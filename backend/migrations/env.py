@@ -1,0 +1,66 @@
+import asyncio
+from logging.config import fileConfig
+
+from alembic import context
+from sqlalchemy import Connection, pool
+from sqlalchemy.ext.asyncio import async_engine_from_config
+
+# Importing app.db.models registers every ORM model against Base.metadata as
+# a side effect — required so autogenerate can see them. Not otherwise used
+# directly in this module.
+import app.db.models  # noqa: E402,F401
+from app.config import get_settings
+from app.db.base import Base
+
+# Alembic Config object, providing access to values within alembic.ini.
+config = context.config
+
+if config.config_file_name is not None:
+    fileConfig(config.config_file_name)
+
+# Target metadata for autogenerate: every model registered via the import
+# above.
+target_metadata = Base.metadata
+
+# Single source of truth for the database URL: app.config.Settings, not a
+# separately-maintained value in alembic.ini.
+# Alembic stores options through ConfigParser, where a literal percent sign is
+# interpolation syntax. Escape it so URL-encoded passwords such as `%40` work.
+config.set_main_option("sqlalchemy.url", get_settings().database_url.replace("%", "%%"))
+
+
+def run_migrations_offline() -> None:
+    url = config.get_main_option("sqlalchemy.url")
+    context.configure(
+        url=url,
+        target_metadata=target_metadata,
+        literal_binds=True,
+        dialect_opts={"paramstyle": "named"},
+    )
+    with context.begin_transaction():
+        context.run_migrations()
+
+
+def do_run_migrations(connection: Connection) -> None:
+    context.configure(connection=connection, target_metadata=target_metadata)
+    with context.begin_transaction():
+        context.run_migrations()
+
+
+async def run_migrations_online() -> None:
+    connectable = async_engine_from_config(
+        config.get_section(config.config_ini_section, {}),
+        prefix="sqlalchemy.",
+        poolclass=pool.NullPool,
+    )
+
+    async with connectable.connect() as connection:
+        await connection.run_sync(do_run_migrations)
+
+    await connectable.dispose()
+
+
+if context.is_offline_mode():
+    run_migrations_offline()
+else:
+    asyncio.run(run_migrations_online())

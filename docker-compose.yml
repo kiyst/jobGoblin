@@ -1,0 +1,33 @@
+name: jobgoblin
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: jobgoblin
+      POSTGRES_PASSWORD: jobgoblin
+      POSTGRES_DB: jobgoblin
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jobgoblin -d jobgoblin"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+    environment:
+      APP_ENV: development
+      DATABASE_URL: postgresql+asyncpg://jobgoblin:jobgoblin@postgres:5432/jobgoblin
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
