@@ -392,4 +392,65 @@ two already-reviewed entries. Nothing below was rewritten — only renumbered.*
 
 ### Work review
 
-Status: awaiting review.
+- Date and reviewing agent: 2026-08-24, Codex
+- Diff/revision reviewed: commit `31aa213` (`fix(phase-1): forward-migrate email checks
+  and harden test-db guard`) against review commit `3ba2635` on branch
+  `codex/phase1-users-wip`. The branch matched the remote and the working tree was clean
+  before review.
+- Verification independently performed:
+  - Inspected the complete `3ba2635..31aa213` diff and every changed implementation,
+    migration, test, and documentation file.
+  - Confirmed `backend/migrations/versions/0002_users.py` is byte-for-byte unchanged
+    from checkpoint `3816d0a`.
+  - `ruff format --check .`: 18 files already formatted.
+  - `ruff check .`: passed.
+  - `mypy app tests`: passed for 14 source files.
+  - `pytest -v`: 26 passed, 0 skipped.
+  - Independently ran `0003 -> 0002 -> 0003` on `jobgoblin_test`: passed.
+  - Independently ran `0003 -> base -> 0003` on `jobgoblin_test`: passed.
+  - `alembic check` at test-database head: no new upgrade operations detected.
+  - Live inspection confirmed both `jobgoblin` and `jobgoblin_test` are at revision
+    `0003` with the corrected space/tab/LF/CR constraints.
+  - Direct guard probes showed equivalent spellings of the same test-named database are
+    accepted: `localhost` versus `127.0.0.1`, and omitted default port versus explicit
+    `5432`.
+- Findings, ordered by severity, with file and line references:
+  1. **High — the destructive-test guard still permits the configured development
+     database through common connection aliases.** `backend/tests/conftest.py:55-61`
+     compares raw `(host, port, database)` tuples. Consequently, a development URL of
+     `postgresql+asyncpg://...@127.0.0.1:5432/my_test_env` and test URL of
+     `postgresql+asyncpg://...@localhost:5432/my_test_env` are treated as distinct, even
+     though they normally reach the same database; the same occurs for omitted port
+     versus explicit PostgreSQL port `5432`. Both probes were accepted. The current
+     defaults are safe because their database names differ, but the guard explicitly
+     promises protection for custom development database names containing `test`, and
+     that promise remains bypassable.
+  2. **Low — `0003` is described as “forward-only” despite implementing a downgrade.**
+     `backend/migrations/versions/0003_fix_email_whitespace_checks.py:14` and the newest
+     `Work done` use that term while the migration is intentionally reversible. This is
+     wording only; the downgrade itself passed.
+- Missing or inconclusive verification: No destructive production/development action
+  was attempted. Host equivalence cannot be proven generically from URL text, so the
+  safe invariant should not depend on resolving every possible hostname alias.
+- Architecture/documentation consistency: The forward migration strategy, current live
+  schemas, four-character whitespace rule, `.env` loading, redacted errors, and removal
+  of the destructive volume-reset recommendation are now consistent and verified. Only
+  the guard alias gap and minor wording remain.
+- Verdict: changes requested.
+- Exact requested corrections:
+  1. In addition to the current checks, reject the test target whenever its normalized
+     database name equals the configured development database name, regardless of host,
+     port, credentials, or driver spelling. This conservative rule may reject a
+     same-named database on a genuinely separate server; that is acceptable for a
+     fail-closed destructive-test guard. Keep the requirement that the test name contain
+     `test`.
+  2. Add regression tests for same database name with `localhost` versus `127.0.0.1`,
+     omitted versus explicit default port, case variation, and distinct database names
+     on the same server. Preserve credential-redaction coverage.
+  3. Replace “forward-only migration” with “forward corrective migration” or equivalent
+     wording everywhere it describes reversible `0003`.
+  4. Rerun format, lint, mypy, all tests, and a focused `0003 -> 0002 -> 0003` migration
+     cycle. Rotate the two-entry ledger, record the correction as the newest `Work
+     done`, commit/push only the task branch, and stop. Do not begin
+     `candidate_profiles`.
+- STOP — reviewer changed only this `Work review`; no implementation files were changed.
