@@ -12,7 +12,7 @@ tab/newline-wrapped value (e.g. `"\tperson@example.com\t"`) pass the
 `ck_users_email_normalized` CHECK outright, since Postgres's `trim()` left it
 unchanged on both sides of the equality.
 
-This is a **forward-only correction**, not a rewrite of `0002`: `0002` is left
+This is a **forward corrective migration**, not a rewrite of `0002`: `0002` is left
 describing exactly what it originally did (and what any database that already
 applied it actually has), so `alembic history`/`current` stay meaningful for
 every database that reached `0002` before this fix existed — including the

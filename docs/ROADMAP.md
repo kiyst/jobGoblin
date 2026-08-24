@@ -130,8 +130,9 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   both available and unavailable.
 - **Phase 1: in progress (2026-08-24). `users` slice complete and verified**: model
   (`backend/app/db/models/user.py`), migrations `0002` (table, reviewed/hand-edited, not
-  autogenerate-as-is) and `0003` (forward-only fix to the email-normalization `CHECK`
-  constraints' whitespace handling — see `docs/DATA_MODEL.md`), and database tests
+  autogenerate-as-is) and `0003` (forward corrective migration, reversible, fixing the
+  email-normalization `CHECK` constraints' whitespace handling — see
+  `docs/DATA_MODEL.md`), and database tests
   against real Compose PostgreSQL all pass — including the normalized-email
   `CHECK`s/unique index, required-field rejection, and `updated_at` advancing on update.
   No other Phase 1 table is implemented yet; the rest

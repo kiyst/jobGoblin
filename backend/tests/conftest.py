@@ -33,9 +33,20 @@ def assert_is_disposable_test_database(test_url: str, development_url: str) -> N
     *distinct from the actually-configured development database*.
 
     Raises `RuntimeError` (a hard test failure, not a skip) if either:
-    - `test_url` resolves to the same (host, port, database) as
-      `development_url` — a custom development database name that happens to
-      contain "test" must not be enough to pass this guard on its own; or
+    - `test_url`'s database name equals `development_url`'s database name
+      (case-insensitive) — compared by **name alone**, deliberately ignoring
+      host, port, credentials, or driver spelling. A first version of this
+      guard compared `(host, port, database)` tuples, which let a
+      `localhost` test URL and a `127.0.0.1` development URL — or an
+      explicit `:5432` versus an omitted default port — pass as "different"
+      even when they resolve to the exact same server. Two different
+      connection strings can reach the same database in more ways than can
+      be reliably enumerated, so this guard doesn't try: it's deliberately
+      conservative and rejects on name match alone, accepting that a
+      same-named database on a genuinely separate server will also be
+      rejected. For a fail-closed guard protecting against irreversible
+      schema/data loss, an occasional false rejection is the correct
+      trade-off against a false acceptance.
     - `test_url`'s database name doesn't contain "test" at all.
 
     Database tests create and drop schema/data; running them against
@@ -46,19 +57,18 @@ def assert_is_disposable_test_database(test_url: str, development_url: str) -> N
     test_parsed = make_url(test_url)
     dev_parsed = make_url(development_url)
 
-    test_target = (test_parsed.host, test_parsed.port, test_parsed.database)
-    dev_target = (dev_parsed.host, dev_parsed.port, dev_parsed.database)
-    name = test_parsed.database or ""
+    test_name = (test_parsed.database or "").lower()
+    dev_name = (dev_parsed.database or "").lower()
 
-    same_as_development = test_target == dev_target
-    missing_test_marker = "test" not in name.lower()
+    same_name_as_development = test_name == dev_name
+    missing_test_marker = "test" not in test_name
 
-    if same_as_development or missing_test_marker:
+    if same_name_as_development or missing_test_marker:
         reasons = []
-        if same_as_development:
+        if same_name_as_development:
             reasons.append(
-                f"it targets the same database as the configured development "
-                f"database ({_redact(dev_parsed)})"
+                "its database name matches the configured development database's "
+                f"name ({_redact(dev_parsed)})"
             )
         if missing_test_marker:
             reasons.append("its database name does not contain 'test'")

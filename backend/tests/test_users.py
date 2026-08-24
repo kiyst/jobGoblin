@@ -32,7 +32,7 @@ def test_guard_rejects_a_test_named_database_that_is_actually_the_development_ta
     must still be rejected — the guard compares against the *actual*
     configured development target, not a hardcoded name."""
     custom_dev_url = "postgresql+asyncpg://jobgoblin:jobgoblin@localhost:5432/my_test_env"
-    with pytest.raises(RuntimeError, match="same database as the configured development"):
+    with pytest.raises(RuntimeError, match="matches the configured development database"):
         assert_is_disposable_test_database(custom_dev_url, development_url=custom_dev_url)
 
 
@@ -41,10 +41,43 @@ def test_guard_rejects_the_ordinary_development_database() -> None:
         assert_is_disposable_test_database(_DEVELOPMENT_URL, _DEVELOPMENT_URL)
 
 
+def test_guard_rejects_same_database_name_via_localhost_vs_127_0_0_1() -> None:
+    """The guard compares database *names* only, deliberately ignoring host —
+    `localhost` and `127.0.0.1` commonly reach the exact same PostgreSQL
+    instance, and a guard that only compared (host, port, database) tuples
+    would have treated these as unrelated targets."""
+    dev_url = "postgresql+asyncpg://jobgoblin:jobgoblin@127.0.0.1:5432/my_test_env"
+    test_url = "postgresql+asyncpg://jobgoblin:jobgoblin@localhost:5432/my_test_env"
+    with pytest.raises(RuntimeError, match="matches the configured development database"):
+        assert_is_disposable_test_database(test_url, dev_url)
+
+
+def test_guard_rejects_same_database_name_via_omitted_vs_explicit_default_port() -> None:
+    dev_url = "postgresql+asyncpg://jobgoblin:jobgoblin@localhost/my_test_env"
+    test_url = "postgresql+asyncpg://jobgoblin:jobgoblin@localhost:5432/my_test_env"
+    with pytest.raises(RuntimeError, match="matches the configured development database"):
+        assert_is_disposable_test_database(test_url, dev_url)
+
+
+def test_guard_rejects_same_database_name_with_different_case() -> None:
+    dev_url = "postgresql+asyncpg://jobgoblin:jobgoblin@localhost:5432/My_Test_Env"
+    test_url = "postgresql+asyncpg://jobgoblin:jobgoblin@localhost:5432/my_test_env"
+    with pytest.raises(RuntimeError, match="matches the configured development database"):
+        assert_is_disposable_test_database(test_url, dev_url)
+
+
 def test_guard_accepts_a_distinct_test_database() -> None:
     assert_is_disposable_test_database(  # must not raise
         DEFAULT_TEST_DATABASE_URL, _DEVELOPMENT_URL
     )
+
+
+def test_guard_accepts_a_distinct_database_name_on_the_same_server() -> None:
+    """A same-server, differently-named test database is still valid — the
+    guard rejects on name collision, not merely on shared host/port."""
+    dev_url = "postgresql+asyncpg://jobgoblin:jobgoblin@localhost:5432/jobgoblin"
+    test_url = "postgresql+asyncpg://jobgoblin:jobgoblin@localhost:5432/jobgoblin_test"
+    assert_is_disposable_test_database(test_url, dev_url)  # must not raise
 
 
 def test_guard_never_includes_credentials_in_its_error_message() -> None:
