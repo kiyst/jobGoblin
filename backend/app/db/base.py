@@ -16,8 +16,9 @@ NAMING_CONVENTION = {
 class Base(DeclarativeBase):
     """Shared declarative base for all ORM models.
 
-    `User` (`app/db/models/user.py`) is the first Phase 1 model registered
-    against this base; every other Phase 1 table will follow the same
+    `User` (`app/db/models/user.py`) and `CandidateProfile`
+    (`app/db/models/candidate_profile.py`) are the Phase 1 models registered
+    against this base so far; every other Phase 1 table will follow the same
     pattern. This is also Alembic's `target_metadata` (see
     `migrations/env.py`, which imports `app.db.models` so autogenerate has
     something to diff against).

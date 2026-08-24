@@ -128,16 +128,22 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   PostgreSQL is healthy; Alembic upgrade -> downgrade -> upgrade passes; Ruff, mypy, and
   pytest pass; and live liveness/readiness behavior has been verified with the database
   both available and unavailable.
-- **Phase 1: in progress (2026-08-24). `users` slice complete and verified**: model
+- **Phase 1: in progress (2026-08-24).** `users` slice complete and verified: model
   (`backend/app/db/models/user.py`), migrations `0002` (table, reviewed/hand-edited, not
   autogenerate-as-is) and `0003` (forward corrective migration, reversible, fixing the
   email-normalization `CHECK` constraints' whitespace handling — see
-  `docs/DATA_MODEL.md`), and database tests
-  against real Compose PostgreSQL all pass — including the normalized-email
-  `CHECK`s/unique index, required-field rejection, and `updated_at` advancing on update.
-  No other Phase 1 table is implemented yet; the rest
-  of Phase 1's exit gate (§[PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md)) remains
-  outstanding.
+  `docs/DATA_MODEL.md`), and database tests against real Compose PostgreSQL all pass —
+  including the normalized-email `CHECK`s/unique index, required-field rejection, and
+  `updated_at` advancing on update. `candidate_profiles` slice also complete and
+  verified: model (`backend/app/db/models/candidate_profile.py`), migration `0004`
+  (`down_revision = "0003"`), and database tests all pass — including the one-profile-
+  per-user uniqueness, `ON DELETE CASCADE` from `users`, the `remote_preference` enum
+  `CHECK`, non-negative `CHECK`s on `years_experience`/`salary_expectation_min`/
+  `salary_expectation_max`, the `salary_expectation_min <= salary_expectation_max`
+  `CHECK`, and the NULL-means-unspecified/empty-array-means-explicitly-none distinction
+  on the `text[]` columns (see `docs/DATA_MODEL.md`). No other Phase 1 table is
+  implemented yet; the rest of Phase 1's exit gate
+  (§[PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md)) remains outstanding.
 - **Phases 2-14: not started.** Begin each phase only after completing its preflight in
   [PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md) and receiving approval for the next
   smallest slice.

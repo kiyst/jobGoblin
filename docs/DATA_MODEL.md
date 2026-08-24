@@ -56,6 +56,16 @@ forward migration, `0003` — `0002` is restored to describe exactly what it alw
 `0003` is what actually changes the CHECK constraints on a database that already has the
 table.
 
+**Rev 7 changes** (second Phase 1 implementation slice, `candidate_profiles`): this
+table's column list below did not previously state three product rules, each resolved by
+explicit approval before migration `0004` was written rather than inferred silently: the
+five `text[]` columns are nullable with no server default, and NULL (never specified) is
+distinct from a future empty-array write (explicitly specified as none); `years_experience`,
+`salary_expectation_min`, and `salary_expectation_max` each have a `CHECK` requiring the
+value be NULL or `>= 0`; and `salary_expectation_min`/`salary_expectation_max` have an
+additional `CHECK` requiring `salary_expectation_min <= salary_expectation_max` whenever
+both are non-null.
+
 Conventions used throughout:
 
 - **Minimum supported PostgreSQL version: 16.** See
@@ -143,26 +153,29 @@ this yet. Acceptable for this slice (nothing writes to `users` outside the ORM);
 need a trigger if a future raw-SQL write path to this table is ever added.
 
 ### `candidate_profiles`
-"Who is the user professionally" (§23). One-to-one with `users` for now; kept as its own
-table (not columns on `users`) because it's the thing a future multi-profile/multi-resume
-feature would key off of.
+**Implemented** (`backend/app/db/models/candidate_profile.py`; migration `0004`, `down_revision
+= "0003"`). "Who is the user professionally" (§23). One-to-one with `users` for now; kept
+as its own table (not columns on `users`) because it's the thing a future
+multi-profile/multi-resume feature would key off of.
 
 | column | type | notes |
 |---|---|---|
-| id | UUID PK | |
-| user_id | UUID FK → users, `ON DELETE CASCADE`, **UNIQUE** | enforces one-to-one while the relationship stays 1:1; a future multi-profile feature would need a migration to drop this uniqueness, which is an acceptable/expected cost when that feature actually lands |
-| target_role_families | text[] | free-form until Phase 3 taxonomy exists |
-| years_experience | int | nullable |
-| education | text | nullable |
-| certifications | text[] | |
-| clearance | text | nullable |
-| preferred_industries | text[] | |
-| excluded_industries | text[] | |
-| preferred_locations | text[] | |
-| relocation_willingness | boolean | nullable = unknown |
-| remote_preference | text | enum: remote / hybrid / onsite / no_preference |
-| salary_expectation_min | int | nullable, annualized |
-| salary_expectation_max | int | nullable, annualized |
+| id | UUID PK | generated application-side (`uuid.uuid4`), not a DB-side default |
+| user_id | UUID FK → users, `ON DELETE CASCADE`, **UNIQUE**, not null | enforces one-to-one while the relationship stays 1:1; a future multi-profile feature would need a migration to drop this uniqueness, which is an acceptable/expected cost when that feature actually lands |
+| target_role_families | text[], nullable | free-form until Phase 3 taxonomy exists; NULL = never specified (see Rev 7 note above) |
+| years_experience | int, nullable | `CHECK (years_experience IS NULL OR years_experience >= 0)` |
+| education | text, nullable | |
+| certifications | text[], nullable | NULL = never specified |
+| clearance | text, nullable | |
+| preferred_industries | text[], nullable | NULL = never specified |
+| excluded_industries | text[], nullable | NULL = never specified |
+| preferred_locations | text[], nullable | NULL = never specified |
+| relocation_willingness | boolean, nullable | nullable = unknown |
+| remote_preference | text, not null | enum: remote / hybrid / onsite / no_preference — `CHECK (remote_preference IN (...))` |
+| salary_expectation_min | int, nullable | annualized; `CHECK (salary_expectation_min IS NULL OR salary_expectation_min >= 0)` |
+| salary_expectation_max | int, nullable | annualized; `CHECK (salary_expectation_max IS NULL OR salary_expectation_max >= 0)`, plus `CHECK (salary_expectation_min IS NULL OR salary_expectation_max IS NULL OR salary_expectation_min <= salary_expectation_max)` |
+| created_at | timestamptz, not null | `server_default now()` |
+| updated_at | timestamptz, not null | `server_default now()`, reset to `now()` by the ORM (`onupdate`) on every update |
 
 ### `candidate_skills`
 Normalized child table rather than an array column, because skills need independent
@@ -740,7 +753,7 @@ reviewed against this list directly:
 | Table | Constraint / index | Purpose |
 |---|---|---|
 | `users` | `CHECK (email = lower(trim(email)))`, `CHECK (trim(email) <> '')`, `UNIQUE` index on `lower(email)` | normalized-email invariant enforced at the database, not just the ORM validator — see the table's own section above (Rev 5) |
-| `candidate_profiles` | `UNIQUE (user_id)` | enforce 1:1 with `users` while that holds |
+| `candidate_profiles` | `UNIQUE (user_id)`; `CHECK` on `remote_preference` enum; non-negative `CHECK`s on `years_experience`/`salary_expectation_min`/`salary_expectation_max`; `CHECK (salary_expectation_min <= salary_expectation_max)` | enforce 1:1 with `users` while that holds; reject an invalid `remote_preference`, a negative experience/salary value, or an inverted salary range at the database — see the table's own section above (Rev 7) |
 | `candidate_skills` | `UNIQUE (candidate_profile_id, lower(skill))` | one entry per skill per profile, case-insensitive |
 | `saved_search_titles` | `UNIQUE (saved_search_id, lower(title))` | one entry per title per search, case-insensitive |
 | `saved_search_locations` | `UNIQUE (saved_search_id, lower(trim(location_text)))` | one entry per location text per search |

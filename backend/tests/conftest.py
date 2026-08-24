@@ -1,3 +1,4 @@
+import uuid
 from collections.abc import AsyncGenerator, Callable
 
 import pytest
@@ -7,7 +8,7 @@ from sqlalchemy.engine import URL, make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
 from app.config import Settings, get_settings
-from app.db.models import User
+from app.db.models import CandidateProfile, User
 from app.db.session import check_database_connection
 from app.main import app
 
@@ -172,5 +173,22 @@ def make_user() -> Callable[..., User]:
 
     def _make(email: str = "person@example.com") -> User:
         return User(email=email)
+
+    return _make
+
+
+@pytest.fixture
+def make_candidate_profile() -> Callable[..., CandidateProfile]:
+    """Factory for a valid `CandidateProfile` — tests only deviate from this
+    intentionally. Takes the owning `user_id` explicitly rather than creating
+    a `User` itself, so callers control and can inspect that row (e.g. to
+    delete it and observe the cascade)."""
+
+    def _make(
+        user_id: uuid.UUID,
+        *,
+        remote_preference: str = "no_preference",
+    ) -> CandidateProfile:
+        return CandidateProfile(user_id=user_id, remote_preference=remote_preference)
 
     return _make
