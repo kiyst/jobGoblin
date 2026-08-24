@@ -335,4 +335,81 @@ already-reviewed entries. Nothing below was rewritten — only renumbered.*
 
 ### Work review
 
-Status: awaiting review.
+- Date and reviewing agent: 2026-08-24, Codex
+- Diff/revision reviewed: commit `b02158f` (`feat(phase-1): implement candidate profiles
+  slice`) against approved base `49aa748` on branch `phase-1/candidate-profiles`. The
+  branch matched `origin/phase-1/candidate-profiles`, and the working tree was clean
+  before review.
+- Verification independently performed:
+  - Inspected the complete `49aa748..b02158f` diff and every changed model, migration,
+    fixture, test, roadmap, data-model, and handoff entry.
+  - `ruff format --check .`: 21 files already formatted.
+  - `ruff check .`: passed.
+  - `mypy app tests`: passed for 16 source files.
+  - `pytest -v`: 52 passed, 0 skipped.
+  - Independently ran `0004 -> 0003 -> 0004` against `jobgoblin_test`: passed.
+  - Independently ran `0004 -> base -> 0004` against `jobgoblin_test`: passed.
+  - `alembic check` at test-database head: no new upgrade operations detected.
+  - Live database verification after review: development remained at `0003` with zero
+    users; the disposable test database returned to `0004` with zero users and zero
+    candidate profiles.
+  - Ran a rolled-back/cleaned ORM mutation probe against `jobgoblin_test`: after loading
+    `target_role_families=['engineering']`, appending `'data'`, and committing,
+    `session.is_modified(..., include_collections=True)` returned `False` and the stored
+    value remained `['engineering']`.
+- Findings, ordered by severity, with file and line references:
+  1. **High — in-place edits to every array field are silently discarded by the ORM.**
+     The five PostgreSQL arrays at
+     `backend/app/db/models/candidate_profile.py:37-44` use plain `ARRAY(Text)`.
+     SQLAlchemy does not track mutation inside a plain Python list without its mutable
+     extension. The independent live probe confirmed that `.append()` leaves the model
+     clean and loses the change on commit. Candidate preferences and certifications are
+     inherently editable collections, so requiring every future caller to replace the
+     entire list is an undocumented and failure-prone constraint.
+  2. **Medium — the real-commit cascade test can still poison the shared test database
+     when it fails.** `backend/tests/test_candidate_profiles.py:94-123` commits a user
+     and profile but has no `try/finally` cleanup path. The reported first run already
+     demonstrated this exact failure mode: an exception left durable rows that caused
+     unrelated tests to fail. Capturing expired IDs fixed the immediate
+     `MissingGreenlet`, but not the database-leak mechanism. The `updated_at` test at
+     lines 315-344 begins its cleanup `try` only after both committed inserts, leaving a
+     similar pre-`try` leak window.
+  3. **Low — two test names/claims exceed their actual coverage.** The parameterized
+     `test_non_negative_check_accepts_zero_and_positive` sets only `0`, never a positive
+     value, and salary ordering covers minimum-only but not maximum-only. Both behaviors
+     should be explicit boundary cases because the handoff claims they were exercised.
+  4. **Low — the consolidated users constraint row is stale.**
+     `docs/DATA_MODEL.md:755` still lists the original bare-`trim` checks from migration
+     `0002`, even though migration `0003` and the current model enforce the explicit
+     space/tab/LF/CR expressions. The users section explains the history correctly, but
+     the consolidated head-schema checklist should state the current constraints.
+- Missing or inconclusive verification: I did not deliberately force an assertion
+  failure inside a real-commit test because that would intentionally dirty the shared
+  test database; the absence of cleanup is directly visible, and the implementation
+  handoff already records the reproduced leak from the first run.
+- Architecture/documentation consistency: Table shape, null-versus-empty semantics,
+  remote-preference enum, numeric/order checks, timestamps, one-to-one uniqueness, FK
+  cascade, migration chain, roadmap, and the approved product decisions are otherwise
+  consistent.
+- Verdict: changes requested.
+- Exact requested corrections:
+  1. Wrap each array mapping with SQLAlchemy's mutable list tracking (for example,
+     `MutableList.as_mutable(ARRAY(Text))`) so in-place append/remove operations mark the
+     profile dirty. No migration should be needed because this changes ORM tracking, not
+     PostgreSQL DDL. Add a PostgreSQL-backed test that mutates a loaded array in place,
+     commits, reloads it in a new session/transaction, and observes the persisted value;
+     parameterize across all five array fields.
+  2. Make every test using real commits failure-safe. Capture identifiers as soon as
+     available, wrap the entire committed lifecycle in cleanup, rollback failed
+     sessions when necessary, and perform best-effort cleanup in a fresh session so an
+     assertion or intermediate commit failure cannot leave durable users/profiles.
+  3. Actually test both zero and a positive value for all three non-negative columns,
+     and add the maximum-only salary-bound case.
+  4. Update the consolidated users row in `docs/DATA_MODEL.md` to show the current
+     migration-`0003` explicit whitespace checks while retaining the historical
+     explanation in the users section.
+  5. Rerun format, lint, mypy, all tests, `0004 -> 0003 -> 0004`, and `alembic check`.
+     Rotate the two-entry ledger, record the correction as the newest `Work done`,
+     commit/push only `phase-1/candidate-profiles`, and stop. Do not begin
+     `candidate_skills`.
+- STOP — reviewer changed only this `Work review`; no implementation files were changed.
