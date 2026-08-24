@@ -76,10 +76,18 @@ containing `test` and different from `jobgoblin`.
 docker exec <postgres-container-name> psql -U jobgoblin -d jobgoblin -c "CREATE DATABASE jobgoblin_test OWNER jobgoblin;"
 ```
 
-(A fresh volume — e.g. after `docker compose down -v && docker compose up -d postgres` —
-creates `jobgoblin_test` automatically via `postgres-init/01-create-test-db.sql`, mounted
-into the container's `docker-entrypoint-initdb.d`. The manual command above is only for
-an already-initialized volume, which won't re-run init scripts.)
+The manual command above is what you need for an already-initialized `postgres_data`
+volume (the normal case), since PostgreSQL only runs
+`docker-entrypoint-initdb.d` scripts — including `postgres-init/01-create-test-db.sql`,
+which creates `jobgoblin_test` automatically — on a *brand-new, empty* volume. This is
+not something you need to do routinely: it only matters the first time you set up this
+repo, or if you're deliberately creating a new environment from scratch.
+
+**Do not run `docker compose down -v` to get a "fresh" volume for this.** That command
+destroys the `postgres_data` volume entirely, including the `jobgoblin` **development**
+database this whole test-isolation setup exists to protect. It is not a normal or
+recommended part of test setup — the one-time manual `CREATE DATABASE` command above is
+sufficient and non-destructive for the volume you already have.
 
 Migrate the test database (separately from the development database — `DATABASE_URL` is
 left untouched):

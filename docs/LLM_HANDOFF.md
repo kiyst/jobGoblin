@@ -82,139 +82,10 @@ and record the actual commit it reviewed.
 
 ## Iteration 1
 
-### Work done
-
-*Backfilled retroactively during the Iteration 2 correction pass, from the
-implementation handoff report Claude Code gave the user at the time — this work predates
-adoption of this ledger, so it was never recorded here as it happened. Content below
-describes the state Codex's `Work review` (right) actually reviewed; it does not include
-any of Iteration 2's corrections.*
-
-- Date and agent: 2026-08-24, Claude Code (Sonnet 4.5).
-- Approved phase/slice: Phase 1, `users` table only (model, migration, database tests) —
-  no other Phase 1 table, no providers/ingestion, no auth.
-- Outcome: `users` model, migration `0002`, and database tests implemented and passing
-  against real PostgreSQL (Docker Compose).
-- Base/starting commit: none — the repository had no commits at all at the time; every
-  file was untracked.
-- Ending commit or working-tree state: uncommitted working tree (no ledger/Git workflow
-  existed yet). This state was later snapshotted, once this ledger was adopted, as
-  commit `3816d0a` ("checkpoint: Phase 0 and Phase 1 users slice") on branch
-  `codex/phase1-users-wip` — that commit is the exact state this row describes and that
-  Codex's `Work review` (right) evaluated.
-- Files changed (all new, Phase 0 + this slice together, since nothing had been
-  committed before): `backend/app/db/models/user.py`,
-  `backend/app/db/models/__init__.py`, `backend/migrations/versions/0002_users.py`,
-  `backend/migrations/env.py` (updated to import `app.db.models`),
-  `backend/tests/conftest.py` (added `db_engine`/`db_session`/`make_user` fixtures),
-  `backend/tests/test_users.py` (new), `docs/DATA_MODEL.md` (`users` table entry),
-  `docs/ROADMAP.md` (status line).
-- Migration revisions: `0002` (`down_revision = "0001"`) — creates `users`.
-- Commands run and exact results (against the `jobgoblin` development database, which at
-  the time was the only database available — see Codex's finding 2 on the right):
-  `alembic revision --autogenerate` (reviewed, then hand-renamed to `0002_users.py`);
-  `alembic upgrade head` (created `users`, confirmed via `psql \d users`);
-  `alembic downgrade 0001` then `alembic upgrade head` (round-trip passed, table
-  dropped/recreated); a second `alembic revision --autogenerate` produced an empty
-  migration (model/migration parity), then was deleted; `pytest -v` — 15 passed, 0
-  skipped; `ruff format --check .` — 17 files formatted; `ruff check .` — passed; `mypy
-  app tests` — passed, 14 source files; `SELECT count(*) FROM users` on the development
-  database after the suite — `0` (no leaked rows).
-- Risks exercised from `PHASE_RISK_CHECKLIST.md`: timezone-aware UTC timestamps tested;
-  Alembic autogenerate output manually reviewed and hand-edited, not accepted as-is;
-  every constraint tested both accepted and rejected; `IntegrityError` recovery via
-  explicit `session.rollback()` before continuing, verified the session stays usable
-  afterward; a valid-state-by-default factory fixture (`make_user`); model/migration
-  parity confirmed explicitly (empty-diff autogenerate). Not applicable to this table:
-  null-bearing unique keys (no nullable column participates in a unique constraint here).
-- Skipped or unavailable verification: none reported as passing that didn't actually
-  run; `test_ready_succeeds_when_database_available` ran for real (not skipped) since
-  Docker/PostgreSQL was available in that session.
-- Deviations and ADR impact: none — this slice didn't touch any ADR.
-- Known limitations (as reported at the time; see Codex's `Work review` for what these
-  missed): `updated_at` only advances for ORM-driven writes (`onupdate`), no DB trigger;
-  no RFC email validation (by design, per instructions).
-- Recommended next smallest slice (as given at the time): `candidate_profiles` alone.
-  Superseded by Codex's review — the approved next step is this correction pass, not a
-  new table.
-- STOP — awaiting review and user approval. *(Historical note: Codex's review at right
-  is that review; this backfill does not re-trigger a new review cycle by itself.)*
-
-### Work review
-
-- Date and reviewing agent: 2026-08-24, Codex
-- Diff/revision reviewed: Phase 1 `users` slice as described in the user's pasted Claude
-  handoff. The repository has no commits and every file is currently untracked, so no
-  reliable base-to-ending Git diff exists. This review inspected the present files
-  directly.
-- Verification independently performed:
-  - Docker Compose reports the backend running and PostgreSQL 16 healthy.
-  - `ruff format --check .`: 17 files already formatted.
-  - `ruff check .`: passed.
-  - `mypy app tests`: passed for 14 source files.
-  - `pytest -v`: 15 passed, 0 skipped.
-  - Alembic current revision: `0002 (head)`.
-  - Alembic `0002 -> 0001 -> 0002` downgrade/upgrade: passed.
-  - `alembic check`: no new upgrade operations detected.
-  - Live `\\d+ users`: columns, primary key, two checks, and functional unique index
-    match migration `0002`.
-  - Rolled-back live PostgreSQL probes confirmed no rows remained afterward.
-- Findings, ordered by severity, with file and line references:
-  1. **High — the database email-normalization backstop is bypassable.**
-     `backend/app/db/models/user.py:39-40` and
-     `backend/migrations/versions/0002_users.py:51-52` use PostgreSQL `trim(email)`,
-     whose default trim character is an ordinary space, while the ORM uses Python
-     `strip()` at `backend/app/db/models/user.py:52`. Direct SQL successfully inserted
-     both `E'\\tperson@example.com\\t'` and a whitespace-only `E'\\t\\n'` value through
-     the checks. The former can also coexist with `person@example.com` because the
-     unique index retains the surrounding control whitespace. This contradicts the
-     claimed invariant in `docs/DATA_MODEL.md:82-93` and the migration comments.
-  2. **High — PostgreSQL tests target the ordinary development database.**
-     `backend/tests/conftest.py:50-64` constructs its engine from the same cached
-     `DATABASE_URL` whose default is the `jobgoblin` development database at
-     `backend/app/config.py:28-34`. Tests currently assume the entire table starts empty
-     (`backend/tests/test_users.py:13-16`), and one test makes real commits before
-     cleanup (`backend/tests/test_users.py:122-149`). More importantly, the required
-     migration downgrade/upgrade workflow drops real tables. This is safe only while
-     the development database is disposable and empty; it needs a dedicated test
-     database before additional state accumulates.
-  3. **Medium — there is no Git baseline or handoff record for this slice.** All files
-     are untracked and `main` has no commits. The pasted report can explain intent but
-     cannot establish exactly what changed or provide a rollback point. The `Work done`
-     section above also remains empty because this work appears to predate the ledger.
-  4. **Low — status documentation is internally stale.** `README.md:7-8` and
-     `backend/app/db/base.py:19-21` still say that no domain models exist. In addition,
-     `docs/ROADMAP.md:91-96` says Phase 9 migrates
-     `collection_run_provider_attempts`, while the Phase 1 roadmap and data model say it
-     is migrated in Phase 1 and first written in Phase 2.
-- Missing or inconclusive verification: Historical attribution is impossible without a
-  commit or prior snapshot. I did not recreate Claude's deleted temporary autogenerate
-  file; `alembic check` independently established current model/migration parity.
-- Architecture/documentation consistency: The `users` table shape and Phase 1 scope are
-  otherwise consistent with the current data model, roadmap, and phase-risk checklist.
-  The whitespace behavior and stale status statements above are the exceptions.
-- Verdict: changes requested.
-- Exact requested corrections:
-  1. Define one explicit supported whitespace-normalization rule shared by Python and
-     PostgreSQL. Update the model, migration `0002` (still uncommitted), and data-model
-     text so the database expression matches the ORM. Add direct-SQL regression tests
-     for tab/newline-only input, tab/newline-wrapped input, and collision with the same
-     normalized email.
-  2. Introduce a dedicated PostgreSQL test database/URL and make database tests fail
-     closed if they are pointed at the normal development database. Run migrations and
-     migration round trips only against that disposable test database.
-  3. Update the stale README/Base statements and correct the Phase 9 roadmap sentence.
-  4. Backfill this iteration's `Work done` entry from the implementation handoff without
-     altering this review. Establish a Git baseline/commit only after the user approves
-     what belongs in the initial snapshot.
-  5. Rerun format, lint, mypy, all tests, Alembic check, and
-     upgrade/downgrade/upgrade against the dedicated test database; record exact results
-     as the next `Work done` iteration and stop. Do not begin `candidate_profiles` yet.
-- STOP — reviewer changed only this `Work review`; no implementation files were changed.
-
----
-
-## Iteration 2
+*Rotated in from "Iteration 2" per the two-iteration rule: its `Work review` (below) is
+no longer pending, so the previous Iteration 1 (the original pre-review `users`
+implementation and Codex's first review of it) was removed rather than kept alongside
+two already-reviewed entries. Nothing below was rewritten — only renumbered.*
 
 ### Work done
 
@@ -397,3 +268,128 @@ any of Iteration 2's corrections.*
      `Work done`, commit/push only the task branch, and stop. Do not begin
      `candidate_profiles`.
 - STOP — reviewer changed only this `Work review`; no implementation files were changed.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date and agent: 2026-08-24, Claude Code (Sonnet 4.5).
+- Approved phase/slice: second bounded correction pass over the existing Phase 1 `users`
+  slice only — all six corrections in Iteration 1's `Work review` approved as one pass.
+  No other table, no new slice.
+- Outcome: all six approved corrections addressed and verified against real PostgreSQL;
+  both the disposable test database and the `jobgoblin` development database now sit at
+  migration `0003` with the corrected email-normalization constraints. 26 tests passed,
+  0 skipped.
+- Base/starting commit: `3ba2635` ("docs(review): request migration and test safety
+  fixes") on branch `codex/phase1-users-wip` — Codex's own review commit, on top of
+  `28655bb`. Confirmed via `git diff HEAD -- docs/LLM_HANDOFF.md` (empty) before making
+  any changes.
+- Ending commit or working-tree state: this commit (recorded by the agent completing
+  this pass; see the agent's final response for the actual resolved hash, per this file's
+  own "Git workflow" instructions above).
+- Files changed:
+  - `backend/migrations/versions/0002_users.py` — **restored verbatim** to the exact DDL
+    in checkpoint `3816d0a` (the original, bare-`trim` CHECK constraints) — no longer
+    describes a fix it never actually applied to any database that had already run it.
+  - `backend/migrations/versions/0003_fix_email_whitespace_checks.py` (new) —
+    forward-only migration: `upgrade()` drops and recreates the two email CHECK
+    constraints with the explicit space/tab/LF/CR expression; `downgrade()` restores the
+    original bare-`trim` expressions. Constraint names wrapped in `op.f(...)` — an
+    unwrapped plain string re-applies the naming convention a second time, which is
+    exactly the bug the first attempt at this migration hit (see Deviations below).
+  - `backend/app/config.py` — added `Settings.test_database_url: str | None`, loaded via
+    the same `.env`/pydantic-settings mechanism as every other setting.
+  - `backend/tests/conftest.py` — `assert_is_disposable_test_database` now takes both
+    the test URL and the actual configured development URL, and rejects when their
+    resolved `(host, port, database)` match — not just a hardcoded `"jobgoblin"` string
+    — as well as when the test URL lacks a `"test"` marker. Added `_redact()` and used it
+    in every raised message so a credential-bearing URL is never printed. `db_engine` now
+    reads `Settings.test_database_url` (falling back to `DEFAULT_TEST_DATABASE_URL` only
+    if unset) instead of `os.environ.get(...)` directly.
+  - `backend/tests/test_users.py` — guard tests rewritten for the new two-argument
+    signature; added cases for a custom dev-database name containing "test" that's
+    actually the configured development target, the ordinary development database,
+    a genuinely distinct accepted test database, and credential redaction.
+  - `README.md` — removed the `docker compose down -v` example entirely; replaced with
+    an explicit warning that it destroys the development database's volume and is not
+    part of normal test setup.
+  - `docs/DATA_MODEL.md` — documents the `0002`/`0003` split (Rev 6a note) and explains
+    why the fix is a forward migration, not an in-place rewrite of an applied one.
+  - `docs/ROADMAP.md` — Phase 1 status line now cites both `0002` and `0003`.
+  - `docs/LLM_HANDOFF.md` — this rotation (old Iteration 1 removed; old Iteration 2
+    renumbered to Iteration 1; this entry appended as the new Iteration 2).
+- Migration revisions: `0002` (`down_revision = "0001"`) restored to its original,
+  as-applied DDL, no revision-id change. `0003` (new, `down_revision = "0002"`) —
+  forward-only fix to the two email CHECK constraints.
+- Commands run and exact results:
+  - `git show 3816d0a:backend/migrations/versions/0002_users.py` → fetched the exact
+    original DDL used to restore `0002` verbatim.
+  - `DATABASE_URL=...jobgoblin_test alembic downgrade base` → success, test DB emptied.
+  - `DATABASE_URL=...jobgoblin_test alembic upgrade head` → **failed**:
+    `asyncpg.exceptions.UndefinedObjectError: constraint
+    "ck_users_ck_users_email_normalized" does not exist` — `0003`'s
+    `op.drop_constraint`/`op.create_check_constraint` calls passed already-fully-resolved
+    names as plain strings, which re-applied the naming convention and double-prefixed
+    them. Postgres DDL is transactional and the whole `0001->0002->0003` run was one
+    transaction (no `transaction_per_migration`), so this rolled back completely —
+    confirmed via `psql`: `alembic_version` had 0 rows, `users` table absent. No partial/
+    corrupted state.
+  - Fixed `0003` to wrap both constraint names in `op.f(...)`.
+  - `DATABASE_URL=...jobgoblin_test alembic upgrade head` (retry) → success,
+    `-> 0001 -> 0002 -> 0003`; `alembic current` → `0003 (head)`; `psql \d users` →
+    corrected constraint text confirmed (fresh `base -> head`, scenario 1 of 3).
+  - `DATABASE_URL=...jobgoblin_test alembic downgrade 0002` → success; `psql \d users` →
+    **original** bare-`trim` constraint text confirmed restored (half of scenario 3).
+  - `DATABASE_URL=...jobgoblin_test alembic upgrade head` → success, `0002 -> 0003`;
+    `psql \d users` → corrected text confirmed again (scenario 2 "existing `0002 ->
+    0003`", and completes scenario 3 "`0003 -> 0002 -> 0003`").
+  - `DATABASE_URL=...jobgoblin_test alembic check` → `No new upgrade operations
+    detected.` (model/head parity).
+  - `pytest -v` → **26 passed, 0 skipped** (up from 24 — 5 guard tests rewritten/added,
+    net +2).
+  - `ruff format --check .` → 1 file needed reformatting → `ruff format .` → recheck:
+    18 files formatted.
+  - `ruff check .` → all checks passed (no fixes needed this time).
+  - `mypy app tests` → success, 14 source files.
+  - `pytest -q` (re-run after formatting) → 26 passed.
+  - Development database, before: `SELECT count(*) FROM users` → `0`; `alembic_version`
+    → `0002`.
+  - `alembic upgrade head` against the **development** database (default
+    `DATABASE_URL`, no override) → success, `0002 -> 0003` only — no downgrade, no drop,
+    per the approved correction; `alembic current` → `0003 (head)`.
+  - `psql \d users` (development DB) → corrected constraint text confirmed;
+    `SELECT count(*) FROM users` → `0` (unchanged, table was never touched structurally
+    beyond the constraint swap).
+  - Direct tab/newline probe against the **development** database:
+    `INSERT INTO users (id, email) VALUES (gen_random_uuid(), E'\tperson@example.com\n');`
+    → `ERROR: new row for relation "users" violates check constraint
+    "ck_users_email_normalized"` (rejected, as required). `SELECT count(*) FROM users`
+    after → `0` (confirmed no row persisted).
+- Risks exercised from `PHASE_RISK_CHECKLIST.md`: "every migration is reviewed and
+  tested upgrade -> downgrade -> upgrade" — now genuinely exercised for `0003`
+  specifically, including starting from an already-applied `0002` state matching the
+  real development database's actual history, which is exactly the scenario the first
+  attempt at this fix got wrong; "PostgreSQL behavior is tested against PostgreSQL" —
+  the migration bug itself was only caught by actually running `0003` against real
+  Postgres, not by code review alone; "logs and API responses never expose credentials" —
+  directly addressed via `_redact()` and its dedicated test.
+- Skipped or unavailable verification: none. Every command above executed for real,
+  including the development-database migration and its direct probe.
+- Deviations and ADR impact: the first attempt at migration `0003` failed on first run
+  (naming-convention double-prefixing bug, detailed above) — caught before being
+  reported as verified, fixed, and the full round-trip sequence re-run from scratch
+  afterward. No ADR impact — Phase 1 implementation-slice detail only.
+- Known limitations: none new. The development-database schema drift flagged in
+  Iteration 1's `Work review` is resolved (both databases now at `0003` with matching,
+  corrected constraints). `updated_at` still only advances for ORM-driven writes
+  (unchanged, out of scope for this pass).
+- Recommended next smallest slice: none proposed by the implementing agent — per the
+  workflow, this pass stops for Codex's review before any further slice is considered.
+- STOP — awaiting Codex review and user approval. Do not begin `candidate_profiles`.
+
+### Work review
+
+Status: awaiting review.

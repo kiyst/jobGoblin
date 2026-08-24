@@ -48,7 +48,13 @@ were implemented in `backend/migrations/versions/0002_users.py` and
 **Rev 6 changes** (first Phase 1 correction pass, per independent review): fixed a real
 whitespace-normalization mismatch between the Python validator and the PostgreSQL CHECK
 constraints — see the `users` table's own section below for the corrected, explicit
-four-character whitespace set now shared by both.
+four-character whitespace set now shared by both. **Rev 6a** (second correction pass):
+the fix itself moved from an in-place rewrite of already-applied migration `0002` (which
+the first correction pass did, and which a review correctly flagged as creating
+undetectable schema drift on any database that had already applied `0002`) into a new
+forward migration, `0003` — `0002` is restored to describe exactly what it always did;
+`0003` is what actually changes the CHECK constraints on a database that already has the
+table.
 
 Conventions used throughout:
 
@@ -73,7 +79,8 @@ Conventions used throughout:
 ## Phase 1 tables
 
 ### `users`
-**Implemented** (`backend/app/db/models/user.py`, migration `0002`). No auth system yet
+**Implemented** (`backend/app/db/models/user.py`; migrations `0002` creates the table,
+`0003` corrects the email-normalization CHECK constraints — see below). No auth system yet
 (no password/session/token columns) — this table is identity only; shape exists so every
 user-scoped table already has a real foreign key instead of a future migration.
 
@@ -111,9 +118,23 @@ plain spaces; Python's bare `str.strip()` strips a much broader Unicode whitespa
 `"\tperson@x.com\t"` (tab-wrapped) pass the CHECK constraint outright — Postgres's
 default `trim()` left it unchanged on both sides of the `=`, so the equality trivially
 held. Both the ORM validator (`_COVERED_WHITESPACE = " \t\n\r"` in
-`app/db/models/user.py`) and the CHECK constraints now name the identical four-character
-set explicitly, so this can't silently drift apart again. If this set is ever revised,
-update both sides together and add a regression test for the newly-covered character.
+`app/db/models/user.py`) and the CHECK constraints (as of migration `0003` — `0002`
+itself still reflects the original, buggy expression, on purpose; see below) now name the
+identical four-character set explicitly, so this can't silently drift apart again. If
+this set is ever revised, update both sides together, add a new forward migration (not
+another in-place rewrite), and add a regression test for the newly-covered character.
+
+**Why the fix is migration `0003`, not a rewrite of `0002`:** `0002` had already been
+applied to at least one real database (the `jobgoblin` development database) before this
+bug was found. Rewriting `0002`'s DDL in place — the first attempt at this fix — left
+`0002` in the repository describing constraints that didn't match what any
+already-migrated database actually had, with no later revision to carry a database that
+was already at `0002` forward; `alembic upgrade head` and `alembic check` both report
+nothing to do, silently. `0003` (`down_revision = "0002"`) instead drops and recreates
+the two CHECK constraints explicitly, is reversible (its `downgrade()` restores the
+original bare-`trim` expressions), and every database — whether starting from `0001`
+fresh or already sitting at `0002` — reaches the same corrected schema by running
+`alembic upgrade head` normally.
 
 **`updated_at` caveat:** advanced via SQLAlchemy's `onupdate=func.now()`, which appends
 `now()` to any UPDATE the ORM issues for a changed row. This does **not** fire for a

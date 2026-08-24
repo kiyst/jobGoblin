@@ -9,31 +9,53 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.db.models import User
 from tests.conftest import (
-    _DEVELOPMENT_DATABASE_NAME,
     DEFAULT_TEST_DATABASE_URL,
     assert_is_disposable_test_database,
 )
 
-
-def test_guard_rejects_the_development_database() -> None:
-    """The fail-closed guard itself is tested directly (no DB connection
-    needed) — proves it actually rejects the ordinary development database
-    rather than merely being trusted to."""
-    with pytest.raises(RuntimeError, match="does not look like a disposable test database"):
-        assert_is_disposable_test_database(
-            f"postgresql+asyncpg://jobgoblin:jobgoblin@localhost:5432/{_DEVELOPMENT_DATABASE_NAME}"
-        )
+_DEVELOPMENT_URL = "postgresql+asyncpg://jobgoblin:jobgoblin@localhost:5432/jobgoblin"
 
 
 def test_guard_rejects_a_url_with_no_test_marker() -> None:
-    with pytest.raises(RuntimeError, match="does not look like a disposable test database"):
+    """The fail-closed guard itself is tested directly (no DB connection
+    needed) — proves it actually rejects a database whose name doesn't look
+    like a test database, rather than merely being trusted to."""
+    with pytest.raises(RuntimeError, match="does not contain 'test'"):
         assert_is_disposable_test_database(
-            "postgresql+asyncpg://jobgoblin:jobgoblin@localhost:5432/some_other_db"
+            "postgresql+asyncpg://jobgoblin:jobgoblin@localhost:5432/some_other_db",
+            _DEVELOPMENT_URL,
         )
 
 
-def test_guard_accepts_the_configured_test_database() -> None:
-    assert_is_disposable_test_database(DEFAULT_TEST_DATABASE_URL)  # must not raise
+def test_guard_rejects_a_test_named_database_that_is_actually_the_development_target() -> None:
+    """A custom development database whose name happens to contain "test"
+    must still be rejected — the guard compares against the *actual*
+    configured development target, not a hardcoded name."""
+    custom_dev_url = "postgresql+asyncpg://jobgoblin:jobgoblin@localhost:5432/my_test_env"
+    with pytest.raises(RuntimeError, match="same database as the configured development"):
+        assert_is_disposable_test_database(custom_dev_url, development_url=custom_dev_url)
+
+
+def test_guard_rejects_the_ordinary_development_database() -> None:
+    with pytest.raises(RuntimeError):
+        assert_is_disposable_test_database(_DEVELOPMENT_URL, _DEVELOPMENT_URL)
+
+
+def test_guard_accepts_a_distinct_test_database() -> None:
+    assert_is_disposable_test_database(  # must not raise
+        DEFAULT_TEST_DATABASE_URL, _DEVELOPMENT_URL
+    )
+
+
+def test_guard_never_includes_credentials_in_its_error_message() -> None:
+    secret_bearing_url = (
+        "postgresql+asyncpg://realuser:supersecretpassword@localhost:5432/jobgoblin"
+    )
+    with pytest.raises(RuntimeError) as exc_info:
+        assert_is_disposable_test_database(secret_bearing_url, secret_bearing_url)
+    message = str(exc_info.value)
+    assert "supersecretpassword" not in message
+    assert "realuser" not in message
 
 
 async def test_table_starts_empty(db_session: AsyncSession) -> None:

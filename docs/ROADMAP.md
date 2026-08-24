@@ -129,10 +129,12 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   pytest pass; and live liveness/readiness behavior has been verified with the database
   both available and unavailable.
 - **Phase 1: in progress (2026-08-24). `users` slice complete and verified**: model
-  (`backend/app/db/models/user.py`), migration `0002` (reviewed/hand-edited, not
-  autogenerate-as-is), and database tests against real Compose PostgreSQL all pass —
-  including the normalized-email `CHECK`s/unique index, required-field rejection, and
-  `updated_at` advancing on update. No other Phase 1 table is implemented yet; the rest
+  (`backend/app/db/models/user.py`), migrations `0002` (table, reviewed/hand-edited, not
+  autogenerate-as-is) and `0003` (forward-only fix to the email-normalization `CHECK`
+  constraints' whitespace handling — see `docs/DATA_MODEL.md`), and database tests
+  against real Compose PostgreSQL all pass — including the normalized-email
+  `CHECK`s/unique index, required-field rejection, and `updated_at` advancing on update.
+  No other Phase 1 table is implemented yet; the rest
   of Phase 1's exit gate (§[PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md)) remains
   outstanding.
 - **Phases 2-14: not started.** Begin each phase only after completing its preflight in

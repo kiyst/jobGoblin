@@ -1,10 +1,9 @@
-import os
 from collections.abc import AsyncGenerator, Callable
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.engine import make_url
+from sqlalchemy.engine import URL, make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
 from app.config import Settings, get_settings
@@ -13,34 +12,61 @@ from app.db.session import check_database_connection
 from app.main import app
 
 # The disposable database `db_engine`/`db_session` run destructive schema
-# tests against — deliberately independent of `app.config.Settings`
-# (DATABASE_URL), which points at the ordinary development database. See
-# .env.example and README.md's "Dedicated test database" section.
+# tests against. Only used as a fallback when `Settings.test_database_url`
+# (loaded from `.env`/`TEST_DATABASE_URL`, same mechanism as every other
+# setting — see app/config.py) isn't set. See .env.example and README.md's
+# "Dedicated test database" section.
 DEFAULT_TEST_DATABASE_URL = "postgresql+asyncpg://jobgoblin:jobgoblin@localhost:5432/jobgoblin_test"
-TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL", DEFAULT_TEST_DATABASE_URL)
-
-# Real, current name of the ordinary development database — the one database
-# these tests must never be able to target, regardless of TEST_DATABASE_URL.
-_DEVELOPMENT_DATABASE_NAME = "jobgoblin"
 
 
-def assert_is_disposable_test_database(url: str) -> None:
+def _redact(url: str | URL) -> str:
+    """A safe-to-print form of a database URL: driver/host/port/database
+    only — never username or password. Used anywhere a misconfigured URL
+    might otherwise end up in a raised exception or test output."""
+    parsed = url if isinstance(url, URL) else make_url(url)
+    return f"{parsed.drivername}://{parsed.host}:{parsed.port}/{parsed.database}"
+
+
+def assert_is_disposable_test_database(test_url: str, development_url: str) -> None:
     """Fail closed: refuse to run destructive database tests against
-    anything that doesn't clearly look like a disposable test database.
+    anything that doesn't clearly look like a disposable test database,
+    *distinct from the actually-configured development database*.
 
-    Raises `RuntimeError` (a hard test failure, not a skip) if the resolved
-    database name is the known development database name, or doesn't contain
-    "test" at all. Database tests create and drop schema/data; running them
-    against `jobgoblin` would corrupt real development state.
+    Raises `RuntimeError` (a hard test failure, not a skip) if either:
+    - `test_url` resolves to the same (host, port, database) as
+      `development_url` — a custom development database name that happens to
+      contain "test" must not be enough to pass this guard on its own; or
+    - `test_url`'s database name doesn't contain "test" at all.
+
+    Database tests create and drop schema/data; running them against
+    whatever `DATABASE_URL` actually points at — the real check, not a
+    hardcoded name — would corrupt real development state. Never includes a
+    raw, credential-bearing URL in the raised message; see `_redact` above.
     """
-    name = make_url(url).database or ""
-    if name.lower() == _DEVELOPMENT_DATABASE_NAME or "test" not in name.lower():
+    test_parsed = make_url(test_url)
+    dev_parsed = make_url(development_url)
+
+    test_target = (test_parsed.host, test_parsed.port, test_parsed.database)
+    dev_target = (dev_parsed.host, dev_parsed.port, dev_parsed.database)
+    name = test_parsed.database or ""
+
+    same_as_development = test_target == dev_target
+    missing_test_marker = "test" not in name.lower()
+
+    if same_as_development or missing_test_marker:
+        reasons = []
+        if same_as_development:
+            reasons.append(
+                f"it targets the same database as the configured development "
+                f"database ({_redact(dev_parsed)})"
+            )
+        if missing_test_marker:
+            reasons.append("its database name does not contain 'test'")
         raise RuntimeError(
-            f"Refusing to run database tests against {url!r}: its database name "
-            f"({name!r}) does not look like a disposable test database. It must "
-            f"contain 'test' and must not be {_DEVELOPMENT_DATABASE_NAME!r} (the "
-            "development database). Set TEST_DATABASE_URL to a database created "
-            "for this purpose — see README.md's 'Dedicated test database' section."
+            f"Refusing to run database tests against {_redact(test_parsed)}: "
+            + " and ".join(reasons)
+            + ". Set TEST_DATABASE_URL to a distinct, clearly-named disposable "
+            "test database — see README.md's 'Dedicated test database' section."
         )
 
 
@@ -83,7 +109,13 @@ async def real_database_available() -> bool:
 @pytest_asyncio.fixture
 async def db_engine() -> AsyncGenerator[AsyncEngine]:
     """A fresh engine per test, against the dedicated disposable test
-    database (`TEST_DATABASE_URL`) — never the ordinary development database.
+    database — never the ordinary development database.
+
+    The test database URL comes from `Settings.test_database_url`
+    (`app.config`), loaded from `.env`/`TEST_DATABASE_URL` through the same
+    mechanism as every other setting, falling back to
+    `DEFAULT_TEST_DATABASE_URL` only if unset — not a separate
+    `os.environ.get` bypassing the project's usual configuration loading.
 
     Function-scoped (not session-scoped) specifically to match pytest-asyncio's
     function-scoped event loop (`asyncio_default_fixture_loop_scope =
@@ -91,13 +123,15 @@ async def db_engine() -> AsyncGenerator[AsyncEngine]:
     outlive that loop. The overhead of one engine per test is negligible at
     this suite's size.
 
-    Requires `alembic upgrade head` to have already been run against
-    `TEST_DATABASE_URL` (docs/PHASE_RISK_CHECKLIST.md's Phase 1 entry:
-    PostgreSQL behavior is tested against PostgreSQL, never mocked or
-    substituted) — see README.md's "Dedicated test database" section.
+    Requires `alembic upgrade head` to have already been run against the test
+    database (docs/PHASE_RISK_CHECKLIST.md's Phase 1 entry: PostgreSQL
+    behavior is tested against PostgreSQL, never mocked or substituted) — see
+    README.md's "Dedicated test database" section.
     """
-    assert_is_disposable_test_database(TEST_DATABASE_URL)
-    engine = create_async_engine(TEST_DATABASE_URL)
+    settings = get_settings()
+    test_url = settings.test_database_url or DEFAULT_TEST_DATABASE_URL
+    assert_is_disposable_test_database(test_url, settings.database_url)
+    engine = create_async_engine(test_url)
     yield engine
     await engine.dispose()
 

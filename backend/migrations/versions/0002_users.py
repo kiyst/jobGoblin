@@ -48,18 +48,8 @@ def upgrade() -> None:
         # app/db/models/user.py's `_normalize_email` validator and
         # docs/DATA_MODEL.md. These reject any write that bypasses the ORM
         # (including a raw SQL INSERT/UPDATE), not just ORM-driven ones.
-        # `trim(both E'\t\n\r ' from email)` strips exactly the same
-        # four-character whitespace set (space, tab, LF, CR) as the model's
-        # `_COVERED_WHITESPACE` — Postgres's bare `trim(email)` only strips
-        # plain spaces, which previously let tab/newline-wrapped values pass.
-        sa.CheckConstraint(
-            r"email = lower(trim(both E'\t\n\r ' from email))",
-            name=op.f("ck_users_email_normalized"),
-        ),
-        sa.CheckConstraint(
-            r"trim(both E'\t\n\r ' from email) <> ''",
-            name=op.f("ck_users_email_not_empty"),
-        ),
+        sa.CheckConstraint("email = lower(trim(email))", name=op.f("ck_users_email_normalized")),
+        sa.CheckConstraint("trim(email) <> ''", name=op.f("ck_users_email_not_empty")),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_users")),
     )
     # Expression/functional unique index — a UNIQUE table constraint can only
