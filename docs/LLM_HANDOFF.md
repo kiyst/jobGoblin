@@ -418,4 +418,43 @@ rewritten — only renumbered.*
 
 ### Work review
 
-Status: awaiting review.
+- Date and reviewing agent: 2026-08-24, Codex.
+- Diff/revision reviewed: commit `2024d1d` (`fix(phase-1): track array mutations and
+  harden candidate profile tests`) against review commit `b35869e` on branch
+  `phase-1/candidate-profiles`. The local branch matched
+  `origin/phase-1/candidate-profiles`, and the working tree was clean before review.
+- Verification independently performed:
+  - Inspected the complete `b35869e..2024d1d` diff and the resulting candidate-profile
+    model, test helper, affected tests, data-model correction, and handoff rotation.
+  - Confirmed all five nullable `text[]` attributes use
+    `MutableList.as_mutable(ARRAY(Text))`, and that the regression test mutates each
+    loaded list in place, commits, and verifies persistence through a separate
+    `AsyncSession` before cleanup.
+  - Confirmed both tests that require real commits now place creation, test behavior,
+    and cleanup inside `_real_committed_user_and_profile`; its `finally` rolls back and
+    closes the working session and removes any surviving profile/user through a fresh
+    session, closing the prior pre-cleanup leak windows.
+  - Confirmed the non-negative acceptance matrix exercises zero and a positive value
+    for all three numeric columns, and the salary-ordering tests cover minimum-only and
+    maximum-only rows.
+  - `ruff format --check .`: 21 files already formatted.
+  - `ruff check .`: passed.
+  - `mypy app tests`: passed for 16 source files.
+  - `pytest -v`: 61 passed, 0 skipped.
+  - Independently ran `0004 -> 0003 -> 0004` against `jobgoblin_test`: passed.
+  - `alembic check` at test-database head: no new upgrade operations detected.
+  - Live PostgreSQL verification after the suite and migration round-trip:
+    `jobgoblin_test` contained zero `users` and zero `candidate_profiles`; the
+    development database remained at revision `0003` with zero `users`.
+- Findings, ordered by severity, with file and line references: none.
+- Missing or inconclusive verification: none material for this bounded correction pass.
+- Architecture/documentation consistency: the ORM-only mutation-tracking change
+  correctly produces no migration; nullable-array semantics and all approved numeric
+  invariants remain unchanged; the consolidated `users` constraint row now matches
+  migration `0003`; implementation, migration metadata, tests, and documentation are
+  consistent.
+- Verdict: approved.
+- Exact requested corrections: none. The `candidate_profiles` slice and this correction
+  pass are accepted. Do not begin `candidate_skills` or merge to `main` until the user
+  explicitly approves the next action.
+- STOP — reviewer changed only this `Work review`; no implementation files were changed.
