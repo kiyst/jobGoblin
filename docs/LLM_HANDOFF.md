@@ -318,4 +318,82 @@ any of Iteration 2's corrections.*
 
 ### Work review
 
-Status: awaiting review.
+- Date and reviewing agent: 2026-08-24, Codex
+- Diff/revision reviewed: commit `28655bb` (`fix(phase-1): harden users slice and isolate
+  database tests`) against checkpoint `3816d0a` on branch
+  `codex/phase1-users-wip`. The branch matched `origin/codex/phase1-users-wip`, and the
+  working tree was clean before review.
+- Verification independently performed:
+  - Inspected the complete `3816d0a..28655bb` commit diff and all changed files.
+  - Docker Compose reports the backend running and PostgreSQL 16 healthy.
+  - `ruff format --check .`: 17 files already formatted.
+  - `ruff check .`: passed.
+  - `mypy app tests`: passed for 14 source files.
+  - `pytest -v`: 24 passed, 0 skipped.
+  - Dedicated `jobgoblin_test` migration `0002 -> 0001 -> 0002`: passed.
+  - `alembic check` against `jobgoblin_test`: no new upgrade operations detected.
+  - Live schema comparison: both databases report Alembic revision `0002`, but
+    `jobgoblin` has the old plain-space-only checks while `jobgoblin_test` has the new
+    explicit space/tab/LF/CR checks.
+  - `alembic check` against the stale development schema still reported no new upgrade
+    operations, confirming that this type of applied-migration drift is not detected or
+    repaired automatically.
+- Findings, ordered by severity, with file and line references:
+  1. **High — rewriting applied migration `0002` creates silent, unrecoverable schema
+     drift.** `backend/migrations/versions/0002_users.py:55-61` now contains corrected
+     DDL, but the development database already records `0002` and retains the vulnerable
+     old checks, as acknowledged in `docs/LLM_HANDOFF.md:306-313`. A normal `alembic
+     upgrade head` does nothing because no later revision exists, and `alembic check`
+     also reports clean. Any other database that applied checkpoint `3816d0a` has the
+     same problem. The correction must be a new forward migration, not a historical
+     rewrite.
+  2. **High — the fail-closed database guard is not tied to the configured development
+     target and exposes credentials on failure.** `backend/tests/conftest.py:22-43`
+     hard-codes only the default development database name (`jobgoblin`) instead of
+     comparing `TEST_DATABASE_URL` with the actual configured `DATABASE_URL`. A custom
+     development database whose name contains `test` can therefore pass the guard even
+     when both URLs target the same database. The raised error also includes `url!r`,
+     which prints embedded usernames/passwords into test output. In addition,
+     `TEST_DATABASE_URL` is read directly from `os.environ` at lines 19-20, so the value
+     shown in `.env.example` is not loaded from the project's `.env` by the existing
+     Pydantic settings loader; custom configuration behavior is inconsistent with the
+     rest of the project.
+  3. **High — the test-database documentation casually suggests deleting the persistent
+     development volume.** `README.md:79-82` gives `docker compose down -v` as an example
+     setup route. That command destroys `postgres_data`, including the development
+     database this change is intended to protect. The safe manual `CREATE DATABASE`
+     path is sufficient for an existing volume; destructive reset instructions should
+     not be presented as a routine alternative.
+- Missing or inconclusive verification: I did not execute the README's destructive
+  `docker compose down -v` example. I did not test an external database; the live local
+  comparison was sufficient to reproduce the migration-drift condition.
+- Architecture/documentation consistency: The four-character email rule, ORM behavior,
+  fresh-schema migration, regression tests, corrected README/Base status statements,
+  and Phase 9 roadmap correction are internally consistent. The three findings above
+  concern migration lifecycle and safety boundaries rather than the normalized-email
+  rule itself.
+- Verdict: changes requested.
+- Exact requested corrections:
+  1. Restore migration `0002` to the exact DDL in checkpoint `3816d0a`. Add migration
+     `0003` whose upgrade drops/recreates the two email checks with the explicit
+     space/tab/LF/CR expressions and whose downgrade restores the old `0002` checks.
+     Verify fresh `base -> head`, existing `0002 -> 0003`, `0003 -> 0002 -> 0003`, and
+     model/head parity against the disposable test database.
+  2. Apply the new constraint-only `0003` with `alembic upgrade head` to the empty
+     development database; do not downgrade or drop its `users` table. Confirm both
+     databases reach `0003` and reject the tab/newline probes.
+  3. Make the safety guard compare the normalized test target with the actual configured
+     development target as well as requiring an explicit test marker. Never include a
+     credential-bearing URL in an exception. Add tests for equal dev/test targets, a
+     custom development database name containing `test`, missing test markers, accepted
+     distinct test targets, and credential redaction.
+  4. Load/document `TEST_DATABASE_URL` consistently with the project's `.env` behavior;
+     do not imply that copying `.env.example` configures a value that the tests ignore.
+  5. Remove the `docker compose down -v` setup suggestion. If volume deletion is
+     mentioned at all, label it explicitly destructive and unnecessary for normal test
+     setup.
+  6. Rerun format, lint, mypy, all tests, and the migration checks above. Rotate the
+     ledger according to its two-iteration rule, record the correction as the newest
+     `Work done`, commit/push only the task branch, and stop. Do not begin
+     `candidate_profiles`.
+- STOP — reviewer changed only this `Work review`; no implementation files were changed.
