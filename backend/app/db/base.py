@@ -16,9 +16,11 @@ NAMING_CONVENTION = {
 class Base(DeclarativeBase):
     """Shared declarative base for all ORM models.
 
-    No domain models exist yet (Phase 0 is scaffolding only) — this is the
-    base Phase 1's models will inherit from, and the target of Alembic's
-    `target_metadata` so autogenerate has something to diff against.
+    `User` (`app/db/models/user.py`) is the first Phase 1 model registered
+    against this base; every other Phase 1 table will follow the same
+    pattern. This is also Alembic's `target_metadata` (see
+    `migrations/env.py`, which imports `app.db.models` so autogenerate has
+    something to diff against).
     """
 
     metadata = MetaData(naming_convention=NAMING_CONVENTION)

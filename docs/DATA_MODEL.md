@@ -45,6 +45,11 @@ normalized-email constraints — a `CHECK` requiring `email = lower(trim(email))
 were implemented in `backend/migrations/versions/0002_users.py` and
 `backend/app/db/models/user.py`.
 
+**Rev 6 changes** (first Phase 1 correction pass, per independent review): fixed a real
+whitespace-normalization mismatch between the Python validator and the PostgreSQL CHECK
+constraints — see the `users` table's own section below for the corrected, explicit
+four-character whitespace set now shared by both.
+
 Conventions used throughout:
 
 - **Minimum supported PostgreSQL version: 16.** See
@@ -81,16 +86,34 @@ user-scoped table already has a real foreign key instead of a future migration.
 
 **Email normalization:** trimmed and lowercased, nothing more — no dot-removal,
 plus-addressing, or other provider-specific transforms (e.g. Gmail-style aliasing), and
-no RFC-822 validation. A SQLAlchemy `@validates` normalizer covers the ORM write path,
-but the database is the authoritative backstop, not the validator:
-- `CHECK (email = lower(trim(email)))` — rejects any row (including a write that
-  bypasses the ORM) whose stored value isn't already normalized.
-- `CHECK (trim(email) <> '')` — rejects empty or whitespace-only email.
+no RFC-822 validation. **The exact covered whitespace set is space, tab, line feed, and
+carriage return (ASCII `0x20`/`0x09`/`0x0A`/`0x0D`) — nothing else.** A SQLAlchemy
+`@validates` normalizer covers the ORM write path, but the database is the authoritative
+backstop, not the validator:
+- `CHECK (email = lower(trim(both E'\t\n\r ' from email)))` — rejects any row (including
+  a write that bypasses the ORM) whose stored value isn't already normalized.
+- `CHECK (trim(both E'\t\n\r ' from email) <> '')` — rejects empty or
+  covered-whitespace-only email.
 - `UNIQUE` functional index on `lower(email)` — case-insensitive uniqueness. A plain
   `UniqueConstraint` can't express this (constraints only cover literal columns, not an
-  expression), so this is an `Index(..., unique=True)`, not a table constraint.
+  expression), so this is an `Index(..., unique=True)`, not a table constraint. Because
+  the CHECK constraints above guarantee a stored row is *already* fully trimmed and
+  lowercased, a whitespace-wrapped duplicate (e.g. `"\tfoo@x.com\n"` alongside
+  `"foo@x.com"`) can never be inserted in the first place — the CHECK rejects it before
+  the index is ever consulted, not merely something the index happens to also catch.
 - No `CITEXT` — kept explicit/portable through the index and CHECK above instead of an
   extension-dependent column type.
+
+**Why an explicit character set, not bare `trim()`/`.strip()` (corrected — this was a
+real bug):** PostgreSQL's `trim(email)` with no explicit character list only strips
+plain spaces; Python's bare `str.strip()` strips a much broader Unicode whitespace set
+(tabs, newlines, and more). Relying on the two "matching by default" let a value like
+`"\tperson@x.com\t"` (tab-wrapped) pass the CHECK constraint outright — Postgres's
+default `trim()` left it unchanged on both sides of the `=`, so the equality trivially
+held. Both the ORM validator (`_COVERED_WHITESPACE = " \t\n\r"` in
+`app/db/models/user.py`) and the CHECK constraints now name the identical four-character
+set explicitly, so this can't silently drift apart again. If this set is ever revised,
+update both sides together and add a regression test for the newly-covered character.
 
 **`updated_at` caveat:** advanced via SQLAlchemy's `onupdate=func.now()`, which appends
 `now()` to any UPDATE the ORM issues for a changed row. This does **not** fire for a

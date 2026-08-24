@@ -1,14 +1,48 @@
+import os
 from collections.abc import AsyncGenerator, Callable
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
 from app.config import Settings, get_settings
 from app.db.models import User
 from app.db.session import check_database_connection
 from app.main import app
+
+# The disposable database `db_engine`/`db_session` run destructive schema
+# tests against — deliberately independent of `app.config.Settings`
+# (DATABASE_URL), which points at the ordinary development database. See
+# .env.example and README.md's "Dedicated test database" section.
+DEFAULT_TEST_DATABASE_URL = "postgresql+asyncpg://jobgoblin:jobgoblin@localhost:5432/jobgoblin_test"
+TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL", DEFAULT_TEST_DATABASE_URL)
+
+# Real, current name of the ordinary development database — the one database
+# these tests must never be able to target, regardless of TEST_DATABASE_URL.
+_DEVELOPMENT_DATABASE_NAME = "jobgoblin"
+
+
+def assert_is_disposable_test_database(url: str) -> None:
+    """Fail closed: refuse to run destructive database tests against
+    anything that doesn't clearly look like a disposable test database.
+
+    Raises `RuntimeError` (a hard test failure, not a skip) if the resolved
+    database name is the known development database name, or doesn't contain
+    "test" at all. Database tests create and drop schema/data; running them
+    against `jobgoblin` would corrupt real development state.
+    """
+    name = make_url(url).database or ""
+    if name.lower() == _DEVELOPMENT_DATABASE_NAME or "test" not in name.lower():
+        raise RuntimeError(
+            f"Refusing to run database tests against {url!r}: its database name "
+            f"({name!r}) does not look like a disposable test database. It must "
+            f"contain 'test' and must not be {_DEVELOPMENT_DATABASE_NAME!r} (the "
+            "development database). Set TEST_DATABASE_URL to a database created "
+            "for this purpose — see README.md's 'Dedicated test database' section."
+        )
+
 
 # Deliberately unroutable-fast: port 1 on loopback refuses connections
 # immediately on every platform this runs on, so the "database unavailable"
@@ -48,7 +82,8 @@ async def real_database_available() -> bool:
 
 @pytest_asyncio.fixture
 async def db_engine() -> AsyncGenerator[AsyncEngine]:
-    """A fresh engine per test, against the real dev PostgreSQL.
+    """A fresh engine per test, against the dedicated disposable test
+    database (`TEST_DATABASE_URL`) — never the ordinary development database.
 
     Function-scoped (not session-scoped) specifically to match pytest-asyncio's
     function-scoped event loop (`asyncio_default_fixture_loop_scope =
@@ -56,11 +91,13 @@ async def db_engine() -> AsyncGenerator[AsyncEngine]:
     outlive that loop. The overhead of one engine per test is negligible at
     this suite's size.
 
-    Requires `alembic upgrade head` to have already been run against this
-    database (docs/PHASE_RISK_CHECKLIST.md's Phase 1 entry: PostgreSQL
-    behavior is tested against PostgreSQL, never mocked or substituted).
+    Requires `alembic upgrade head` to have already been run against
+    `TEST_DATABASE_URL` (docs/PHASE_RISK_CHECKLIST.md's Phase 1 entry:
+    PostgreSQL behavior is tested against PostgreSQL, never mocked or
+    substituted) — see README.md's "Dedicated test database" section.
     """
-    engine = create_async_engine(get_settings().database_url)
+    assert_is_disposable_test_database(TEST_DATABASE_URL)
+    engine = create_async_engine(TEST_DATABASE_URL)
     yield engine
     await engine.dispose()
 

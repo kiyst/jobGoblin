@@ -90,10 +90,12 @@ polish required yet.
 
 ## Phase 9 — Scheduler
 `workers/scheduler.py`: Run Now / hourly / daily / weekly execution, `CollectionRun`
-tracking, provider-failure isolation, retry/backoff per `ProviderCapabilities`. Migrates
-the `collection_run_provider_attempts` table
-([DECISIONS/0005](DECISIONS/0005-raw-ingestion-vs-provider-attempts.md)) whose shape was
-fixed in the Phase 0 design pass, and starts populating it per run.
+tracking, provider-failure isolation, retry/backoff per `ProviderCapabilities`. **Reuses**
+the `collection_run_provider_attempts` table — migrated in Phase 1 and first written to
+by Phase 2's fixture pipeline, not introduced here (see
+[DECISIONS/0005](DECISIONS/0005-raw-ingestion-vs-provider-attempts.md) and this
+document's own Phase 1/2 entries above) — extending how it's populated to cover real
+scheduled runs.
 
 ## Phase 10 — User Workspace
 Saved/applied views, notes, statuses, applied date, days-since-applied — all reading and

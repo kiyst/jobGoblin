@@ -4,8 +4,10 @@ Job aggregation and market-intelligence platform. See [docs/ARCHITECTURE.md](doc
 [docs/DATA_MODEL.md](docs/DATA_MODEL.md), and [docs/ROADMAP.md](docs/ROADMAP.md) for the
 full design. Before planning or reviewing a phase, use
 [docs/PHASE_RISK_CHECKLIST.md](docs/PHASE_RISK_CHECKLIST.md) as its engineering preflight.
-This repo has completed **Phase 0** (repository scaffolding only) — no domain models,
-providers, or ingestion logic exist yet.
+**Phase 0** (repository scaffolding) is complete. **Phase 1** is in progress: the `users`
+table (model, migration, and database tests) is implemented and verified — see
+[docs/ROADMAP.md](docs/ROADMAP.md) for exact status. No providers, ingestion, or other
+Phase 1 tables exist yet.
 
 ## Requirements
 
@@ -59,6 +61,51 @@ Or via Docker Compose (builds and runs the backend against the compose Postgres)
 docker compose up -d
 ```
 
+## Dedicated test database
+
+Tests that create/drop schema or rows (`backend/tests/test_users.py`) run against a
+**separate, disposable** PostgreSQL database — `jobgoblin_test` — never the ordinary
+`jobgoblin` development database. This is enforced, not just documented:
+`backend/tests/conftest.py::assert_is_disposable_test_database` raises a hard error
+(fails the test, does not skip) if `TEST_DATABASE_URL` doesn't resolve to a database name
+containing `test` and different from `jobgoblin`.
+
+**One-time setup**, only needed once per `postgres_data` Docker volume:
+
+```bash
+docker exec <postgres-container-name> psql -U jobgoblin -d jobgoblin -c "CREATE DATABASE jobgoblin_test OWNER jobgoblin;"
+```
+
+(A fresh volume — e.g. after `docker compose down -v && docker compose up -d postgres` —
+creates `jobgoblin_test` automatically via `postgres-init/01-create-test-db.sql`, mounted
+into the container's `docker-entrypoint-initdb.d`. The manual command above is only for
+an already-initialized volume, which won't re-run init scripts.)
+
+Migrate the test database (separately from the development database — `DATABASE_URL` is
+left untouched):
+
+```bash
+# bash
+DATABASE_URL=postgresql+asyncpg://jobgoblin:jobgoblin@localhost:5432/jobgoblin_test alembic upgrade head
+```
+```powershell
+# PowerShell
+$env:DATABASE_URL = "postgresql+asyncpg://jobgoblin:jobgoblin@localhost:5432/jobgoblin_test"
+alembic upgrade head
+Remove-Item Env:\DATABASE_URL
+```
+
+`TEST_DATABASE_URL` (see `.env.example`) defaults to exactly this database/URL, so no
+further configuration is needed once it exists and is migrated.
+
+**Migration round-trip verification** (upgrade/downgrade/upgrade) must only ever target
+this test database, the same way:
+
+```bash
+DATABASE_URL=postgresql+asyncpg://jobgoblin:jobgoblin@localhost:5432/jobgoblin_test alembic downgrade 0001
+DATABASE_URL=postgresql+asyncpg://jobgoblin:jobgoblin@localhost:5432/jobgoblin_test alembic upgrade head
+```
+
 ## Run tests
 
 From `backend/`:
@@ -70,7 +117,11 @@ pytest
 The database-unavailable test cases run unconditionally (no external
 dependency). The database-*available* `/ready` test skips cleanly if no
 PostgreSQL is reachable at `DATABASE_URL` — run `docker compose up -d
-postgres` first to exercise it. No test contacts the public internet.
+postgres` first to exercise it. The `users`-table database tests
+(`test_users.py`) require the dedicated test database above to exist and be
+migrated to head — they fail (not skip) if it isn't reachable, and fail
+closed with a clear error if pointed at the development database instead.
+No test contacts the public internet.
 
 ## Verification
 
@@ -86,13 +137,15 @@ PowerShell 7 (stops at the first failed check):
 ruff format --check . && ruff check . && mypy app tests && pytest
 ```
 
-To also prove the full migration cycle against a real database:
+To also prove the full migration cycle against real PostgreSQL, use the **dedicated test
+database** (see above) — never run destructive migration verification against the
+development database:
 
 ```bash
 docker compose up -d postgres
-alembic upgrade head
-alembic downgrade base
-alembic upgrade head
+DATABASE_URL=postgresql+asyncpg://jobgoblin:jobgoblin@localhost:5432/jobgoblin_test alembic upgrade head
+DATABASE_URL=postgresql+asyncpg://jobgoblin:jobgoblin@localhost:5432/jobgoblin_test alembic downgrade base
+DATABASE_URL=postgresql+asyncpg://jobgoblin:jobgoblin@localhost:5432/jobgoblin_test alembic upgrade head
 ```
 
 ## Project layout

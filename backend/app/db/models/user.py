@@ -7,6 +7,18 @@ from sqlalchemy.types import Uuid
 
 from app.db.base import Base
 
+# The exact whitespace set this project normalizes: space, tab, line feed,
+# carriage return (ASCII 0x20/0x09/0x0A/0x0D). Deliberately narrower than
+# Python's bare `str.strip()`, which also strips other Unicode whitespace
+# (e.g. non-breaking space) that PostgreSQL's `trim()` does not recognize —
+# using the bare form here previously let a value like "\tperson@x.com\t"
+# through, because Postgres's default `trim(email)` only strips plain spaces,
+# not tabs/newlines, while the Python side stripped them. Both sides below use
+# exactly this same four-character set, so they can no longer disagree. If
+# this set is ever revised, both `_COVERED_WHITESPACE` and the CHECK
+# constraints' SQL string below must be updated together.
+_COVERED_WHITESPACE = " \t\n\r"
+
 
 class User(Base):
     """A single account. Phase 1 slice: identity only.
@@ -36,20 +48,33 @@ class User(Base):
     __table_args__ = (
         # The database is the authoritative backstop for both of these, not
         # just the `_normalize_email` validator below — see docs/DATA_MODEL.md.
-        CheckConstraint("email = lower(trim(email))", name="email_normalized"),
-        CheckConstraint("trim(email) <> ''", name="email_not_empty"),
+        # `trim(both E'\t\n\r ' from email)` strips exactly `_COVERED_WHITESPACE`
+        # above — same four characters, same set, on both sides. Postgres's
+        # bare `trim(email)` (no explicit character list) only strips plain
+        # spaces, which is what let whitespace-wrapped values through before.
+        CheckConstraint(
+            r"email = lower(trim(both E'\t\n\r ' from email))",
+            name="email_normalized",
+        ),
+        CheckConstraint(
+            r"trim(both E'\t\n\r ' from email) <> ''",
+            name="email_not_empty",
+        ),
     )
 
     @validates("email")
     def _normalize_email(self, _key: str, value: str) -> str:
-        """Trim and lowercase before the row ever reaches the database.
+        """Trim `_COVERED_WHITESPACE` and lowercase before the row ever
+        reaches the database.
 
         Deliberately does *not* attempt provider-specific transforms (dot-
         removal, plus-addressing, etc.) — see docs/DATA_MODEL.md. This is a
         convenience for the common path; the CHECK constraints above are what
-        actually enforce it, including against writes that bypass the ORM.
+        actually enforce it, including against writes that bypass the ORM —
+        and they enforce exactly this same whitespace set, not Python's
+        broader default `str.strip()`.
         """
-        return value.strip().lower()
+        return value.strip(_COVERED_WHITESPACE).lower()
 
 
 # A functional/expression unique index can't be expressed as a table-level
