@@ -345,4 +345,35 @@ alongside two already-reviewed entries. Nothing below was rewritten — only ren
 
 ### Work review
 
-Status: awaiting review.
+- Date and reviewing agent: 2026-08-24, Codex
+- Diff/revision reviewed: commit `d484a90` (`fix(phase-1): compare test/dev database
+  targets by name, fix wording`) against review commit `50f6e58` on branch
+  `codex/phase1-users-wip`. The branch matched `origin/codex/phase1-users-wip`, and the
+  working tree was clean before review.
+- Verification independently performed:
+  - Inspected the complete `50f6e58..d484a90` diff and every changed implementation,
+    test, migration-comment, roadmap, and handoff entry.
+  - Confirmed the guard now compares case-normalized database names independently of
+    host, port, credentials, and driver spelling, while still requiring the test marker.
+  - Re-ran the previously bypassing `localhost`/`127.0.0.1` and omitted/explicit-port
+    scenarios through the committed regression suite.
+  - `ruff format --check .`: 18 files already formatted.
+  - `ruff check .`: passed.
+  - `mypy app tests`: passed for 14 source files.
+  - `pytest -v`: 30 passed, 0 skipped.
+  - Independently ran `0003 -> 0002 -> 0003` against `jobgoblin_test`: passed.
+  - `alembic check` at test-database head: no new upgrade operations detected.
+  - Live PostgreSQL verification: both `jobgoblin` and `jobgoblin_test` remain at
+    revision `0003`; both contain zero user rows after verification.
+- Findings, ordered by severity, with file and line references: none.
+- Missing or inconclusive verification: none material for this bounded correction pass.
+- Architecture/documentation consistency: The conservative name-only guard matches the
+  documented fail-closed trade-off; credential redaction remains covered; `0003` is
+  accurately described as a reversible forward corrective migration; the migration
+  chain, model metadata, live schemas, tests, roadmap, and data-model documentation are
+  consistent.
+- Verdict: approved.
+- Exact requested corrections: none. The Phase 1 `users` slice and its correction chain
+  are accepted. Do not begin another slice until the user approves it; the next proposed
+  bounded slice may be evaluated separately.
+- STOP — reviewer changed only this `Work review`; no implementation files were changed.
