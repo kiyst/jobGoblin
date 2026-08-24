@@ -83,119 +83,11 @@ and record the actual commit it reviewed.
 ## Iteration 1
 
 *Rotated in from "Iteration 2" per the two-iteration rule: its `Work review` (below) is
-no longer pending — Codex's verdict was "approved" — so the previous Iteration 1 (the
-second `users`-slice correction pass, whose review had requested further changes that
-were then made in this iteration) was removed rather than kept alongside two
-already-reviewed entries. Nothing below was rewritten — only renumbered.*
-
-### Work done
-
-- Date and agent: 2026-08-24, Claude Code (Sonnet 4.5).
-- Approved phase/slice: third bounded correction pass over the existing Phase 1 `users`
-  slice only — the guard alias-comparison fix and the "forward-only" wording correction
-  from Iteration 1's `Work review`, approved as one final pass. No other table, no new
-  slice.
-- Outcome: both corrections addressed and verified against real PostgreSQL. 30 tests
-  passed, 0 skipped.
-- Base/starting commit: `50f6e58` ("docs(review): close test-db alias gap") on branch
-  `codex/phase1-users-wip` — Codex's own review commit, on top of `31aa213`
-  ("fix(phase-1): forward-migrate email checks and harden test-db guard"), the commit
-  its review evaluated. Confirmed via `git log --oneline` before making any changes.
-- Ending commit or working-tree state: `49aa748` (Codex's approval commit for this
-  iteration's `Work review`, below — this is also the commit the user confirmed and the
-  commit `main` was created at before branching `phase-1/candidate-profiles`).
-- Files changed:
-  - `backend/tests/conftest.py` — `assert_is_disposable_test_database` no longer
-    compares `(host, port, database)` tuples; it now compares **database name only**
-    (case-insensitive), deliberately ignoring host/port/credentials/driver spelling, per
-    the review's explicit conservative-rejection instruction. Docstring rewritten to
-    explain why (a `localhost`/`127.0.0.1` pair, or an omitted vs. explicit default port,
-    can reach the identical database while looking different as tuples).
-  - `backend/tests/test_users.py` — added regression tests: same database name via
-    `localhost` vs. `127.0.0.1`, same name via omitted vs. explicit default port, same
-    name with different case, and a distinct database name on the same server (must
-    still be accepted). Updated the existing "test-named-but-actually-dev" test's
-    expected message substring to match the new wording. Kept the credential-redaction
-    test unchanged.
-  - `backend/migrations/versions/0003_fix_email_whitespace_checks.py` — docstring
-    wording: "forward-only correction" → "forward corrective migration" (it has a
-    working, tested `downgrade()`; "forward-only" incorrectly implied it couldn't be
-    reversed).
-  - `docs/ROADMAP.md` — same wording correction in the Phase 1 status line.
-  - `docs/LLM_HANDOFF.md` — this rotation (old Iteration 1 removed; prior Iteration 2
-    renumbered to Iteration 1; this entry appended as the new Iteration 2). Historical
-    "forward-only" wording inside the now-Iteration-1 `Work done`/`Work review` text was
-    **not** edited — per the rotation rule, retained entries are renumbered, not
-    rewritten, even when they use since-corrected wording.
-- Migration revisions: none added or changed — `0002` and `0003` are unchanged from the
-  previous pass; only the guard logic and prose were corrected this time.
-- Commands run and exact results:
-  - `ruff format --check .` → 18 files already formatted (no changes needed).
-  - `ruff check .` → all checks passed.
-  - `mypy app tests` → success, 14 source files.
-  - `pytest -v` → **30 passed, 0 skipped** (up from 26 — 4 new guard regression tests).
-  - Focused migration cycle against `jobgoblin_test`: `alembic current` → `0003 (head)`;
-    `alembic downgrade 0002` → success; `alembic upgrade head` → success, `0002 -> 0003`;
-    `alembic check` → `No new upgrade operations detected.`
-  - Development database, confirmed untouched by the above (test-DB-only commands):
-    `SELECT version_num FROM alembic_version` → `0003`; `SELECT count(*) FROM users` →
-    `0`.
-- Risks exercised from `PHASE_RISK_CHECKLIST.md`: "PostgreSQL behavior is tested against
-  PostgreSQL" — the alias-comparison gap (`localhost` vs `127.0.0.1`, default port) was
-  itself only demonstrable against real connection-string parsing, not by inspection;
-  "every migration is reviewed and tested upgrade -> downgrade -> upgrade" — re-verified
-  for `0003` specifically after this pass's unrelated changes, to confirm nothing in the
-  guard/wording fix touched migration behavior.
-- Skipped or unavailable verification: none. All commands executed for real.
-- Deviations and ADR impact: none. This pass touched only test infrastructure and prose;
-  no schema, model, or ADR-relevant decision changed.
-- Known limitations: the guard's name-only comparison is deliberately conservative — a
-  same-named test database on a genuinely different, unrelated PostgreSQL server would
-  still be rejected (documented in the guard's own docstring as an accepted trade-off,
-  per the review's explicit instruction). `updated_at` still only advances for
-  ORM-driven writes (unchanged, out of scope for this pass).
-- Recommended next smallest slice: none proposed by the implementing agent — per the
-  workflow, this pass stops for Codex's review before any further slice is considered.
-- STOP — awaiting Codex review and user approval. Do not begin `candidate_profiles`.
-
-### Work review
-
-- Date and reviewing agent: 2026-08-24, Codex
-- Diff/revision reviewed: commit `d484a90` (`fix(phase-1): compare test/dev database
-  targets by name, fix wording`) against review commit `50f6e58` on branch
-  `codex/phase1-users-wip`. The branch matched `origin/codex/phase1-users-wip`, and the
-  working tree was clean before review.
-- Verification independently performed:
-  - Inspected the complete `50f6e58..d484a90` diff and every changed implementation,
-    test, migration-comment, roadmap, and handoff entry.
-  - Confirmed the guard now compares case-normalized database names independently of
-    host, port, credentials, and driver spelling, while still requiring the test marker.
-  - Re-ran the previously bypassing `localhost`/`127.0.0.1` and omitted/explicit-port
-    scenarios through the committed regression suite.
-  - `ruff format --check .`: 18 files already formatted.
-  - `ruff check .`: passed.
-  - `mypy app tests`: passed for 14 source files.
-  - `pytest -v`: 30 passed, 0 skipped.
-  - Independently ran `0003 -> 0002 -> 0003` against `jobgoblin_test`: passed.
-  - `alembic check` at test-database head: no new upgrade operations detected.
-  - Live PostgreSQL verification: both `jobgoblin` and `jobgoblin_test` remain at
-    revision `0003`; both contain zero user rows after verification.
-- Findings, ordered by severity, with file and line references: none.
-- Missing or inconclusive verification: none material for this bounded correction pass.
-- Architecture/documentation consistency: The conservative name-only guard matches the
-  documented fail-closed trade-off; credential redaction remains covered; `0003` is
-  accurately described as a reversible forward corrective migration; the migration
-  chain, model metadata, live schemas, tests, roadmap, and data-model documentation are
-  consistent.
-- Verdict: approved.
-- Exact requested corrections: none. The Phase 1 `users` slice and its correction chain
-  are accepted. Do not begin another slice until the user approves it; the next proposed
-  bounded slice may be evaluated separately.
-- STOP — reviewer changed only this `Work review`; no implementation files were changed.
-
----
-
-## Iteration 2
+no longer pending — Codex's verdict was "changes requested," and all five requested
+corrections were approved and addressed in the next iteration — so the previous
+Iteration 1 (the third `users`-slice correction pass and Codex's approval of it) was
+removed rather than kept alongside two already-reviewed entries. Nothing below was
+rewritten — only renumbered.*
 
 ### Work done
 
@@ -207,15 +99,14 @@ already-reviewed entries. Nothing below was rewritten — only renumbered.*
   verified against real PostgreSQL. 52 tests passed, 0 skipped (up from 30 — 22 new
   `candidate_profiles` tests).
 - Base/starting commit: `49aa748` on branch `codex/phase1-users-wip` — Codex's approval
-  commit for the `users` slice (Iteration 1's `Work review`, verdict: approved),
+  commit for the `users` slice (previous Iteration 1's `Work review`, verdict: approved),
   confirmed by the user before authorizing this slice. `main` did not exist in this
   repository before this pass (git was initialized with `main` as the default branch
   name, but every commit had only ever been made on `codex/phase1-users-wip`); per the
   user's explicit choice (asked directly rather than assumed), `main` was created at
   `49aa748` and pushed, then `phase-1/candidate-profiles` was branched from `main`.
-- Ending commit or working-tree state: this commit (recorded by the agent completing
-  this pass; see the agent's final response for the actual resolved hash, per this
-  file's own "Git workflow" instructions above).
+- Ending commit or working-tree state: `b02158f` (`feat(phase-1): implement candidate
+  profiles slice` — this is the commit Codex's `Work review` below actually reviewed).
 - Three product rules were not determined by `docs/DATA_MODEL.md` and were resolved by
   explicit user approval before migration `0004` was written, per this slice's approval
   message's explicit stop-and-ask instruction (not silently invented):
@@ -413,3 +304,118 @@ already-reviewed entries. Nothing below was rewritten — only renumbered.*
      commit/push only `phase-1/candidate-profiles`, and stop. Do not begin
      `candidate_skills`.
 - STOP — reviewer changed only this `Work review`; no implementation files were changed.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date and agent: 2026-08-24, Claude Code (Sonnet 4.5).
+- Approved phase/slice: bounded correction pass over the `candidate_profiles` slice only
+  — all five corrections in Iteration 1's `Work review` approved as one pass. No
+  `candidate_skills`, no new table.
+- Outcome: all five corrections addressed and verified against real PostgreSQL. 61 tests
+  passed, 0 skipped (up from 52 — 9 net new tests).
+- Base/starting commit: `b02158f` (`feat(phase-1): implement candidate profiles slice`)
+  on branch `phase-1/candidate-profiles`, with Codex's review commit `b35869e`
+  (`docs(review): request candidate profile mutation fixes`) on top. Confirmed via
+  `git log --oneline` and `git status` (clean, branch up to date with origin) before
+  making any changes.
+- Ending commit or working-tree state: this commit (recorded by the agent completing
+  this pass; see the agent's final response for the actual resolved hash, per this
+  file's own "Git workflow" instructions above).
+- Files changed:
+  - `backend/app/db/models/candidate_profile.py` — the five `text[]` columns
+    (`target_role_families`, `certifications`, `preferred_industries`,
+    `excluded_industries`, `preferred_locations`) now use
+    `MutableList.as_mutable(ARRAY(Text))` instead of plain `ARRAY(Text)`, so an in-place
+    `.append()`/`.remove()` on a loaded list marks the profile dirty and is actually
+    written on commit — previously silently dropped, per finding 1. No migration
+    needed: this changes only SQLAlchemy's in-Python change-tracking, not PostgreSQL
+    DDL, and `alembic check` (below) confirms no new upgrade operations were detected.
+    Added a short comment explaining why the wrapper is required.
+  - `backend/tests/test_candidate_profiles.py`:
+    - Added `_real_committed_user_and_profile`, a shared async context manager wrapping
+      the entire committed lifecycle (user insert, profile insert, and whatever the
+      test body does) in a `try`/`finally`. The `finally` always rolls back the
+      session (`contextlib.suppress(Exception)`, since the session may already be in a
+      failed-transaction state) and then performs best-effort cleanup in a **fresh**
+      session — fetching the profile and user by their captured ids and deleting each
+      only if still present — so a test-body exception or an already-cascaded row
+      can't leave a durable row behind or raise a second error while cleaning up.
+      Addresses finding 2.
+    - `test_deleting_user_cascades_to_candidate_profile` and
+      `test_updating_a_profile_advances_updated_at` rewritten to use this helper
+      instead of ad hoc `db_engine`/manual cleanup, closing the pre-`try` leak window
+      the review identified in the latter.
+    - Added `test_appending_to_array_field_persists_after_reload`, parameterized across
+      all five array fields (`ARRAY_FIELDS`): builds a profile with the field set to
+      `["first"]` via the new helper, appends `"second"` to the *loaded* list in place,
+      commits, and reloads the row in a genuinely separate `AsyncSession` (not
+      `.refresh()` on the same object) to prove the value was actually written to
+      PostgreSQL, not merely echoed back from the original session's identity map.
+      Addresses finding 1's requested test.
+    - `test_non_negative_check_accepts_zero_and_positive` reparameterized over both
+      `(field, 0)` and `(field, 5)` for all three non-negative columns (6 cases instead
+      of 3-cases-at-zero-only), and now also refreshes and asserts the persisted value
+      instead of only asserting `commit()` didn't raise. Addresses finding 3.
+    - Added `test_salary_max_without_min_is_not_constrained_by_ordering_check`,
+      mirroring the existing minimum-only case. Addresses finding 3.
+  - `docs/DATA_MODEL.md` — the consolidated `users` row in "Phase 1 constraints &
+    indexes" now states the current migration-`0003` explicit space/tab/LF/CR `CHECK`
+    expressions instead of the stale migration-`0002` bare-`trim` ones; the `users`
+    table's own section (which explains the `0002`/`0003` history) was left unchanged.
+    Addresses finding 4.
+  - `docs/LLM_HANDOFF.md` — this rotation (old Iteration 1 — the approved third `users`
+    correction pass — removed; prior Iteration 2 renumbered to Iteration 1; this entry
+    appended as the new Iteration 2).
+- Migration revisions: none added or changed. `0004` is unchanged; only ORM-level
+  mutation tracking and test/documentation content were corrected this pass, exactly as
+  the review anticipated ("No migration should be needed").
+- Commands run and exact results:
+  - `ruff format .` → 1 file reformatted (`candidate_profile.py`, from wrapping the
+    array columns), then a second reformat after adding `contextlib.suppress` → 21
+    files left unchanged (stable).
+  - `ruff check .` → one `SIM105` finding (`try`/`except`/`pass` in the new cleanup
+    helper) → replaced with `contextlib.suppress(Exception)` → all checks passed.
+  - `mypy app tests` → success, 16 source files.
+  - `pytest -v` (first run after the new mutation tests) → **5 failed, 56 passed**: the
+    five new `test_appending_to_array_field_persists_after_reload` cases asserted
+    `reloaded is not None` *after* the helper's `async with` block had already exited —
+    the helper's cleanup deletes the profile/user as soon as the block exits, so the
+    row was legitimately gone by the time the reload ran. Fixed by moving the
+    reload-and-assert *inside* the `async with` block, before cleanup runs (a test
+    ordering bug in this pass's own new test, not a defect in the reviewed model fix or
+    the cleanup helper itself).
+  - `pytest -v` (after the fix) → **61 passed, 0 skipped**.
+  - `DATABASE_URL=...jobgoblin_test alembic current` (before any change) → `0004
+    (head)`.
+  - `DATABASE_URL=...jobgoblin_test alembic downgrade 0003` → success.
+  - `DATABASE_URL=...jobgoblin_test alembic upgrade head` → success, `0003 -> 0004`
+    (round-trip scenario, confirming the model change needed no migration).
+  - `DATABASE_URL=...jobgoblin_test alembic check` → `No new upgrade operations
+    detected.`
+  - `alembic current` against the **development** database (default `DATABASE_URL`, no
+    override) → `0003`, unchanged — confirmed untouched.
+  - `pytest -q` (final re-run after the migration round-trip) → **61 passed**.
+- Risks exercised from `PHASE_RISK_CHECKLIST.md`: "PostgreSQL behavior is tested against
+  PostgreSQL" — the `MutableList` fix and the new persistence test only prove anything
+  because the reload happens in a genuinely separate session hitting real Postgres, not
+  the same session's identity map; "every migration is reviewed and tested upgrade ->
+  downgrade -> upgrade" — re-verified for `0004` after this pass's ORM-only change, to
+  confirm nothing in the fix touched migration behavior.
+- Skipped or unavailable verification: none. All commands executed for real, including
+  the development-database confirmation.
+- Deviations and ADR impact: the first run of the five new mutation tests failed (test
+  ordering bug in the new test itself, detailed above); fixed and re-verified before
+  reporting success. No ADR impact — Phase 1 implementation-slice detail only.
+- Known limitations: none new. `updated_at` still only advances for ORM-driven writes
+  (unchanged, out of scope for this pass, same as prior passes).
+- Recommended next smallest slice: none proposed by the implementing agent — per the
+  workflow, this pass stops for Codex's review before any further slice is considered.
+- STOP — awaiting Codex review and user approval. Do not begin `candidate_skills`.
+
+### Work review
+
+Status: awaiting review.

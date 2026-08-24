@@ -752,7 +752,7 @@ reviewed against this list directly:
 
 | Table | Constraint / index | Purpose |
 |---|---|---|
-| `users` | `CHECK (email = lower(trim(email)))`, `CHECK (trim(email) <> '')`, `UNIQUE` index on `lower(email)` | normalized-email invariant enforced at the database, not just the ORM validator — see the table's own section above (Rev 5) |
+| `users` | `CHECK (email = lower(trim(both E'\t\n\r ' from email)))`, `CHECK (trim(both E'\t\n\r ' from email) <> '')`, `UNIQUE` index on `lower(email)` | normalized-email invariant (current, as of migration `0003`) enforced at the database, not just the ORM validator — see the table's own section above (Rev 5/6) |
 | `candidate_profiles` | `UNIQUE (user_id)`; `CHECK` on `remote_preference` enum; non-negative `CHECK`s on `years_experience`/`salary_expectation_min`/`salary_expectation_max`; `CHECK (salary_expectation_min <= salary_expectation_max)` | enforce 1:1 with `users` while that holds; reject an invalid `remote_preference`, a negative experience/salary value, or an inverted salary range at the database — see the table's own section above (Rev 7) |
 | `candidate_skills` | `UNIQUE (candidate_profile_id, lower(skill))` | one entry per skill per profile, case-insensitive |
 | `saved_search_titles` | `UNIQUE (saved_search_id, lower(title))` | one entry per title per search, case-insensitive |

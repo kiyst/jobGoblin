@@ -3,6 +3,7 @@ from datetime import datetime
 
 from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Integer, Text, func
 from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.ext.mutable import MutableList
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import Uuid
 
@@ -34,14 +35,28 @@ class CandidateProfile(Base):
         nullable=False,
         unique=True,
     )
-    target_role_families: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
+    # MutableList.as_mutable wraps ARRAY(Text) so SQLAlchemy tracks in-place
+    # mutation (.append(), .remove(), etc.) of the loaded Python list — a
+    # plain ARRAY(Text) column looks unchanged to the unit-of-work after an
+    # in-place edit, and the change is silently dropped on commit.
+    target_role_families: Mapped[list[str] | None] = mapped_column(
+        MutableList.as_mutable(ARRAY(Text)), nullable=True
+    )
     years_experience: Mapped[int | None] = mapped_column(Integer, nullable=True)
     education: Mapped[str | None] = mapped_column(Text, nullable=True)
-    certifications: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
+    certifications: Mapped[list[str] | None] = mapped_column(
+        MutableList.as_mutable(ARRAY(Text)), nullable=True
+    )
     clearance: Mapped[str | None] = mapped_column(Text, nullable=True)
-    preferred_industries: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
-    excluded_industries: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
-    preferred_locations: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
+    preferred_industries: Mapped[list[str] | None] = mapped_column(
+        MutableList.as_mutable(ARRAY(Text)), nullable=True
+    )
+    excluded_industries: Mapped[list[str] | None] = mapped_column(
+        MutableList.as_mutable(ARRAY(Text)), nullable=True
+    )
+    preferred_locations: Mapped[list[str] | None] = mapped_column(
+        MutableList.as_mutable(ARRAY(Text)), nullable=True
+    )
     relocation_willingness: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     remote_preference: Mapped[str] = mapped_column(Text, nullable=False)
     salary_expectation_min: Mapped[int | None] = mapped_column(Integer, nullable=True)

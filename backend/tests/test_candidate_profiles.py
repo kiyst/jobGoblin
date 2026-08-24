@@ -1,5 +1,6 @@
 import uuid
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 
 import pytest
@@ -10,6 +11,14 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from app.db.models import CandidateProfile, User
 from app.db.models.candidate_profile import REMOTE_PREFERENCES
 
+ARRAY_FIELDS = [
+    "target_role_families",
+    "certifications",
+    "preferred_industries",
+    "excluded_industries",
+    "preferred_locations",
+]
+
 
 async def _insert_user(
     db_session: AsyncSession, make_user: Callable[..., User], email: str
@@ -19,6 +28,67 @@ async def _insert_user(
     await db_session.commit()
     await db_session.refresh(user)
     return user
+
+
+@asynccontextmanager
+async def _real_committed_user_and_profile(
+    db_engine: AsyncEngine, email: str, **profile_kwargs: object
+) -> AsyncIterator[tuple[AsyncSession, uuid.UUID, uuid.UUID]]:
+    """Creates a `User` and `CandidateProfile` via real, separately-committed
+    transactions on `db_engine` (not the savepoint-isolated `db_session`),
+    for tests that need genuinely durable commits (e.g. to exercise
+    `ON DELETE CASCADE` or observe `updated_at` actually advance). Guarantees
+    cleanup even if the test body raises or leaves the session in a
+    failed-transaction state — a prior version of these tests committed rows
+    with no cleanup path at all, which left permanent rows in the shared
+    disposable test database on any assertion failure.
+
+    Captures both ids immediately after each row's own commit and yields
+    plain UUIDs, not ORM attribute access after a later commit: `commit()`
+    expires every attribute of every object in the session by default, and
+    reading an expired attribute outside of an active await under asyncpg's
+    async dialect raises `MissingGreenlet` instead of transparently
+    refreshing it.
+
+    Cleanup always runs in a fresh session (the caller's session may be
+    closed, or mid-failed-transaction, by the time cleanup runs) and fetches
+    each row before deleting it, so a row already removed by the test body
+    itself (e.g. the profile, after its owning user was deleted and the
+    delete cascaded) is skipped rather than erroring.
+    """
+    session = AsyncSession(bind=db_engine)
+    user_id: uuid.UUID | None = None
+    profile_id: uuid.UUID | None = None
+    try:
+        user = User(email=email)
+        session.add(user)
+        await session.commit()
+        await session.refresh(user)
+        user_id = user.id
+
+        profile = CandidateProfile(user_id=user_id, **profile_kwargs)
+        session.add(profile)
+        await session.commit()
+        await session.refresh(profile)
+        profile_id = profile.id
+
+        yield session, user_id, profile_id
+    finally:
+        with suppress(Exception):
+            await session.rollback()
+        await session.close()
+
+        async with AsyncSession(bind=db_engine) as cleanup_session:
+            if profile_id is not None:
+                existing_profile = await cleanup_session.get(CandidateProfile, profile_id)
+                if existing_profile is not None:
+                    await cleanup_session.delete(existing_profile)
+                    await cleanup_session.commit()
+            if user_id is not None:
+                existing_user = await cleanup_session.get(User, user_id)
+                if existing_user is not None:
+                    await cleanup_session.delete(existing_user)
+                    await cleanup_session.commit()
 
 
 async def test_table_starts_empty(db_session: AsyncSession) -> None:
@@ -95,18 +165,11 @@ async def test_deleting_user_cascades_to_candidate_profile(db_engine: AsyncEngin
     """Uses `db_engine` directly (real, separate transactions) so the
     `ON DELETE CASCADE` is actually exercised by PostgreSQL, not merely
     implied by ORM-side cascade configuration."""
-    async with AsyncSession(bind=db_engine) as session:
-        user = User(email="cascade-owner@example.com")
-        session.add(user)
-        await session.commit()
-        await session.refresh(user)
-
-        profile = CandidateProfile(user_id=user.id, remote_preference="remote")
-        session.add(profile)
-        await session.commit()
-        await session.refresh(profile)
-        profile_id = profile.id  # captured before deleting `user` expires it again
-
+    async with _real_committed_user_and_profile(
+        db_engine, "cascade-owner@example.com", remote_preference="remote"
+    ) as (session, user_id, profile_id):
+        user = await session.get(User, user_id)
+        assert user is not None
         await session.delete(user)
         await session.commit()
 
@@ -200,6 +263,36 @@ async def test_empty_array_is_distinct_from_null(
     assert explicit_profile.target_role_families == []
 
 
+@pytest.mark.parametrize("field", ARRAY_FIELDS)
+async def test_appending_to_array_field_persists_after_reload(
+    db_engine: AsyncEngine, field: str
+) -> None:
+    """A plain `ARRAY(Text)` column looks unchanged to SQLAlchemy's
+    unit-of-work after an in-place `.append()` — the model wraps these
+    columns with `MutableList.as_mutable` (see
+    `app/db/models/candidate_profile.py`) specifically so this mutation is
+    tracked and actually written on commit, instead of being silently
+    dropped. Reloads from a genuinely separate session (not just
+    `.refresh()` on the same object) so this proves the value was written to
+    PostgreSQL, not merely echoed back from the original session's identity
+    map."""
+    async with _real_committed_user_and_profile(
+        db_engine,
+        f"array-mutate-{field}@example.com",
+        remote_preference="no_preference",
+        **{field: ["first"]},
+    ) as (session, _user_id, profile_id):
+        profile = await session.get(CandidateProfile, profile_id)
+        assert profile is not None
+        getattr(profile, field).append("second")
+        await session.commit()
+
+        async with AsyncSession(bind=db_engine) as verify_session:
+            reloaded = await verify_session.get(CandidateProfile, profile_id)
+            assert reloaded is not None
+            assert getattr(reloaded, field) == ["first", "second"]
+
+
 async def test_relocation_willingness_null_means_unknown(
     db_session: AsyncSession,
     make_user: Callable[..., User],
@@ -216,19 +309,28 @@ async def test_relocation_willingness_null_means_unknown(
 
 
 @pytest.mark.parametrize(
-    "field", ["years_experience", "salary_expectation_min", "salary_expectation_max"]
+    "field,value",
+    [
+        (field, value)
+        for field in ("years_experience", "salary_expectation_min", "salary_expectation_max")
+        for value in (0, 5)
+    ],
 )
 async def test_non_negative_check_accepts_zero_and_positive(
     db_session: AsyncSession,
     make_user: Callable[..., User],
     make_candidate_profile: Callable[..., CandidateProfile],
     field: str,
+    value: int,
 ) -> None:
-    user = await _insert_user(db_session, make_user, f"non-negative-ok-{field}@example.com")
+    user = await _insert_user(db_session, make_user, f"non-negative-ok-{field}-{value}@example.com")
     profile = make_candidate_profile(user.id)
-    setattr(profile, field, 0)
+    setattr(profile, field, value)
     db_session.add(profile)
-    await db_session.commit()  # must not raise
+    await db_session.commit()
+    await db_session.refresh(profile)
+
+    assert getattr(profile, field) == value
 
 
 @pytest.mark.parametrize(
@@ -312,36 +414,38 @@ async def test_salary_min_without_max_is_not_constrained_by_ordering_check(
     await db_session.commit()  # must not raise
 
 
+async def test_salary_max_without_min_is_not_constrained_by_ordering_check(
+    db_session: AsyncSession,
+    make_user: Callable[..., User],
+    make_candidate_profile: Callable[..., CandidateProfile],
+) -> None:
+    user = await _insert_user(db_session, make_user, "salary-max-only@example.com")
+    profile = make_candidate_profile(user.id)
+    profile.salary_expectation_max = 150_000
+    db_session.add(profile)
+    await db_session.commit()  # must not raise
+
+
 async def test_updating_a_profile_advances_updated_at(db_engine: AsyncEngine) -> None:
     """Same rationale as `test_users.py`'s equivalent test: PostgreSQL's
     `now()` is fixed for the lifetime of one transaction (including nested
     savepoints), so this uses `db_engine` directly for two genuinely
     separate, really-committed transactions."""
-    async with AsyncSession(bind=db_engine) as session:
-        user = User(email="updated-at@example.com")
-        session.add(user)
-        await session.commit()
-        await session.refresh(user)
-
-        profile = CandidateProfile(user_id=user.id, remote_preference="onsite")
-        session.add(profile)
-        await session.commit()
-        await session.refresh(profile)
+    async with _real_committed_user_and_profile(
+        db_engine, "updated-at@example.com", remote_preference="onsite"
+    ) as (session, _user_id, profile_id):
+        profile = await session.get(CandidateProfile, profile_id)
+        assert profile is not None
         created_at = profile.created_at
         first_updated_at = profile.updated_at
 
-        try:
-            profile.remote_preference = "remote"
-            await session.commit()
-            await session.refresh(profile)
-            second_updated_at = profile.updated_at
+        profile.remote_preference = "remote"
+        await session.commit()
+        await session.refresh(profile)
+        second_updated_at = profile.updated_at
 
-            assert second_updated_at > first_updated_at
-            assert second_updated_at >= created_at
-        finally:
-            await session.delete(profile)
-            await session.delete(user)
-            await session.commit()
+        assert second_updated_at > first_updated_at
+        assert second_updated_at >= created_at
 
     async with AsyncSession(bind=db_engine) as verify_session:
         count = (
