@@ -79,6 +79,28 @@ table's own convention: only `category` is documented as nullable) and restricte
 `CHECK` to `must_have` / `preferred`. `category` remains nullable free text with no enum
 `CHECK` — the documented examples are illustrative, not a closed set.
 
+**Rev 9 changes** (fourth Phase 1 implementation slice, `saved_searches` — parent table
+only; `saved_search_titles`/`saved_search_locations` remain future slices): this table's
+column list below did not previously state several product rules, resolved by explicit
+approval before migration `0006` was written:
+- Every `text[]` column is nullable with no server default (NULL = never specified),
+  same convention as `candidate_profiles`.
+- `name` is normalized the same way `skill` is (trim-only, case preserved, matching
+  `CHECK`s) — but has no uniqueness requirement, unlike `skill`.
+- `salary_floor`, `preferred_salary`, and `recency_limit_hours` each have a `CHECK`
+  requiring the value be NULL or `>= 0`, plus a `CHECK` requiring
+  `salary_floor <= preferred_salary` whenever both are non-null.
+- `radius_miles` is **deliberately unconstrained**: plain `numeric`, no precision/scale,
+  no non-negative `CHECK` — an explicit product decision, not an oversight (contrast with
+  the integer numeric fields above, which do get non-negative `CHECK`s).
+- `enabled_sources` and `scoring_weights` (the first `jsonb` columns in this schema) are
+  each restricted by a `CHECK` requiring the stored value be a top-level JSON *object*
+  when non-null; deeper shape is a Phase 2 `QueryPlanner`-time concern
+  ([ARCHITECTURE.md §6.5–6.6](ARCHITECTURE.md#65-savedsearchenabled_sources--unambiguous-source-selection)),
+  not a Phase 1 database constraint.
+- `created_at`/`updated_at` are added, per the same previously-omitted-despite-the-global-
+  convention gap already fixed for `users` (Rev 5) and `candidate_skills` (Rev 8).
+
 Conventions used throughout:
 
 - **Minimum supported PostgreSQL version: 16.** See
@@ -224,32 +246,52 @@ backstop, not the validator:
   CHECK rejects it before the index is ever consulted.
 
 ### `saved_searches`
-"What am I looking for right now" (§24).
+**Implemented** (`backend/app/db/models/saved_search.py`; migration `0006`,
+`down_revision = "0005"` — parent table only, see Rev 9 note above). "What am I looking
+for right now" (§24).
 
 | column | type | notes |
 |---|---|---|
-| id | UUID PK | |
-| user_id | UUID FK → users, `ON DELETE CASCADE` | |
-| name | text | |
-| excluded_titles | text[] | |
-| radius_miles | numeric | nullable |
-| remote_rules | text | enum: remote_only / hybrid_ok / onsite_ok / any |
-| salary_floor | int | nullable, hard filter |
-| preferred_salary | int | nullable, soft/scoring signal |
-| industries | text[] | |
-| employment_types | text[] | |
-| seniority | text[] | |
-| must_have_skills | text[] | |
-| preferred_skills | text[] | |
-| excluded_keywords | text[] | |
-| preferred_companies | text[] | |
-| excluded_companies | text[] | |
-| recency_limit_hours | int | nullable |
-| enabled_providers | text[] | provider names from ProviderRegistry — which providers run at all |
-| enabled_sources | jsonb | **new in Rev 4** — nullable, supplements (does not replace) `enabled_providers`. Shape: `{"jobspy": ["linkedin", "indeed", "glassdoor"], "ats_scrapers": ["greenhouse", "lever", "workday"]}`. A provider key absent here (but present in `enabled_providers`) means "no source-level preference — use every source that provider currently supports"; a provider key present with an empty list means "run this provider with zero sources this cycle." Validated against `ProviderRegistry`/`ProviderCapabilities` at query-planning time (see [ARCHITECTURE.md §6.5–6.6](ARCHITECTURE.md#65-savedsearchenabled_sources--unambiguous-source-selection)) — unknown source names fail validation before any provider call, not silently ignored |
-| polling_schedule | text | enum: manual / hourly / daily / weekly |
-| scoring_weights | jsonb | overrides matching/weights.py defaults |
-| is_active | boolean | default true |
+| id | UUID PK | generated application-side (`uuid.uuid4`), not a DB-side default |
+| user_id | UUID FK → users, `ON DELETE CASCADE`, not null | non-unique `INDEX` for lookup |
+| name | text, not null | normalized before storage — see below |
+| excluded_titles | text[], nullable | NULL = never specified |
+| radius_miles | numeric, nullable | deliberately unconstrained — no precision/scale, no `CHECK` |
+| remote_rules | text, not null | enum: remote_only / hybrid_ok / onsite_ok / any |
+| salary_floor | int, nullable | hard filter; `CHECK (salary_floor IS NULL OR salary_floor >= 0)` |
+| preferred_salary | int, nullable | soft/scoring signal; `CHECK (preferred_salary IS NULL OR preferred_salary >= 0)`, plus `CHECK (salary_floor IS NULL OR preferred_salary IS NULL OR salary_floor <= preferred_salary)` |
+| industries | text[], nullable | NULL = never specified |
+| employment_types | text[], nullable | NULL = never specified |
+| seniority | text[], nullable | NULL = never specified |
+| must_have_skills | text[], nullable | NULL = never specified |
+| preferred_skills | text[], nullable | NULL = never specified |
+| excluded_keywords | text[], nullable | NULL = never specified |
+| preferred_companies | text[], nullable | NULL = never specified |
+| excluded_companies | text[], nullable | NULL = never specified |
+| recency_limit_hours | int, nullable | `CHECK (recency_limit_hours IS NULL OR recency_limit_hours >= 0)` |
+| enabled_providers | text[], nullable | provider names from ProviderRegistry — which providers run at all; NULL = never specified |
+| enabled_sources | jsonb, nullable | **new in Rev 4** — supplements (does not replace) `enabled_providers`. Shape: `{"jobspy": ["linkedin", "indeed", "glassdoor"], "ats_scrapers": ["greenhouse", "lever", "workday"]}`. A provider key absent here (but present in `enabled_providers`) means "no source-level preference — use every source that provider currently supports"; a provider key present with an empty list means "run this provider with zero sources this cycle." Validated against `ProviderRegistry`/`ProviderCapabilities` at query-planning time (see [ARCHITECTURE.md §6.5–6.6](ARCHITECTURE.md#65-savedsearchenabled_sources--unambiguous-source-selection)) — unknown source names fail validation before any provider call, not silently ignored. `CHECK (enabled_sources IS NULL OR jsonb_typeof(enabled_sources) = 'object')` — Phase 1 enforces only the top-level JSON shape, not key/value validity |
+| polling_schedule | text, not null | enum: manual / hourly / daily / weekly |
+| scoring_weights | jsonb, nullable | overrides matching/weights.py defaults; same top-level-object `CHECK` as `enabled_sources` |
+| is_active | boolean, not null | `server_default true` |
+| created_at | timestamptz, not null | `server_default now()` |
+| updated_at | timestamptz, not null | `server_default now()`, reset to `now()` by the ORM (`onupdate`) on every update |
+
+**Name normalization:** trimmed of exactly the same four-character whitespace set as
+`candidate_skills.skill` (space, tab, line feed, carriage return) — case preserved, no
+uniqueness requirement (unlike `skill`, there is no `UNIQUE`/functional index on `name`;
+a user may have multiple saved searches sharing a name).
+
+**Mutable-collection tracking:** every `text[]` column is wrapped with
+`MutableList.as_mutable`, and both `jsonb` columns are wrapped with
+`MutableDict.as_mutable`, so an in-place `.append()`/`.remove()`/`dict[key] = value` on a
+loaded value is tracked and actually written on commit — the array-mutation gap caught on
+`candidate_profiles` (Rev 7/8 correction), applied proactively here from the start.
+`MutableDict` (like `MutableList`) only instruments the wrapped column's own top-level
+`__setitem__`/`__delitem__` — mutating a value already nested *inside* one of these jsonb
+columns (e.g. a dict nested inside `scoring_weights`) is invisible to the unit-of-work and
+is still silently dropped on commit; see the model's own docstring and
+`test_mutating_a_nested_jsonb_value_is_not_tracked`.
 
 ### `saved_search_titles`
 Split out (rather than an array column on `saved_searches`) because titles need
@@ -785,6 +827,7 @@ reviewed against this list directly:
 | `users` | `CHECK (email = lower(trim(both E'\t\n\r ' from email)))`, `CHECK (trim(both E'\t\n\r ' from email) <> '')`, `UNIQUE` index on `lower(email)` | normalized-email invariant (current, as of migration `0003`) enforced at the database, not just the ORM validator — see the table's own section above (Rev 5/6) |
 | `candidate_profiles` | `UNIQUE (user_id)`; `CHECK` on `remote_preference` enum; non-negative `CHECK`s on `years_experience`/`salary_expectation_min`/`salary_expectation_max`; `CHECK (salary_expectation_min <= salary_expectation_max)` | enforce 1:1 with `users` while that holds; reject an invalid `remote_preference`, a negative experience/salary value, or an inverted salary range at the database — see the table's own section above (Rev 7) |
 | `candidate_skills` | `UNIQUE (candidate_profile_id, lower(skill))`; `CHECK (skill = trim(both E'\t\n\r ' from skill))`; `CHECK (trim(both E'\t\n\r ' from skill) <> '')`; `CHECK` on `priority` enum | one entry per skill per profile, case-insensitive; reject a non-normalized, empty, or invalid-priority skill at the database — see the table's own section above (Rev 8) |
+| `saved_searches` | `INDEX (user_id)`; `CHECK (name = trim(both E'\t\n\r ' from name))`; `CHECK (trim(both E'\t\n\r ' from name) <> '')`; `CHECK` on `remote_rules`/`polling_schedule` enums; non-negative `CHECK`s on `salary_floor`/`preferred_salary`/`recency_limit_hours`; `CHECK (salary_floor <= preferred_salary)`; `CHECK` requiring `enabled_sources`/`scoring_weights` be a top-level JSON object when non-null | reject a non-normalized/empty `name`, an invalid enum, a negative bound, an inverted salary range, or a non-object jsonb value at the database; `radius_miles` is deliberately unconstrained — see the table's own section above (Rev 9) |
 | `saved_search_titles` | `UNIQUE (saved_search_id, lower(title))` | one entry per title per search, case-insensitive |
 | `saved_search_locations` | `UNIQUE (saved_search_id, lower(trim(location_text)))` | one entry per location text per search |
 | `companies` | `UNIQUE (lower(domain)) WHERE domain IS NOT NULL` | strongest available company identity signal, case-normalized (Rev 3, item 8b); **no** uniqueness on `normalized_name` (see conservative collision behavior above) |

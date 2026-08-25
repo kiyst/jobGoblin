@@ -9,7 +9,7 @@ from sqlalchemy.engine import URL, make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
 from app.config import Settings, get_settings
-from app.db.models import CandidateProfile, CandidateSkill, User
+from app.db.models import CandidateProfile, CandidateSkill, SavedSearch, User
 from app.db.session import check_database_connection
 from app.main import app
 
@@ -219,6 +219,29 @@ def make_candidate_skill() -> Callable[..., CandidateSkill]:
     return _make
 
 
+@pytest.fixture
+def make_saved_search() -> Callable[..., SavedSearch]:
+    """Factory for a valid `SavedSearch` — tests only deviate from this
+    intentionally. Takes the owning `user_id` explicitly, matching
+    `make_candidate_profile`'s pattern."""
+
+    def _make(
+        user_id: uuid.UUID,
+        *,
+        name: str = "Backend roles",
+        remote_rules: str = "any",
+        polling_schedule: str = "manual",
+    ) -> SavedSearch:
+        return SavedSearch(
+            user_id=user_id,
+            name=name,
+            remote_rules=remote_rules,
+            polling_schedule=polling_schedule,
+        )
+
+    return _make
+
+
 @asynccontextmanager
 async def real_committed_user_and_profile(
     db_engine: AsyncEngine, email: str, **profile_kwargs: object
@@ -325,3 +348,52 @@ async def real_committed_user_profile_and_skill(
                     if existing_skill is not None:
                         await cleanup_session.delete(existing_skill)
                         await cleanup_session.commit()
+
+
+@asynccontextmanager
+async def real_committed_user_and_saved_search(
+    db_engine: AsyncEngine, email: str, **saved_search_kwargs: object
+) -> AsyncIterator[tuple[AsyncSession, uuid.UUID, uuid.UUID]]:
+    """Creates a `User` and `SavedSearch` via real, separately-committed
+    transactions on `db_engine`, for tests that need genuinely durable
+    commits (e.g. to exercise `ON DELETE CASCADE` or observe `updated_at`
+    actually advance). Same failure-safe lifecycle/cleanup rationale as
+    `real_committed_user_and_profile` above.
+    """
+    saved_search_kwargs.setdefault("name", "Backend roles")
+    saved_search_kwargs.setdefault("remote_rules", "any")
+    saved_search_kwargs.setdefault("polling_schedule", "manual")
+
+    session = AsyncSession(bind=db_engine)
+    user_id: uuid.UUID | None = None
+    saved_search_id: uuid.UUID | None = None
+    try:
+        user = User(email=email)
+        session.add(user)
+        await session.commit()
+        await session.refresh(user)
+        user_id = user.id
+
+        saved_search = SavedSearch(user_id=user_id, **saved_search_kwargs)
+        session.add(saved_search)
+        await session.commit()
+        await session.refresh(saved_search)
+        saved_search_id = saved_search.id
+
+        yield session, user_id, saved_search_id
+    finally:
+        with suppress(Exception):
+            await session.rollback()
+        await session.close()
+
+        async with AsyncSession(bind=db_engine) as cleanup_session:
+            if saved_search_id is not None:
+                existing_saved_search = await cleanup_session.get(SavedSearch, saved_search_id)
+                if existing_saved_search is not None:
+                    await cleanup_session.delete(existing_saved_search)
+                    await cleanup_session.commit()
+            if user_id is not None:
+                existing_user = await cleanup_session.get(User, user_id)
+                if existing_user is not None:
+                    await cleanup_session.delete(existing_user)
+                    await cleanup_session.commit()
