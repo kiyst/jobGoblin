@@ -483,4 +483,43 @@ renumbered, with "Ending commit" backfilled to the actual hash Codex reviewed.*
 
 ### Work review
 
-Status: awaiting review.
+- Date and reviewing agent: 2026-08-24, Codex.
+- Diff/revision reviewed: commit `223ccb4` (`fix(phase-1): restore non-negative radius
+  check and add missing saved search tests`) against review commit `ff039b4` on branch
+  `phase-1/saved-searches`. The branch matched `origin/phase-1/saved-searches`, and the
+  working tree was clean before review.
+- Verification independently performed:
+  - Inspected the complete `ff039b4..223ccb4` diff and resulting model constraint,
+    corrected migration `0006`, all new/replaced tests, data-model/roadmap corrections,
+    source references, and handoff rotation.
+  - Confirmed model metadata and migration now both enforce
+    `radius_miles IS NULL OR radius_miles >= 0` while retaining plain `Numeric` without
+    declared precision or scale.
+  - Confirmed the complete-row, duplicate-name, JSON SQL-NULL-versus-`{}`, JSON `null`
+    rejection, realistic provider-list replacement, radius boundary, and fractional
+    round-trip cases are present and exercise real PostgreSQL behavior where required.
+  - `ruff format --check .`: 27 files already formatted.
+  - `ruff check .`: passed.
+  - `mypy app tests`: passed for 20 source files.
+  - `pytest -v`: 141 passed, 0 skipped.
+  - Independently rebuilt `jobgoblin_test` via `base -> 0001 -> ... -> 0006`: passed.
+  - Independently ran `0006 -> 0005 -> 0006`: passed.
+  - `alembic check` at corrected test-database head: no new upgrade operations
+    detected.
+  - Live-schema inspection confirmed `saved_searches.radius_miles` reports no numeric
+    precision or scale and that `ck_saved_searches_radius_miles_non_negative` exists.
+  - Live database verification after all checks: `jobgoblin_test` remained at `0006`
+    with zero users/saved searches; development remained untouched at `0005` with zero
+    users.
+- Findings, ordered by severity, with file and line references: none.
+- Missing or inconclusive verification: none material for this bounded correction pass.
+- Architecture/documentation consistency: the corrected radius invariant, unrestricted
+  numeric precision/scale, JSONB semantics and mutation contract, name rules, enums,
+  salary/recency invariants, FK/index/default/timestamp behavior, migration chain,
+  tests, `DATA_MODEL.md`, and `ROADMAP.md` are mutually consistent and match the
+  approved decisions.
+- Verdict: approved.
+- Exact requested corrections: none. The `saved_searches` parent-table slice is
+  accepted. Do not begin `saved_search_titles`, `saved_search_locations`, modify or
+  merge `main`, or advance to another slice until the user explicitly approves it.
+- STOP — reviewer changed only this `Work review`; no implementation files were changed.
