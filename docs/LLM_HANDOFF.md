@@ -402,4 +402,48 @@ rewritten — only renumbered.*
 
 ### Work review
 
-Status: awaiting review.
+- Date and reviewing agent: 2026-08-24, Codex.
+- Diff/revision reviewed: commit `9d35f75` (`feat(phase-1): implement candidate skills
+  slice`) against approved base `7817073` on branch `phase-1/candidate-skills`. The
+  branch matched `origin/phase-1/candidate-skills`, and the working tree was clean
+  before review.
+- Verification independently performed:
+  - Inspected the complete `7817073..9d35f75` diff and resulting model, migration,
+    model registration, shared real-commit helpers, candidate-profile refactor, all 20
+    candidate-skill tests, data-model/roadmap changes, and handoff rotation.
+  - Confirmed the ORM validator and both database `CHECK`s use the identical explicit
+    space/tab/LF/CR set, preserve case, reject non-normalized or empty values, and leave
+    internal whitespace unchanged.
+  - Confirmed profile-scoped case-insensitive uniqueness is represented consistently in
+    model metadata and migration `0005` as a functional unique index on
+    `(candidate_profile_id, lower(skill))`.
+  - Confirmed `category` is nullable unconstrained text; `priority` is non-null and
+    `CHECK`-restricted to `must_have`/`preferred`; timestamps follow the established
+    server-default/ORM-on-update convention.
+  - Confirmed the extracted `real_committed_user_and_profile` helper retains its prior
+    failure-safe lifecycle, and the skill wrapper cleans any surviving skill before the
+    wrapped profile/user cleanup. Existing candidate-profile call sites use the shared
+    helper without behavioral changes.
+  - `ruff format --check .`: 24 files already formatted.
+  - `ruff check .`: passed.
+  - `mypy app tests`: passed for 18 source files.
+  - `pytest -v`: 81 passed, 0 skipped.
+  - Independently ran `0005 -> 0004 -> 0005` against `jobgoblin_test`: passed.
+  - Independently ran `base -> 0001 -> 0002 -> 0003 -> 0004 -> 0005` against
+    `jobgoblin_test`: passed.
+  - `alembic check` after both incremental and fresh migration verification: no new
+    upgrade operations detected.
+  - Live PostgreSQL verification after migration testing: `jobgoblin_test` remained at
+    `0005` with zero users, profiles, and skills; the development database remained at
+    `0003` with zero users.
+- Findings, ordered by severity, with file and line references: none.
+- Missing or inconclusive verification: none material for this bounded slice.
+- Architecture/documentation consistency: the implemented column types, nullability,
+  FK cascade, normalization rules, functional uniqueness, priority invariant,
+  timestamps, migration chain, metadata, tests, `DATA_MODEL.md`, and `ROADMAP.md` are
+  mutually consistent and match the seven explicitly approved decisions.
+- Verdict: approved.
+- Exact requested corrections: none. The `candidate_skills` slice is accepted. Do not
+  begin `saved_searches`, modify or merge `main`, or advance to any other slice until
+  the user explicitly approves the next action.
+- STOP — reviewer changed only this `Work review`; no implementation files were changed.
