@@ -294,16 +294,45 @@ async def test_nonexistent_saved_search_id_rejected(
     assert count == 0
 
 
-async def test_is_primary_defaults_to_false(
+async def test_is_primary_defaults_to_false_at_the_database_level(
+    db_session: AsyncSession,
+    make_user: Callable[..., User],
+    make_saved_search: Callable[..., SavedSearch],
+) -> None:
+    """`make_saved_search_title`'s factory always passes an explicit
+    `is_primary` value (even its own `False` default), so it can never prove
+    the *database's* `server_default false` actually supplies the value —
+    the test would pass even if migration `0007` omitted that default
+    entirely. A raw SQL insert that genuinely omits the column is the only
+    way to prove PostgreSQL itself supplies `false`, not the ORM/factory."""
+    saved_search_id = await _insert_saved_search(
+        db_session, make_user, make_saved_search, "is-primary-default@example.com"
+    )
+    result = await db_session.execute(
+        text(
+            "INSERT INTO saved_search_titles (id, saved_search_id, title) "
+            "VALUES (gen_random_uuid(), :saved_search_id, 'Backend Engineer') "
+            "RETURNING is_primary"
+        ).bindparams(saved_search_id=saved_search_id)
+    )
+    await db_session.commit()
+
+    assert result.scalar_one() is False
+
+
+async def test_is_primary_explicit_false_accepted(
     db_session: AsyncSession,
     make_user: Callable[..., User],
     make_saved_search: Callable[..., SavedSearch],
     make_saved_search_title: Callable[..., SavedSearchTitle],
 ) -> None:
+    """Distinct from the database-default test above: proves the ORM path
+    can also explicitly set `is_primary=False`, not just rely on the
+    default."""
     saved_search_id = await _insert_saved_search(
-        db_session, make_user, make_saved_search, "is-primary-default@example.com"
+        db_session, make_user, make_saved_search, "is-primary-explicit-false@example.com"
     )
-    title = make_saved_search_title(saved_search_id)
+    title = make_saved_search_title(saved_search_id, is_primary=False)
     db_session.add(title)
     await db_session.commit()
     await db_session.refresh(title)

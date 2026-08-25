@@ -83,173 +83,11 @@ and record the actual commit it reviewed.
 ## Iteration 1
 
 *Rotated in from "Iteration 2" per the two-iteration rule: its `Work review` (below) is
-no longer pending — Codex's verdict was "approved," with no requested corrections — so
-the previous Iteration 1 (the first `saved_searches` implementation pass and Codex's
-"changes requested" review of it, already superseded by this iteration's fixes) was
-removed rather than kept alongside two already-reviewed entries. Nothing below was
-rewritten — only renumbered, with "Ending commit" backfilled to the actual hash Codex
-reviewed.*
-
-### Work done
-
-- Date and agent: 2026-08-24, Claude Code (Sonnet 4.5).
-- Approved phase/slice: bounded correction pass over the `saved_searches` slice only —
-  all three findings and the exact correction pass requested in the previous
-  iteration's `Work review` approved as one pass. No `saved_search_titles`, no
-  `saved_search_locations`, no new table.
-- Outcome: all three findings addressed and verified against real PostgreSQL. 141
-  tests passed, 0 skipped (up from 132 — 9 net new tests).
-- Base/starting commit: `a267a2f` (`feat(phase-1): implement saved searches slice`) on
-  branch `phase-1/saved-searches`, with Codex's review commit `ff039b4`
-  (`docs(review): request saved search corrections`) on top. Confirmed via
-  `git log --oneline` and `git status` (clean, up to date with origin) before making
-  any changes.
-- Ending commit or working-tree state: `223ccb4` (`fix(phase-1): restore non-negative
-  radius check and add missing saved search tests` — this is the commit Codex's `Work
-  review` below actually reviewed and approved).
-- Migration `0006` was corrected **in place**, not via a new forward migration:
-  unlike the `0002`/`0003` situation, `0006` had not yet been applied to the
-  **development** database (which was deliberately stopped at `0005` per a prior,
-  separately authorized instruction) — only to the disposable `jobgoblin_test`
-  database, which is safe to rebuild. There is no already-applied-elsewhere version to
-  preserve or drift from, so no `0007` corrective migration was needed.
-- Files changed:
-  - `backend/app/db/models/saved_search.py` — added
-    `CheckConstraint("radius_miles IS NULL OR radius_miles >= 0", name=
-    "radius_miles_non_negative")` to `__table_args__`; corrected the column's comment
-    (previously claimed "no non-negative CHECK ... explicit product decision"); fixed
-    `SS6.5-6.6` → `§6.5–6.6` in the class docstring. Addresses findings 1 and 3.
-  - `backend/migrations/versions/0006_saved_searches.py` — added the matching
-    `sa.CheckConstraint` (`op.f("ck_saved_searches_radius_miles_non_negative")`);
-    corrected the docstring's claim about `radius_miles` being unconstrained; fixed
-    the same `SS6.5-6.6` typo; added a docstring paragraph explaining the in-place
-    correction (see above). Addresses findings 1 and 3.
-  - `backend/tests/test_saved_searches.py`:
-    - Replaced `test_radius_miles_is_unconstrained_and_accepts_a_negative_value` with
-      `test_radius_miles_non_negative_check_accepts_zero_and_positive` (parameterized
-      over `Decimal(0)`/`Decimal(5)`), `test_radius_miles_non_negative_check_rejects_
-      negative_value`, and `test_radius_miles_preserves_fractional_precision`
-      (`Decimal("12.75")` round-trip, proving precision/scale is still unconstrained
-      even though the value must now be non-negative). Addresses finding 1.
-    - Added `test_insert_and_retrieve_a_fully_populated_saved_search` (every column
-      populated at once) and `test_duplicate_name_across_saved_searches_is_accepted`
-      (two saved searches sharing a `name` for the same user). Addresses finding 2.
-    - Added `test_explicit_empty_jsonb_object_is_distinct_from_null`, parameterized
-      over both `jsonb` fields — explicit SQL-`NULL`-versus-`{}` round-trip, mirroring
-      the existing array NULL-vs-empty test. Addresses finding 2.
-    - Added `test_enabled_sources_rejects_a_json_null_literal` — a direct-SQL
-      `'null'::jsonb` insert, distinct from a genuine SQL `NULL`, rejected by the same
-      object-only `CHECK`. Addresses finding 2.
-    - Added `test_enabled_sources_provider_list_replacement_persists_after_reload` —
-      exercises the actual documented `enabled_sources` shape
-      (`{"jobspy": ["linkedin"]}`) and the supported top-level-replacement workaround
-      for `MutableDict`'s nested-mutation limitation
-      (`enabled_sources["jobspy"] = [...]`, not an in-place list mutation), verified
-      through a separate-session reload. The existing generic
-      `test_setting_a_top_level_jsonb_key_persists_after_reload` (parameterized over
-      both `jsonb` fields with an arbitrary `{"first": 1}` shape) was left as-is — it
-      tests generic `MutableDict` key-tracking mechanics, which is a distinct, still
-      valid purpose from the new realistic-shape test. Addresses finding 2.
-  - `docs/DATA_MODEL.md` — the Rev 9 note, the `saved_searches` table's own
-    `radius_miles` row, and the consolidated "Phase 1 constraints & indexes" row now
-    state the non-negative `CHECK` instead of "deliberately unconstrained." Addresses
-    finding 1.
-  - `docs/ROADMAP.md` — same correction in the Phase 1 status line. Addresses
-    finding 1.
-  - `docs/LLM_HANDOFF.md` — this rotation (old Iteration 1 — the `candidate_skills`
-    implementation pass — removed; prior Iteration 2 renumbered to Iteration 1; this
-    entry appended as the new Iteration 2).
-- Migration revisions: `0006` corrected in place (see above, not a new revision
-  number) — now includes `ck_saved_searches_radius_miles_non_negative`. `0001`–`0005`
-  unchanged.
-- Commands run and exact results:
-  - `ruff format .` → 1 file reformatted (`test_saved_searches.py`) → recheck: 27
-    files formatted.
-  - `ruff check .` → all checks passed.
-  - `mypy app tests` → success, 20 source files.
-  - `DATABASE_URL=...jobgoblin_test alembic downgrade base` / `upgrade head` →
-    success — full rebuild from scratch since `0006` changed in place and the
-    previously-applied version was stale; `alembic current` → `0006 (head)`.
-  - `DATABASE_URL=...jobgoblin_test alembic downgrade 0005` / `upgrade head` →
-    success (round-trip scenario, on the corrected migration).
-  - `DATABASE_URL=...jobgoblin_test alembic check` → `No new upgrade operations
-    detected.`
-  - `DATABASE_URL=...jobgoblin_test alembic downgrade base` / `upgrade head` →
-    success, ` -> 0001 -> ... -> 0005 -> 0006` (fresh `base -> head`, explicitly
-    rerun per the review's request since it wasn't independently repeated last time).
-  - `alembic current` against the **development** database (default `DATABASE_URL`,
-    no override) → `0005`, unchanged throughout — confirmed untouched.
-  - `pytest -v` → **141 passed, 0 skipped** (up from 132 — 9 net new tests: 2 replaced
-    with 3 for `radius_miles`, plus 2 parameterized NULL-vs-`{}` cases, 1 JSON-`null`
-    rejection, 1 provider-list-replacement, 1 complete-row, 1 duplicate-name).
-  - `pytest -q` (final re-run after the full migration verification sequence) →
-    **141 passed**.
-- Risks exercised from `PHASE_RISK_CHECKLIST.md`: "every migration is reviewed and
-  tested upgrade -> downgrade -> upgrade" — re-verified as three scenarios (round-trip,
-  fresh `base -> head`, `alembic check`) specifically because the migration's own DDL
-  changed in this pass; "PostgreSQL behavior is tested against PostgreSQL" — the
-  corrected non-negative invariant, the SQL-`NULL`-vs-JSON-`{}`/`null` distinctions,
-  and the realistic `enabled_sources` replacement workflow are all proven against real
-  Postgres, not asserted from code alone.
-- Skipped or unavailable verification: none. Every command above executed for real,
-  including the development-database confirmation.
-- Deviations and ADR impact: none — every correction matched the review's exact
-  requests on the first attempt; no unexpected failures this pass. No ADR impact —
-  Phase 1 implementation-slice detail only.
-- Known limitations: none new, beyond what Iteration 1 already documented (the
-  `MutableDict` top-level-only tracking limitation and `updated_at` advancing only for
-  ORM-driven writes).
-- Recommended next smallest slice: none proposed by the implementing agent — per the
-  workflow, this pass stops for Codex's review before any further slice is considered.
-- STOP — awaiting Codex review and user approval. Do not begin either saved-search
-  child table.
-
-### Work review
-
-- Date and reviewing agent: 2026-08-24, Codex.
-- Diff/revision reviewed: commit `223ccb4` (`fix(phase-1): restore non-negative radius
-  check and add missing saved search tests`) against review commit `ff039b4` on branch
-  `phase-1/saved-searches`. The branch matched `origin/phase-1/saved-searches`, and the
-  working tree was clean before review.
-- Verification independently performed:
-  - Inspected the complete `ff039b4..223ccb4` diff and resulting model constraint,
-    corrected migration `0006`, all new/replaced tests, data-model/roadmap corrections,
-    source references, and handoff rotation.
-  - Confirmed model metadata and migration now both enforce
-    `radius_miles IS NULL OR radius_miles >= 0` while retaining plain `Numeric` without
-    declared precision or scale.
-  - Confirmed the complete-row, duplicate-name, JSON SQL-NULL-versus-`{}`, JSON `null`
-    rejection, realistic provider-list replacement, radius boundary, and fractional
-    round-trip cases are present and exercise real PostgreSQL behavior where required.
-  - `ruff format --check .`: 27 files already formatted.
-  - `ruff check .`: passed.
-  - `mypy app tests`: passed for 20 source files.
-  - `pytest -v`: 141 passed, 0 skipped.
-  - Independently rebuilt `jobgoblin_test` via `base -> 0001 -> ... -> 0006`: passed.
-  - Independently ran `0006 -> 0005 -> 0006`: passed.
-  - `alembic check` at corrected test-database head: no new upgrade operations
-    detected.
-  - Live-schema inspection confirmed `saved_searches.radius_miles` reports no numeric
-    precision or scale and that `ck_saved_searches_radius_miles_non_negative` exists.
-  - Live database verification after all checks: `jobgoblin_test` remained at `0006`
-    with zero users/saved searches; development remained untouched at `0005` with zero
-    users.
-- Findings, ordered by severity, with file and line references: none.
-- Missing or inconclusive verification: none material for this bounded correction pass.
-- Architecture/documentation consistency: the corrected radius invariant, unrestricted
-  numeric precision/scale, JSONB semantics and mutation contract, name rules, enums,
-  salary/recency invariants, FK/index/default/timestamp behavior, migration chain,
-  tests, `DATA_MODEL.md`, and `ROADMAP.md` are mutually consistent and match the
-  approved decisions.
-- Verdict: approved.
-- Exact requested corrections: none. The `saved_searches` parent-table slice is
-  accepted. Do not begin `saved_search_titles`, `saved_search_locations`, modify or
-  merge `main`, or advance to another slice until the user explicitly approves it.
-- STOP — reviewer changed only this `Work review`; no implementation files were changed.
-
----
-
-## Iteration 2
+no longer pending — Codex gave its finding and requested correction, which are being
+addressed in this rotation's Iteration 2 — so the previous Iteration 1 (the
+`saved_searches` correction pass and Codex's approval of it) was removed rather than
+kept alongside two already-reviewed entries. Nothing below was rewritten — only
+renumbered, with "Ending commit" backfilled to the actual hash Codex reviewed.*
 
 ### Work done
 
@@ -262,16 +100,16 @@ reviewed.*
   verified against real PostgreSQL. 167 tests passed, 0 skipped (up from 141 — 26 new
   `saved_search_titles` tests).
 - Base/starting commit: `33a38e3` (`docs(review): approve saved searches slice`) —
-  Codex's approval commit for the `saved_searches` slice (Iteration 1's `Work review`,
-  verdict: approved). Confirmed `main`/`origin/main` both at `33a38e3` and the working
-  tree clean before making any changes. Also confirmed the development database was
-  already at `0006` (this upgrade happened outside this session — flagged to the user
-  as an external repo-state change, consistent with the earlier `main` fast-forward —
-  and matched what the user separately stated). Branch `phase-1/saved-search-titles`
-  created directly from `33a38e3`.
-- Ending commit or working-tree state: this commit (recorded by the agent completing
-  this pass; see the agent's final response for the actual resolved hash, per this
-  file's own "Git workflow" instructions above).
+  Codex's approval commit for the `saved_searches` slice (previous Iteration 1's `Work
+  review`, verdict: approved). Confirmed `main`/`origin/main` both at `33a38e3` and the
+  working tree clean before making any changes. Also confirmed the development
+  database was already at `0006` (this upgrade happened outside this session —
+  flagged to the user as an external repo-state change, consistent with the earlier
+  `main` fast-forward — and matched what the user separately stated). Branch
+  `phase-1/saved-search-titles` created directly from `33a38e3`.
+- Ending commit or working-tree state: `195eb09` (`feat(phase-1): implement saved
+  search titles slice` — this is the commit Codex's `Work review` below actually
+  reviewed).
 - Product decisions approved by the user before this pass began (proposed in advance
   by the implementing agent, all ten confirmed as-proposed with no overrides this
   time):
@@ -454,3 +292,85 @@ reviewed.*
      migration, or product-document changes are requested unless the corrected test
      exposes a real mismatch. Do not begin `saved_search_locations`.
 - STOP — reviewer changed only this `Work review`; no implementation files were changed.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date and agent: 2026-08-24, Claude Code (Sonnet 4.5).
+- Approved phase/slice: focused, test-only correction pass over the
+  `saved_search_titles` slice — the single finding and exact correction requested in
+  the previous iteration's `Work review` approved as one pass. No
+  `saved_search_locations`, no other table.
+- Outcome: the finding addressed and verified against real PostgreSQL. 168 tests
+  passed, 0 skipped (up from 167 — 1 net new test).
+- Base/starting commit: `195eb09` (`feat(phase-1): implement saved search titles
+  slice`) on branch `phase-1/saved-search-titles`, with Codex's review commit
+  `b1138da` (`docs(review): request saved search title default test`) on top.
+  Confirmed via `git log --oneline` and `git status` (clean, up to date with origin)
+  before making any changes.
+- Ending commit or working-tree state: this commit (recorded by the agent completing
+  this pass; see the agent's final response for the actual resolved hash, per this
+  file's own "Git workflow" instructions above).
+- No model, migration, or product-document changes were made: the review's finding was
+  purely a test-quality gap (the factory always supplies an explicit `is_primary`
+  value, so the old test never exercised the database's own `server_default false`),
+  and the corrected test exposed no mismatch — the implementation was already correct,
+  as Codex's own live-schema inspection had already confirmed.
+- Files changed:
+  - `backend/tests/test_saved_search_titles.py`:
+    - Replaced `test_is_primary_defaults_to_false` with
+      `test_is_primary_defaults_to_false_at_the_database_level`, which performs a raw
+      SQL `INSERT ... RETURNING is_primary` that genuinely omits the column (bypassing
+      both the ORM and the `make_saved_search_title` factory, which always passes an
+      explicit value even for its own default), then asserts PostgreSQL's
+      `server_default false` supplied the value. This is the only way to prove the
+      *database* invariant rather than the factory's Python-side default.
+    - Added `test_is_primary_explicit_false_accepted`, a small new ORM/factory-level
+      test proving `is_primary=False` can still be set explicitly through the normal
+      path — keeping that behavior covered separately from both the new
+      database-default test and the pre-existing `test_is_primary_settable_true`
+      (explicit-`true` path, left unchanged), per the review's explicit instruction.
+  - No other file changed.
+- Migration revisions: none. `0001`–`0007` unchanged.
+- Commands run and exact results:
+  - `ruff format .` → 30 files left unchanged (no reformatting needed).
+  - `ruff check .` → all checks passed.
+  - `mypy app tests` → success, 22 source files.
+  - `pytest -v -k saved_search_title` → **27 passed** (up from 26 — the replaced test
+    plus the new explicit-`false` test, net +1).
+  - `pytest -v` (full suite) → **168 passed, 0 skipped**.
+  - `DATABASE_URL=...jobgoblin_test alembic current` (before any change) → `0007
+    (head)`.
+  - `DATABASE_URL=...jobgoblin_test alembic downgrade 0006` / `upgrade head` →
+    success, `0007 -> 0006 -> 0007` (round-trip scenario, the only migration
+    verification requested this pass — no fresh `base -> head` was asked for since
+    migration `0007` itself did not change).
+  - `DATABASE_URL=...jobgoblin_test alembic check` → `No new upgrade operations
+    detected.`
+  - `alembic current` against the **development** database (default `DATABASE_URL`,
+    no override) → `0006`, unchanged — confirmed untouched.
+  - `pytest -q` (final re-run after the migration verification sequence) →
+    **168 passed**.
+- Risks exercised from `PHASE_RISK_CHECKLIST.md`: "PostgreSQL behavior is tested
+  against PostgreSQL" — this pass exists entirely because the prior test asserted a
+  Python-side value instead of a genuine database-supplied one; the corrected test now
+  proves the actual server default via a raw SQL insert that omits the column.
+- Skipped or unavailable verification: none. Every command above executed for real,
+  including the development-database confirmation.
+- Deviations and ADR impact: none — the corrected test passed on the first run and
+  confirmed the existing implementation was already correct. No ADR impact — test-only
+  correction, no schema or model change.
+- Known limitations: none new, beyond what Iteration 1 already documented (the
+  intentionally-unenforced "exactly one primary title" invariant and `updated_at`
+  advancing only for ORM-driven writes).
+- Recommended next smallest slice: none proposed by the implementing agent — per the
+  workflow, this pass stops for Codex's review before any further slice is considered.
+- STOP — awaiting Codex review and user approval. Do not begin
+  `saved_search_locations`.
+
+### Work review
+
+Status: awaiting review.
