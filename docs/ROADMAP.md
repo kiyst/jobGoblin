@@ -157,8 +157,15 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   `salary_floor <= preferred_salary` `CHECK`, `ON DELETE CASCADE` from `users`, and — the
   first `jsonb` columns in this schema — `MutableDict`-tracked top-level mutation with a
   documented (and tested) nested-mutation limitation, plus a top-level-JSON-object `CHECK`
-  on `enabled_sources`/`scoring_weights` (see `docs/DATA_MODEL.md`). No other Phase 1
-  table is implemented yet;
+  on `enabled_sources`/`scoring_weights` (see `docs/DATA_MODEL.md`). `saved_search_titles`
+  slice also complete and verified (`saved_search_locations` remains a future slice):
+  model (`backend/app/db/models/saved_search_title.py`), migration `0007`
+  (`down_revision = "0006"`), and database tests all pass — including the `title`
+  trim/non-empty `CHECK`s and case-preserving normalization (mirroring `skill`/`name`),
+  the case-insensitive `(saved_search_id, lower(title))` unique index, the partial
+  `UNIQUE (saved_search_id) WHERE is_primary` index enforcing at most one primary title
+  per search while allowing zero, and `ON DELETE CASCADE` from `saved_searches` (see
+  `docs/DATA_MODEL.md`). No other Phase 1 table is implemented yet;
   the rest of Phase 1's exit gate (§[PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md))
   remains outstanding.
 - **Phases 2-14: not started.** Begin each phase only after completing its preflight in

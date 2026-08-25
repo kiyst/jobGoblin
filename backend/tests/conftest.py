@@ -9,7 +9,7 @@ from sqlalchemy.engine import URL, make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
 from app.config import Settings, get_settings
-from app.db.models import CandidateProfile, CandidateSkill, SavedSearch, User
+from app.db.models import CandidateProfile, CandidateSkill, SavedSearch, SavedSearchTitle, User
 from app.db.session import check_database_connection
 from app.main import app
 
@@ -242,6 +242,27 @@ def make_saved_search() -> Callable[..., SavedSearch]:
     return _make
 
 
+@pytest.fixture
+def make_saved_search_title() -> Callable[..., SavedSearchTitle]:
+    """Factory for a valid `SavedSearchTitle` — tests only deviate from this
+    intentionally. Takes the owning `saved_search_id` explicitly, matching
+    `make_candidate_skill`'s pattern."""
+
+    def _make(
+        saved_search_id: uuid.UUID,
+        *,
+        title: str = "Backend Engineer",
+        is_primary: bool = False,
+    ) -> SavedSearchTitle:
+        return SavedSearchTitle(
+            saved_search_id=saved_search_id,
+            title=title,
+            is_primary=is_primary,
+        )
+
+    return _make
+
+
 @asynccontextmanager
 async def real_committed_user_and_profile(
     db_engine: AsyncEngine, email: str, **profile_kwargs: object
@@ -397,3 +418,41 @@ async def real_committed_user_and_saved_search(
                 if existing_user is not None:
                     await cleanup_session.delete(existing_user)
                     await cleanup_session.commit()
+
+
+@asynccontextmanager
+async def real_committed_user_saved_search_and_title(
+    db_engine: AsyncEngine,
+    email: str,
+    *,
+    saved_search_kwargs: dict[str, object] | None = None,
+    **title_kwargs: object,
+) -> AsyncIterator[tuple[AsyncSession, uuid.UUID, uuid.UUID, uuid.UUID]]:
+    """Builds on `real_committed_user_and_saved_search`: additionally creates
+    a `SavedSearchTitle` row on the same real-commit lifecycle, with its own
+    best-effort cleanup (title, then — via the wrapped helper — saved
+    search, then user) so a partially cascaded state is skipped rather than
+    treated as an error, same rationale as the wrapped helper above.
+    """
+    title_kwargs.setdefault("title", "Backend Engineer")
+    async with real_committed_user_and_saved_search(
+        db_engine, email, **(saved_search_kwargs or {})
+    ) as (session, user_id, saved_search_id):
+        title = SavedSearchTitle(saved_search_id=saved_search_id, **title_kwargs)
+        session.add(title)
+        title_id: uuid.UUID | None = None
+        try:
+            await session.commit()
+            await session.refresh(title)
+            title_id = title.id
+
+            yield session, user_id, saved_search_id, title_id
+        finally:
+            if title_id is not None:
+                with suppress(Exception):
+                    await session.rollback()
+                async with AsyncSession(bind=db_engine) as cleanup_session:
+                    existing_title = await cleanup_session.get(SavedSearchTitle, title_id)
+                    if existing_title is not None:
+                        await cleanup_session.delete(existing_title)
+                        await cleanup_session.commit()

@@ -102,6 +102,21 @@ approval before migration `0006` was written:
 - `created_at`/`updated_at` are added, per the same previously-omitted-despite-the-global-
   convention gap already fixed for `users` (Rev 5) and `candidate_skills` (Rev 8).
 
+**Rev 10 changes** (fifth Phase 1 implementation slice, `saved_search_titles` only;
+`saved_search_locations` remains a future slice): this table's column list below did not
+previously state several product rules, resolved by explicit approval before migration
+`0007` was written:
+- `title` is normalized the same way `skill`/`name` are (trim-only, case preserved,
+  matching `CHECK`s).
+- `is_primary` is not null with `server_default false`. At most one primary title per
+  saved search is enforced by a partial unique index on `saved_search_id WHERE
+  is_primary`; zero primary titles is a valid, unconstrained state — enforcing "exactly
+  one" would need a trigger, which is deliberately not added.
+- `created_at`/`updated_at` are added, per the same recurring gap already fixed for
+  `users`, `candidate_skills`, and `saved_searches`.
+- No separate plain index on `saved_search_id`: it is already the leading column of the
+  `(saved_search_id, lower(title))` unique index, so a second index would be redundant.
+
 Conventions used throughout:
 
 - **Minimum supported PostgreSQL version: 16.** See
@@ -295,18 +310,38 @@ is still silently dropped on commit; see the model's own docstring and
 `test_mutating_a_nested_jsonb_value_is_not_tracked`.
 
 ### `saved_search_titles`
-Split out (rather than an array column on `saved_searches`) because titles need
-per-entry alias expansion against `taxonomy/titles.yaml` in Phase 3, and because a title
-can independently carry "this is the primary title" vs. "this is an acceptable alias."
+**Implemented** (`backend/app/db/models/saved_search_title.py`; migration `0007`,
+`down_revision = "0006"`). Split out (rather than an array column on `saved_searches`)
+because titles need per-entry alias expansion against `taxonomy/titles.yaml` in Phase 3,
+and because a title can independently carry "this is the primary title" vs. "this is an
+acceptable alias."
 
 | column | type | notes |
 |---|---|---|
-| id | UUID PK | |
-| saved_search_id | UUID FK → saved_searches, `ON DELETE CASCADE` | |
-| title | text | |
-| is_primary | boolean | |
+| id | UUID PK | generated application-side (`uuid.uuid4`), not a DB-side default |
+| saved_search_id | UUID FK → saved_searches, `ON DELETE CASCADE`, not null | |
+| title | text, not null | normalized before storage — see below |
+| is_primary | boolean, not null | `server_default false`; at most one `true` row per `saved_search_id` — see below |
+| created_at | timestamptz, not null | `server_default now()` |
+| updated_at | timestamptz, not null | `server_default now()`, reset to `now()` by the ORM (`onupdate`) on every update |
 
-Unique constraint: `(saved_search_id, lower(title))`.
+**Title normalization:** trimmed of exactly the same four-character whitespace set as
+`candidate_skills.skill`/`saved_searches.name` (space, tab, line feed, carriage return) —
+case preserved, never lowercased. A SQLAlchemy `@validates` normalizer covers the ORM
+write path, but the database is the authoritative backstop:
+- `CHECK (title = trim(both E'\t\n\r ' from title))` — rejects any row (including a write
+  that bypasses the ORM) whose stored value isn't already trimmed.
+- `CHECK (trim(both E'\t\n\r ' from title) <> '')` — rejects empty or
+  covered-whitespace-only title.
+- `UNIQUE` functional index on `(saved_search_id, lower(title))` — case-insensitive,
+  scoped per saved search. Because the CHECK constraints above guarantee a stored row is
+  already fully trimmed, a whitespace-wrapped duplicate can never be inserted in the
+  first place.
+
+**At most one primary title:** a partial unique index on `saved_search_id WHERE
+is_primary` rejects a second `true` row for the same saved search, but zero primary
+titles is a valid, unconstrained state — enforcing "exactly one" is deliberately not
+attempted (would require a trigger, not a declarative constraint).
 
 ### `saved_search_locations`
 Split out for the same reason as titles — each location independently carries its own
@@ -829,7 +864,7 @@ reviewed against this list directly:
 | `candidate_profiles` | `UNIQUE (user_id)`; `CHECK` on `remote_preference` enum; non-negative `CHECK`s on `years_experience`/`salary_expectation_min`/`salary_expectation_max`; `CHECK (salary_expectation_min <= salary_expectation_max)` | enforce 1:1 with `users` while that holds; reject an invalid `remote_preference`, a negative experience/salary value, or an inverted salary range at the database — see the table's own section above (Rev 7) |
 | `candidate_skills` | `UNIQUE (candidate_profile_id, lower(skill))`; `CHECK (skill = trim(both E'\t\n\r ' from skill))`; `CHECK (trim(both E'\t\n\r ' from skill) <> '')`; `CHECK` on `priority` enum | one entry per skill per profile, case-insensitive; reject a non-normalized, empty, or invalid-priority skill at the database — see the table's own section above (Rev 8) |
 | `saved_searches` | `INDEX (user_id)`; `CHECK (name = trim(both E'\t\n\r ' from name))`; `CHECK (trim(both E'\t\n\r ' from name) <> '')`; `CHECK` on `remote_rules`/`polling_schedule` enums; non-negative `CHECK`s on `radius_miles`/`salary_floor`/`preferred_salary`/`recency_limit_hours`; `CHECK (salary_floor <= preferred_salary)`; `CHECK` requiring `enabled_sources`/`scoring_weights` be a top-level JSON object when non-null | reject a non-normalized/empty `name`, an invalid enum, a negative bound, an inverted salary range, or a non-object jsonb value at the database; `radius_miles` has no precision/scale but is non-negative like the other numeric fields — see the table's own section above (Rev 9) |
-| `saved_search_titles` | `UNIQUE (saved_search_id, lower(title))` | one entry per title per search, case-insensitive |
+| `saved_search_titles` | `UNIQUE (saved_search_id, lower(title))`; `CHECK (title = trim(both E'\t\n\r ' from title))`; `CHECK (trim(both E'\t\n\r ' from title) <> '')`; partial `UNIQUE (saved_search_id) WHERE is_primary` | one entry per title per search, case-insensitive; reject a non-normalized or empty title; at most one primary title per search, zero allowed — see the table's own section above (Rev 10) |
 | `saved_search_locations` | `UNIQUE (saved_search_id, lower(trim(location_text)))` | one entry per location text per search |
 | `companies` | `UNIQUE (lower(domain)) WHERE domain IS NOT NULL` | strongest available company identity signal, case-normalized (Rev 3, item 8b); **no** uniqueness on `normalized_name` (see conservative collision behavior above) |
 | `companies` | `INDEX (normalized_name)` | non-unique, for search/lookup only |

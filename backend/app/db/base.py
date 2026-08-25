@@ -18,8 +18,9 @@ class Base(DeclarativeBase):
 
     `User` (`app/db/models/user.py`), `CandidateProfile`
     (`app/db/models/candidate_profile.py`), `CandidateSkill`
-    (`app/db/models/candidate_skill.py`), and `SavedSearch`
-    (`app/db/models/saved_search.py`) are the Phase 1 models registered
+    (`app/db/models/candidate_skill.py`), `SavedSearch`
+    (`app/db/models/saved_search.py`), and `SavedSearchTitle`
+    (`app/db/models/saved_search_title.py`) are the Phase 1 models registered
     against this base so far; every other Phase 1 table will follow the same
     pattern. This is also Alembic's `target_metadata` (see
     `migrations/env.py`, which imports `app.db.models` so autogenerate has

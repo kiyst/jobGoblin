@@ -83,297 +83,20 @@ and record the actual commit it reviewed.
 ## Iteration 1
 
 *Rotated in from "Iteration 2" per the two-iteration rule: its `Work review` (below) is
-no longer pending — Codex gave its findings and requested corrections, which are being
-addressed in this rotation's Iteration 2 — so the previous Iteration 1 (the
-`candidate_skills` implementation pass and Codex's approval of it) was removed rather
-than kept alongside two already-reviewed entries. Nothing below was rewritten — only
-renumbered, with "Ending commit" backfilled to the actual hash Codex reviewed.*
-
-### Work done
-
-- Date and agent: 2026-08-24, Claude Code (Sonnet 4.5).
-- Approved phase/slice: first bounded Phase 1 slice after `candidate_skills` —
-  `saved_searches` parent table only. `saved_search_titles`/`saved_search_locations`
-  remain out of scope (separate future slices, same incremental pattern as
-  `candidate_profiles` -> `candidate_skills`). No auth, no APIs/services, no
-  providers/ingestion/matching/normalization, no other Phase 1 table.
-- Outcome: model, migration `0006`, factories, and database tests implemented and
-  verified against real PostgreSQL. 132 tests passed, 0 skipped (up from 81 — 51 new
-  `saved_searches` tests).
-- Base/starting commit: `906cf24` (`docs(review): approve candidate skills slice`) —
-  Codex's approval commit for the `candidate_skills` slice (previous Iteration 1's
-  `Work review`, verdict: approved), fast-forward-merged into `main` by the user
-  outside this session (confirmed via `git reflog show main`: "merge
-  phase-1/candidate-skills: Fast-forward") before this pass began. Confirmed
-  `main`/`origin/main` both at `906cf24` before making any changes. Branch
-  `phase-1/saved-searches` created directly from `906cf24`.
-- Ending commit or working-tree state: `a267a2f` (`feat(phase-1): implement saved
-  searches slice` — this is the commit Codex's `Work review` below actually
-  reviewed).
-- Separately authorized, file-free operational step performed before this
-  implementation pass, at the user's explicit request: the **development** database
-  (`jobgoblin`, distinct from the disposable `jobgoblin_test`) was upgraded from `0003`
-  to `0005` (head at the time) via `alembic upgrade head` with the default
-  `DATABASE_URL`. Row counts in `users`/`candidate_profiles`/`candidate_skills`
-  confirmed `0` both before and after. No files were changed, no branch created, no
-  commit made for this step, per explicit instruction.
-- Product decisions approved by the user before this pass began (proposed in advance
-  by the implementing agent, then explicitly overridden on four points by the user
-  before implementation — see below):
-  1. Every `text[]` column nullable, no server default, `MutableList.as_mutable`
-     wrapped from the start (not a later correction, unlike `candidate_profiles`).
-  2. `created_at`/`updated_at` added (`docs/DATA_MODEL.md`'s `saved_searches` column
-     list omitted them — the same gap already fixed for `users` and
-     `candidate_skills`).
-  3. **`name`**: normalized non-empty — trimmed of the same four-character whitespace
-     set as `skill` (space, tab, LF, CR), case preserved (no lowercasing, since `name`
-     has no uniqueness requirement), with matching `CHECK`s
-     (`name = trim(both E'\t\n\r ' from name)`, non-empty after trim) and an ORM
-     `@validates` normalizer. This explicitly overrides the implementing agent's
-     initial proposal of "no `CHECK`."
-  4. **`enabled_sources`/`scoring_weights` (jsonb)**: restricted by a `CHECK` requiring
-     the stored value be a top-level JSON *object* when non-null
-     (`jsonb_typeof(col) = 'object'`). This explicitly overrides the initial proposal
-     of "leave fully unconstrained."
-  5. **`radius_miles`**: plain, **unconstrained** `numeric` — no precision/scale, no
-     non-negative `CHECK`. This explicitly overrides the initial proposal of
-     `NUMERIC(6, 2)`. *(Iteration 2 below records that this specific reading — no
-     non-negative CHECK at all — was itself an implementer misreading of the
-     authorization, corrected after review.)*
-  6. **Both `jsonb` columns wrapped with `MutableDict.as_mutable`, with the top-level-
-     only tracking limitation explicitly documented** (in the model's docstring and a
-     dedicated test) — `MutableDict`, like `MutableList`, only instruments the wrapped
-     column's own top-level `__setitem__`/`__delitem__`; a value already nested inside
-     one of these columns can be mutated in place without the unit-of-work noticing,
-     and the change is still silently dropped on commit.
-  7. `salary_floor`, `preferred_salary`, `recency_limit_hours` each get a non-negative
-     `CHECK`, plus `salary_floor <= preferred_salary` when both are non-null — carried
-     over unchanged from the implementing agent's initial proposal (not addressed by
-     the four overrides above, so not treated as conflicting).
-  8. `name` has no uniqueness constraint (a user may have multiple saved searches
-     sharing a name) — unchanged from the initial proposal.
-  9. A plain non-unique `INDEX (user_id)` for the "list a user's saved searches"
-     query — unchanged from the initial proposal.
-  The implementing agent could not locate the four-point override instruction
-  recorded anywhere in this repository or its own prior conversation turns before
-  receiving it; it restated its interpretation of each override explicitly before
-  implementing, rather than silently guessing or blocking on an unverifiable
-  provenance claim.
-- Files changed:
-  - `backend/app/db/models/saved_search.py` (new) — `SavedSearch` model.
-    `REMOTE_RULES`/`POLLING_SCHEDULES` module constants list the allowed enum values,
-    reused by tests. `name` uses a `@validates` normalizer (trim only, no lowercasing —
-    same case-handling as `CandidateSkill.skill`). All ten `text[]` columns wrapped
-    with `MutableList.as_mutable(ARRAY(Text))`; both `jsonb` columns wrapped with
-    `MutableDict.as_mutable(JSONB())`. `radius_miles` typed `Numeric`/`Decimal`,
-    deliberately without a `CHECK`. A plain `Index("ix_saved_searches_user_id", ...)`
-    declared after the class, outside `__table_args__`, since it is a performance
-    index, not a correctness constraint.
-  - `backend/app/db/models/__init__.py` — registers `SavedSearch` alongside the other
-    three models.
-  - `backend/app/db/base.py` — docstring updated to mention all four Phase 1 models.
-  - `backend/migrations/versions/0006_saved_searches.py` (new) — `down_revision =
-    "0005"`. Table created with all constraints defined inline in
-    `op.create_table(...)` (the established pattern); the non-unique `user_id` index
-    added via a separate `op.create_index(...)`. `downgrade()` drops the index then
-    the table.
-  - `backend/tests/conftest.py`:
-    - Added `make_saved_search`, a factory fixture matching the
-      `make_candidate_profile`/`make_candidate_skill` pattern (takes `user_id`
-      explicitly).
-    - Added `real_committed_user_and_saved_search`, mirroring
-      `real_committed_user_and_profile`'s failure-safe real-commit lifecycle/cleanup
-      pattern exactly (User + SavedSearch instead of User + CandidateProfile), for
-      `saved_searches`' own cascade-delete/`updated_at`/mutation-persistence tests.
-  - `backend/tests/test_saved_searches.py` (new) — 51 tests: valid insert/retrieve
-    (including `is_active` defaulting `true`); ORM trimming of a whitespace-wrapped
-    `name` (case preserved); direct-SQL rejection of an empty, a
-    covered-whitespace-only, and a non-normalized `name`; every allowed
-    `remote_rules`/`polling_schedule` value accepted, one invalid value each rejected;
-    `is_active` default and explicit-`false` settability; all nullable array/jsonb
-    fields defaulting to `None`; NULL-vs-empty-array distinction (one representative
-    field, mirroring `candidate_profiles`); array-field mutation persisting after
-    reload (parameterized across all ten `text[]` fields); jsonb nullable defaults;
-    a nested-dict jsonb round-trip; top-level jsonb key mutation persisting after
-    reload (parameterized across both `jsonb` fields); a dedicated test proving a
-    *nested* jsonb mutation is **not** tracked and is silently dropped (documents
-    decision 6's limitation directly); direct-SQL rejection of a non-object jsonb
-    value for each `jsonb` column plus one accepted-valid-object case; non-negative
-    `CHECK` accepted (zero and positive) / rejected (negative) cases for all three
-    integer numeric fields; a dedicated test proving `radius_miles` is genuinely
-    unconstrained (accepts a negative value without error — proves decision 5 is
-    actually implemented, not merely absent by omission); accepted (equal, ascending,
-    either-side-only) and rejected (descending) cases for the salary-ordering `CHECK`;
-    nonexistent `user_id` FK rejection; `ON DELETE CASCADE` from `users` (real
-    commits); UTC-aware timestamps; and `updated_at` advancing on update (real
-    commits).
-  - `docs/DATA_MODEL.md` — `saved_searches` marked **Implemented** (parent table only);
-    added a "Rev 9" note and updated the table's own column list and the "Phase 1
-    constraints & indexes" summary table (which previously had no row for
-    `saved_searches` itself) to state every resolved rule explicitly.
-  - `docs/ROADMAP.md` — Phase 1 status line now also describes the `saved_searches`
-    slice as complete and verified.
-  - `docs/LLM_HANDOFF.md` — this rotation (old Iteration 1 — the `candidate_skills`
-    implementation pass — removed; prior Iteration 2 renumbered to Iteration 1; this
-    entry appended as the new Iteration 2).
-- Migration revisions: `0006` (new, `down_revision = "0005"`) — adds `saved_searches`.
-  `0001`–`0005` unchanged.
-- Commands run and exact results:
-  - Development-database upgrade (separately authorized, described above):
-    `alembic current` → `0003`; row counts confirmed `0`; `alembic upgrade head` →
-    `0003 -> 0004 -> 0005`; `alembic current` → `0005 (head)`; row counts confirmed
-    `0` again.
-  - `git checkout -b phase-1/saved-searches 906cf24` → success, clean tree, `HEAD` at
-    `906cf24`.
-  - `ruff format .` → 2 files reformatted (the new model and test file) → recheck: 27
-    files formatted.
-  - `mypy app tests` (first run) → **4 errors**: `MutableDict.as_mutable(JSONB)`
-    passed the bare class instead of an instance (fixed: `JSONB()`); a test's indexed
-    assignment into a `dict[str, object] | None`-typed nested value (fixed: targeted
-    `# type: ignore[index]`, since the test deliberately exercises untyped dynamic
-    JSON shape); a test assigned a bare `int` to a `Decimal`-typed attribute (fixed:
-    wrapped in `Decimal(...)`).
-  - `mypy app tests` (after fixes) → success, 20 source files.
-  - `ruff check .` → all checks passed.
-  - `pytest -v` (first run) → **1 failed, 131 passed**:
-    `test_insert_and_retrieve_valid_saved_search` failed with `MissingGreenlet` — the
-    same expired-attribute bug caught (and supposedly learned from) during the
-    `candidate_profiles` slice: `user.id` was read in a final assertion *after* the
-    saved search's own `commit()` had already expired `user`. Fixed the same way as
-    before — capture `user_id = user.id` immediately after the user's own commit,
-    before any later commit.
-  - `pytest -v` (after the fix) → **132 passed, 0 skipped**.
-  - `DATABASE_URL=...jobgoblin_test alembic current` (before any change) → `0006
-    (head)` (already upgraded once ad hoc before the first test run).
-  - `DATABASE_URL=...jobgoblin_test alembic downgrade 0005` → success.
-  - `DATABASE_URL=...jobgoblin_test alembic upgrade head` → success, `0005 -> 0006`
-    ("existing `0005 -> 0006`" scenario).
-  - `DATABASE_URL=...jobgoblin_test alembic downgrade 0005` / `upgrade head` → success
-    again (round-trip scenario).
-  - `DATABASE_URL=...jobgoblin_test alembic check` → `No new upgrade operations
-    detected.`
-  - `DATABASE_URL=...jobgoblin_test alembic downgrade base` → success, all tables
-    dropped.
-  - `DATABASE_URL=...jobgoblin_test alembic upgrade head` → success, ` -> 0001 -> ... ->
-    0005 -> 0006` ("fresh `base -> head`" scenario).
-  - `alembic current` against the **development** database (default `DATABASE_URL`,
-    no override) → `0005`, unchanged throughout this test-database-only verification
-    sequence — confirmed untouched (correctly still one migration behind `jobgoblin_test`,
-    since only the dev-database upgrade to `0005` was separately authorized, not `0006`).
-  - `pytest -q` (final re-run after the full migration verification sequence) →
-    **132 passed**.
-- Risks exercised from `PHASE_RISK_CHECKLIST.md`: "define nullability/defaults/
-  uniqueness/checks/indexes/ON DELETE before implementing each table" — nine product
-  decisions above, four of which were explicit user overrides of the implementing
-  agent's own proposal, none invented during implementation; "every migration is
-  reviewed and tested upgrade -> downgrade -> upgrade" — exercised as four scenarios
-  (existing `0005 -> 0006`, round-trip, fresh `base -> head`, plus the separately
-  authorized dev-database `0003 -> 0005` operational upgrade); "PostgreSQL behavior is
-  tested against PostgreSQL" — the `MutableDict` top-level-tracked-but-not-nested
-  behavior, and the jsonb-object `CHECK`, are each proven with real Postgres round
-  trips and direct-SQL probes, not mocked; "destructive cascades" — the user-to-
-  saved-search cascade is proven with real, separately-committed transactions.
-- Skipped or unavailable verification: none. Every command above executed for real,
-  including both database confirmations.
-- Deviations and ADR impact: mypy failed 4 checks and pytest failed 1 test on first
-  runs, both for reasons detailed above; fixed and re-verified before reporting
-  success. No ADR impact — Phase 1 implementation-slice detail only.
-- Known limitations: `MutableDict`'s top-level-only tracking is a real, documented
-  (and tested) limitation of this pass's own design, not a defect — a caller that
-  mutates a value nested inside `scoring_weights`/`enabled_sources` in place will
-  silently lose that change on commit; `updated_at` still only advances for
-  ORM-driven writes (unchanged, out of scope for this pass, same as prior tables).
-- Recommended next smallest slice: none proposed by the implementing agent — per the
-  workflow, this pass stops for Codex's review before any further slice is considered.
-- STOP — awaiting Codex review and user approval. Do not begin `saved_search_titles`,
-  `saved_search_locations`, or any other slice.
-
-### Work review
-
-- Date and reviewing agent: 2026-08-24, Codex.
-- Diff/revision reviewed: commit `a267a2f` (`feat(phase-1): implement saved searches
-  slice`) against approved base `906cf24` on branch `phase-1/saved-searches`. The branch
-  matched `origin/phase-1/saved-searches`, and the working tree was clean before review.
-- Verification independently performed:
-  - Inspected the complete `906cf24..a267a2f` diff and resulting saved-search model,
-    migration `0006`, registration/base changes, factory and real-commit helper, all 51
-    new tests, data-model/roadmap changes, and handoff rotation.
-  - Confirmed the array mappings use `MutableList`, JSONB mappings use `MutableDict`,
-    name normalization uses the approved four-character set, JSONB object checks and
-    enum/salary/recency checks match between metadata and migration, and the user FK,
-    lookup index, defaults, and timestamps are otherwise consistent.
-  - `ruff format --check .`: 27 files already formatted.
-  - `ruff check .`: passed.
-  - `mypy app tests`: passed for 20 source files.
-  - `pytest -v`: 132 passed, 0 skipped; this includes a test that currently codifies
-    the incorrect acceptance of a negative radius described in finding 1.
-  - Independently ran `0006 -> 0005 -> 0006` against `jobgoblin_test`: passed.
-  - `alembic check` at test-database head: no new upgrade operations detected.
-  - Live PostgreSQL verification after the suite and round-trip: `jobgoblin_test`
-    remained at `0006` with zero users/saved searches; the development database
-    remained untouched at `0005` with zero users.
-- Findings, ordered by severity, with file and line references:
-  1. **High — the approved non-negative radius invariant was reversed.**
-     `backend/app/db/models/saved_search.py:97-101`,
-     `backend/migrations/versions/0006_saved_searches.py:28-30,79`,
-     `backend/tests/test_saved_searches.py:454-469`, `docs/DATA_MODEL.md:93-94,259,830`,
-     and `docs/ROADMAP.md:156` deliberately allow and document negative
-     `radius_miles`. The authorization used "unconstrained `NUMERIC`" to mean no
-     precision/scale/rounding/maximum, then separately and explicitly required a
-     non-negative `radius_miles` `CHECK`. A negative search radius is also not a valid
-     domain magnitude. Add matching model/migration constraints
-     (`radius_miles IS NULL OR radius_miles >= 0`), replace the negative-acceptance
-     test with zero/positive acceptance and negative rejection, and correct every
-     statement that calls the column unconstrained. Keep `Numeric` itself free of
-     precision and scale.
-  2. **Medium — several explicitly requested persistence/edge contracts are absent
-     from the test suite.** `backend/tests/test_saved_searches.py` has no complete-row
-     test, no duplicate-name-accepted test, no explicit SQL-NULL-versus-empty-object
-     round-trip for both JSONB fields, no direct-SQL JSON `null` rejection, and no
-     precise fractional `Decimal` radius round-trip. Its generic top-level JSON test
-     (`:339-357`) stores numeric values in `enabled_sources`, rather than exercising
-     the supported real shape and the required replacement pattern
-     `enabled_sources[provider] = [*old_sources, new_source]`. Add these cases. Keep
-     the documented top-level-only `MutableDict` limitation, but prove the supported
-     nested-list replacement workflow through a separate-session reload.
-  3. **Low — two source comments contain a malformed documentation reference.**
-     `backend/app/db/models/saved_search.py:54` and
-     `backend/migrations/versions/0006_saved_searches.py:35` say `SS6.5-6.6`; change
-     this to `§6.5–6.6` (or plain `sections 6.5–6.6`).
-- Missing or inconclusive verification: fresh `base -> head` was reported by the
-  implementer but not repeated in this review because the bounded round-trip and
-  metadata drift check were sufficient to establish the current migration mechanics;
-  it must be rerun after correcting migration `0006`.
-- Architecture/documentation consistency: all approved rules except the radius
-  invariant are represented consistently. The current model, migration, tests,
-  `DATA_MODEL.md`, and `ROADMAP.md` agree with one another about allowing negative
-  radius, but that agreement is based on a misreading of the authorization and must be
-  corrected together.
-- Verdict: changes requested.
-- Exact requested corrections:
-  1. Add the non-negative `radius_miles` CHECK to model metadata and migration `0006`
-     while retaining unconstrained `Numeric` precision/scale; correct its tests and all
-     affected documentation.
-  2. Add the missing complete/minimal-boundary tests listed in finding 2, including
-     realistic `enabled_sources` replacement and separate-session persistence.
-  3. Correct the two malformed section references.
-  4. Rerun format, lint, mypy, all tests, `0006 -> 0005 -> 0006`, fresh `base -> head`,
-     and `alembic check` against `jobgoblin_test`; confirm development remains at
-     `0005`. Rotate the ledger, commit/push only `phase-1/saved-searches`, and stop.
-     Do not begin either saved-search child table.
-- STOP — reviewer changed only this `Work review`; no implementation files were changed.
-
----
-
-## Iteration 2
+no longer pending — Codex's verdict was "approved," with no requested corrections — so
+the previous Iteration 1 (the first `saved_searches` implementation pass and Codex's
+"changes requested" review of it, already superseded by this iteration's fixes) was
+removed rather than kept alongside two already-reviewed entries. Nothing below was
+rewritten — only renumbered, with "Ending commit" backfilled to the actual hash Codex
+reviewed.*
 
 ### Work done
 
 - Date and agent: 2026-08-24, Claude Code (Sonnet 4.5).
 - Approved phase/slice: bounded correction pass over the `saved_searches` slice only —
-  all three findings and the exact correction pass requested in Iteration 1's `Work
-  review` approved as one pass. No `saved_search_titles`, no `saved_search_locations`,
-  no new table.
+  all three findings and the exact correction pass requested in the previous
+  iteration's `Work review` approved as one pass. No `saved_search_titles`, no
+  `saved_search_locations`, no new table.
 - Outcome: all three findings addressed and verified against real PostgreSQL. 141
   tests passed, 0 skipped (up from 132 — 9 net new tests).
 - Base/starting commit: `a267a2f` (`feat(phase-1): implement saved searches slice`) on
@@ -381,9 +104,9 @@ renumbered, with "Ending commit" backfilled to the actual hash Codex reviewed.*
   (`docs(review): request saved search corrections`) on top. Confirmed via
   `git log --oneline` and `git status` (clean, up to date with origin) before making
   any changes.
-- Ending commit or working-tree state: this commit (recorded by the agent completing
-  this pass; see the agent's final response for the actual resolved hash, per this
-  file's own "Git workflow" instructions above).
+- Ending commit or working-tree state: `223ccb4` (`fix(phase-1): restore non-negative
+  radius check and add missing saved search tests` — this is the commit Codex's `Work
+  review` below actually reviewed and approved).
 - Migration `0006` was corrected **in place**, not via a new forward migration:
   unlike the `0002`/`0003` situation, `0006` had not yet been applied to the
   **development** database (which was deliberately stopped at `0005` per a prior,
@@ -523,3 +246,159 @@ renumbered, with "Ending commit" backfilled to the actual hash Codex reviewed.*
   accepted. Do not begin `saved_search_titles`, `saved_search_locations`, modify or
   merge `main`, or advance to another slice until the user explicitly approves it.
 - STOP — reviewer changed only this `Work review`; no implementation files were changed.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date and agent: 2026-08-24, Claude Code (Sonnet 4.5).
+- Approved phase/slice: first bounded Phase 1 slice after `saved_searches` —
+  `saved_search_titles` only. `saved_search_locations` remains out of scope (separate
+  future slice, same incremental pattern as every prior Phase 1 table). No other
+  table, no auth, no APIs/services.
+- Outcome: model, migration `0007`, factories, and database tests implemented and
+  verified against real PostgreSQL. 167 tests passed, 0 skipped (up from 141 — 26 new
+  `saved_search_titles` tests).
+- Base/starting commit: `33a38e3` (`docs(review): approve saved searches slice`) —
+  Codex's approval commit for the `saved_searches` slice (Iteration 1's `Work review`,
+  verdict: approved). Confirmed `main`/`origin/main` both at `33a38e3` and the working
+  tree clean before making any changes. Also confirmed the development database was
+  already at `0006` (this upgrade happened outside this session — flagged to the user
+  as an external repo-state change, consistent with the earlier `main` fast-forward —
+  and matched what the user separately stated). Branch `phase-1/saved-search-titles`
+  created directly from `33a38e3`.
+- Ending commit or working-tree state: this commit (recorded by the agent completing
+  this pass; see the agent's final response for the actual resolved hash, per this
+  file's own "Git workflow" instructions above).
+- Product decisions approved by the user before this pass began (proposed in advance
+  by the implementing agent, all ten confirmed as-proposed with no overrides this
+  time):
+  1. `id`: application-generated UUID primary key.
+  2. `saved_search_id`: non-null FK to `saved_searches.id`, `ON DELETE CASCADE`.
+  3. `title`: non-null, case-preserving text; trimmed of exactly space/tab/LF/CR via a
+     matching ORM `@validates` normalizer and database `CHECK` (same pattern as
+     `candidate_skills.skill`/`saved_searches.name`).
+  4. Empty and covered-whitespace-only titles rejected via a `CHECK`.
+  5. Case-insensitive, per-search uniqueness via a functional unique index on
+     `(saved_search_id, lower(title))`.
+  6. `is_primary`: non-null boolean, `server_default false`.
+  7. At most one primary title per saved search enforced by a partial unique index on
+     `saved_search_id WHERE is_primary`.
+  8. Zero primary titles is allowed at the database level — no trigger attempting to
+     enforce "exactly one."
+  9. `created_at`/`updated_at` added as non-null `timestamptz` columns with the
+     established `server_default`/ORM `onupdate` convention (the same recurring gap
+     already fixed for `users`, `candidate_skills`, `saved_searches`).
+  10. No separate plain index on `saved_search_id` — the composite unique index
+      already supports lookups by its leading column.
+- Files changed:
+  - `backend/app/db/models/saved_search_title.py` (new) — `SavedSearchTitle` model.
+    `title` uses a `@validates` normalizer (trim only, no lowercasing — same
+    case-handling as `CandidateSkill.skill`/`SavedSearch.name`). The case-insensitive
+    unique index and the partial primary-title unique index are both declared as
+    module-level `Index(...)` calls after the class, outside `__table_args__`, matching
+    the established pattern for functional/expression indexes.
+  - `backend/app/db/models/__init__.py` — registers `SavedSearchTitle` alongside the
+    other four models.
+  - `backend/app/db/base.py` — docstring updated to mention all five Phase 1 models.
+  - `backend/migrations/versions/0007_saved_search_titles.py` (new) — `down_revision =
+    "0006"`. Table created with all constraints defined inline in
+    `op.create_table(...)` (the established pattern); both indexes (the composite
+    functional unique index and the partial primary-title unique index) added via
+    separate `op.create_index(...)` calls, the latter using
+    `postgresql_where=sa.text("is_primary")`. `downgrade()` drops both indexes then
+    the table.
+  - `backend/tests/conftest.py`:
+    - Added `make_saved_search_title`, a factory fixture matching the
+      `make_candidate_skill` pattern (takes `saved_search_id` explicitly).
+    - Added `real_committed_user_saved_search_and_title`, mirroring
+      `real_committed_user_profile_and_skill`'s failure-safe real-commit lifecycle/
+      cleanup pattern exactly (built on top of `real_committed_user_and_saved_search`),
+      for `saved_search_titles`' own cascade-delete/`updated_at` tests.
+  - `backend/tests/test_saved_search_titles.py` (new) — 26 tests: valid insert/
+    retrieve; ORM trimming of a whitespace-wrapped title (case preserved); direct-SQL
+    rejection of an empty, a covered-whitespace-only, and a non-normalized title;
+    direct-SQL rejection of a whitespace-wrapped duplicate attempting to bypass the
+    uniqueness index; same-case and case-insensitive duplicate rejection;
+    confirmation that case is preserved despite case-insensitive uniqueness; the same
+    title accepted on two different saved searches (proves per-search scoping);
+    distinct titles accepted on one saved search; nonexistent `saved_search_id` FK
+    rejection; `is_primary` defaulting to `false` and settable to `true`; direct-SQL
+    `NULL is_primary` rejection; one primary plus multiple non-primary titles on one
+    search accepted; two primary titles on the same search rejected; primary titles on
+    two different searches accepted; zero primary titles accepted; changing which
+    title is primary by clearing the old one before setting the new one (two
+    sequential commits, since setting the new primary before clearing the old would
+    violate the partial unique index); `ON DELETE CASCADE` from `saved_searches` (real
+    commits) proven two ways — deleting a saved search removes its own title, and a
+    second, independent saved search's title survives that same deletion untouched;
+    UTC-aware timestamps; and `updated_at` advancing on both an ORM title-text update
+    and an ORM `is_primary` update (two separate tests, both real commits).
+  - `docs/DATA_MODEL.md` — `saved_search_titles` marked **Implemented**; added a
+    "Rev 10" note and updated the table's own column list (adding `created_at`/
+    `updated_at`, marking `title`/`is_primary` not null, documenting the partial
+    unique index) and the "Phase 1 constraints & indexes" summary table.
+  - `docs/ROADMAP.md` — Phase 1 status line now also describes the
+    `saved_search_titles` slice as complete and verified.
+  - `docs/LLM_HANDOFF.md` — this rotation (old Iteration 1 — the `saved_searches`
+    correction pass — removed; prior Iteration 2 renumbered to Iteration 1; this entry
+    appended as the new Iteration 2).
+- Migration revisions: `0007` (new, `down_revision = "0006"`) — adds
+  `saved_search_titles`. `0001`–`0006` unchanged.
+- Commands run and exact results:
+  - `git checkout -b phase-1/saved-search-titles 33a38e3` → success, clean tree,
+    `HEAD` at `33a38e3`.
+  - `ruff format .` → 1 file reformatted (the new test file, before an `SIM117`
+    nested-`with` fix) → recheck: 30 files formatted.
+  - `ruff check .` (first run) → 1 finding: `SIM117` (nested `async with` statements
+    in the two-independent-saved-searches cascade test) → combined into a single
+    `async with (... , ...):` statement → all checks passed.
+  - `mypy app tests` → success, 22 source files.
+  - `pytest -v` (first and only run) → **167 passed, 0 skipped** — no failures this
+    time; the expired-attribute (`MissingGreenlet`) bug that recurred on the two
+    previous slices did not recur here, since `_insert_saved_search`'s returned id is
+    captured before any later commit.
+  - `DATABASE_URL=...jobgoblin_test alembic current` (before any change) → `0006`.
+  - `DATABASE_URL=...jobgoblin_test alembic upgrade head` → success, `0006 -> 0007`
+    ("existing `0006 -> 0007`" scenario).
+  - `DATABASE_URL=...jobgoblin_test alembic downgrade 0006` / `upgrade head` →
+    success (round-trip scenario).
+  - `DATABASE_URL=...jobgoblin_test alembic check` → `No new upgrade operations
+    detected.`
+  - `DATABASE_URL=...jobgoblin_test alembic downgrade base` / `upgrade head` →
+    success, ` -> 0001 -> ... -> 0006 -> 0007` (fresh `base -> head`).
+  - `alembic current` against the **development** database (default `DATABASE_URL`,
+    no override) → `0006`, unchanged throughout — confirmed untouched.
+  - `pytest -q` (final re-run after the full migration verification sequence) →
+    **167 passed**.
+- Risks exercised from `PHASE_RISK_CHECKLIST.md`: "define nullability/defaults/
+  uniqueness/checks/indexes/ON DELETE before implementing each table" — all ten
+  product decisions above were approved before migration `0007` was written, none
+  invented during implementation; "every migration is reviewed and tested upgrade ->
+  downgrade -> upgrade" — exercised as four scenarios (existing `0006 -> 0007`,
+  round-trip, fresh `base -> head`, `alembic check`); "PostgreSQL behavior is tested
+  against PostgreSQL" — the partial-unique-index primary-title invariant (including
+  the zero-primary-allowed and change-of-primary cases) is proven against real
+  Postgres constraint enforcement, not asserted from code; "destructive cascades" —
+  proven both for the deleted search's own title and for a second, unrelated search's
+  title surviving untouched, using real, separately-committed transactions.
+- Skipped or unavailable verification: none. Every command above executed for real,
+  including the development-database confirmation.
+- Deviations and ADR impact: none — `ruff check` caught one `SIM117` style finding,
+  fixed before the first full verification pass; no test failures at any point. No
+  ADR impact — Phase 1 implementation-slice detail only.
+- Known limitations: "exactly one primary title" is intentionally unenforced at the
+  database level (decision 8) — a saved search with zero primary titles is valid and
+  the application layer, not the schema, is responsible for prompting the user to pick
+  one if that UX is ever needed; `updated_at` still only advances for ORM-driven
+  writes (unchanged, out of scope for this pass, same as prior tables).
+- Recommended next smallest slice: none proposed by the implementing agent — per the
+  workflow, this pass stops for Codex's review before any further slice is considered.
+- STOP — awaiting Codex review and user approval. Do not begin
+  `saved_search_locations`.
+
+### Work review
+
+Status: awaiting review.
