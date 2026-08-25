@@ -53,7 +53,7 @@ class SavedSearch(Base):
     *object* (not array/string/number/bool) when non-null; deeper shape
     (e.g. which keys `enabled_sources` may contain) is validated by Phase
     2's `QueryPlanner` against `ProviderRegistry`/`ProviderCapabilities`, not
-    by a Phase 1 database constraint — see docs/ARCHITECTURE.md SS6.5-6.6.
+    by a Phase 1 database constraint — see docs/ARCHITECTURE.md §6.5–6.6.
     """
 
     __tablename__ = "saved_searches"
@@ -95,9 +95,9 @@ class SavedSearch(Base):
     enabled_providers: Mapped[list[str] | None] = mapped_column(
         MutableList.as_mutable(ARRAY(Text)), nullable=True
     )
-    # Deliberately unconstrained: plain `numeric`, no precision/scale, no
-    # non-negative CHECK (explicit product decision — unlike the integer
-    # numeric fields below, which do get non-negative CHECKs).
+    # Plain `numeric`, deliberately without precision/scale (no rounding, no
+    # maximum) — but, like the integer numeric fields below, still requires
+    # a non-negative value via the CHECK in __table_args__.
     radius_miles: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     remote_rules: Mapped[str] = mapped_column(Text, nullable=False)
     salary_floor: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -129,6 +129,10 @@ class SavedSearch(Base):
         CheckConstraint(
             r"trim(both E'\t\n\r ' from name) <> ''",
             name="name_not_empty",
+        ),
+        CheckConstraint(
+            "radius_miles IS NULL OR radius_miles >= 0",
+            name="radius_miles_non_negative",
         ),
         CheckConstraint(
             "remote_rules IN ('remote_only', 'hybrid_ok', 'onsite_ok', 'any')",

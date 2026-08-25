@@ -25,14 +25,15 @@ written (not inferred silently):
   `CHECK` requiring the value be NULL or >= 0, plus an additional `CHECK`
   requiring `salary_floor <= preferred_salary` whenever both are non-null —
   the same pattern as `candidate_profiles`' salary fields.
-- `radius_miles` is a deliberately **unconstrained** `numeric` column: no
-  precision/scale and no non-negative `CHECK`, unlike the integer numeric
-  fields above.
+- `radius_miles` is `numeric` with no precision/scale (no rounding, no
+  maximum) but **is** restricted by a non-negative `CHECK`, same as the
+  integer numeric fields above — a negative search radius is not a valid
+  domain magnitude.
 - `enabled_sources` and `scoring_weights` are `jsonb`, nullable, each
   restricted by a `CHECK` requiring the stored value be a top-level JSON
   *object* when non-null (`jsonb_typeof(...) = 'object'`) — deeper shape
   (e.g. which provider/source keys `enabled_sources` may contain) is a
-  Phase 2 `QueryPlanner`-time concern (docs/ARCHITECTURE.md SS6.5-6.6), not a
+  Phase 2 `QueryPlanner`-time concern (docs/ARCHITECTURE.md §6.5–6.6), not a
   Phase 1 database constraint.
 - `created_at`/`updated_at` are added as non-null `timestamptz` columns with
   `server_default now()`, consistent with every other implemented table,
@@ -41,6 +42,13 @@ written (not inferred silently):
   `candidate_skills`).
 - `is_active` is not null with `server_default true`, per its documented
   default.
+
+Corrected in place (not via a new forward migration) after an independent
+review caught that the first version of this migration wrongly omitted the
+non-negative `radius_miles` CHECK: unlike `0002`/`0003`'s email-whitespace
+fix, this migration had not yet been applied to the development database —
+only to the disposable `jobgoblin_test` database, which is safe to rebuild —
+so there is no already-applied-elsewhere version to preserve or drift from.
 """
 
 from collections.abc import Sequence
@@ -104,6 +112,10 @@ def upgrade() -> None:
         sa.CheckConstraint(
             r"trim(both E'\t\n\r ' from name) <> ''",
             name=op.f("ck_saved_searches_name_not_empty"),
+        ),
+        sa.CheckConstraint(
+            "radius_miles IS NULL OR radius_miles >= 0",
+            name=op.f("ck_saved_searches_radius_miles_non_negative"),
         ),
         sa.CheckConstraint(
             "remote_rules IN ('remote_only', 'hybrid_ok', 'onsite_ok', 'any')",

@@ -152,12 +152,13 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   (`backend/app/db/models/saved_search.py`), migration `0006` (`down_revision = "0005"`),
   and database tests all pass — including the `name` trim/non-empty `CHECK`s,
   `remote_rules`/`polling_schedule` enum `CHECK`s, non-negative `CHECK`s on
-  `salary_floor`/`preferred_salary`/`recency_limit_hours`, the
-  `salary_floor <= preferred_salary` `CHECK`, `radius_miles` left deliberately
-  unconstrained, `ON DELETE CASCADE` from `users`, and — the first `jsonb` columns in this
-  schema — `MutableDict`-tracked top-level mutation with a documented (and tested) nested-
-  mutation limitation, plus a top-level-JSON-object `CHECK` on `enabled_sources`/
-  `scoring_weights` (see `docs/DATA_MODEL.md`). No other Phase 1 table is implemented yet;
+  `radius_miles`/`salary_floor`/`preferred_salary`/`recency_limit_hours` (`radius_miles`
+  has no precision/scale, but is still non-negative), the
+  `salary_floor <= preferred_salary` `CHECK`, `ON DELETE CASCADE` from `users`, and — the
+  first `jsonb` columns in this schema — `MutableDict`-tracked top-level mutation with a
+  documented (and tested) nested-mutation limitation, plus a top-level-JSON-object `CHECK`
+  on `enabled_sources`/`scoring_weights` (see `docs/DATA_MODEL.md`). No other Phase 1
+  table is implemented yet;
   the rest of Phase 1's exit gate (§[PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md))
   remains outstanding.
 - **Phases 2-14: not started.** Begin each phase only after completing its preflight in

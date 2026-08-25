@@ -90,9 +90,10 @@ approval before migration `0006` was written:
 - `salary_floor`, `preferred_salary`, and `recency_limit_hours` each have a `CHECK`
   requiring the value be NULL or `>= 0`, plus a `CHECK` requiring
   `salary_floor <= preferred_salary` whenever both are non-null.
-- `radius_miles` is **deliberately unconstrained**: plain `numeric`, no precision/scale,
-  no non-negative `CHECK` — an explicit product decision, not an oversight (contrast with
-  the integer numeric fields above, which do get non-negative `CHECK`s).
+- `radius_miles` is plain `numeric` with no precision/scale (no rounding, no maximum —
+  that part is a deliberate product decision), but **does** require a non-negative
+  `CHECK`, same as the integer numeric fields above — a negative search radius is not a
+  valid domain magnitude.
 - `enabled_sources` and `scoring_weights` (the first `jsonb` columns in this schema) are
   each restricted by a `CHECK` requiring the stored value be a top-level JSON *object*
   when non-null; deeper shape is a Phase 2 `QueryPlanner`-time concern
@@ -256,7 +257,7 @@ for right now" (§24).
 | user_id | UUID FK → users, `ON DELETE CASCADE`, not null | non-unique `INDEX` for lookup |
 | name | text, not null | normalized before storage — see below |
 | excluded_titles | text[], nullable | NULL = never specified |
-| radius_miles | numeric, nullable | deliberately unconstrained — no precision/scale, no `CHECK` |
+| radius_miles | numeric, nullable | no precision/scale (deliberate); `CHECK (radius_miles IS NULL OR radius_miles >= 0)` |
 | remote_rules | text, not null | enum: remote_only / hybrid_ok / onsite_ok / any |
 | salary_floor | int, nullable | hard filter; `CHECK (salary_floor IS NULL OR salary_floor >= 0)` |
 | preferred_salary | int, nullable | soft/scoring signal; `CHECK (preferred_salary IS NULL OR preferred_salary >= 0)`, plus `CHECK (salary_floor IS NULL OR preferred_salary IS NULL OR salary_floor <= preferred_salary)` |
@@ -827,7 +828,7 @@ reviewed against this list directly:
 | `users` | `CHECK (email = lower(trim(both E'\t\n\r ' from email)))`, `CHECK (trim(both E'\t\n\r ' from email) <> '')`, `UNIQUE` index on `lower(email)` | normalized-email invariant (current, as of migration `0003`) enforced at the database, not just the ORM validator — see the table's own section above (Rev 5/6) |
 | `candidate_profiles` | `UNIQUE (user_id)`; `CHECK` on `remote_preference` enum; non-negative `CHECK`s on `years_experience`/`salary_expectation_min`/`salary_expectation_max`; `CHECK (salary_expectation_min <= salary_expectation_max)` | enforce 1:1 with `users` while that holds; reject an invalid `remote_preference`, a negative experience/salary value, or an inverted salary range at the database — see the table's own section above (Rev 7) |
 | `candidate_skills` | `UNIQUE (candidate_profile_id, lower(skill))`; `CHECK (skill = trim(both E'\t\n\r ' from skill))`; `CHECK (trim(both E'\t\n\r ' from skill) <> '')`; `CHECK` on `priority` enum | one entry per skill per profile, case-insensitive; reject a non-normalized, empty, or invalid-priority skill at the database — see the table's own section above (Rev 8) |
-| `saved_searches` | `INDEX (user_id)`; `CHECK (name = trim(both E'\t\n\r ' from name))`; `CHECK (trim(both E'\t\n\r ' from name) <> '')`; `CHECK` on `remote_rules`/`polling_schedule` enums; non-negative `CHECK`s on `salary_floor`/`preferred_salary`/`recency_limit_hours`; `CHECK (salary_floor <= preferred_salary)`; `CHECK` requiring `enabled_sources`/`scoring_weights` be a top-level JSON object when non-null | reject a non-normalized/empty `name`, an invalid enum, a negative bound, an inverted salary range, or a non-object jsonb value at the database; `radius_miles` is deliberately unconstrained — see the table's own section above (Rev 9) |
+| `saved_searches` | `INDEX (user_id)`; `CHECK (name = trim(both E'\t\n\r ' from name))`; `CHECK (trim(both E'\t\n\r ' from name) <> '')`; `CHECK` on `remote_rules`/`polling_schedule` enums; non-negative `CHECK`s on `radius_miles`/`salary_floor`/`preferred_salary`/`recency_limit_hours`; `CHECK (salary_floor <= preferred_salary)`; `CHECK` requiring `enabled_sources`/`scoring_weights` be a top-level JSON object when non-null | reject a non-normalized/empty `name`, an invalid enum, a negative bound, an inverted salary range, or a non-object jsonb value at the database; `radius_miles` has no precision/scale but is non-negative like the other numeric fields — see the table's own section above (Rev 9) |
 | `saved_search_titles` | `UNIQUE (saved_search_id, lower(title))` | one entry per title per search, case-insensitive |
 | `saved_search_locations` | `UNIQUE (saved_search_id, lower(trim(location_text)))` | one entry per location text per search |
 | `companies` | `UNIQUE (lower(domain)) WHERE domain IS NOT NULL` | strongest available company identity signal, case-normalized (Rev 3, item 8b); **no** uniqueness on `normalized_name` (see conservative collision behavior above) |
