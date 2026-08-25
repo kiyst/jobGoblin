@@ -401,4 +401,56 @@ reviewed.*
 
 ### Work review
 
-Status: awaiting review.
+- Date and reviewing agent: 2026-08-24, Codex.
+- Diff/revision reviewed: commit `195eb09` (`feat(phase-1): implement saved search
+  titles slice`) against approved base `33a38e3` on branch
+  `phase-1/saved-search-titles`. The branch matched
+  `origin/phase-1/saved-search-titles`, and the working tree was clean before review.
+- Verification independently performed:
+  - Inspected the complete `33a38e3..195eb09` diff and resulting model, migration
+    `0007`, model registration, factory/real-commit helper, all 26 new tests,
+    data-model/roadmap changes, and handoff rotation.
+  - Confirmed the title normalization checks, case-insensitive scoped unique index,
+    partial primary-title index, FK cascade, timestamps, and model/migration metadata
+    are structurally consistent with the approved decisions.
+  - `ruff format --check .`: 30 files already formatted.
+  - `ruff check .`: passed.
+  - `mypy app tests`: passed for 22 source files.
+  - `pytest -v`: 167 passed, 0 skipped.
+  - Independently rebuilt `jobgoblin_test` via `base -> 0001 -> ... -> 0007`: passed.
+  - Independently ran `0007 -> 0006 -> 0007`: passed.
+  - `alembic check` at test-database head: no new upgrade operations detected.
+  - Live-schema inspection confirmed PostgreSQL has `is_primary DEFAULT false`, the
+    functional index on `(saved_search_id, lower(title))`, and the partial unique index
+    on `saved_search_id WHERE is_primary`.
+  - Live database verification after all checks: `jobgoblin_test` contained zero users
+    and titles; development remained untouched at `0006` with zero users.
+- Findings, ordered by severity, with file and line references:
+  1. **Medium — the server-default test supplies the value itself and therefore cannot
+     detect a missing database default.** `backend/tests/conftest.py:246-260` defines
+     `make_saved_search_title(..., is_primary=False)` and always passes that value into
+     the model. `backend/tests/test_saved_search_titles.py:297-311` uses this factory,
+     so `test_is_primary_defaults_to_false` explicitly inserts `false`; it would still
+     pass if migration `0007` omitted `server_default false`. This is particularly
+     important because the current Alembic environment does not enable explicit
+     server-default comparison. Replace or rewrite the test so the insert genuinely
+     omits `is_primary` (preferably a raw SQL `INSERT ... RETURNING is_primary`, or an
+     ORM instance constructed without that attribute), then assert PostgreSQL supplies
+     `false`. The implementation is currently correct—the live-schema inspection above
+     confirmed it—but the committed regression test does not prove that invariant.
+- Missing or inconclusive verification: only the automated server-default assertion
+  described above; the current live database was inspected directly and is correct.
+- Architecture/documentation consistency: model, migration, live schema, indexes,
+  constraints, behavior, `DATA_MODEL.md`, and `ROADMAP.md` are otherwise mutually
+  consistent and match all ten approved decisions.
+- Verdict: changes requested.
+- Exact requested corrections:
+  1. Correct `test_is_primary_defaults_to_false` so the tested insert omits
+     `is_primary` and proves the database server default supplies `false`. Keep the
+     explicit-false and explicit-true paths covered separately as useful.
+  2. Rerun format, lint, mypy, all tests, `0007 -> 0006 -> 0007`, and `alembic check`
+     against `jobgoblin_test`; confirm development remains at `0006`. Rotate the
+     ledger, commit/push only `phase-1/saved-search-titles`, and stop. No model,
+     migration, or product-document changes are requested unless the corrected test
+     exposes a real mismatch. Do not begin `saved_search_locations`.
+- STOP — reviewer changed only this `Work review`; no implementation files were changed.
