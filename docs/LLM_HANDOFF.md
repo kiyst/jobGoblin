@@ -497,4 +497,75 @@ Nothing below was rewritten — only renumbered.*
 
 ### Work review
 
-Status: awaiting review.
+- Date and reviewing agent: 2026-08-24, Codex.
+- Diff/revision reviewed: commit `a267a2f` (`feat(phase-1): implement saved searches
+  slice`) against approved base `906cf24` on branch `phase-1/saved-searches`. The branch
+  matched `origin/phase-1/saved-searches`, and the working tree was clean before review.
+- Verification independently performed:
+  - Inspected the complete `906cf24..a267a2f` diff and resulting saved-search model,
+    migration `0006`, registration/base changes, factory and real-commit helper, all 51
+    new tests, data-model/roadmap changes, and handoff rotation.
+  - Confirmed the array mappings use `MutableList`, JSONB mappings use `MutableDict`,
+    name normalization uses the approved four-character set, JSONB object checks and
+    enum/salary/recency checks match between metadata and migration, and the user FK,
+    lookup index, defaults, and timestamps are otherwise consistent.
+  - `ruff format --check .`: 27 files already formatted.
+  - `ruff check .`: passed.
+  - `mypy app tests`: passed for 20 source files.
+  - `pytest -v`: 132 passed, 0 skipped; this includes a test that currently codifies
+    the incorrect acceptance of a negative radius described in finding 1.
+  - Independently ran `0006 -> 0005 -> 0006` against `jobgoblin_test`: passed.
+  - `alembic check` at test-database head: no new upgrade operations detected.
+  - Live PostgreSQL verification after the suite and round-trip: `jobgoblin_test`
+    remained at `0006` with zero users/saved searches; the development database
+    remained untouched at `0005` with zero users.
+- Findings, ordered by severity, with file and line references:
+  1. **High — the approved non-negative radius invariant was reversed.**
+     `backend/app/db/models/saved_search.py:97-101`,
+     `backend/migrations/versions/0006_saved_searches.py:28-30,79`,
+     `backend/tests/test_saved_searches.py:454-469`, `docs/DATA_MODEL.md:93-94,259,830`,
+     and `docs/ROADMAP.md:156` deliberately allow and document negative
+     `radius_miles`. The authorization used “unconstrained `NUMERIC`” to mean no
+     precision/scale/rounding/maximum, then separately and explicitly required a
+     non-negative `radius_miles` `CHECK`. A negative search radius is also not a valid
+     domain magnitude. Add matching model/migration constraints
+     (`radius_miles IS NULL OR radius_miles >= 0`), replace the negative-acceptance
+     test with zero/positive acceptance and negative rejection, and correct every
+     statement that calls the column unconstrained. Keep `Numeric` itself free of
+     precision and scale.
+  2. **Medium — several explicitly requested persistence/edge contracts are absent
+     from the test suite.** `backend/tests/test_saved_searches.py` has no complete-row
+     test, no duplicate-name-accepted test, no explicit SQL-NULL-versus-empty-object
+     round-trip for both JSONB fields, no direct-SQL JSON `null` rejection, and no
+     precise fractional `Decimal` radius round-trip. Its generic top-level JSON test
+     (`:339-357`) stores numeric values in `enabled_sources`, rather than exercising
+     the supported real shape and the required replacement pattern
+     `enabled_sources[provider] = [*old_sources, new_source]`. Add these cases. Keep
+     the documented top-level-only `MutableDict` limitation, but prove the supported
+     nested-list replacement workflow through a separate-session reload.
+  3. **Low — two source comments contain a malformed documentation reference.**
+     `backend/app/db/models/saved_search.py:54` and
+     `backend/migrations/versions/0006_saved_searches.py:35` say `SS6.5-6.6`; change
+     this to `§6.5–6.6` (or plain `sections 6.5–6.6`).
+- Missing or inconclusive verification: fresh `base -> head` was reported by the
+  implementer but not repeated in this review because the bounded round-trip and
+  metadata drift check were sufficient to establish the current migration mechanics;
+  it must be rerun after correcting migration `0006`.
+- Architecture/documentation consistency: all approved rules except the radius
+  invariant are represented consistently. The current model, migration, tests,
+  `DATA_MODEL.md`, and `ROADMAP.md` agree with one another about allowing negative
+  radius, but that agreement is based on a misreading of the authorization and must be
+  corrected together.
+- Verdict: changes requested.
+- Exact requested corrections:
+  1. Add the non-negative `radius_miles` CHECK to model metadata and migration `0006`
+     while retaining unconstrained `Numeric` precision/scale; correct its tests and all
+     affected documentation.
+  2. Add the missing complete/minimal-boundary tests listed in finding 2, including
+     realistic `enabled_sources` replacement and separate-session persistence.
+  3. Correct the two malformed section references.
+  4. Rerun format, lint, mypy, all tests, `0006 -> 0005 -> 0006`, fresh `base -> head`,
+     and `alembic check` against `jobgoblin_test`; confirm development remains at
+     `0005`. Rotate the ledger, commit/push only `phase-1/saved-searches`, and stop.
+     Do not begin either saved-search child table.
+- STOP — reviewer changed only this `Work review`; no implementation files were changed.
