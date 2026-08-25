@@ -1,5 +1,6 @@
 import uuid
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Callable
+from contextlib import asynccontextmanager, suppress
 
 import pytest
 import pytest_asyncio
@@ -8,7 +9,7 @@ from sqlalchemy.engine import URL, make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
 from app.config import Settings, get_settings
-from app.db.models import CandidateProfile, User
+from app.db.models import CandidateProfile, CandidateSkill, User
 from app.db.session import check_database_connection
 from app.main import app
 
@@ -192,3 +193,135 @@ def make_candidate_profile() -> Callable[..., CandidateProfile]:
         return CandidateProfile(user_id=user_id, remote_preference=remote_preference)
 
     return _make
+
+
+@pytest.fixture
+def make_candidate_skill() -> Callable[..., CandidateSkill]:
+    """Factory for a valid `CandidateSkill` — tests only deviate from this
+    intentionally. Takes the owning `candidate_profile_id` explicitly rather
+    than creating a `CandidateProfile` itself, matching
+    `make_candidate_profile`'s pattern."""
+
+    def _make(
+        candidate_profile_id: uuid.UUID,
+        *,
+        skill: str = "Python",
+        category: str | None = None,
+        priority: str = "must_have",
+    ) -> CandidateSkill:
+        return CandidateSkill(
+            candidate_profile_id=candidate_profile_id,
+            skill=skill,
+            category=category,
+            priority=priority,
+        )
+
+    return _make
+
+
+@asynccontextmanager
+async def real_committed_user_and_profile(
+    db_engine: AsyncEngine, email: str, **profile_kwargs: object
+) -> AsyncIterator[tuple[AsyncSession, uuid.UUID, uuid.UUID]]:
+    """Creates a `User` and `CandidateProfile` via real, separately-committed
+    transactions on `db_engine` (not the savepoint-isolated `db_session`),
+    for tests that need genuinely durable commits (e.g. to exercise
+    `ON DELETE CASCADE` or observe `updated_at` actually advance). Guarantees
+    cleanup even if the test body raises or leaves the session in a
+    failed-transaction state — an earlier version of these tests committed
+    rows with no cleanup path at all, which left permanent rows in the shared
+    disposable test database on any assertion failure.
+
+    Lives here (not in a single test module) so more than one test module
+    can reuse it without importing from each other — see
+    `real_committed_user_profile_and_skill` below, which builds on this.
+
+    Captures both ids immediately after each row's own commit and yields
+    plain UUIDs, not ORM attribute access after a later commit: `commit()`
+    expires every attribute of every object in the session by default, and
+    reading an expired attribute outside of an active await under asyncpg's
+    async dialect raises `MissingGreenlet` instead of transparently
+    refreshing it.
+
+    Cleanup always runs in a fresh session (the caller's session may be
+    closed, or mid-failed-transaction, by the time cleanup runs) and fetches
+    each row before deleting it, so a row already removed by the test body
+    itself (e.g. the profile, after its owning user was deleted and the
+    delete cascaded) is skipped rather than erroring.
+    """
+    session = AsyncSession(bind=db_engine)
+    user_id: uuid.UUID | None = None
+    profile_id: uuid.UUID | None = None
+    try:
+        user = User(email=email)
+        session.add(user)
+        await session.commit()
+        await session.refresh(user)
+        user_id = user.id
+
+        profile = CandidateProfile(user_id=user_id, **profile_kwargs)
+        session.add(profile)
+        await session.commit()
+        await session.refresh(profile)
+        profile_id = profile.id
+
+        yield session, user_id, profile_id
+    finally:
+        with suppress(Exception):
+            await session.rollback()
+        await session.close()
+
+        async with AsyncSession(bind=db_engine) as cleanup_session:
+            if profile_id is not None:
+                existing_profile = await cleanup_session.get(CandidateProfile, profile_id)
+                if existing_profile is not None:
+                    await cleanup_session.delete(existing_profile)
+                    await cleanup_session.commit()
+            if user_id is not None:
+                existing_user = await cleanup_session.get(User, user_id)
+                if existing_user is not None:
+                    await cleanup_session.delete(existing_user)
+                    await cleanup_session.commit()
+
+
+@asynccontextmanager
+async def real_committed_user_profile_and_skill(
+    db_engine: AsyncEngine,
+    email: str,
+    *,
+    profile_kwargs: dict[str, object] | None = None,
+    **skill_kwargs: object,
+) -> AsyncIterator[tuple[AsyncSession, uuid.UUID, uuid.UUID, uuid.UUID]]:
+    """Builds on `real_committed_user_and_profile`: additionally creates a
+    `CandidateSkill` row on the same real-commit lifecycle, with its own
+    best-effort cleanup (skill, then — via the wrapped helper — profile,
+    then user) so a partially cascaded state is skipped rather than treated
+    as an error, same rationale as the wrapped helper above.
+    """
+    skill_kwargs.setdefault("skill", "Python")
+    skill_kwargs.setdefault("priority", "must_have")
+    resolved_profile_kwargs: dict[str, object] = {"remote_preference": "no_preference"}
+    resolved_profile_kwargs.update(profile_kwargs or {})
+    async with real_committed_user_and_profile(db_engine, email, **resolved_profile_kwargs) as (
+        session,
+        user_id,
+        profile_id,
+    ):
+        skill = CandidateSkill(candidate_profile_id=profile_id, **skill_kwargs)
+        session.add(skill)
+        skill_id: uuid.UUID | None = None
+        try:
+            await session.commit()
+            await session.refresh(skill)
+            skill_id = skill.id
+
+            yield session, user_id, profile_id, skill_id
+        finally:
+            if skill_id is not None:
+                with suppress(Exception):
+                    await session.rollback()
+                async with AsyncSession(bind=db_engine) as cleanup_session:
+                    existing_skill = await cleanup_session.get(CandidateSkill, skill_id)
+                    if existing_skill is not None:
+                        await cleanup_session.delete(existing_skill)
+                        await cleanup_session.commit()

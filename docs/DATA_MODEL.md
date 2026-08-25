@@ -66,6 +66,19 @@ value be NULL or `>= 0`; and `salary_expectation_min`/`salary_expectation_max` h
 additional `CHECK` requiring `salary_expectation_min <= salary_expectation_max` whenever
 both are non-null.
 
+**Rev 8 changes** (third Phase 1 implementation slice, `candidate_skills`): this table's
+column list below omitted `created_at`/`updated_at` entirely despite the global
+convention stated below ("all tables have `created_at`/`updated_at` unless noted" — this
+table was never marked as an exception); both are now added, consistent with `users` and
+`candidate_profiles`. `skill` is normalized the same way `email` is — trimmed of exactly
+the four-character whitespace set (space, tab, LF, CR), enforced by database `CHECK`s in
+addition to an ORM validator — but, unlike `email`, `skill` is **not** lowercased; its
+case is preserved, and case-insensitive uniqueness is enforced separately by a functional
+index on `lower(skill)`, scoped per `candidate_profile_id`. `priority` is not null (this
+table's own convention: only `category` is documented as nullable) and restricted by
+`CHECK` to `must_have` / `preferred`. `category` remains nullable free text with no enum
+`CHECK` — the documented examples are illustrative, not a closed set.
+
 Conventions used throughout:
 
 - **Minimum supported PostgreSQL version: 16.** See
@@ -178,20 +191,37 @@ multi-profile/multi-resume feature would key off of.
 | updated_at | timestamptz, not null | `server_default now()`, reset to `now()` by the ORM (`onupdate`) on every update |
 
 ### `candidate_skills`
-Normalized child table rather than an array column, because skills need independent
-matching against the taxonomy (Phase 3) and a weight/priority per skill.
+**Implemented** (`backend/app/db/models/candidate_skill.py`; migration `0005`,
+`down_revision = "0004"`). Normalized child table rather than an array column, because
+skills need independent matching against the taxonomy (Phase 3) and a weight/priority per
+skill.
 
 | column | type | notes |
 |---|---|---|
-| id | UUID PK | |
-| candidate_profile_id | UUID FK → candidate_profiles, `ON DELETE CASCADE` | |
-| skill | text | raw or already-canonical string; taxonomy resolution is Phase 3 |
-| category | text | nullable: language / framework / cloud / tool / etc. |
-| priority | text | enum: must_have / preferred |
+| id | UUID PK | generated application-side (`uuid.uuid4`), not a DB-side default |
+| candidate_profile_id | UUID FK → candidate_profiles, `ON DELETE CASCADE`, not null | |
+| skill | text, not null | raw or already-canonical string; taxonomy resolution is Phase 3; normalized before storage — see below |
+| category | text, nullable | free text: language / framework / cloud / tool / etc. — examples, not an enforced enum |
+| priority | text, not null | enum: must_have / preferred — `CHECK (priority IN (...))` |
+| created_at | timestamptz, not null | `server_default now()` |
+| updated_at | timestamptz, not null | `server_default now()`, reset to `now()` by the ORM (`onupdate`) on every update |
 
-Unique constraint: `(candidate_profile_id, lower(skill))` — case-insensitive, so "Python"
-and "python" can't both be added to the same profile as separate rows before the Phase 3
-taxonomy exists to catch that.
+**Skill normalization:** trimmed of exactly the same four-character whitespace set as
+`users.email` (space, tab, line feed, carriage return — ASCII `0x20`/`0x09`/`0x0A`/`0x0D`)
+— but, unlike `email`, **never lowercased**; case is preserved for display. A SQLAlchemy
+`@validates` normalizer covers the ORM write path, but the database is the authoritative
+backstop, not the validator:
+- `CHECK (skill = trim(both E'\t\n\r ' from skill))` — rejects any row (including a write
+  that bypasses the ORM) whose stored value isn't already trimmed.
+- `CHECK (trim(both E'\t\n\r ' from skill) <> '')` — rejects empty or
+  covered-whitespace-only skill.
+- `UNIQUE` functional index on `(candidate_profile_id, lower(skill))` — case-insensitive,
+  scoped per profile, so "Python" and "python" can't both be added to the same profile as
+  separate rows before the Phase 3 taxonomy exists to catch that. A plain `UniqueConstraint`
+  can't express `lower(skill)`, so this is an `Index(..., unique=True)`, not a table
+  constraint. Because the CHECK constraints above guarantee a stored row is already fully
+  trimmed, a whitespace-wrapped duplicate can never be inserted in the first place — the
+  CHECK rejects it before the index is ever consulted.
 
 ### `saved_searches`
 "What am I looking for right now" (§24).
@@ -754,7 +784,7 @@ reviewed against this list directly:
 |---|---|---|
 | `users` | `CHECK (email = lower(trim(both E'\t\n\r ' from email)))`, `CHECK (trim(both E'\t\n\r ' from email) <> '')`, `UNIQUE` index on `lower(email)` | normalized-email invariant (current, as of migration `0003`) enforced at the database, not just the ORM validator — see the table's own section above (Rev 5/6) |
 | `candidate_profiles` | `UNIQUE (user_id)`; `CHECK` on `remote_preference` enum; non-negative `CHECK`s on `years_experience`/`salary_expectation_min`/`salary_expectation_max`; `CHECK (salary_expectation_min <= salary_expectation_max)` | enforce 1:1 with `users` while that holds; reject an invalid `remote_preference`, a negative experience/salary value, or an inverted salary range at the database — see the table's own section above (Rev 7) |
-| `candidate_skills` | `UNIQUE (candidate_profile_id, lower(skill))` | one entry per skill per profile, case-insensitive |
+| `candidate_skills` | `UNIQUE (candidate_profile_id, lower(skill))`; `CHECK (skill = trim(both E'\t\n\r ' from skill))`; `CHECK (trim(both E'\t\n\r ' from skill) <> '')`; `CHECK` on `priority` enum | one entry per skill per profile, case-insensitive; reject a non-normalized, empty, or invalid-priority skill at the database — see the table's own section above (Rev 8) |
 | `saved_search_titles` | `UNIQUE (saved_search_id, lower(title))` | one entry per title per search, case-insensitive |
 | `saved_search_locations` | `UNIQUE (saved_search_id, lower(trim(location_text)))` | one entry per location text per search |
 | `companies` | `UNIQUE (lower(domain)) WHERE domain IS NOT NULL` | strongest available company identity signal, case-normalized (Rev 3, item 8b); **no** uniqueness on `normalized_name` (see conservative collision behavior above) |

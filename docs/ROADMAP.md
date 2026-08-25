@@ -141,9 +141,14 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   `CHECK`, non-negative `CHECK`s on `years_experience`/`salary_expectation_min`/
   `salary_expectation_max`, the `salary_expectation_min <= salary_expectation_max`
   `CHECK`, and the NULL-means-unspecified/empty-array-means-explicitly-none distinction
-  on the `text[]` columns (see `docs/DATA_MODEL.md`). No other Phase 1 table is
-  implemented yet; the rest of Phase 1's exit gate
-  (§[PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md)) remains outstanding.
+  on the `text[]` columns (see `docs/DATA_MODEL.md`). `candidate_skills` slice also
+  complete and verified: model (`backend/app/db/models/candidate_skill.py`), migration
+  `0005` (`down_revision = "0004"`), and database tests all pass — including the
+  same-whitespace-set trim/non-empty `CHECK`s and case-preserving normalization used for
+  `users.email`, the case-insensitive `(candidate_profile_id, lower(skill))` unique index,
+  `ON DELETE CASCADE` from `candidate_profiles`, and the `priority` enum `CHECK` (see
+  `docs/DATA_MODEL.md`). No other Phase 1 table is implemented yet; the rest of Phase 1's
+  exit gate (§[PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md)) remains outstanding.
 - **Phases 2-14: not started.** Begin each phase only after completing its preflight in
   [PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md) and receiving approval for the next
   smallest slice.

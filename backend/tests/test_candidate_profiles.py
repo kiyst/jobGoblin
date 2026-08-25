@@ -1,6 +1,5 @@
 import uuid
-from collections.abc import AsyncIterator, Callable
-from contextlib import asynccontextmanager, suppress
+from collections.abc import Callable
 from datetime import UTC, datetime
 
 import pytest
@@ -10,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.db.models import CandidateProfile, User
 from app.db.models.candidate_profile import REMOTE_PREFERENCES
+from tests.conftest import real_committed_user_and_profile
 
 ARRAY_FIELDS = [
     "target_role_families",
@@ -28,67 +28,6 @@ async def _insert_user(
     await db_session.commit()
     await db_session.refresh(user)
     return user
-
-
-@asynccontextmanager
-async def _real_committed_user_and_profile(
-    db_engine: AsyncEngine, email: str, **profile_kwargs: object
-) -> AsyncIterator[tuple[AsyncSession, uuid.UUID, uuid.UUID]]:
-    """Creates a `User` and `CandidateProfile` via real, separately-committed
-    transactions on `db_engine` (not the savepoint-isolated `db_session`),
-    for tests that need genuinely durable commits (e.g. to exercise
-    `ON DELETE CASCADE` or observe `updated_at` actually advance). Guarantees
-    cleanup even if the test body raises or leaves the session in a
-    failed-transaction state — a prior version of these tests committed rows
-    with no cleanup path at all, which left permanent rows in the shared
-    disposable test database on any assertion failure.
-
-    Captures both ids immediately after each row's own commit and yields
-    plain UUIDs, not ORM attribute access after a later commit: `commit()`
-    expires every attribute of every object in the session by default, and
-    reading an expired attribute outside of an active await under asyncpg's
-    async dialect raises `MissingGreenlet` instead of transparently
-    refreshing it.
-
-    Cleanup always runs in a fresh session (the caller's session may be
-    closed, or mid-failed-transaction, by the time cleanup runs) and fetches
-    each row before deleting it, so a row already removed by the test body
-    itself (e.g. the profile, after its owning user was deleted and the
-    delete cascaded) is skipped rather than erroring.
-    """
-    session = AsyncSession(bind=db_engine)
-    user_id: uuid.UUID | None = None
-    profile_id: uuid.UUID | None = None
-    try:
-        user = User(email=email)
-        session.add(user)
-        await session.commit()
-        await session.refresh(user)
-        user_id = user.id
-
-        profile = CandidateProfile(user_id=user_id, **profile_kwargs)
-        session.add(profile)
-        await session.commit()
-        await session.refresh(profile)
-        profile_id = profile.id
-
-        yield session, user_id, profile_id
-    finally:
-        with suppress(Exception):
-            await session.rollback()
-        await session.close()
-
-        async with AsyncSession(bind=db_engine) as cleanup_session:
-            if profile_id is not None:
-                existing_profile = await cleanup_session.get(CandidateProfile, profile_id)
-                if existing_profile is not None:
-                    await cleanup_session.delete(existing_profile)
-                    await cleanup_session.commit()
-            if user_id is not None:
-                existing_user = await cleanup_session.get(User, user_id)
-                if existing_user is not None:
-                    await cleanup_session.delete(existing_user)
-                    await cleanup_session.commit()
 
 
 async def test_table_starts_empty(db_session: AsyncSession) -> None:
@@ -165,7 +104,7 @@ async def test_deleting_user_cascades_to_candidate_profile(db_engine: AsyncEngin
     """Uses `db_engine` directly (real, separate transactions) so the
     `ON DELETE CASCADE` is actually exercised by PostgreSQL, not merely
     implied by ORM-side cascade configuration."""
-    async with _real_committed_user_and_profile(
+    async with real_committed_user_and_profile(
         db_engine, "cascade-owner@example.com", remote_preference="remote"
     ) as (session, user_id, profile_id):
         user = await session.get(User, user_id)
@@ -276,7 +215,7 @@ async def test_appending_to_array_field_persists_after_reload(
     `.refresh()` on the same object) so this proves the value was written to
     PostgreSQL, not merely echoed back from the original session's identity
     map."""
-    async with _real_committed_user_and_profile(
+    async with real_committed_user_and_profile(
         db_engine,
         f"array-mutate-{field}@example.com",
         remote_preference="no_preference",
@@ -431,7 +370,7 @@ async def test_updating_a_profile_advances_updated_at(db_engine: AsyncEngine) ->
     `now()` is fixed for the lifetime of one transaction (including nested
     savepoints), so this uses `db_engine` directly for two genuinely
     separate, really-committed transactions."""
-    async with _real_committed_user_and_profile(
+    async with real_committed_user_and_profile(
         db_engine, "updated-at@example.com", remote_preference="onsite"
     ) as (session, _user_id, profile_id):
         profile = await session.get(CandidateProfile, profile_id)

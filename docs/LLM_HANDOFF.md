@@ -83,238 +83,18 @@ and record the actual commit it reviewed.
 ## Iteration 1
 
 *Rotated in from "Iteration 2" per the two-iteration rule: its `Work review` (below) is
-no longer pending — Codex's verdict was "changes requested," and all five requested
-corrections were approved and addressed in the next iteration — so the previous
-Iteration 1 (the third `users`-slice correction pass and Codex's approval of it) was
+no longer pending — Codex's verdict was "approved," with no requested corrections — so
+the previous Iteration 1 (the first `candidate_profiles` implementation pass and Codex's
+"changes requested" review of it, already superseded by this iteration's fixes) was
 removed rather than kept alongside two already-reviewed entries. Nothing below was
 rewritten — only renumbered.*
 
 ### Work done
 
 - Date and agent: 2026-08-24, Claude Code (Sonnet 4.5).
-- Approved phase/slice: first bounded Phase 1 slice after `users` — `candidate_profiles`
-  only. No `candidate_skills`, no saved searches, no auth, no APIs/services, no
-  providers/ingestion/matching/normalization, no other Phase 1 table.
-- Outcome: model, migration `0004`, factory fixture, and database tests implemented and
-  verified against real PostgreSQL. 52 tests passed, 0 skipped (up from 30 — 22 new
-  `candidate_profiles` tests).
-- Base/starting commit: `49aa748` on branch `codex/phase1-users-wip` — Codex's approval
-  commit for the `users` slice (previous Iteration 1's `Work review`, verdict: approved),
-  confirmed by the user before authorizing this slice. `main` did not exist in this
-  repository before this pass (git was initialized with `main` as the default branch
-  name, but every commit had only ever been made on `codex/phase1-users-wip`); per the
-  user's explicit choice (asked directly rather than assumed), `main` was created at
-  `49aa748` and pushed, then `phase-1/candidate-profiles` was branched from `main`.
-- Ending commit or working-tree state: `b02158f` (`feat(phase-1): implement candidate
-  profiles slice` — this is the commit Codex's `Work review` below actually reviewed).
-- Three product rules were not determined by `docs/DATA_MODEL.md` and were resolved by
-  explicit user approval before migration `0004` was written, per this slice's approval
-  message's explicit stop-and-ask instruction (not silently invented):
-  1. The five `text[]` columns (`target_role_families`, `certifications`,
-     `preferred_industries`, `excluded_industries`, `preferred_locations`) are nullable
-     with no server default; NULL means "never specified," distinct from a future
-     explicit empty-array write.
-  2. `years_experience`, `salary_expectation_min`, and `salary_expectation_max` each have
-     a `CHECK` requiring the value be NULL or `>= 0`.
-  3. `salary_expectation_min`/`salary_expectation_max` have an additional `CHECK`
-     requiring `salary_expectation_min <= salary_expectation_max` whenever both are
-     non-null.
-  `remote_preference` was treated as **not** nullable — unlike the columns above, its
-  row in `docs/DATA_MODEL.md`'s existing column table was never annotated "nullable,"
-  matching that table's own established convention (only nullable columns are marked as
-  such) — so this was not treated as a fourth open ambiguity.
-- Files changed:
-  - `backend/app/db/models/candidate_profile.py` (new) — `CandidateProfile` model
-    following `User`'s existing pattern (`Uuid` PK with app-side `uuid.uuid4` default,
-    `timestamptz` `created_at`/`updated_at` with `server_default=func.now()` and
-    `onupdate=func.now()`). `REMOTE_PREFERENCES` module constant lists the four allowed
-    values, reused by the migration's CHECK and by tests.
-  - `backend/app/db/models/__init__.py` — registers `CandidateProfile` alongside `User`.
-  - `backend/app/db/base.py` — docstring updated to mention both Phase 1 models.
-  - `backend/migrations/versions/0004_candidate_profiles.py` (new) — `down_revision =
-    "0003"`. Table created with all constraints defined inline in `op.create_table(...)`
-    (the `0002_users.py` pattern, not a separate `op.drop_constraint`/`op.f()` ALTER
-    step, so the naming-convention double-prefixing bug hit during the `users` slice
-    cannot recur here). `downgrade()` drops the table.
-  - `backend/tests/conftest.py` — added `make_candidate_profile` factory fixture,
-    parameterized by an explicit `user_id` (not creating its own `User`) so tests can
-    inspect/delete the owning row directly (e.g. to observe the cascade).
-  - `backend/tests/test_candidate_profiles.py` (new) — 22 tests: valid insert/retrieve;
-    one-profile-per-user uniqueness; nonexistent `user_id` FK rejection; `ON DELETE
-    CASCADE` from `users` (verified with real, separate commits via `db_engine`, not the
-    savepoint-isolated `db_session`); every allowed `remote_preference` value accepted;
-    an invalid value rejected; all nullable fields default to `None`; NULL vs. an
-    explicitly-stored empty array round-trip as distinguishable values;
-    `relocation_willingness` NULL-means-unknown; both accepted (zero/positive) and
-    rejected (negative) cases for each of the three non-negative `CHECK`s; both accepted
-    (equal, ascending, min-only) and rejected (descending) cases for the salary-ordering
-    `CHECK`; `updated_at` advancing on update (same `db_engine`-direct pattern as
-    `test_users.py`, for the same `now()`-is-transaction-fixed reason); UTC-aware
-    timestamps; and an explicit `test_table_starts_empty` isolation check.
-  - `docs/DATA_MODEL.md` — `candidate_profiles` marked **Implemented**; added a "Rev 7"
-    note and updated the table's own column list and the "Phase 1 constraints & indexes"
-    summary table to state the three resolved rules explicitly (nullability, the two
-    non-negative `CHECK`s, and the ordering `CHECK`).
-  - `docs/ROADMAP.md` — Phase 1 status line now also describes the `candidate_profiles`
-    slice as complete and verified.
-  - `docs/LLM_HANDOFF.md` — this rotation (old Iteration 1 — the second `users`
-    correction pass — removed; prior Iteration 2 renumbered to Iteration 1; this entry
-    appended as the new Iteration 2).
-- Migration revisions: `0004` (new, `down_revision = "0003"`) — adds `candidate_profiles`.
-  `0001`–`0003` unchanged.
-- Commands run and exact results:
-  - `git branch main 49aa748` / `git push -u origin main` → success (new branch on
-    origin); `git checkout -b phase-1/candidate-profiles main` → success, clean tree,
-    `HEAD` at `49aa748`.
-  - Read `docs/DATA_MODEL.md`'s `candidate_profiles` section, `docs/ARCHITECTURE.md`, and
-    ADRs 0001–0007: confirmed none of the three product rules above were already
-    determined (the closest existing precedent, `jobs.salary_min`/`salary_max`, is
-    documented as "nullable, as originally stated" with no `CHECK`) — presented to the
-    user as three explicit ambiguities before writing any migration code; user resolved
-    all three.
-  - `DATABASE_URL=...jobgoblin_test alembic current` (before any change) → `0003`.
-  - `DATABASE_URL=...jobgoblin_test alembic upgrade head` → success, `0003 -> 0004`
-    ("existing `0003 -> 0004`" scenario).
-  - `DATABASE_URL=...jobgoblin_test alembic downgrade 0003` → success.
-  - `DATABASE_URL=...jobgoblin_test alembic upgrade head` → success, `0003 -> 0004` again
-    (round-trip scenario).
-  - `DATABASE_URL=...jobgoblin_test alembic check` → `No new upgrade operations
-    detected.`
-  - `DATABASE_URL=...jobgoblin_test alembic downgrade base` → success, all tables
-    dropped.
-  - `DATABASE_URL=...jobgoblin_test alembic upgrade head` → success, ` -> 0001 -> 0002 ->
-    0003 -> 0004` ("fresh `base -> head`" scenario).
-  - `alembic current` against the **development** database (default `DATABASE_URL`, no
-    override) → `0003`, both before and after all of the above — confirmed untouched.
-  - `ruff format --check .` → 2 files needed reformatting (the new model and test file)
-    → `ruff format .` → recheck: 21 files formatted.
-  - `ruff check .` → all checks passed.
-  - `mypy app tests` → success, 16 source files.
-  - `pytest -v` (first full run) → **16 failed, 36 passed**. Root cause investigated
-    rather than worked around: several new tests read an ORM attribute (e.g. `user.id`,
-    `profile.id`) *after* a later `session.commit()` had already expired it
-    (`expire_on_commit` is on by default), which under `asyncpg`'s async dialect raises
-    `MissingGreenlet` instead of transparently refreshing — not a database bug. Fixed by
-    capturing needed values into local variables immediately after the commit that
-    populated them, before any subsequent commit. One of the affected tests
-    (`test_deleting_user_cascades_to_candidate_profile`) used `db_engine` directly (real
-    commits, no savepoint) and had no cleanup path for this failure, which left rows
-    permanently committed in `jobgoblin_test` and caused unrelated tests in the same file
-    to fail on stale row counts on every subsequent run until the database was reset
-    (`alembic downgrade base` / `upgrade head` against `jobgoblin_test` only).
-  - `pytest -v` (after the fix, against a freshly reset `jobgoblin_test`) → **52 passed,
-    0 skipped**.
-- Risks exercised from `PHASE_RISK_CHECKLIST.md`: "define nullability/defaults/
-  uniqueness/checks/indexes/ON DELETE before implementing each table" — done explicitly
-  via the three-ambiguity stop-and-ask above, before any migration code was written;
-  "every migration is reviewed and tested upgrade -> downgrade -> upgrade" — exercised as
-  three separate scenarios (existing `0003 -> 0004`, round-trip, fresh `base -> head`);
-  "PostgreSQL behavior is tested against PostgreSQL" — the `MissingGreenlet`/expired-
-  attribute bug above was only caught by actually running the tests against real
-  Postgres, not by code review; "null-bearing unique key tests" and "accepted+rejected
-  constraint tests" — covered for every new `CHECK` and the `UNIQUE (user_id)` index.
-- Skipped or unavailable verification: none. Every command above executed for real,
-  including the development-database confirmation.
-- Deviations and ADR impact: the first full test run failed (16 of 52) for the reasons
-  above; fixed and re-verified from a clean database before reporting success. No ADR
-  impact — Phase 1 implementation-slice detail only.
-- Known limitations: none new. `updated_at` still only advances for ORM-driven writes
-  (unchanged, out of scope for this pass, same as the `users` slice).
-- Recommended next smallest slice: none proposed by the implementing agent — per the
-  workflow, this pass stops for Codex's review before any further slice is considered.
-- STOP — awaiting Codex review and user approval. Do not begin `candidate_skills`.
-
-### Work review
-
-- Date and reviewing agent: 2026-08-24, Codex
-- Diff/revision reviewed: commit `b02158f` (`feat(phase-1): implement candidate profiles
-  slice`) against approved base `49aa748` on branch `phase-1/candidate-profiles`. The
-  branch matched `origin/phase-1/candidate-profiles`, and the working tree was clean
-  before review.
-- Verification independently performed:
-  - Inspected the complete `49aa748..b02158f` diff and every changed model, migration,
-    fixture, test, roadmap, data-model, and handoff entry.
-  - `ruff format --check .`: 21 files already formatted.
-  - `ruff check .`: passed.
-  - `mypy app tests`: passed for 16 source files.
-  - `pytest -v`: 52 passed, 0 skipped.
-  - Independently ran `0004 -> 0003 -> 0004` against `jobgoblin_test`: passed.
-  - Independently ran `0004 -> base -> 0004` against `jobgoblin_test`: passed.
-  - `alembic check` at test-database head: no new upgrade operations detected.
-  - Live database verification after review: development remained at `0003` with zero
-    users; the disposable test database returned to `0004` with zero users and zero
-    candidate profiles.
-  - Ran a rolled-back/cleaned ORM mutation probe against `jobgoblin_test`: after loading
-    `target_role_families=['engineering']`, appending `'data'`, and committing,
-    `session.is_modified(..., include_collections=True)` returned `False` and the stored
-    value remained `['engineering']`.
-- Findings, ordered by severity, with file and line references:
-  1. **High — in-place edits to every array field are silently discarded by the ORM.**
-     The five PostgreSQL arrays at
-     `backend/app/db/models/candidate_profile.py:37-44` use plain `ARRAY(Text)`.
-     SQLAlchemy does not track mutation inside a plain Python list without its mutable
-     extension. The independent live probe confirmed that `.append()` leaves the model
-     clean and loses the change on commit. Candidate preferences and certifications are
-     inherently editable collections, so requiring every future caller to replace the
-     entire list is an undocumented and failure-prone constraint.
-  2. **Medium — the real-commit cascade test can still poison the shared test database
-     when it fails.** `backend/tests/test_candidate_profiles.py:94-123` commits a user
-     and profile but has no `try/finally` cleanup path. The reported first run already
-     demonstrated this exact failure mode: an exception left durable rows that caused
-     unrelated tests to fail. Capturing expired IDs fixed the immediate
-     `MissingGreenlet`, but not the database-leak mechanism. The `updated_at` test at
-     lines 315-344 begins its cleanup `try` only after both committed inserts, leaving a
-     similar pre-`try` leak window.
-  3. **Low — two test names/claims exceed their actual coverage.** The parameterized
-     `test_non_negative_check_accepts_zero_and_positive` sets only `0`, never a positive
-     value, and salary ordering covers minimum-only but not maximum-only. Both behaviors
-     should be explicit boundary cases because the handoff claims they were exercised.
-  4. **Low — the consolidated users constraint row is stale.**
-     `docs/DATA_MODEL.md:755` still lists the original bare-`trim` checks from migration
-     `0002`, even though migration `0003` and the current model enforce the explicit
-     space/tab/LF/CR expressions. The users section explains the history correctly, but
-     the consolidated head-schema checklist should state the current constraints.
-- Missing or inconclusive verification: I did not deliberately force an assertion
-  failure inside a real-commit test because that would intentionally dirty the shared
-  test database; the absence of cleanup is directly visible, and the implementation
-  handoff already records the reproduced leak from the first run.
-- Architecture/documentation consistency: Table shape, null-versus-empty semantics,
-  remote-preference enum, numeric/order checks, timestamps, one-to-one uniqueness, FK
-  cascade, migration chain, roadmap, and the approved product decisions are otherwise
-  consistent.
-- Verdict: changes requested.
-- Exact requested corrections:
-  1. Wrap each array mapping with SQLAlchemy's mutable list tracking (for example,
-     `MutableList.as_mutable(ARRAY(Text))`) so in-place append/remove operations mark the
-     profile dirty. No migration should be needed because this changes ORM tracking, not
-     PostgreSQL DDL. Add a PostgreSQL-backed test that mutates a loaded array in place,
-     commits, reloads it in a new session/transaction, and observes the persisted value;
-     parameterize across all five array fields.
-  2. Make every test using real commits failure-safe. Capture identifiers as soon as
-     available, wrap the entire committed lifecycle in cleanup, rollback failed
-     sessions when necessary, and perform best-effort cleanup in a fresh session so an
-     assertion or intermediate commit failure cannot leave durable users/profiles.
-  3. Actually test both zero and a positive value for all three non-negative columns,
-     and add the maximum-only salary-bound case.
-  4. Update the consolidated users row in `docs/DATA_MODEL.md` to show the current
-     migration-`0003` explicit whitespace checks while retaining the historical
-     explanation in the users section.
-  5. Rerun format, lint, mypy, all tests, `0004 -> 0003 -> 0004`, and `alembic check`.
-     Rotate the two-entry ledger, record the correction as the newest `Work done`,
-     commit/push only `phase-1/candidate-profiles`, and stop. Do not begin
-     `candidate_skills`.
-- STOP — reviewer changed only this `Work review`; no implementation files were changed.
-
----
-
-## Iteration 2
-
-### Work done
-
-- Date and agent: 2026-08-24, Claude Code (Sonnet 4.5).
 - Approved phase/slice: bounded correction pass over the `candidate_profiles` slice only
-  — all five corrections in Iteration 1's `Work review` approved as one pass. No
-  `candidate_skills`, no new table.
+  — all five corrections in the previous iteration's `Work review` approved as one pass.
+  No `candidate_skills`, no new table.
 - Outcome: all five corrections addressed and verified against real PostgreSQL. 61 tests
   passed, 0 skipped (up from 52 — 9 net new tests).
 - Base/starting commit: `b02158f` (`feat(phase-1): implement candidate profiles slice`)
@@ -322,9 +102,9 @@ rewritten — only renumbered.*
   (`docs(review): request candidate profile mutation fixes`) on top. Confirmed via
   `git log --oneline` and `git status` (clean, branch up to date with origin) before
   making any changes.
-- Ending commit or working-tree state: this commit (recorded by the agent completing
-  this pass; see the agent's final response for the actual resolved hash, per this
-  file's own "Git workflow" instructions above).
+- Ending commit or working-tree state: `2024d1d` (`fix(phase-1): track array mutations
+  and harden candidate profile tests` — this is the commit Codex's `Work review` below
+  actually reviewed and approved).
 - Files changed:
   - `backend/app/db/models/candidate_profile.py` — the five `text[]` columns
     (`target_role_families`, `certifications`, `preferred_industries`,
@@ -458,3 +238,168 @@ rewritten — only renumbered.*
   pass are accepted. Do not begin `candidate_skills` or merge to `main` until the user
   explicitly approves the next action.
 - STOP — reviewer changed only this `Work review`; no implementation files were changed.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date and agent: 2026-08-24, Claude Code (Sonnet 4.5).
+- Approved phase/slice: first bounded Phase 1 slice after `candidate_profiles` —
+  `candidate_skills` only. No `saved_searches`, no auth, no APIs/services, no
+  providers/ingestion/matching/normalization, no other Phase 1 table.
+- Outcome: model, migration `0005`, factories, and database tests implemented and
+  verified against real PostgreSQL. 81 tests passed, 0 skipped (up from 61 — 20 new
+  `candidate_skills` tests).
+- Base/starting commit: `7817073` (`docs(review): approve candidate profile
+  corrections`) on branch `phase-1/candidate-profiles` — Codex's approval commit for
+  the `candidate_profiles` slice (Iteration 1's `Work review`, verdict: approved).
+  Confirmed via `git status` (clean, up to date with origin) and `git log --oneline`
+  before making any changes. Branch `phase-1/candidate-skills` created directly from
+  `7817073`, per the user's explicit instruction — `main` was not touched.
+- Ending commit or working-tree state: this commit (recorded by the agent completing
+  this pass; see the agent's final response for the actual resolved hash, per this
+  file's own "Git workflow" instructions above).
+- Product decisions approved by the user before this pass began (proposed in advance,
+  not invented during implementation):
+  1. `created_at`/`updated_at` added as non-null `timestamptz` columns with
+     `server_default now()` and ORM `onupdate=func.now()` — `docs/DATA_MODEL.md`'s
+     `candidate_skills` column list had omitted them despite the project's global
+     "all tables have these unless noted" convention.
+  2. `skill` is normalized by trimming exactly the same four-character whitespace set
+     as `users.email` (space, tab, LF, CR), preserving case and internal whitespace —
+     unlike `email`, never lowercased.
+  3. Database `CHECK`s requiring `skill = trim(both E'\t\n\r ' from skill)` and
+     `trim(both E'\t\n\r ' from skill) <> ''`, mirroring `email`'s normalization/
+     not-empty pair.
+  4. A matching ORM `@validates` normalizer using exactly the same four-character set
+     — explicitly not Python's unrestricted `.strip()`, for the same reason `email`'s
+     validator doesn't use it (Postgres's `trim()` and Python's `.strip()` disagree on
+     which characters count as whitespace).
+  5. Case-insensitive, profile-scoped uniqueness via a functional unique index on
+     `(candidate_profile_id, lower(skill))`.
+  6. `category` nullable free text, no enum `CHECK`.
+  7. `priority` not null, `CHECK`-restricted to `must_have` / `preferred`.
+- Files changed:
+  - `backend/app/db/models/candidate_skill.py` (new) — `CandidateSkill` model. `skill`
+    uses a `@validates` normalizer (trim only, no lowercasing — the opposite case-
+    handling from `User._normalize_email`). `PRIORITIES` module constant lists the two
+    allowed values, reused by tests. The case-insensitive unique index is declared with
+    `Index(..., CandidateSkill.candidate_profile_id, func.lower(CandidateSkill.skill),
+    unique=True)`, the same pattern as `users`' `lower(email)` index.
+  - `backend/app/db/models/__init__.py` — registers `CandidateSkill` alongside the
+    other two models.
+  - `backend/app/db/base.py` — docstring updated to mention all three Phase 1 models.
+  - `backend/migrations/versions/0005_candidate_skills.py` (new) — `down_revision =
+    "0004"`. Table created with all constraints defined inline in
+    `op.create_table(...)` (the `0002_users.py`/`0004_candidate_profiles.py` pattern);
+    the functional unique index added via a separate `op.create_index(...)`, matching
+    `0002`'s `lower(email)` index. `downgrade()` drops the index then the table.
+  - `backend/tests/conftest.py`:
+    - Added `make_candidate_skill`, a factory fixture matching the
+      `make_candidate_profile` pattern (takes `candidate_profile_id` explicitly).
+    - Moved `_real_committed_user_and_profile` here from
+      `test_candidate_profiles.py`, renamed `real_committed_user_and_profile` (no
+      leading underscore, now a shared cross-module helper) — required so
+      `candidate_skills`' own real-commit tests (cascade delete, `updated_at`
+      advancement) could reuse the same failure-safe lifecycle/cleanup pattern without
+      one test module importing from another, per the user's explicit instruction.
+      Behavior is unchanged from the version reviewed and approved in the previous
+      iteration.
+    - Added `real_committed_user_profile_and_skill`, which builds on the above by
+      additionally creating a `CandidateSkill` on the same real-commit lifecycle, with
+      its own best-effort cleanup (skill, then — via the wrapped helper — profile,
+      then user) so a partially cascaded state is skipped rather than treated as an
+      error. Defaults `profile_kwargs["remote_preference"]` to `"no_preference"` so
+      callers that only care about the skill don't have to supply it.
+  - `backend/tests/test_candidate_profiles.py` — updated to import
+    `real_committed_user_and_profile` from `tests.conftest` instead of defining it
+    locally; call sites renamed to match. No behavioral change; re-verified all 61
+    existing tests still pass unmodified otherwise.
+  - `backend/tests/test_candidate_skills.py` (new) — 20 tests: valid insert/retrieve;
+    ORM trimming of a whitespace-wrapped skill (case preserved); direct-SQL rejection
+    of an empty, a covered-whitespace-only, and a non-normalized (leading/trailing-
+    wrapped) skill; direct-SQL rejection of a whitespace-wrapped duplicate attempting
+    to bypass the uniqueness index (mirroring `test_users.py`'s equivalent test —
+    the normalization `CHECK` rejects it before the index is ever consulted);
+    same-case and case-insensitive duplicate rejection; confirmation that case is
+    preserved despite case-insensitive uniqueness; the same skill accepted on two
+    different profiles (proves per-profile scoping); distinct skills accepted on one
+    profile; nonexistent `candidate_profile_id` FK rejection; `ON DELETE CASCADE` from
+    `candidate_profiles` (real commits via the new fixture-shared helper); every
+    allowed `priority` value accepted; an invalid `priority` rejected; `category`
+    defaulting to `None` and accepting arbitrary free text; UTC-aware timestamps; and
+    `updated_at` advancing on update (same real-commit pattern as the other two
+    tables' equivalent tests).
+  - `docs/DATA_MODEL.md` — `candidate_skills` marked **Implemented**; added a "Rev 8"
+    note and updated the table's own column list (adding `created_at`/`updated_at`,
+    marking `skill`/`priority` not null) and the "Phase 1 constraints & indexes"
+    summary table to state the normalization/not-empty/priority `CHECK`s explicitly.
+  - `docs/ROADMAP.md` — Phase 1 status line now also describes the `candidate_skills`
+    slice as complete and verified.
+  - `docs/LLM_HANDOFF.md` — this rotation (old Iteration 1 — the first
+    `candidate_profiles` implementation pass — removed; prior Iteration 2 renumbered
+    to Iteration 1; this entry appended as the new Iteration 2).
+- Migration revisions: `0005` (new, `down_revision = "0004"`) — adds
+  `candidate_skills`. `0001`–`0004` unchanged.
+- Commands run and exact results:
+  - `git checkout -b phase-1/candidate-skills 7817073` → success, clean tree, `HEAD`
+    at `7817073`.
+  - `ruff format .` → 24 files left unchanged (no reformatting needed at any point in
+    this pass).
+  - `ruff check .` → all checks passed.
+  - `mypy app tests` → success, 18 source files.
+  - `pytest -v` (first run, after adding `real_committed_user_profile_and_skill` and
+    the new test file) → **2 failed, 79 passed**: both new real-commit tests
+    (`test_deleting_profile_cascades_to_candidate_skill`,
+    `test_updating_a_skill_advances_updated_at`) failed with a `NotNullViolationError`
+    on `candidate_profiles.remote_preference` — `real_committed_user_profile_and_skill`
+    forwarded an empty `profile_kwargs` by default, and unlike the
+    `make_candidate_profile` fixture, the underlying
+    `real_committed_user_and_profile` helper has no default for
+    `remote_preference`. Fixed by defaulting `remote_preference` to
+    `"no_preference"` inside `real_committed_user_profile_and_skill` specifically
+    (not the shared, lower-level helper, which intentionally requires callers to be
+    explicit) whenever the caller doesn't override it.
+  - `pytest -v` (after the fix) → **81 passed, 0 skipped**.
+  - `DATABASE_URL=...jobgoblin_test alembic current` (before any change) → `0004`.
+  - `DATABASE_URL=...jobgoblin_test alembic upgrade head` → success, `0004 -> 0005`
+    ("existing `0004 -> 0005`" scenario).
+  - `DATABASE_URL=...jobgoblin_test alembic downgrade 0004` → success.
+  - `DATABASE_URL=...jobgoblin_test alembic upgrade head` → success, `0004 -> 0005`
+    again (round-trip scenario, repeated twice against the same running instance).
+  - `DATABASE_URL=...jobgoblin_test alembic check` → `No new upgrade operations
+    detected.`
+  - `DATABASE_URL=...jobgoblin_test alembic downgrade base` → success, all tables
+    dropped.
+  - `DATABASE_URL=...jobgoblin_test alembic upgrade head` → success, ` -> 0001 -> 0002
+    -> 0003 -> 0004 -> 0005` ("fresh `base -> head`" scenario).
+  - `alembic current` against the **development** database (default `DATABASE_URL`,
+    no override) → `0003`, unchanged throughout — confirmed untouched.
+  - `pytest -q` (final re-run after the full migration verification sequence) →
+    **81 passed**.
+- Risks exercised from `PHASE_RISK_CHECKLIST.md`: "define nullability/defaults/
+  uniqueness/checks/indexes/ON DELETE before implementing each table" — all seven
+  product decisions above were approved before migration `0005` was written, none
+  invented during implementation; "every migration is reviewed and tested upgrade ->
+  downgrade -> upgrade" — exercised as four separate scenarios (existing `0004 ->
+  0005`, round-trip twice, fresh `base -> head`); "PostgreSQL behavior is tested
+  against PostgreSQL" — every normalization/uniqueness/priority `CHECK` has both a
+  direct-SQL and (where applicable) an ORM-path test exercising real Postgres, not
+  mocked; "destructive cascades" — the profile-to-skill cascade is proven with real,
+  separately-committed transactions, not merely asserted from ORM configuration.
+- Skipped or unavailable verification: none. Every command above executed for real,
+  including the development-database confirmation.
+- Deviations and ADR impact: the first full test run failed (2 of 81) for the
+  `remote_preference` default reason above; fixed and re-verified before reporting
+  success. No ADR impact — Phase 1 implementation-slice detail only.
+- Known limitations: none new. `updated_at` still only advances for ORM-driven writes
+  (unchanged, out of scope for this pass, same as prior tables).
+- Recommended next smallest slice: none proposed by the implementing agent — per the
+  workflow, this pass stops for Codex's review before any further slice is considered.
+- STOP — awaiting Codex review and user approval. Do not begin `saved_searches`.
+
+### Work review
+
+Status: awaiting review.
