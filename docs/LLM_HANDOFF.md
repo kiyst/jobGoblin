@@ -373,4 +373,31 @@ renumbered, with "Ending commit" backfilled to the actual hash Codex reviewed.*
 
 ### Work review
 
-Status: awaiting review.
+- Date and reviewing agent: 2026-08-25, Codex.
+- Diff/revision reviewed: correction commit `a0a533f` against review commit
+  `b1138da` on `phase-1/saved-search-titles`; the branch was clean and matched
+  `origin/phase-1/saved-search-titles` before this review entry.
+- Verification performed:
+  - Inspected the complete `b1138da..a0a533f` diff. Product code, migration `0007`,
+    and product documentation are unchanged; the implementation diff is confined to
+    `backend/tests/test_saved_search_titles.py`.
+  - Confirmed the replacement test issues raw SQL that omits `is_primary`, uses
+    `RETURNING is_primary`, and therefore proves PostgreSQL—not the ORM or factory—
+    supplies `false`. Explicit `false` and explicit `true` remain separately covered.
+  - `ruff format --check .`: passed (30 files already formatted).
+  - `ruff check .`: passed.
+  - `mypy app tests`: passed (22 source files).
+  - `pytest -v`: 168 passed, 0 skipped.
+  - Independently ran `0007 -> 0006 -> 0007`: passed.
+  - `alembic check` at test-database head: no new upgrade operations detected.
+  - Final live database verification: `jobgoblin_test` was at `0007` with zero users
+    and titles; development remained untouched at `0006` with zero users.
+- Findings, ordered by severity, with file and line references: none.
+- Missing or inconclusive verification: none for this correction pass.
+- Architecture/documentation consistency: unchanged from the accepted implementation;
+  the corrected regression test now proves the documented database default directly.
+- Verdict: approved.
+- Exact requested corrections: none. The `saved_search_titles` slice and correction
+  pass are accepted. Do not begin `saved_search_locations`, modify or merge `main`, or
+  advance to any other slice until the user explicitly approves the next action.
+- STOP — reviewer changed only this `Work review`; no implementation files were changed.
