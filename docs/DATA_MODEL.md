@@ -117,6 +117,31 @@ previously state several product rules, resolved by explicit approval before mig
 - No separate plain index on `saved_search_id`: it is already the leading column of the
   `(saved_search_id, lower(title))` unique index, so a second index would be redundant.
 
+**Rev 11 changes** (sixth Phase 1 implementation slice, `saved_search_locations` — the
+final child table of the `saved_searches` group): this table's column list below did not
+previously state several product rules, resolved by explicit approval before migration
+`0008` was written:
+- `location_text` is normalized the same way `title`/`skill`/`name` are (trim-only, case
+  preserved, matching `CHECK`s). The unique index is `(saved_search_id,
+  lower(location_text))` — **not** `lower(trim(location_text))` as an earlier revision of
+  this section's prose implied — because the normalization `CHECK`s already guarantee
+  every stored value is trimmed, so a plain `lower(...)` expresses an equivalent but
+  stronger invariant on the stored data.
+- `latitude`/`longitude` each have a `CHECK` restricting them to a valid coordinate range
+  (`[-90, 90]` / `[-180, 180]`) when non-null, plus a coordinate-pair `CHECK` requiring
+  both be NULL or both be non-NULL — a half-geocoded row is not a valid state.
+- `radius_miles_override` has a `CHECK` requiring it be NULL or `>= 0`, matching
+  `saved_searches.radius_miles`'s established pattern.
+- All three numeric columns are left with no precision/scale, same as
+  `saved_searches.radius_miles`.
+- `created_at`/`updated_at` are added, per the same recurring gap already fixed for
+  `users`, `candidate_skills`, `saved_searches`, and `saved_search_titles`.
+- No separate plain index on `saved_search_id`: same reasoning as `saved_search_titles`.
+- **Corrected stale wording:** this table's own section previously said each location
+  carries its own "radius/remote override." No remote-override column has ever been
+  documented or approved for this table — only `radius_miles_override` exists. That
+  phrase was stale wording, corrected below; no new column was added.
+
 Conventions used throughout:
 
 - **Minimum supported PostgreSQL version: 16.** See
@@ -344,24 +369,43 @@ titles is a valid, unconstrained state — enforcing "exactly one" is deliberate
 attempted (would require a trigger, not a declarative constraint).
 
 ### `saved_search_locations`
-Split out for the same reason as titles — each location independently carries its own
-radius/remote override, and future geocoding work (master spec §30) keys off individual
+**Implemented** (`backend/app/db/models/saved_search_location.py`; migration `0008`,
+`down_revision = "0007"` — the final child table of the `saved_searches` group). Split out
+for the same reason as titles — each location independently carries its own radius
+override, and future per-location geocoding work (master spec §30) keys off individual
 location rows rather than a whole saved search.
 
 | column | type | notes |
 |---|---|---|
-| id | UUID PK | |
-| saved_search_id | UUID FK → saved_searches, `ON DELETE CASCADE` | |
-| location_text | text | e.g. "Ashburn, VA" |
-| latitude | numeric | nullable until geocoded |
-| longitude | numeric | nullable until geocoded |
-| radius_miles_override | numeric | nullable, falls back to saved_searches.radius_miles |
+| id | UUID PK | generated application-side (`uuid.uuid4`), not a DB-side default |
+| saved_search_id | UUID FK → saved_searches, `ON DELETE CASCADE`, not null | |
+| location_text | text, not null | e.g. "Ashburn, VA"; normalized before storage — see below |
+| latitude | numeric, nullable | nullable until geocoded; `CHECK (latitude IS NULL OR latitude BETWEEN -90 AND 90)`; no precision/scale |
+| longitude | numeric, nullable | nullable until geocoded; `CHECK (longitude IS NULL OR longitude BETWEEN -180 AND 180)`; no precision/scale |
+| radius_miles_override | numeric, nullable | falls back to `saved_searches.radius_miles` when null; `CHECK (radius_miles_override IS NULL OR radius_miles_override >= 0)`; no precision/scale |
+| created_at | timestamptz, not null | `server_default now()` |
+| updated_at | timestamptz, not null | `server_default now()`, reset to `now()` by the ORM (`onupdate`) on every update |
 
-Unique constraint: `(saved_search_id, lower(trim(location_text)))` — prevents accidental
-duplicate location rows from differing only in case/whitespace; does not attempt to
-dedupe genuinely different textual representations of the same place (e.g. "Ashburn, VA"
-vs. "Ashburn, Virginia") — that's a normalization/geocoding concern, not a uniqueness
-concern, and geocoding hasn't run yet at insert time.
+**Location text normalization:** trimmed of exactly the same four-character whitespace
+set as `saved_search_titles.title` (space, tab, line feed, carriage return) — case
+preserved, never lowercased. A SQLAlchemy `@validates` normalizer covers the ORM write
+path, but the database is the authoritative backstop:
+- `CHECK (location_text = trim(both E'\t\n\r ' from location_text))` — rejects any row
+  (including a write that bypasses the ORM) whose stored value isn't already trimmed.
+- `CHECK (trim(both E'\t\n\r ' from location_text) <> '')` — rejects empty or
+  covered-whitespace-only location text.
+- `UNIQUE` functional index on `(saved_search_id, lower(location_text))` — case-
+  insensitive, scoped per saved search. Only `lower(...)` is needed, not
+  `lower(trim(...))`: the CHECK constraints above already guarantee every stored value is
+  trimmed, so a whitespace-wrapped duplicate can never be inserted in the first place —
+  the CHECK rejects it before the index is ever consulted. Does not attempt to dedupe
+  genuinely different textual representations of the same place (e.g. "Ashburn, VA" vs.
+  "Ashburn, Virginia") — that's a normalization/geocoding concern, not a uniqueness
+  concern, and geocoding hasn't run yet at insert time.
+
+**Coordinate invariants:** `latitude`/`longitude` must be either both NULL (not yet
+geocoded) or both non-NULL (`CHECK ((latitude IS NULL) = (longitude IS NULL))`) — a
+half-geocoded row is not a valid state.
 
 ### `companies`
 Deduplicated employer identity. **This is deliberately not "solved" by a single unique
@@ -865,6 +909,7 @@ reviewed against this list directly:
 | `candidate_skills` | `UNIQUE (candidate_profile_id, lower(skill))`; `CHECK (skill = trim(both E'\t\n\r ' from skill))`; `CHECK (trim(both E'\t\n\r ' from skill) <> '')`; `CHECK` on `priority` enum | one entry per skill per profile, case-insensitive; reject a non-normalized, empty, or invalid-priority skill at the database — see the table's own section above (Rev 8) |
 | `saved_searches` | `INDEX (user_id)`; `CHECK (name = trim(both E'\t\n\r ' from name))`; `CHECK (trim(both E'\t\n\r ' from name) <> '')`; `CHECK` on `remote_rules`/`polling_schedule` enums; non-negative `CHECK`s on `radius_miles`/`salary_floor`/`preferred_salary`/`recency_limit_hours`; `CHECK (salary_floor <= preferred_salary)`; `CHECK` requiring `enabled_sources`/`scoring_weights` be a top-level JSON object when non-null | reject a non-normalized/empty `name`, an invalid enum, a negative bound, an inverted salary range, or a non-object jsonb value at the database; `radius_miles` has no precision/scale but is non-negative like the other numeric fields — see the table's own section above (Rev 9) |
 | `saved_search_titles` | `UNIQUE (saved_search_id, lower(title))`; `CHECK (title = trim(both E'\t\n\r ' from title))`; `CHECK (trim(both E'\t\n\r ' from title) <> '')`; partial `UNIQUE (saved_search_id) WHERE is_primary` | one entry per title per search, case-insensitive; reject a non-normalized or empty title; at most one primary title per search, zero allowed — see the table's own section above (Rev 10) |
+| `saved_search_locations` | `UNIQUE (saved_search_id, lower(location_text))`; `CHECK (location_text = trim(both E'\t\n\r ' from location_text))`; `CHECK (trim(both E'\t\n\r ' from location_text) <> '')`; `CHECK` on latitude/longitude range; `CHECK ((latitude IS NULL) = (longitude IS NULL))`; `CHECK (radius_miles_override IS NULL OR radius_miles_override >= 0)` | one entry per location per search, case-insensitive; reject a non-normalized/empty location, an out-of-range or half-geocoded coordinate pair, or a negative radius override — see the table's own section above (Rev 11) |
 | `saved_search_locations` | `UNIQUE (saved_search_id, lower(trim(location_text)))` | one entry per location text per search |
 | `companies` | `UNIQUE (lower(domain)) WHERE domain IS NOT NULL` | strongest available company identity signal, case-normalized (Rev 3, item 8b); **no** uniqueness on `normalized_name` (see conservative collision behavior above) |
 | `companies` | `INDEX (normalized_name)` | non-unique, for search/lookup only |

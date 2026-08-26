@@ -165,6 +165,15 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   the case-insensitive `(saved_search_id, lower(title))` unique index, the partial
   `UNIQUE (saved_search_id) WHERE is_primary` index enforcing at most one primary title
   per search while allowing zero, and `ON DELETE CASCADE` from `saved_searches` (see
+  `docs/DATA_MODEL.md`). `saved_search_locations` slice also complete and verified (the
+  final child table of the `saved_searches` group): model
+  (`backend/app/db/models/saved_search_location.py`), migration `0008`
+  (`down_revision = "0007"`), and database tests all pass — including the `location_text`
+  trim/non-empty `CHECK`s and case-preserving normalization (mirroring `title`), the
+  case-insensitive `(saved_search_id, lower(location_text))` unique index, `CHECK`s
+  restricting latitude to `[-90, 90]` and longitude to `[-180, 180]`, a coordinate-pair
+  `CHECK` requiring both be NULL or both be non-NULL, a non-negative `CHECK` on
+  `radius_miles_override`, and `ON DELETE CASCADE` from `saved_searches` (see
   `docs/DATA_MODEL.md`). No other Phase 1 table is implemented yet;
   the rest of Phase 1's exit gate (§[PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md))
   remains outstanding.

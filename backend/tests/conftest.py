@@ -9,7 +9,14 @@ from sqlalchemy.engine import URL, make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
 from app.config import Settings, get_settings
-from app.db.models import CandidateProfile, CandidateSkill, SavedSearch, SavedSearchTitle, User
+from app.db.models import (
+    CandidateProfile,
+    CandidateSkill,
+    SavedSearch,
+    SavedSearchLocation,
+    SavedSearchTitle,
+    User,
+)
 from app.db.session import check_database_connection
 from app.main import app
 
@@ -263,6 +270,25 @@ def make_saved_search_title() -> Callable[..., SavedSearchTitle]:
     return _make
 
 
+@pytest.fixture
+def make_saved_search_location() -> Callable[..., SavedSearchLocation]:
+    """Factory for a valid `SavedSearchLocation` — tests only deviate from
+    this intentionally. Takes the owning `saved_search_id` explicitly,
+    matching `make_saved_search_title`'s pattern."""
+
+    def _make(
+        saved_search_id: uuid.UUID,
+        *,
+        location_text: str = "Ashburn, VA",
+    ) -> SavedSearchLocation:
+        return SavedSearchLocation(
+            saved_search_id=saved_search_id,
+            location_text=location_text,
+        )
+
+    return _make
+
+
 @asynccontextmanager
 async def real_committed_user_and_profile(
     db_engine: AsyncEngine, email: str, **profile_kwargs: object
@@ -455,4 +481,43 @@ async def real_committed_user_saved_search_and_title(
                     existing_title = await cleanup_session.get(SavedSearchTitle, title_id)
                     if existing_title is not None:
                         await cleanup_session.delete(existing_title)
+                        await cleanup_session.commit()
+
+
+@asynccontextmanager
+async def real_committed_user_saved_search_and_location(
+    db_engine: AsyncEngine,
+    email: str,
+    *,
+    saved_search_kwargs: dict[str, object] | None = None,
+    **location_kwargs: object,
+) -> AsyncIterator[tuple[AsyncSession, uuid.UUID, uuid.UUID, uuid.UUID]]:
+    """Builds on `real_committed_user_and_saved_search`: additionally creates
+    a `SavedSearchLocation` row on the same real-commit lifecycle, with its
+    own best-effort cleanup (location, then — via the wrapped helper —
+    saved search, then user) so a partially cascaded state is skipped
+    rather than treated as an error, same rationale as the wrapped helper
+    above.
+    """
+    location_kwargs.setdefault("location_text", "Ashburn, VA")
+    async with real_committed_user_and_saved_search(
+        db_engine, email, **(saved_search_kwargs or {})
+    ) as (session, user_id, saved_search_id):
+        location = SavedSearchLocation(saved_search_id=saved_search_id, **location_kwargs)
+        session.add(location)
+        location_id: uuid.UUID | None = None
+        try:
+            await session.commit()
+            await session.refresh(location)
+            location_id = location.id
+
+            yield session, user_id, saved_search_id, location_id
+        finally:
+            if location_id is not None:
+                with suppress(Exception):
+                    await session.rollback()
+                async with AsyncSession(bind=db_engine) as cleanup_session:
+                    existing_location = await cleanup_session.get(SavedSearchLocation, location_id)
+                    if existing_location is not None:
+                        await cleanup_session.delete(existing_location)
                         await cleanup_session.commit()
