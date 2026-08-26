@@ -371,6 +371,20 @@ renumbered, with "Ending commit" backfilled to the actual hash Codex reviewed.*
 - STOP — awaiting Codex review and user approval. Do not begin
   `saved_search_locations`.
 
+**Merge record (appended after review, not a rewrite of the entry above):** Codex
+approved this correction pass in commit `aca923e` (`docs(review): approve saved
+search title correction`), with no further findings. Per the user's explicit
+authorization, `phase-1/saved-search-titles` was merged into `main` with a
+non-destructive fast-forward merge (`main` was a strict ancestor of the branch, so no
+merge commit was created) and pushed. `main`/`origin/main` are both now at `aca923e`,
+containing the complete approved history through migration `0007`
+(`saved_search_titles`). Post-merge verification on `main`: `ruff format --check .`
+and `ruff check .` passed (30 files); `mypy app tests` passed (22 source files);
+`pytest -q` — 168 passed, 0 skipped; `jobgoblin_test` confirmed at `0007 (head)`; the
+development database remains untouched at `0006` (no operational upgrade was
+authorized this turn). No branches were deleted, squashed, or rebased; no force-push
+was used. `saved_search_locations` implementation has not begun.
+
 ### Work review
 
 - Date and reviewing agent: 2026-08-25, Codex.
