@@ -4,24 +4,33 @@ Purpose: this file is the shared communication ledger between the implementing L
 the reviewing LLM. Update it at the end of every bounded implementation or correction
 pass so the user does not have to copy status messages between agents.
 
+Canonical operating process: [LLM_WORKFLOW.md](LLM_WORKFLOW.md). Both agents must read
+it before proposing, implementing, correcting, or reviewing work. This file is the
+short-lived ledger; `LLM_WORKFLOW.md` defines roles, risk classes, verification depth,
+and the mechanical-documentation correction rule.
+
 This ledger records only the two latest completed iterations. Git remains the source of
 truth for diffs and rollback; record commit or base references whenever they exist.
 
 ## Required workflow
 
-1. Before working, read the master project documentation, `PHASE_RISK_CHECKLIST.md`,
-   and both iterations in this file.
+1. Before working, read `LLM_WORKFLOW.md`, the master project documentation,
+   `PHASE_RISK_CHECKLIST.md`, and both iterations in this file.
 2. The implementing LLM completes only the approved slice, runs the required checks,
    and fills in a new `Work done` section. It must not fill in its own `Work review`.
 3. The reviewing LLM independently inspects the repository and actual diff, runs
    proportionate checks, gives the user its findings, and writes the same findings in
    that iteration's `Work review` section. A review does not authorize code changes.
+   Codex may directly resolve only a mechanical documentation defect that satisfies
+   every condition in `LLM_WORKFLOW.md`; it records that edit in a separate review
+   commit.
 4. The implementing LLM reads the latest review on its next run. It changes only
    findings approved by the user, then records that correction pass as the next
    iteration.
 5. Never allow both LLMs to edit implementation files simultaneously. Only the active
-   implementer writes code; the reviewer writes only its `Work review` entry unless the
-   user explicitly transfers implementation ownership.
+   implementer writes code; the reviewer writes its `Work review` and may make only the
+   mechanical documentation fixes permitted by `LLM_WORKFLOW.md`, unless the user
+   explicitly transfers broader implementation ownership.
 
 ## Two-iteration rotation rule
 
@@ -56,8 +65,9 @@ After completing an authorized pass and updating the agent's assigned handoff se
 Role boundaries:
 
 - The implementing LLM may commit implementation files and its own `Work done` entry.
-- The reviewing LLM may commit only its own `Work review` entry unless the user
-  explicitly authorizes implementation changes.
+- The reviewing LLM may commit its own `Work review` entry and mechanical documentation
+  fixes permitted by `LLM_WORKFLOW.md`; all other changes require explicit user
+  authorization.
 - Neither LLM may rewrite the other LLM's handoff content.
 - Only one LLM may edit or perform Git writes at a time.
 - A successful push is a checkpoint, not approval to begin another slice.
@@ -77,6 +87,10 @@ handoff entry. Before committing, record the branch and write `Ending commit: th
 commit`. After committing, report the actual hash in the agent's final response. The Git
 history already binds the handoff entry to its commit; the following agent must resolve
 and record the actual commit it reviewed.
+
+Keep new entries concise—target roughly 40 lines per agent section. Record command names
+and exact outcomes, but do not narrate every individual test; Git and test files preserve
+that detail.
 
 ---
 

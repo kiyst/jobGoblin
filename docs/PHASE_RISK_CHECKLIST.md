@@ -5,6 +5,9 @@ or reviewing every phase. It supplements [ARCHITECTURE.md](ARCHITECTURE.md),
 [DATA_MODEL.md](DATA_MODEL.md), and [ROADMAP.md](ROADMAP.md); accepted ADRs remain the
 authority when a checklist item and a recorded decision appear to conflict.
 
+Agent roles, risk-based slice sizing, review disposition, proportionate verification,
+and handoff rules are defined in [LLM_WORKFLOW.md](LLM_WORKFLOW.md).
+
 ## How to use this checklist
 
 For each phase:
