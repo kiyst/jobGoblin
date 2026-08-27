@@ -361,4 +361,26 @@ only renumbered, with "Ending commit" backfilled to the actual hash Codex review
 
 ### Work review
 
-Status: awaiting review.
+- Date and reviewing agent: 2026-08-26, Codex.
+- Diff/revision reviewed: documentation correction commit `02be34f` against review
+  commit `dfa6adb` on `phase-1/saved-search-locations`; branch clean and synchronized
+  with origin before this review entry.
+- Verification performed:
+  - Inspected the complete diff: the only product-document change deletes the obsolete
+    `saved_search_locations` constraints-summary row from `docs/DATA_MODEL.md`.
+  - `git diff --check dfa6adb..02be34f`: passed.
+  - Repository search confirms exactly one current `saved_search_locations` summary
+    row remains. Other mentions of `lower(trim(location_text))` explicitly identify it
+    as superseded or occur in historical review narration.
+  - Backend and migration checks were correctly not repeated for this documentation-
+    only correction; the implementation verification from the preceding review remains
+    applicable.
+- Findings: none.
+- Missing or inconclusive verification: none for this correction.
+- Architecture/documentation consistency: restored; the detailed section, constraints
+  summary, model, migration, tests, and live schema now agree.
+- Verdict: approved.
+- Exact requested corrections: none. The `saved_search_locations` slice is accepted.
+  Do not begin `companies` or merge/modify `main` until the user explicitly authorizes
+  the next action.
+- STOP — reviewer changed only this `Work review`; no implementation files were changed.
