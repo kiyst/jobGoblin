@@ -83,135 +83,11 @@ and record the actual commit it reviewed.
 ## Iteration 1
 
 *Rotated in from "Iteration 2" per the two-iteration rule: its `Work review` (below) is
-no longer pending — Codex's verdict was "approved," with no requested corrections — so
-the previous Iteration 1 (the first `saved_search_titles` implementation pass and
-Codex's "changes requested" review of it, already superseded by this iteration's fix)
-was removed rather than kept alongside two already-reviewed entries. Nothing below was
-rewritten — only renumbered, with "Ending commit" backfilled to the actual hash Codex
-reviewed.*
-
-### Work done
-
-- Date and agent: 2026-08-24, Claude Code (Sonnet 4.5).
-- Approved phase/slice: focused, test-only correction pass over the
-  `saved_search_titles` slice — the single finding and exact correction requested in
-  the previous iteration's `Work review` approved as one pass. No
-  `saved_search_locations`, no other table.
-- Outcome: the finding addressed and verified against real PostgreSQL. 168 tests
-  passed, 0 skipped (up from 167 — 1 net new test).
-- Base/starting commit: `195eb09` (`feat(phase-1): implement saved search titles
-  slice`) on branch `phase-1/saved-search-titles`, with Codex's review commit
-  `b1138da` (`docs(review): request saved search title default test`) on top.
-  Confirmed via `git log --oneline` and `git status` (clean, up to date with origin)
-  before making any changes.
-- Ending commit or working-tree state: `a0a533f` (`test(phase-1): prove is_primary
-  database default via raw SQL insert` — this is the commit Codex's `Work review`
-  below actually reviewed and approved).
-- No model, migration, or product-document changes were made: the review's finding was
-  purely a test-quality gap (the factory always supplies an explicit `is_primary`
-  value, so the old test never exercised the database's own `server_default false`),
-  and the corrected test exposed no mismatch — the implementation was already correct,
-  as Codex's own live-schema inspection had already confirmed.
-- Files changed:
-  - `backend/tests/test_saved_search_titles.py`:
-    - Replaced `test_is_primary_defaults_to_false` with
-      `test_is_primary_defaults_to_false_at_the_database_level`, which performs a raw
-      SQL `INSERT ... RETURNING is_primary` that genuinely omits the column (bypassing
-      both the ORM and the `make_saved_search_title` factory, which always passes an
-      explicit value even for its own default), then asserts PostgreSQL's
-      `server_default false` supplied the value. This is the only way to prove the
-      *database* invariant rather than the factory's Python-side default.
-    - Added `test_is_primary_explicit_false_accepted`, a small new ORM/factory-level
-      test proving `is_primary=False` can still be set explicitly through the normal
-      path — keeping that behavior covered separately from both the new
-      database-default test and the pre-existing `test_is_primary_settable_true`
-      (explicit-`true` path, left unchanged), per the review's explicit instruction.
-  - No other file changed.
-- Migration revisions: none. `0001`–`0007` unchanged.
-- Commands run and exact results:
-  - `ruff format .` → 30 files left unchanged (no reformatting needed).
-  - `ruff check .` → all checks passed.
-  - `mypy app tests` → success, 22 source files.
-  - `pytest -v -k saved_search_title` → **27 passed** (up from 26 — the replaced test
-    plus the new explicit-`false` test, net +1).
-  - `pytest -v` (full suite) → **168 passed, 0 skipped**.
-  - `DATABASE_URL=...jobgoblin_test alembic current` (before any change) → `0007
-    (head)`.
-  - `DATABASE_URL=...jobgoblin_test alembic downgrade 0006` / `upgrade head` →
-    success, `0007 -> 0006 -> 0007` (round-trip scenario, the only migration
-    verification requested this pass — no fresh `base -> head` was asked for since
-    migration `0007` itself did not change).
-  - `DATABASE_URL=...jobgoblin_test alembic check` → `No new upgrade operations
-    detected.`
-  - `alembic current` against the **development** database (default `DATABASE_URL`,
-    no override) → `0006`, unchanged — confirmed untouched.
-  - `pytest -q` (final re-run after the migration verification sequence) →
-    **168 passed**.
-- Risks exercised from `PHASE_RISK_CHECKLIST.md`: "PostgreSQL behavior is tested
-  against PostgreSQL" — this pass exists entirely because the prior test asserted a
-  Python-side value instead of a genuine database-supplied one; the corrected test now
-  proves the actual server default via a raw SQL insert that omits the column.
-- Skipped or unavailable verification: none. Every command above executed for real,
-  including the development-database confirmation.
-- Deviations and ADR impact: none — the corrected test passed on the first run and
-  confirmed the existing implementation was already correct. No ADR impact — test-only
-  correction, no schema or model change.
-- Known limitations: none new, beyond what Iteration 1 already documented (the
-  intentionally-unenforced "exactly one primary title" invariant and `updated_at`
-  advancing only for ORM-driven writes).
-- Recommended next smallest slice: none proposed by the implementing agent — per the
-  workflow, this pass stops for Codex's review before any further slice is considered.
-- STOP — awaiting Codex review and user approval. Do not begin
-  `saved_search_locations`.
-
-**Merge record (appended after review, not a rewrite of the entry above):** Codex
-approved this correction pass in commit `aca923e` (`docs(review): approve saved
-search title correction`), with no further findings. Per the user's explicit
-authorization, `phase-1/saved-search-titles` was merged into `main` with a
-non-destructive fast-forward merge (`main` was a strict ancestor of the branch, so no
-merge commit was created) and pushed. `main`/`origin/main` are both now at `aca923e`,
-containing the complete approved history through migration `0007`
-(`saved_search_titles`). Post-merge verification on `main`: `ruff format --check .`
-and `ruff check .` passed (30 files); `mypy app tests` passed (22 source files);
-`pytest -q` — 168 passed, 0 skipped; `jobgoblin_test` confirmed at `0007 (head)`; the
-development database remains untouched at `0006` (no operational upgrade was
-authorized this turn). No branches were deleted, squashed, or rebased; no force-push
-was used. `saved_search_locations` implementation has not begun.
-
-### Work review
-
-- Date and reviewing agent: 2026-08-25, Codex.
-- Diff/revision reviewed: correction commit `a0a533f` against review commit
-  `b1138da` on `phase-1/saved-search-titles`; the branch was clean and matched
-  `origin/phase-1/saved-search-titles` before this review entry.
-- Verification performed:
-  - Inspected the complete `b1138da..a0a533f` diff. Product code, migration `0007`,
-    and product documentation are unchanged; the implementation diff is confined to
-    `backend/tests/test_saved_search_titles.py`.
-  - Confirmed the replacement test issues raw SQL that omits `is_primary`, uses
-    `RETURNING is_primary`, and therefore proves PostgreSQL—not the ORM or factory—
-    supplies `false`. Explicit `false` and explicit `true` remain separately covered.
-  - `ruff format --check .`: passed (30 files already formatted).
-  - `ruff check .`: passed.
-  - `mypy app tests`: passed (22 source files).
-  - `pytest -v`: 168 passed, 0 skipped.
-  - Independently ran `0007 -> 0006 -> 0007`: passed.
-  - `alembic check` at test-database head: no new upgrade operations detected.
-  - Final live database verification: `jobgoblin_test` was at `0007` with zero users
-    and titles; development remained untouched at `0006` with zero users.
-- Findings, ordered by severity, with file and line references: none.
-- Missing or inconclusive verification: none for this correction pass.
-- Architecture/documentation consistency: unchanged from the accepted implementation;
-  the corrected regression test now proves the documented database default directly.
-- Verdict: approved.
-- Exact requested corrections: none. The `saved_search_titles` slice and correction
-  pass are accepted. Do not begin `saved_search_locations`, modify or merge `main`, or
-  advance to any other slice until the user explicitly approves the next action.
-- STOP — reviewer changed only this `Work review`; no implementation files were changed.
-
----
-
-## Iteration 2
+no longer pending — Codex gave its finding and requested correction, which are being
+addressed in this rotation's Iteration 2 — so the previous Iteration 1 (the focused
+`saved_search_titles` test correction pass and Codex's approval of it) was removed
+rather than kept alongside two already-reviewed entries. Nothing below was rewritten —
+only renumbered, with "Ending commit" backfilled to the actual hash Codex reviewed.*
 
 ### Work done
 
@@ -226,9 +102,9 @@ was used. `saved_search_locations` implementation has not begun.
   of `aca923e` (Codex's approval of the `saved_search_titles` correction pass).
   Confirmed `main`/`origin/main` clean and at `0333f10` before making any changes.
   Branch `phase-1/saved-search-locations` created directly from `0333f10`.
-- Ending commit or working-tree state: this commit (recorded by the agent completing
-  this pass; see the agent's final response for the actual resolved hash, per this
-  file's own "Git workflow" instructions above).
+- Ending commit or working-tree state: `ab2bdb9` (`feat(phase-1): implement saved
+  search locations slice` — this is the commit Codex's `Work review` below actually
+  reviewed).
 - Two schema questions the user caught that the implementing agent's own proposal had
   missed, resolved by explicit approval before migration `0008` was written:
   1. `latitude`/`longitude` must be present together — a database `CHECK` requiring
@@ -314,9 +190,9 @@ was used. `saved_search_locations` implementation has not begun.
     "Phase 1 constraints & indexes" summary table.
   - `docs/ROADMAP.md` — Phase 1 status line now also describes the
     `saved_search_locations` slice as complete and verified.
-  - `docs/LLM_HANDOFF.md` — this rotation (old Iteration 1 — the first
-    `saved_search_titles` implementation pass — removed; prior Iteration 2 renumbered
-    to Iteration 1; this entry appended as the new Iteration 2).
+  - `docs/LLM_HANDOFF.md` — this rotation (old Iteration 1 — the focused
+    `saved_search_titles` test correction pass — removed; prior Iteration 2
+    renumbered to Iteration 1; this entry appended as the new Iteration 2).
 - Migration revisions: `0008` (new, `down_revision = "0007"`) — adds
   `saved_search_locations`. `0001`–`0007` unchanged.
 - Commands run and exact results:
@@ -420,3 +296,69 @@ was used. `saved_search_locations` implementation has not begun.
      because no executable or migration file should change.
   3. Do not begin `companies`, modify or merge `main`, or expand this correction pass.
 - STOP — reviewer changed only this `Work review`; no implementation files were changed.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date and agent: 2026-08-26, Claude Code (Sonnet 5).
+- Approved phase/slice: documentation-only correction pass over the
+  `saved_search_locations` slice — the single finding requested in the previous
+  iteration's `Work review` approved as one pass. No `companies`, no other table.
+- Outcome: the finding addressed. No backend tests rerun, per explicit instruction
+  (no executable or migration file changed).
+- Base/starting commit: `ab2bdb9` (`feat(phase-1): implement saved search locations
+  slice`) on branch `phase-1/saved-search-locations`, with Codex's review commit
+  `dfa6adb` (`docs(review): request saved search location doc correction`) on top.
+  Confirmed via `git log --oneline` and `git status` (clean, up to date with origin)
+  before making any changes.
+- Ending commit or working-tree state: this commit (recorded by the agent completing
+  this pass; see the agent's final response for the actual resolved hash, per this
+  file's own "Git workflow" instructions above).
+- Root cause: `docs/DATA_MODEL.md`'s "Phase 1 constraints & indexes" summary table
+  contained two rows for `saved_search_locations` — the correct, complete Rev 11 row
+  (`lower(location_text)`, all six `CHECK`s) immediately followed by a pre-existing,
+  now-obsolete row using the superseded `lower(trim(location_text))` formula. The
+  previous implementation pass added the correct row but did not notice or remove the
+  older one already present in the file.
+- Files changed:
+  - `docs/DATA_MODEL.md` — deleted the obsolete second `saved_search_locations` row
+    (`UNIQUE (saved_search_id, lower(trim(location_text)))` | "one entry per location
+    text per search"); the complete Rev 11 row is now the only
+    `saved_search_locations` row in the summary table. No other line changed.
+  - `docs/LLM_HANDOFF.md` — this rotation (old Iteration 1 — the focused
+    `saved_search_titles` test correction pass — removed; prior Iteration 2 renumbered
+    to Iteration 1; this entry appended as the new Iteration 2).
+  - No executable, model, migration, or test file changed, per explicit instruction.
+- Migration revisions: none. `0001`–`0008` unchanged.
+- Commands run and exact results:
+  - `git diff --check` → no output (no whitespace errors, no conflict markers).
+  - Repository search: `grep -n "^| \`saved_search_locations\`" docs/DATA_MODEL.md` →
+    exactly one match (the complete Rev 11 row).
+  - Repository search: `grep -rn "lower(trim(location_text))"` across the repository →
+    matches only in (a) `backend/migrations/versions/0008_saved_search_locations.py`'s
+    own docstring, which explains the implemented index is *not* this formula
+    (contrasting it, not presenting it as current); (b) `docs/DATA_MODEL.md`'s Rev 11
+    note, which likewise contrasts it explicitly ("not `lower(trim(location_text))` as
+    an earlier revision... implied"); (c) Codex's own `Work review` text above,
+    historical record of the finding itself, which is not rewritten. No location
+    presents the superseded formula as the current implementation.
+  - Backend tests, `ruff`, `mypy`, and Alembic migration checks were **not** rerun, per
+    explicit instruction — no executable or migration file was changed by this pass.
+- Risks exercised from `PHASE_RISK_CHECKLIST.md`: none specific to this pass — a
+  documentation-only correction with no schema or code change.
+- Skipped or unavailable verification: backend test suite, `ruff`/`mypy`, and Alembic
+  round-trip/`alembic check` were deliberately not rerun, per the review's own
+  instruction that they aren't needed since no executable or migration file changed.
+- Deviations and ADR impact: none. No ADR impact — documentation-only correction.
+- Known limitations: none new, beyond what Iteration 1 already documented.
+- Recommended next smallest slice: none proposed by the implementing agent — per the
+  workflow, this pass stops for Codex's review before any further slice is considered.
+- STOP — awaiting Codex review and user approval. Do not begin `companies` or alter
+  `main`.
+
+### Work review
+
+Status: awaiting review.
