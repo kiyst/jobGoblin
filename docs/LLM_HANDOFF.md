@@ -398,3 +398,13 @@ only renumbered, with "Ending commit" backfilled to the actual hash Codex review
   Do not begin `companies` or merge/modify `main` until the user explicitly authorizes
   the next action.
 - STOP — reviewer changed only this `Work review`; no implementation files were changed.
+
+**Merge record (appended, not a rewrite of the entry above):** Approved at review
+commit `05be8dc`. Per user authorization, `phase-1/saved-search-locations` was
+fast-forward merged into `main` (no merge commit; `main` was a strict ancestor) and
+pushed. `main`/`origin/main` are both now at `0f4da2c`, which also carries the
+`LLM_WORKFLOW.md` v2 process update. Verified: `main` has zero content diff against the
+feature branch; migration head is `0008` (`alembic heads`, file-based, no DB
+connection); working tree clean. Full backend suite intentionally not rerun — pure
+fast-forward of an already-verified tree. Development database not touched. No
+squash/rebase/force-push/branch-deletion. `companies` not started.
