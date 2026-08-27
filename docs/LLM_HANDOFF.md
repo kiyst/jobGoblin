@@ -370,4 +370,53 @@ was used. `saved_search_locations` implementation has not begun.
 
 ### Work review
 
-Status: awaiting review.
+- Date and reviewing agent: 2026-08-26, Codex.
+- Diff/revision reviewed: feature commit `ab2bdb9` against `main` commit `0333f10`
+  on `phase-1/saved-search-locations`; the branch was clean and matched
+  `origin/phase-1/saved-search-locations` before this review entry.
+- Verification performed:
+  - Inspected the complete `0333f10..ab2bdb9` diff across the model, migration,
+    fixtures, all 38 new tests, data-model documentation, roadmap, and handoff rotation.
+  - Confirmed model and migration agree on nullability, types, normalization and
+    non-empty checks, coordinate ranges, the both-or-neither coordinate invariant,
+    non-negative radius override, timestamps, foreign-key cascade, and the functional
+    unique index.
+  - `ruff format --check .`: passed (33 files already formatted).
+  - `ruff check .`: passed.
+  - `mypy app tests`: passed (24 source files).
+  - `pytest -v`: 206 passed, 0 skipped.
+  - Independently ran `0008 -> 0007 -> 0008`: passed.
+  - Independently rebuilt the disposable test database via `base -> head`: passed.
+  - `alembic check` at test-database head: no new upgrade operations detected.
+  - Live-schema inspection confirmed all six named checks, the `ON DELETE CASCADE`
+    foreign key, and unique `(saved_search_id, lower(location_text))` index. The test
+    database was at `0008` with zero location rows; development remained untouched at
+    `0006`.
+- Findings, ordered by severity, with file and line references:
+  1. **Low — the constraints summary retains the obsolete location-index row.**
+     `docs/DATA_MODEL.md:912` correctly documents the implemented
+     `(saved_search_id, lower(location_text))` index and all approved checks, but
+     `docs/DATA_MODEL.md:913` immediately repeats `saved_search_locations` with the
+     superseded `(saved_search_id, lower(trim(location_text)))` formula. This leaves
+     the authoritative summary internally contradictory even though the detailed
+     section, model, migration, tests, and live schema are correct. Remove only the
+     obsolete second row.
+- Missing or inconclusive verification: none material. Docker process listing was
+  unavailable to the sandbox, but every database-backed test, migration operation,
+  Alembic comparison, and direct live-schema query connected to PostgreSQL successfully.
+- Architecture/documentation consistency: implementation and detailed documentation
+  match the nine approved decisions; only the stale duplicate summary row above is
+  inconsistent.
+- Verdict: changes requested (documentation-only).
+- Exact requested corrections:
+  1. Delete the obsolete `saved_search_locations` constraints-summary row containing
+     `lower(trim(location_text))` from `docs/DATA_MODEL.md`; retain the complete Rev 11
+     row containing `lower(location_text)`.
+  2. Verify with `git diff --check` and a repository search that only one
+     `saved_search_locations` constraints-summary row remains and that no current
+     documentation presents `lower(trim(location_text))` as the implemented formula.
+     Rotate/update only the handoff `Work done`, commit and push this documentation-only
+     correction on the same branch, and stop. Backend checks do not need to be rerun
+     because no executable or migration file should change.
+  3. Do not begin `companies`, modify or merge `main`, or expand this correction pass.
+- STOP — reviewer changed only this `Work review`; no implementation files were changed.
