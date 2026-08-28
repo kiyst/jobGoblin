@@ -11,6 +11,14 @@ dependencies = [
     "sqlalchemy==2.0.36",
     "asyncpg==0.30.0",
     "alembic==1.14.0",
+    # Direct dependency (not just transitively installed via httpx/dev
+    # extras) — app/normalization/company.py::normalize_domain() requires
+    # IDNA2008/UTS #46 validation and mapping (uts46=True) for company-domain
+    # identity matching (docs/DATA_MODEL.md's `companies.domain`); Python's
+    # stdlib "idna" codec only implements the older IDNA2003 algorithm and
+    # mishandles some inputs UTS #46 accepts. BSD-3-Clause license. Remove if
+    # normalize_domain() is ever rewritten without IDNA/UTS46 conversion.
+    "idna==3.19",
 ]
 
 [project.optional-dependencies]

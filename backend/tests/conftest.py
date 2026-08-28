@@ -12,6 +12,7 @@ from app.config import Settings, get_settings
 from app.db.models import (
     CandidateProfile,
     CandidateSkill,
+    Company,
     SavedSearch,
     SavedSearchLocation,
     SavedSearchTitle,
@@ -287,6 +288,114 @@ def make_saved_search_location() -> Callable[..., SavedSearchLocation]:
         )
 
     return _make
+
+
+@pytest.fixture
+def make_company() -> Callable[..., Company]:
+    """Factory for a valid `Company` — tests only deviate from this
+    intentionally. Unlike every other factory above, `Company` has no owning
+    parent row to take an id for — it is a top-level Phase 1 table."""
+
+    def _make(
+        *,
+        name: str = "Acme Corp",
+        domain: str | None = None,
+        homepage_url: str | None = None,
+        career_page_url: str | None = None,
+        industry: str | None = None,
+        duplicate_of_company_id: uuid.UUID | None = None,
+    ) -> Company:
+        return Company(
+            name=name,
+            domain=domain,
+            homepage_url=homepage_url,
+            career_page_url=career_page_url,
+            industry=industry,
+            duplicate_of_company_id=duplicate_of_company_id,
+        )
+
+    return _make
+
+
+@asynccontextmanager
+async def real_committed_company(
+    db_engine: AsyncEngine, **company_kwargs: object
+) -> AsyncIterator[tuple[AsyncSession, uuid.UUID]]:
+    """Creates a `Company` via a real, separately-committed transaction on
+    `db_engine` (not the savepoint-isolated `db_session`), for tests that
+    need a genuinely durable commit (e.g. to observe `updated_at` actually
+    advance). Same failure-safe lifecycle/cleanup rationale as
+    `real_committed_user_and_profile` above — cleanup always runs in a fresh
+    session and fetches before deleting, so a row already removed by the
+    test body itself is skipped rather than erroring.
+    """
+    company_kwargs.setdefault("name", "Acme Corp")
+
+    session = AsyncSession(bind=db_engine)
+    company_id: uuid.UUID | None = None
+    try:
+        company = Company(**company_kwargs)
+        session.add(company)
+        await session.commit()
+        await session.refresh(company)
+        company_id = company.id
+
+        yield session, company_id
+    finally:
+        with suppress(Exception):
+            await session.rollback()
+        await session.close()
+
+        async with AsyncSession(bind=db_engine) as cleanup_session:
+            if company_id is not None:
+                existing_company = await cleanup_session.get(Company, company_id)
+                if existing_company is not None:
+                    await cleanup_session.delete(existing_company)
+                    await cleanup_session.commit()
+
+
+@asynccontextmanager
+async def real_committed_duplicate_company_pair(
+    db_engine: AsyncEngine,
+    *,
+    original_kwargs: dict[str, object] | None = None,
+    duplicate_kwargs: dict[str, object] | None = None,
+) -> AsyncIterator[tuple[AsyncSession, uuid.UUID, uuid.UUID]]:
+    """Creates two real, separately-committed `Company` rows — an "original"
+    and a "duplicate" whose `duplicate_of_company_id` points at the
+    original — for tests that exercise the self-referential FK's real
+    `ON DELETE SET NULL` behavior (deleting the original must clear the
+    duplicate's `duplicate_of_company_id`, never cascade-delete it). Cleanup
+    fetches and deletes the duplicate first, then the original, tolerating
+    either already being gone (e.g. the test itself deleted the original).
+    """
+    resolved_original_kwargs: dict[str, object] = {"name": "Acme Corp"}
+    resolved_original_kwargs.update(original_kwargs or {})
+    resolved_duplicate_kwargs: dict[str, object] = {"name": "Acme Corporation"}
+    resolved_duplicate_kwargs.update(duplicate_kwargs or {})
+
+    async with real_committed_company(db_engine, **resolved_original_kwargs) as (
+        session,
+        original_id,
+    ):
+        duplicate = Company(duplicate_of_company_id=original_id, **resolved_duplicate_kwargs)
+        session.add(duplicate)
+        duplicate_id: uuid.UUID | None = None
+        try:
+            await session.commit()
+            await session.refresh(duplicate)
+            duplicate_id = duplicate.id
+
+            yield session, original_id, duplicate_id
+        finally:
+            if duplicate_id is not None:
+                with suppress(Exception):
+                    await session.rollback()
+                async with AsyncSession(bind=db_engine) as cleanup_session:
+                    existing_duplicate = await cleanup_session.get(Company, duplicate_id)
+                    if existing_duplicate is not None:
+                        await cleanup_session.delete(existing_duplicate)
+                        await cleanup_session.commit()
 
 
 @asynccontextmanager

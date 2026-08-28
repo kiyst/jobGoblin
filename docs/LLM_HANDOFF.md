@@ -97,109 +97,10 @@ that detail.
 ## Iteration 1
 
 *Rotated in from "Iteration 2" per the two-iteration rule: the prior Iteration 1 (the
-initial checker implementation and Codex's first review requesting findings 1-4) was
-removed rather than kept alongside a third entry, since this entry's `Work review`
-(below) requested one further change that is being addressed in this rotation's
-Iteration 2. Nothing below was rewritten — only renumbered.*
-
-### Work done
-
-- Date/agent: 2026-08-27, Claude Code (Sonnet 5). Authorized slice: bounded correction
-  pass addressing review findings 1-4 at commit `d9185fb`, on the same
-  `tooling/repository-validation` branch. Base: `d9185fb` (Codex's review). No CI,
-  `companies`, migration, or product-behavior changes.
-- Outcome: all four findings addressed in `backend/scripts/check_repo.py`.
-  1. Added `check_constraints_table_integrity`, run only for `docs/DATA_MODEL.md`:
-     reports a finding if the "Phase 1 constraints & indexes" section/table is missing
-     or has no data rows, or if it has rows but zero rows yield a parseable UNIQUE/INDEX
-     signature — closing the fail-open gap `check_duplicate_constraint_rows` had.
-  2. Widened `_BARE_REVISION_RE` from `` `(000\d)` `` to `` `(0\d{3})` ``, so revisions
-     `0010` and later are inspected (still requires the leading-zero, four-digit,
-     backtick-delimited shape, so years/ports are not misdetected).
-  3. `_chain_integrity_findings` now also detects: a non-null parent that doesn't exist
-     in the revision set; a merge/tuple `down_revision` (rejected outright — this
-     project requires one unbranched chain); and disconnected components, by walking
-     parent links from the sole head and flagging any revision never reached.
-     `check_migration_chain_integrity` catches Alembic's own `CommandError` and returns
-     it as a normal `Finding` instead of an uncontrolled traceback.
-  4. Added `_display_path`: renders a finding's path repository-relative
-     (`docs/DATA_MODEL.md`, `backend/migrations`) when the path exists on disk inside
-     the repo, forward-slash-normalized for cross-platform determinism; falls back to
-     the given path unchanged for synthetic/nonexistent paths used by unit tests.
-     Applied at every `Finding(...)` call site.
-- Files changed:
-  - `backend/scripts/check_repo.py` — the four fixes above; module docstring updated to
-    describe the hardened guarantees.
-  - `backend/tests/test_check_repo.py` — 11 new tests: missing constraints-summary
-    section, a section with rows but no extractable signatures (plus one confirming a
-    valid section is *not* flagged), existing/nonexistent revisions at `0010`+, missing
-    migration parent, disconnected migration graph (a `0004`/`0005` cycle unreachable
-    from the head, invisible to the pre-existing head/base/shared-down-revision checks),
-    rejection of a tuple/merge parent, and three path-relativity tests (`_display_path`
-    on a real file, on a synthetic nonexistent path, and end-to-end through
-    `check_links_and_anchors` against the real `README.md`).
-- Commands run and exact results:
-  - `python scripts/check_repo.py` from `backend/` → exit 0, zero findings.
-  - Same script invoked from an unrelated working directory (outside the repo) → exit 0.
-  - `ruff format --check .` → 36 files already formatted (after one `ruff format .` pass
-    to apply its own reflow of a multi-line `assert any(...)`).
-  - `ruff check .` → all checks passed.
-  - `mypy app tests scripts` → success, 27 source files.
-  - `pytest tests/test_check_repo.py -v` → 33 passed (22 prior + 11 new).
-  - `pytest -q` (full suite) → 239 passed.
-  - `git status`/`git diff --check` → only `backend/scripts/check_repo.py` and
-    `backend/tests/test_check_repo.py` changed; no whitespace/conflict errors.
-- Deviations/known limitations: none. README/workflow text was not changed — no
-  invocation or behavior wording needed correction, per the bounded scope.
-- STOP — awaiting Codex review. Do not add CI, begin `companies`, modify migrations, or
-  alter product behavior.
-
-### Work review
-
-- Date/reviewer: 2026-08-27, Codex. Correction diff reviewed:
-  `d9185fb..5bd70ec` on `tooling/repository-validation`; branch clean and synchronized
-  with origin before this review entry.
-- Independent verification:
-  - Inspected every correction and new test. Findings 1, 2, and 4 are resolved; the
-    missing-parent, reachability, and merge-parent logic requested in finding 3 is also
-    correct.
-  - `python scripts/check_repo.py`: exit 0, zero findings.
-  - `ruff format --check .`, `ruff check .`: passed (36 files).
-  - `mypy app tests scripts`: passed (27 source files).
-  - `pytest -q` with a reviewer-writable temporary root: 239 passed.
-  - Directly injected a `CommandError` into the initial revision walk and confirmed it
-    still escapes uncaught before the new graph-integrity handler runs.
-- Findings:
-  1. **Medium — Alembic graph-load errors can still bypass the normal-finding handler.**
-     `backend/scripts/check_repo.py:557-575` catches `CommandError` while
-     `check_migration_chain_integrity()` calls `get_heads()`/`walk_revisions()`, but
-     `run_checks()` first calls `_revision_map(script)` at
-     `backend/scripts/check_repo.py:597`; `_revision_map()` performs its own
-     `walk_revisions()` at `backend/scripts/check_repo.py:420-426` outside that handler.
-     A malformed/missing-parent graph can therefore raise during revision-map creation
-     and terminate with a traceback before `check_migration_chain_integrity()` is ever
-     reached. A direct injected `CommandError("broken graph")` reproduced the uncaught
-     path. Load/walk the graph once under one handler (or catch the earlier traversal),
-     return a repository-relative normal `Finding`, and avoid continuing revision-
-     citation checks when no valid revision map exists.
-- Missing/inconclusive checks: none. The checker is database-free; the full existing
-  suite passed against the configured environment.
-- Verdict: changes requested (one narrow executable correction).
-- Exact bounded correction:
-  1. Make the first Alembic graph traversal in the production `run_checks()` path
-     convert `CommandError` into the same sorted `backend/migrations:1: ...` finding;
-     do not traverse the graph once outside and again inside separate error handling.
-  2. Add a test at the `run_checks()`/orchestration boundary—not only the pure helper—
-     that injects a graph-load `CommandError`, asserts no exception escapes, and asserts
-     one normal repository-relative finding/nonzero CLI outcome.
-  3. Rerun checker from two CWDs, Ruff, mypy, targeted checker tests, and the full suite;
-     update the concise handoff entry, commit/push the same branch, and stop.
-  4. Do not add CI, begin `companies`, modify migrations, or alter product behavior.
-- STOP — reviewer changed only this `Work review`; no implementation files were changed.
-
----
-
-## Iteration 2
+first checker correction pass and Codex's review requesting the single-load fix) was
+removed rather than kept alongside a third entry, since this entry's `Work review` and
+merge record (below) mean it is no longer pending either. Nothing below was rewritten —
+only renumbered.*
 
 ### Work done
 
@@ -279,3 +180,87 @@ pushed. `main`/`origin/main` are both now at `fc12091`. Verified: `main` has zer
 content diff against the feature branch; `python scripts/check_repo.py` from `backend/`
 exits 0 with zero findings; working tree clean. No squash/rebase/force-push/branch-
 deletion. `companies` not started.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-08-28, Claude Code (Sonnet 5). Authorized slice: `companies`, Class H
+  per docs/LLM_WORKFLOW.md (first self-referential FK, first `ON DELETE SET NULL`, first
+  PostgreSQL generated column). Base `a8d7456` on `main` -> branch `phase-1/companies`.
+- Outcome: model, domain-normalization module, migration `0009`, factory/real-commit
+  helpers, and 69 new tests implemented and verified against real PostgreSQL.
+  - `app/normalization/company.py::normalize_domain()`: pure function, trim/lowercase,
+    bare-host-or-`scheme://`-URL parsing (custom, not `urlsplit`, which misparses a bare
+    `host:port` as scheme+path), strips userinfo/port/path/query/fragment/one leading
+    `www.`/one trailing dot, rejects single-label hosts/IP literals/invalid ports/
+    missing hosts, converts through `idna.encode(host, uts46=True, std3_rules=True)`.
+    Never raises — unparseable input returns `None`.
+  - `Company` model: `name` (trim-only `@validates`, matching `CHECK`s);
+    `normalized_name` as SQLAlchemy `Computed(..., persisted=True)` — a real PostgreSQL
+    `GENERATED ALWAYS AS (...) STORED` column, verified via `information_schema.columns`
+    and a direct-SQL insert that omits it entirely; `domain` (`@validates` delegates to
+    `normalize_domain()`) with a partial `UNIQUE (lower(domain)) WHERE domain IS NOT
+    NULL` index; `duplicate_of_company_id` self-referential FK (`ON DELETE SET NULL`)
+    plus a `CHECK` rejecting direct self-reference; `homepage_url`/`career_page_url`/
+    `industry` nullable text with NULL-safe normalization `CHECK`s, ORM blank-to-`None`.
+  - `idna==3.19` added as a **direct** runtime dependency (`backend/pyproject.toml`,
+    BSD-3-Clause, documented consumer/replacement-boundary inline) — not relied on
+    transitively; stdlib `str.encode("idna")` only implements IDNA2003 and doesn't
+    support UTS #46 validation/mapping (`uts46=True`, `std3_rules=True`).
+- Files changed:
+  - `backend/app/normalization/__init__.py`, `backend/app/normalization/company.py` (new).
+  - `backend/app/db/models/company.py` (new); `backend/app/db/models/__init__.py`,
+    `backend/app/db/base.py` — registration/docstring.
+  - `backend/migrations/versions/0009_companies.py` (new, `down_revision = "0008"`).
+  - `backend/pyproject.toml` — `idna==3.19` direct dependency.
+  - `backend/tests/conftest.py` — `make_company`, `real_committed_company`,
+    `real_committed_duplicate_company_pair` (two real-committed companies, one
+    `duplicate_of` the other, for the `ON DELETE SET NULL` test).
+  - `backend/tests/test_companies.py` (new) — 69 tests: every `normalize_domain()` step/
+    case (casing/`www`/Unicode-punycode collisions, distinct domains, single-label/IP-
+    literal/empty-label/invalid-port/missing-host/oversized/invalid-IDNA -> `None`);
+    generated `normalized_name` on insert and name-update (real commit), direct-SQL
+    omission proving PostgreSQL generates it, direct-SQL attempt to set it directly
+    rejected (`ProgrammingError`, not `IntegrityError` — a `GeneratedAlwaysError`, a
+    different condition from a constraint violation); two colliding `normalized_name`s
+    accepted; case-insensitive/direct-SQL domain collision, multiple `NULL` domains, a
+    real concurrent same-domain insert race (exactly one winner); self-reference and
+    nonexistent-target rejection, valid reference accepted, real-commit `ON DELETE SET
+    NULL`; nullable-text blank-to-`None` and direct-SQL rejection (parametrized across
+    all three columns); timestamps and test isolation.
+  - `docs/DATA_MODEL.md` — `companies` marked **Implemented**; added "Rev 12" note;
+    corrected the domain-normalization algorithm description to the actual
+    IDNA2008/UTS#46 implementation; updated the "Phase 1 constraints & indexes" row.
+  - `docs/ROADMAP.md` — Phase 1 status line describes the `companies` slice as complete.
+- Commands run and exact results:
+  - `python scripts/check_repo.py` (from `backend/`) → exit 0, zero findings.
+  - `ruff format --check .`, `ruff check .` → passed (41 files).
+  - `mypy app tests scripts` → success, 31 source files.
+  - `pytest tests/test_companies.py -v` → 69 passed.
+  - `pytest -q` (full suite) → 309 passed.
+  - `DATABASE_URL=...jobgoblin_test`: `alembic upgrade head` (`0008 -> 0009`),
+    `downgrade 0008` / `upgrade head` (round-trip), `downgrade base` / `upgrade head`
+    (fresh `base -> head`), `alembic check` (`No new upgrade operations detected` — one
+    informational `UserWarning` that computed defaults aren't diffable, expected/known
+    Alembic limitation for `Computed` columns) — all passed.
+  - `alembic current` against the **development** database (no `DATABASE_URL` override)
+    → `0006`, unchanged throughout.
+  - Live schema inspected directly (`information_schema.columns`, `pg_constraint`,
+    `pg_indexes`) — confirmed the generated column, all named checks/FK, and both
+    indexes match the model exactly.
+  - `git status`/`git diff --check` → only the files listed above; no whitespace/
+    conflict errors.
+  - `docker compose build backend` → succeeded, `idna-3.19` confirmed installed in the
+    image (dependency changed, per instruction).
+- Deviations/known limitations: none. `jobs.company_id` (`ON DELETE RESTRICT`) does not
+  exist yet — `jobs` isn't implemented; no reconciliation/merge workflow exists or is
+  implied by `duplicate_of_company_id`, per explicit scope.
+- STOP — awaiting Codex review. Do not begin `jobs`, implement reconciliation, add CI, or
+  modify `main`.
+
+### Work review
+
+*Pending — awaiting Codex.*

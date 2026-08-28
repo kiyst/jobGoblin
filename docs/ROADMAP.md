@@ -174,7 +174,19 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   restricting latitude to `[-90, 90]` and longitude to `[-180, 180]`, a coordinate-pair
   `CHECK` requiring both be NULL or both be non-NULL, a non-negative `CHECK` on
   `radius_miles_override`, and `ON DELETE CASCADE` from `saved_searches` (see
-  `docs/DATA_MODEL.md`). No other Phase 1 table is implemented yet;
+  `docs/DATA_MODEL.md`). `companies` slice also complete and verified (Class H — the
+  first table with a self-referential FK, `ON DELETE SET NULL`, and a PostgreSQL
+  generated column): model (`backend/app/db/models/company.py`), domain normalization
+  (`backend/app/normalization/company.py::normalize_domain()`, IDNA2008/UTS #46 via the
+  `idna` package), migration `0009` (`down_revision = "0008"`), and database tests all
+  pass — including the case-insensitive, NULL-safe partial `UNIQUE (lower(domain))`
+  index (multiple `NULL`-domain companies coexist; a real concurrent-insert race
+  correctly leaves exactly one winner), the `normalized_name` PostgreSQL `GENERATED
+  ALWAYS AS (...) STORED` column (trim/collapse/lowercase of `name`, proven generated
+  even via a direct SQL insert that never mentions it), the `duplicate_of_company_id`
+  self-referential FK's `ON DELETE SET NULL` behavior and its direct-self-reference
+  `CHECK`, and NULL-safe normalization `CHECK`s on `homepage_url`/`career_page_url`/
+  `industry` (see `docs/DATA_MODEL.md`). No other Phase 1 table is implemented yet;
   the rest of Phase 1's exit gate (§[PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md))
   remains outstanding.
 - **Phases 2-14: not started.** Begin each phase only after completing its preflight in

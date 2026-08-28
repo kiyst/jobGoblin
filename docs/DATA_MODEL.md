@@ -142,6 +142,44 @@ previously state several product rules, resolved by explicit approval before mig
   documented or approved for this table — only `radius_miles_override` exists. That
   phrase was stale wording, corrected below; no new column was added.
 
+**Rev 12 changes** (seventh Phase 1 implementation slice, `companies` — Class H per
+docs/LLM_WORKFLOW.md, the first table with a self-referential FK, `ON DELETE SET NULL`,
+and a PostgreSQL generated column): this table's column list below did not previously
+state several implementation decisions, resolved by explicit approval before migration
+`0009` was written:
+- **`normalize_domain()`'s IDNA step uses the `idna` PyPI package
+  (`idna.encode(host, uts46=True, std3_rules=True)`), not Python's stdlib `str.encode
+  ("idna")` codec.** The stdlib codec only implements the older IDNA2003 algorithm;
+  `café.com` happens to work under both, but UTS #46 validation/mapping (rejecting
+  underscores, leading/trailing hyphens, and other STD3-disallowed forms under
+  `std3_rules=True`) is only available via the dedicated package. `idna==3.19` is a new
+  **direct** runtime dependency (not merely transitively installed via `httpx`) — see
+  `backend/pyproject.toml` for its license (BSD-3-Clause) and replacement/removal note.
+- **`normalized_name` is a PostgreSQL `GENERATED ALWAYS AS (...) STORED` column**, not an
+  independently writable column kept in sync by an ORM `@validates` normalizer. A
+  validator-maintained mirror column can be bypassed by direct SQL or a bulk operation,
+  silently storing a `name`/`normalized_name` pair that disagree; generating it in the
+  database makes that impossible. Algorithm: trim `name`'s covered whitespace (space,
+  tab, LF, CR — same four-character set as every other trim-only column), collapse any
+  remaining internal run of that same four-character set to one ordinary space, then
+  lowercase. Because `name`'s own not-empty `CHECK` already guarantees a non-empty
+  trimmed input, no separate `normalized_name_not_empty` CHECK is needed — it could never
+  fire.
+- **A `CHECK` rejects direct self-reference:** `duplicate_of_company_id IS NULL OR
+  duplicate_of_company_id <> id`. This prevents only a company pointing at itself; a
+  longer duplicate cycle (A → B → A) is out of scope for this migration and remains a
+  future reconciliation-workflow responsibility, consistent with
+  `duplicate_of_company_id` itself being schema-reserved and unenforced beyond this one
+  invariant.
+- `homepage_url`, `career_page_url`, and `industry` each get a NULL-safe pair of
+  `CHECK`s (`col IS NULL OR col = trim(...)` / `col IS NULL OR trim(...) <> ''`) — a
+  non-NULL value must already be trimmed and non-empty, same defense-in-depth posture as
+  every other text column in this schema, just NULL-safe since these three are optional.
+  No URL-format validation is applied to `homepage_url`/`career_page_url`, per explicit
+  decision. On the ORM path, a covered-whitespace-only input is converted to `NULL`
+  rather than failing ingestion — these fields are optional, so a blank value is "not
+  provided," not invalid input.
+
 Conventions used throughout:
 
 - **Minimum supported PostgreSQL version: 16.** See
@@ -408,44 +446,54 @@ geocoded) or both non-NULL (`CHECK ((latitude IS NULL) = (longitude IS NULL))`) 
 half-geocoded row is not a valid state.
 
 ### `companies`
-Deduplicated employer identity. **This is deliberately not "solved" by a single unique
-constraint** — company identity resolution is a hard, ongoing problem, not a one-time
-schema decision:
+**Implemented** (`backend/app/db/models/company.py`; migration `0009`, `down_revision =
+"0008"`; domain normalization in `backend/app/normalization/company.py`). Deduplicated
+employer identity. **This is deliberately not "solved" by a single unique constraint** —
+company identity resolution is a hard, ongoing problem, not a one-time schema decision:
 
 | column | type | notes |
 |---|---|---|
-| id | UUID PK | |
-| name | text | |
-| normalized_name | text | indexed (non-unique — see below) |
-| domain | text | nullable |
-| homepage_url | text | nullable |
-| career_page_url | text | nullable |
-| industry | text | nullable |
-| duplicate_of_company_id | UUID | nullable, self-referential FK, `ON DELETE SET NULL` — see below |
+| id | UUID PK | generated application-side (`uuid.uuid4`) |
+| name | text, not null | trimmed (case preserved), matching `CHECK`s — see below |
+| normalized_name | text, not null | **PostgreSQL `GENERATED ALWAYS AS (...) STORED`** column derived from `name` — not an ORM-maintained mirror; see Rev 12 below. Indexed (non-unique — see below) |
+| domain | text | nullable, always stored pre-normalized by `normalize_domain()` — see below |
+| homepage_url | text | nullable, NULL-safe normalization `CHECK`s |
+| career_page_url | text | nullable, NULL-safe normalization `CHECK`s |
+| industry | text | nullable, NULL-safe normalization `CHECK`s |
+| duplicate_of_company_id | UUID | nullable, self-referential FK, `ON DELETE SET NULL`, `CHECK` rejects direct self-reference — see below |
+| created_at | timestamptz, not null | `server_default now()` |
+| updated_at | timestamptz, not null | `server_default now()`, ORM `onupdate` |
 
-**Domain normalization (Rev 3, item 8b; completed Rev 4, item 3):** `domain` is always
-stored pre-normalized by `normalization/company.py::normalize_domain()` before any
-insert/update touches this column. Full algorithm:
-1. Lowercase the input.
-2. Strip the scheme (`http://`, `https://`, or any other `scheme://` prefix).
-3. Strip userinfo/credentials (`user:pass@`) if present.
-4. Strip the port (`:8080`), path, query string, and fragment — only the host remains.
-5. Strip a leading `www.`.
-6. Strip a trailing dot (the DNS root-label separator, e.g. `acme.com.` → `acme.com`).
-7. Convert internationalized domain names to their canonical IDNA ASCII (punycode)
-   representation (e.g. `café.com` → `xn--caf-dma.com`), so a Unicode domain and its
-   punycode-encoded equivalent always normalize to the same stored value.
-8. Validate the result is a syntactically plausible hostname (non-empty, valid label
-   structure). **Explicit rule for malformed input:** if the input cannot be parsed into
-   a valid hostname at all (empty string, garbage input, a URL with no discernible host),
-   `normalize_domain()` returns `None` rather than raising — the caller stores `NULL` in
-   `companies.domain`, the same representation already used for "domain unknown"
-   elsewhere in this schema. This is a deliberate choice, not a fallback of convenience:
-   ingestion must never abort or crash a batch because one company's source data had a
-   malformed URL (consistent with §17/§32's requirement that provider/parsing failures
-   stay isolated); raising an exception here would do exactly that. Rejecting outright
-   (as opposed to normalizing to `NULL`) was considered and rejected for the same reason
-   — this is the one explicitly documented rule the acceptance tests below check.
+**Domain normalization (Rev 3, item 8b; completed Rev 4, item 3; implementation detail
+corrected at Rev 12 — see below):** `domain` is always stored pre-normalized by
+`app/normalization/company.py::normalize_domain()` before any insert/update touches this
+column. Full algorithm:
+1. Trim, then lowercase the input.
+2. Accept either a bare host or an arbitrary `scheme://` URL — detected only by the
+   presence of `://`, so a bare host with a port (e.g. `acme.com:8080`) is never
+   misparsed as scheme `acme.com` with path `8080`.
+3. Strip userinfo/credentials (`user:pass@`), the port, path, query string, and
+   fragment — only the host remains.
+4. Strip one leading `www.` and one trailing dot (the DNS root-label separator, e.g.
+   `acme.com.` → `acme.com`).
+5. Reject (return `None`) a single-label host, an IP literal (IPv4 or IPv6, bracketed
+   or bare), an invalid port, or a missing host.
+6. Convert through IDNA2008/UTS #46 (`idna.encode(host, uts46=True, std3_rules=True)` —
+   see Rev 12), which additionally rejects empty labels, invalid punycode, disallowed
+   codepoints (e.g. embedded whitespace, underscores under STD3 rules), and oversized
+   labels/names.
+7. Return the ASCII, lowercase result.
+
+**Explicit rule for malformed input:** if the input cannot be parsed into a valid
+hostname at all (empty string, garbage input, a URL with no discernible host, an IP
+literal, a single-label host), `normalize_domain()` returns `None` rather than raising —
+the caller stores `NULL` in `companies.domain`, the same representation already used for
+"domain unknown" elsewhere in this schema. This is a deliberate choice, not a fallback of
+convenience: ingestion must never abort or crash a batch because one company's source
+data had a malformed URL (consistent with §17/§32's requirement that provider/parsing
+failures stay isolated); raising an exception here would do exactly that. Rejecting
+outright (as opposed to normalizing to `NULL`) was considered and rejected for the same
+reason — this is the one explicitly documented rule the acceptance tests below check.
 
 Comparing raw, differently-cased, or differently-encoded domain strings (`Acme.com` vs
 `acme.com` vs `www.acme.com` vs a Unicode/punycode pair) as if they were distinct would
@@ -910,8 +958,7 @@ reviewed against this list directly:
 | `saved_searches` | `INDEX (user_id)`; `CHECK (name = trim(both E'\t\n\r ' from name))`; `CHECK (trim(both E'\t\n\r ' from name) <> '')`; `CHECK` on `remote_rules`/`polling_schedule` enums; non-negative `CHECK`s on `radius_miles`/`salary_floor`/`preferred_salary`/`recency_limit_hours`; `CHECK (salary_floor <= preferred_salary)`; `CHECK` requiring `enabled_sources`/`scoring_weights` be a top-level JSON object when non-null | reject a non-normalized/empty `name`, an invalid enum, a negative bound, an inverted salary range, or a non-object jsonb value at the database; `radius_miles` has no precision/scale but is non-negative like the other numeric fields — see the table's own section above (Rev 9) |
 | `saved_search_titles` | `UNIQUE (saved_search_id, lower(title))`; `CHECK (title = trim(both E'\t\n\r ' from title))`; `CHECK (trim(both E'\t\n\r ' from title) <> '')`; partial `UNIQUE (saved_search_id) WHERE is_primary` | one entry per title per search, case-insensitive; reject a non-normalized or empty title; at most one primary title per search, zero allowed — see the table's own section above (Rev 10) |
 | `saved_search_locations` | `UNIQUE (saved_search_id, lower(location_text))`; `CHECK (location_text = trim(both E'\t\n\r ' from location_text))`; `CHECK (trim(both E'\t\n\r ' from location_text) <> '')`; `CHECK` on latitude/longitude range; `CHECK ((latitude IS NULL) = (longitude IS NULL))`; `CHECK (radius_miles_override IS NULL OR radius_miles_override >= 0)` | one entry per location per search, case-insensitive; reject a non-normalized/empty location, an out-of-range or half-geocoded coordinate pair, or a negative radius override — see the table's own section above (Rev 11) |
-| `companies` | `UNIQUE (lower(domain)) WHERE domain IS NOT NULL` | strongest available company identity signal, case-normalized (Rev 3, item 8b); **no** uniqueness on `normalized_name` (see conservative collision behavior above) |
-| `companies` | `INDEX (normalized_name)` | non-unique, for search/lookup only |
+| `companies` | `UNIQUE (lower(domain)) WHERE domain IS NOT NULL`; `INDEX (normalized_name)`; `CHECK (name = trim(both E'\t\n\r ' from name))`; `CHECK (trim(both E'\t\n\r ' from name) <> '')`; NULL-safe normalized/non-empty `CHECK` pairs on `homepage_url`/`career_page_url`/`industry`; `CHECK (duplicate_of_company_id IS NULL OR duplicate_of_company_id <> id)` | strongest available company identity signal, case-normalized, NULL-safe (any number of `NULL`-domain companies coexist); **no** uniqueness on `normalized_name` (see conservative collision behavior above) — it is a `GENERATED ALWAYS AS (...) STORED` column, not an independently writable one; reject a non-normalized/empty `name`, an optional text field that's present-but-blank/wrapped, or direct self-reference on `duplicate_of_company_id` — see the table's own section above (Rev 12) |
 | `job_occurrences` | `UNIQUE (provider, source, source_tenant_id, source_job_id) WHERE source_job_id IS NOT NULL AND source_tenant_id IS NOT NULL` | natural key for tenant-scoped sources (Rev 3 split — see ADR 0004) |
 | `job_occurrences` | `UNIQUE (provider, source, source_job_id) WHERE source_job_id IS NOT NULL AND source_tenant_id IS NULL` | natural key for sources with no tenant concept, e.g. LinkedIn/Indeed (Rev 3 split — the fix for the NULL-distinctness bug, ADR 0004) |
 | `job_occurrences` | `UNIQUE (provider, source, source_url_normalized) WHERE source_job_id IS NULL` | fallback natural key when no stable ID is available |
