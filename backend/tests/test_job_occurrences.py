@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.db.models import Job, JobOccurrence
+from app.normalization import url as url_module
 from app.normalization.url import normalize_url
 from tests.conftest import real_committed_job, real_committed_job_occurrence
 
@@ -84,6 +85,24 @@ def test_normalize_url_unicode_separator_variant_host_equivalence() -> None:
     `normalize_domain()`'s equivalent regression coverage."""
     assert normalize_url("http://www。acme.com/x") == normalize_url("http://www.acme.com/x")
     assert normalize_url("http://acme．com/x") == normalize_url("http://acme.com/x")
+
+
+def test_normalize_url_trailing_root_dot_host_equivalence() -> None:
+    """A single trailing DNS root-dot (ASCII or a UTS #46-mapped
+    equivalent) must canonicalize identically to no trailing dot at all —
+    otherwise the same real-world URL could fail to match itself merely
+    because one occurrence happened to include the root separator."""
+    assert normalize_url("http://example.com./x") == normalize_url("http://example.com/x")
+    assert normalize_url("http://example.com./x") == "http://example.com/x"
+    assert normalize_url("http://example.com。/x") == "http://example.com/x"
+
+
+def test_normalize_url_doubled_root_dot_rejected() -> None:
+    """A doubled/empty-label host must still be rejected outright — the
+    root-dot equivalence above only ever strips exactly one trailing dot
+    from an otherwise-valid host, never repairs a malformed one."""
+    assert normalize_url("http://example.com../x") is None
+    assert normalize_url("http://.example.com/x") is None
 
 
 @pytest.mark.parametrize(
@@ -178,14 +197,48 @@ def test_normalize_url_preserves_path_casing() -> None:
     assert normalize_url("http://acme.com/CaReErS") == "http://acme.com/CaReErS"
 
 
-def test_normalize_url_strips_trailing_space_in_path() -> None:
-    # A raw, unencoded trailing space in the path survives `urlsplit()`
-    # untouched (unlike \t/\n/\r, which `urlsplit()` already strips
-    # anywhere in the input). Without stripping it here, the returned
-    # value would violate the `*_normalized` columns' own
-    # trim/non-empty CHECK constraints when written outside the ORM's
-    # `@validates` path (e.g. a future raw-SQL/Core insert).
-    assert normalize_url("http://acme.com/careers ") == "http://acme.com/careers"
+def test_normalize_url_strips_ordinary_outer_wrapper_whitespace() -> None:
+    """Symmetric leading/trailing whitespace around the whole raw URL is
+    trimmed before parsing, not rejected — only whitespace that remains
+    *inside* the trimmed input is malformed (see the rejection tests
+    below)."""
+    assert normalize_url("  http://acme.com/careers  ") == "http://acme.com/careers"
+    assert normalize_url("http://acme.com/careers \t") == "http://acme.com/careers"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://exa\tmple.com/job",
+        "https://example.com/jo\nb",
+        "https://example.com/jo\rb",
+        "https://example.com/jo b",
+        "https://example.com/job?a=1\tb=2",
+        "\thttps://example.com/j ob",
+    ],
+    ids=[
+        "tab-in-host",
+        "newline-in-path",
+        "cr-in-path",
+        "space-in-path",
+        "tab-in-query",
+        "outer-plus-inner-whitespace",
+    ],
+)
+def test_normalize_url_rejects_embedded_whitespace(url: str) -> None:
+    """`urlsplit()` on its own would silently delete an embedded
+    `\\t`/`\\n`/`\\r` anywhere in the input, or leave an embedded space
+    untouched — either way, a different-looking raw URL could
+    "successfully" normalize to something that collides with an unrelated
+    valid occurrence. Any covered whitespace surviving the outer trim
+    must reject the whole input instead."""
+    assert normalize_url(url) is None
+
+
+def test_normalize_url_percent_encoded_whitespace_remains_valid() -> None:
+    """A `%20` is not a literal whitespace character in the raw string, so
+    it must not be rejected by the embedded-whitespace check above."""
+    assert normalize_url("https://example.com/jo%20b") == "https://example.com/jo%20b"
 
 
 def test_normalize_url_repeated_and_blank_query_values_retained() -> None:
@@ -228,6 +281,30 @@ def test_normalize_url_single_label_host_accepted() -> None:
     assert normalize_url("http://localhost/x") == "http://localhost/x"
 
 
+def test_normalize_url_allow_list_lookup_is_canonicalized(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The per-`(provider, source)` allow-list is keyed by already-
+    canonical (lowercase, trimmed) tuples. A caller passing different
+    casing/whitespace for `provider`/`source` must still hit the same
+    entry — otherwise a real, evidence-based allow-list addition could
+    silently fail to apply merely because of how a particular call site
+    happened to format its own context strings."""
+    monkeypatch.setitem(
+        url_module._PER_SOURCE_ALLOW_LIST,
+        ("ats_scrapers", "greenhouse"),
+        frozenset({"utm_source"}),
+    )
+    assert (
+        normalize_url(
+            "http://acme.com/?utm_source=x",
+            provider=" ATS_Scrapers\t",
+            source="\nGreenHouse ",
+        )
+        == "http://acme.com/?utm_source=x"
+    )
+
+
 # --------------------------------------------------------------------------
 # JobOccurrence model — baseline
 # --------------------------------------------------------------------------
@@ -261,7 +338,10 @@ async def test_insert_and_retrieve_minimal_valid_occurrence(
     assert fetched.source_job_id is None
     assert fetched.requisition_id_raw is None
     assert fetched.source_url == "https://boards.greenhouse.io/acme/jobs/12345"
-    assert fetched.source_url_normalized is None
+    # The factory computes this from `source_url` by default — a "valid
+    # occurrence" must actually be identity-consistent, the same way a
+    # real ingestion write would be.
+    assert fetched.source_url_normalized == "https://boards.greenhouse.io/acme/jobs/12345"
     assert fetched.apply_url is None
     assert fetched.canonical_url is None
     assert fetched.canonical_url_normalized is None
@@ -325,6 +405,93 @@ async def test_direct_sql_empty_provider_or_source_rejected(
 ) -> None:
     job_id = await _insert_job(db_session, make_job)
     await _assert_direct_sql_insert_rejected(db_session, job_id, {column: "''"})
+
+
+@pytest.mark.parametrize("column", ["provider", "source"])
+async def test_non_ascii_provider_or_source_rejected_on_orm_path(
+    db_session: AsyncSession,
+    make_job: Callable[..., Job],
+    make_job_occurrence: Callable[..., JobOccurrence],
+    column: str,
+) -> None:
+    """The ASCII slug-format `CHECK`, not the ORM's `str.lower()`
+    validator, is what actually rejects this: "café" is already lowercase
+    under Python's `lower()`, so the ORM passes it through unchanged, and
+    only the slug-format `CHECK` (ASCII-only by construction) catches it —
+    exactly the gap that let Python's and PostgreSQL's `lower()` disagree
+    on non-ASCII input before this `CHECK` existed."""
+    job_id = await _insert_job(db_session, make_job)
+    occurrence = make_job_occurrence(
+        job_id=job_id, first_seen_at=_SEEN_AT, last_seen_at=_SEEN_AT, **{column: "café"}
+    )
+    db_session.add(occurrence)
+    with pytest.raises(IntegrityError):
+        await db_session.commit()
+    await db_session.rollback()
+
+
+@pytest.mark.parametrize("column", ["provider", "source"])
+async def test_direct_sql_non_ascii_provider_or_source_rejected(
+    db_session: AsyncSession, make_job: Callable[..., Job], column: str
+) -> None:
+    job_id = await _insert_job(db_session, make_job)
+    await _assert_direct_sql_insert_rejected(db_session, job_id, {column: "'café'"})
+
+
+@pytest.mark.parametrize("column", ["provider", "source"])
+async def test_embedded_space_provider_or_source_rejected_on_orm_path(
+    db_session: AsyncSession,
+    make_job: Callable[..., Job],
+    make_job_occurrence: Callable[..., JobOccurrence],
+    column: str,
+) -> None:
+    """Already trimmed and already lowercase by the ORM validator, so only
+    the slug-format `CHECK` (not the ORM validator itself) rejects this —
+    same rationale as `test_non_ascii_provider_or_source_rejected_on_orm_path`."""
+    job_id = await _insert_job(db_session, make_job)
+    occurrence = make_job_occurrence(
+        job_id=job_id, first_seen_at=_SEEN_AT, last_seen_at=_SEEN_AT, **{column: "green house"}
+    )
+    db_session.add(occurrence)
+    with pytest.raises(IntegrityError):
+        await db_session.commit()
+    await db_session.rollback()
+
+
+@pytest.mark.parametrize("column", ["provider", "source"])
+async def test_direct_sql_embedded_space_provider_or_source_rejected(
+    db_session: AsyncSession, make_job: Callable[..., Job], column: str
+) -> None:
+    """Already trimmed and already lowercase, so only the slug-format
+    `CHECK` (which forbids a literal space) rejects this."""
+    job_id = await _insert_job(db_session, make_job)
+    await _assert_direct_sql_insert_rejected(db_session, job_id, {column: "'green house'"})
+
+
+@pytest.mark.parametrize("column", ["provider", "source"])
+async def test_direct_sql_provider_or_source_starting_with_hyphen_rejected(
+    db_session: AsyncSession, make_job: Callable[..., Job], column: str
+) -> None:
+    job_id = await _insert_job(db_session, make_job)
+    await _assert_direct_sql_insert_rejected(db_session, job_id, {column: "'-leadinghyphen'"})
+
+
+@pytest.mark.parametrize("column", ["provider", "source"])
+async def test_provider_or_source_slug_format_accepts_dot_underscore_hyphen(
+    db_session: AsyncSession,
+    make_job: Callable[..., Job],
+    make_job_occurrence: Callable[..., JobOccurrence],
+    column: str,
+) -> None:
+    job_id = await _insert_job(db_session, make_job)
+    occurrence = make_job_occurrence(
+        job_id=job_id,
+        first_seen_at=_SEEN_AT,
+        last_seen_at=_SEEN_AT,
+        **{column: "job-spy_v2.test"},
+    )
+    db_session.add(occurrence)
+    await db_session.commit()  # must not raise
 
 
 # --------------------------------------------------------------------------
@@ -455,18 +622,22 @@ async def test_direct_sql_whitespace_wrapped_source_url_rejected(
 async def test_normalized_url_columns_are_not_auto_derived_from_raw_urls(
     db_session: AsyncSession,
     make_job: Callable[..., Job],
-    make_job_occurrence: Callable[..., JobOccurrence],
 ) -> None:
-    """The model never calls `normalize_url()` itself — setting the raw URL
-    columns must not silently populate the normalized ones."""
+    """The model itself never calls `normalize_url()` — setting the raw
+    URL columns must not silently populate the normalized ones.
+    Constructed directly (bypassing `make_job_occurrence`, which — as an
+    application caller, not the model — computes `source_url_normalized`
+    itself) to isolate the model's own behavior from the factory's."""
     job_id = await _insert_job(db_session, make_job)
-    occurrence = make_job_occurrence(
+    occurrence = JobOccurrence(
         job_id=job_id,
+        provider="ats_scrapers",
+        source="greenhouse",
+        source_url="https://Boards.Greenhouse.io/Acme/Jobs/1",
+        canonical_url="https://acme.com/careers/1",
         first_seen_at=_SEEN_AT,
         last_seen_at=_SEEN_AT,
-        source_url="https://Boards.Greenhouse.io/Acme/Jobs/1",
     )
-    occurrence.canonical_url = "https://acme.com/careers/1"
     db_session.add(occurrence)
     await db_session.commit()
     await db_session.refresh(occurrence)
@@ -990,18 +1161,34 @@ async def test_multiple_rows_with_null_source_job_id_and_null_normalized_url_acc
     make_job: Callable[..., Job],
     make_job_occurrence: Callable[..., JobOccurrence],
 ) -> None:
-    """Two malformed-source-URL occurrences (both `source_job_id` and
-    `source_url_normalized` NULL) must not be treated as duplicates of each
-    other merely because they're both unparseable."""
+    """Three genuinely malformed-source-URL occurrences (`source_job_id`
+    NULL and, because each raw `source_url` is unparseable,
+    `source_url_normalized` NULL too — verified against the same
+    `normalize_url()` the factory itself calls) must not be treated as
+    duplicates of each other merely because they're all `NULL`/`NULL`.
+    Distinct raw URLs, so this isn't incidentally exercising some other
+    invariant."""
     job_id = await _insert_job(db_session, make_job)
-    for _ in range(3):
+    malformed_urls = ["not a url at all", "also-not-a-url", "ftp://wrong-scheme.example.com/x"]
+    for malformed in malformed_urls:
+        assert normalize_url(malformed) is None
         db_session.add(
-            make_job_occurrence(job_id=job_id, first_seen_at=_SEEN_AT, last_seen_at=_SEEN_AT)
+            make_job_occurrence(
+                job_id=job_id, first_seen_at=_SEEN_AT, last_seen_at=_SEEN_AT, source_url=malformed
+            )
         )
     await db_session.commit()  # must not raise
 
     count = (await db_session.execute(select(func.count()).select_from(JobOccurrence))).scalar_one()
     assert count == 3
+    normalized_count = (
+        await db_session.execute(
+            select(func.count())
+            .select_from(JobOccurrence)
+            .where(JobOccurrence.source_url_normalized.is_(None))
+        )
+    ).scalar_one()
+    assert normalized_count == 3
 
 
 # --------------------------------------------------------------------------

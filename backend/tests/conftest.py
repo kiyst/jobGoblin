@@ -23,6 +23,7 @@ from app.db.models import (
 )
 from app.db.session import check_database_connection
 from app.main import app
+from app.normalization.url import normalize_url
 
 # The disposable database `db_engine`/`db_session` run destructive schema
 # tests against. Only used as a fallback when `Settings.test_database_url`
@@ -472,7 +473,15 @@ def make_job_occurrence() -> Callable[..., JobOccurrence]:
     is also required (no default): a `JobOccurrence` cannot exist without a
     real `Job` row to reference, and this factory deliberately doesn't
     create one implicitly, matching `make_candidate_profile`'s
-    take-the-parent-id-explicitly pattern."""
+    take-the-parent-id-explicitly pattern.
+
+    `source_url_normalized` defaults to `normalize_url(source_url, ...)` —
+    this factory is an application caller, not the model itself, so a
+    "valid occurrence" by default must actually be identity-consistent,
+    the same way a real ingestion write would be. A test that needs the
+    model's own non-derivation behavior, or a deliberately malformed/NULL
+    normalized value, overrides the attribute explicitly after
+    construction (see test_job_occurrences.py)."""
 
     def _make(
         *,
@@ -488,6 +497,7 @@ def make_job_occurrence() -> Callable[..., JobOccurrence]:
             provider=provider,
             source=source,
             source_url=source_url,
+            source_url_normalized=normalize_url(source_url, provider=provider, source=source),
             first_seen_at=first_seen_at,
             last_seen_at=last_seen_at,
         )
@@ -509,10 +519,18 @@ async def real_committed_job_occurrence(
     best-effort cleanup (occurrence, then — via the wrapped helper — job)
     so a partially cascaded state is skipped rather than treated as an
     error, same rationale as every other `real_committed_*` helper above.
+    Same "valid by default" rationale as `make_job_occurrence`:
+    `source_url_normalized` defaults to `normalize_url(source_url, ...)`
+    unless the caller already passed one explicitly.
     """
-    occurrence_kwargs.setdefault("provider", "ats_scrapers")
-    occurrence_kwargs.setdefault("source", "greenhouse")
-    occurrence_kwargs.setdefault("source_url", "https://boards.greenhouse.io/acme/jobs/12345")
+    provider = str(occurrence_kwargs.setdefault("provider", "ats_scrapers"))
+    source = str(occurrence_kwargs.setdefault("source", "greenhouse"))
+    source_url = str(
+        occurrence_kwargs.setdefault("source_url", "https://boards.greenhouse.io/acme/jobs/12345")
+    )
+    occurrence_kwargs.setdefault(
+        "source_url_normalized", normalize_url(source_url, provider=provider, source=source)
+    )
 
     async with real_committed_job(
         db_engine, first_seen_at=first_seen_at, last_seen_at=last_seen_at, **(job_kwargs or {})

@@ -14,6 +14,18 @@ host (both are rejected outright by `normalize_domain()`).
 
 Malformed input never raises: it returns `None`, the same representation
 "unknown"/"unparseable" already uses elsewhere in this schema.
+
+Whitespace is rejected, never silently deleted: `urlsplit()` on its own
+quietly strips embedded `\t`/`\n`/`\r` from anywhere in the input (a
+CPython mitigation for header-injection-style attacks) and leaves a raw
+embedded space untouched, so two clearly different raw strings could
+otherwise both "successfully" normalize — one by having its embedded
+whitespace deleted, the other by keeping it verbatim — and collide as a
+false identity match. `normalize_url()` instead trims only the outer
+wrapper whitespace before parsing and rejects the input entirely (`None`)
+if any covered whitespace remains anywhere inside. Percent-encoded
+whitespace (e.g. `%20`) is untouched by this check — it is not a literal
+whitespace character in the raw string.
 """
 
 from __future__ import annotations
@@ -26,9 +38,10 @@ import idna
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 
 # Matches the trim set the `*_normalized` columns' own DB CHECK constraints
-# use (`trim(both E'\t\n\r ' from ...)`). `urlsplit()` only strips `\t`/`\n`/
-# `\r` from the whole input already; a literal, unencoded space is not
-# rejected by `urlsplit()` and can otherwise survive verbatim in `.path`.
+# use (`trim(both E'\t\n\r ' from ...)`). Used both to trim outer wrapper
+# whitespace before parsing and to detect (and reject) any of these
+# characters remaining anywhere inside the trimmed input — see
+# `normalize_url()`.
 _TRIM_CHARS = " \t\n\r"
 
 # Stripped regardless of case: exact tracking-parameter names named in
@@ -51,7 +64,12 @@ _EXACT_STRIP_NAMES = frozenset(
 # Per-(provider, source) query-parameter allow-list, overriding the deny-list
 # above when a name is listed here. Deliberately empty in Phase 1 (ADR 0004:
 # "starts empty/conservative", grows only with real Phase 4/7 adapter
-# evidence) — never guess entries ahead of that evidence.
+# evidence) — never guess entries ahead of that evidence. Keys must already
+# be lowercase/trimmed (matching `JobOccurrence.provider`/`.source`'s own
+# canonical form) — `normalize_url()` canonicalizes its caller-supplied
+# `provider`/`source` the same way before looking a key up, so a future
+# entry can't silently miss merely because a caller passed different
+# casing/whitespace.
 _PER_SOURCE_ALLOW_LIST: dict[tuple[str, str], frozenset[str]] = {}
 
 
@@ -67,7 +85,14 @@ def _canonicalize_host(hostname: str) -> str | None:
     if `hostname` is neither a valid IP literal nor a validly-encodable
     domain name. Unlike `normalize_domain()`, a single-label host and an
     IP-literal host are both accepted — a URL's host is not being asked to
-    prove company identity, only to be a stable, comparable target."""
+    prove company identity, only to be a stable, comparable target.
+
+    A single trailing DNS root-dot (ASCII `.` or a UTS #46-mapped
+    equivalent, e.g. U+3002/U+FF0E) is stripped so `example.com.` and
+    `example.com` canonicalize identically — `idna.encode()` already
+    treats a doubled or otherwise empty label as an error, so a malformed
+    form like `example.com..` still returns `None` below, never a
+    stripped-down value."""
     try:
         parsed_ip = ipaddress.ip_address(hostname)
     except ValueError:
@@ -79,7 +104,10 @@ def _canonicalize_host(hostname: str) -> str | None:
         encoded = idna.encode(hostname, uts46=True, std3_rules=True)
     except (idna.IDNAError, UnicodeError, ValueError):
         return None
-    return encoded.decode("ascii").lower()
+    canonical = encoded.decode("ascii").lower()
+    if len(canonical) > 1 and canonical.endswith("."):
+        canonical = canonical[:-1]
+    return canonical
 
 
 def normalize_url(
@@ -110,8 +138,17 @@ def normalize_url(
     if value is None:
         return None
 
+    trimmed = value.strip(_TRIM_CHARS)
+    if not trimmed or any(char in _TRIM_CHARS for char in trimmed):
+        # Reject rather than silently repair: `urlsplit()` on its own would
+        # delete an embedded \t/\n/\r invisibly and leave an embedded space
+        # untouched, letting two different raw URLs collide as the same
+        # "normalized" identity. Only symmetric outer wrapper whitespace —
+        # already removed by the trim above — is tolerated.
+        return None
+
     try:
-        parsed = urlsplit(value)
+        parsed = urlsplit(trimmed)
         port = parsed.port
         hostname = parsed.hostname
         username = parsed.username
@@ -138,7 +175,10 @@ def normalize_url(
     path = parsed.path.rstrip("/") or "/"
 
     allowed = (
-        _PER_SOURCE_ALLOW_LIST.get((provider, source), frozenset())
+        _PER_SOURCE_ALLOW_LIST.get(
+            (provider.strip(_TRIM_CHARS).lower(), source.strip(_TRIM_CHARS).lower()),
+            frozenset(),
+        )
         if provider and source
         else frozenset()
     )
@@ -150,5 +190,4 @@ def normalize_url(
     retained.sort()
     query_suffix = f"?{urlencode(retained)}" if retained else ""
 
-    result = f"{scheme}://{host}{port_suffix}{path}{query_suffix}"
-    return result.strip(_TRIM_CHARS)
+    return f"{scheme}://{host}{port_suffix}{path}{query_suffix}"

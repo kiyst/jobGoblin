@@ -670,7 +670,7 @@ code, out of scope for this schema-only slice.
 |---|---|---|
 | id | UUID PK | generated application-side (`uuid.uuid4`) |
 | job_id | UUID FK → jobs, `ON DELETE CASCADE`, not null | |
-| provider | text, not null | e.g. "ats_scrapers", "jobspy" — a required canonical identifier: lowercased and trimmed by the ORM, `CHECK`-enforced already lowercase/trimmed/non-empty (Rev 15) |
+| provider | text, not null | e.g. "ats_scrapers", "jobspy" — a required canonical identifier: lowercased and trimmed by the ORM, `CHECK`-enforced already lowercase/trimmed/non-empty (Rev 15), and restricted to a lowercase ASCII slug grammar `^[a-z0-9][a-z0-9._-]*$` (Rev 16) |
 | source | text, not null | e.g. "greenhouse", "linkedin" — same canonical-identifier treatment as `provider` |
 | source_tenant_id | text | **new in Rev 2** — nullable, case-preserving (not case-folded — externally assigned, unlike `provider`/`source`). The ATS-tenant or employer-account identifier *within* `(provider, source)`: a Workday tenant subdomain, a Greenhouse board token, a Lever company slug. Null for sources with no tenant concept (e.g. a LinkedIn/Indeed posting isn't scoped to a "tenant" beyond the site itself). This is what makes requisition-ID matching safe — see [ADR 0004](DECISIONS/0004-scoped-deterministic-identity.md) |
 | source_job_id | text | nullable, case-preserving |
@@ -733,6 +733,42 @@ several implementation decisions, resolved by explicit approval before migration
 - `applicant_count` gets the established non-negative `CHECK`. `is_active` is NOT
   NULL with `server_default true`, matching `saved_searches.is_active`.
   `created_at`/`updated_at` are added, per the established global convention.
+
+**Rev 16 corrections** (Codex review at commit `5ad85bd`, applied on the same
+`phase-1/job-occurrences` branch): three defects in Rev 15's implementation, found by
+adversarial self-review and independent review before merge:
+- **`normalize_url()` now rejects embedded whitespace instead of silently
+  repairing or ignoring it.** `urlsplit()` on its own quietly deletes an embedded
+  `\t`/`\n`/`\r` from anywhere in the raw input (a CPython header-injection
+  mitigation) while leaving an embedded literal space untouched — so two
+  different-looking raw URLs could each "successfully" normalize and collide as a
+  false identity match. `normalize_url()` now trims only symmetric *outer* wrapper
+  whitespace before parsing, then returns `None` for the whole input if any covered
+  whitespace remains anywhere inside it. Percent-encoded whitespace (`%20`) is
+  unaffected — it is not a literal whitespace character in the raw string.
+- **A single trailing DNS root-dot now canonicalizes identically to no trailing
+  dot.** `example.com.` (or a UTS #46-mapped equivalent, e.g. U+3002/U+FF0E) previously
+  normalized to a *different* host string than `example.com`, so the same real posting
+  could fail to match itself depending on whether a source happened to include the
+  root separator. `_canonicalize_host()` now strips exactly one trailing dot from the
+  post-IDNA ASCII form; a doubled or otherwise empty label (`example.com..`,
+  `.example.com`) is still rejected outright (`idna.encode()` already treats these as
+  errors), never silently repaired.
+- **`provider`/`source` are now restricted to a lowercase ASCII slug grammar**
+  (`^[a-z0-9][a-z0-9._-]*$`), in addition to the existing trim/lower/non-empty
+  `CHECK`s. Python's `str.lower()` (used by the ORM validator) and PostgreSQL's
+  `lower()` (used by the `_normalized` `CHECK`) can disagree on non-ASCII input
+  depending on locale/collation (e.g. Turkish dotted-İ); restricting both columns to
+  ASCII makes that divergence structurally impossible rather than an accepted
+  limitation. `normalize_url()`'s per-`(provider, source)` allow-list lookup is also
+  now canonicalized (trim + lowercase) before the dict lookup, so a future
+  evidence-based allow-list entry can't silently miss due to caller casing.
+- The `job_occurrences` factory (`backend/tests/conftest.py`) now computes
+  `source_url_normalized = normalize_url(source_url, ...)` by default instead of
+  leaving it `NULL` — a "valid occurrence" produced by an application-level test
+  helper must actually be identity-consistent, the same way a real ingestion write
+  would be. Tests that need the model's own non-derivation behavior, or a
+  deliberately malformed/`NULL` normalized value, override it explicitly.
 
 **Removed in Rev 2:** `last_raw_ingestion_id`. Rev 1 gave this table a FK to
 `raw_job_ingestions` *and* gave `raw_job_ingestions` a FK back — a circular reference
@@ -1090,7 +1126,7 @@ reviewed against this list directly:
 | `job_occurrences` | `INDEX (canonical_url_normalized)` | identity-resolution lookup (ADR 0004 tier 2) |
 | `job_occurrences` | `INDEX (provider, source, source_tenant_id, requisition_id_raw)` | identity-resolution lookup (ADR 0004 tier 3 — Rev 3 fix: now scoped by `provider`/`source`, not just `source_tenant_id`, per item 2) |
 | `job_occurrences` | `INDEX (job_id, is_active, last_seen_at DESC)` | "active occurrences for this job, freshest first" — the common feed-rendering query |
-| `job_occurrences` | `CHECK` requiring `provider`/`source` already lowercase/trimmed/non-empty; NULL-safe normalized/non-empty `CHECK` pairs on every other text column (`source_tenant_id`, `source_job_id`, `requisition_id_raw`, `source_url` [not-null], `source_url_normalized`, `apply_url`, `canonical_url`, `canonical_url_normalized`, `applicant_count_text`); `CHECK (canonical_url IS NOT NULL OR canonical_url_normalized IS NULL)`; non-negative `CHECK` on `applicant_count`; `CHECK (first_seen_at <= last_seen_at)` | reject a non-canonical `provider`/`source`, a non-normalized/empty text field, a normalized canonical URL with no raw URL behind it, a negative applicant count, or an inverted observation-time pair — see the table's own section above (Rev 15) |
+| `job_occurrences` | `CHECK` requiring `provider`/`source` already lowercase/trimmed/non-empty and matching the ASCII slug grammar `^[a-z0-9][a-z0-9._-]*$` (Rev 16); NULL-safe normalized/non-empty `CHECK` pairs on every other text column (`source_tenant_id`, `source_job_id`, `requisition_id_raw`, `source_url` [not-null], `source_url_normalized`, `apply_url`, `canonical_url`, `canonical_url_normalized`, `applicant_count_text`); `CHECK (canonical_url IS NOT NULL OR canonical_url_normalized IS NULL)`; non-negative `CHECK` on `applicant_count`; `CHECK (first_seen_at <= last_seen_at)` | reject a non-canonical `provider`/`source`, a non-ASCII-slug `provider`/`source`, a non-normalized/empty text field, a normalized canonical URL with no raw URL behind it, a negative applicant count, or an inverted observation-time pair — see the table's own section above (Rev 15/16) |
 | `raw_job_ingestions` | `INDEX (job_occurrence_id, fetched_at DESC)` | derives "latest ingestion for this occurrence" without a stored pointer (ADR 0005) |
 | `identity_conflicts` | `INDEX (status)`, `INDEX (existing_job_occurrence_id)`, `INDEX (incoming_raw_job_ingestion_id)` | **new in Rev 3** — open-conflict queue lookup and traceback to the occurrence/ingestion in dispute |
 | `identity_conflicts` | `CHECK` on `status`, `conflict_type`, `(status, resolved_at)`, `existing_value NOT NULL`, `incoming_value NOT NULL` | **new in Rev 4** — full lifecycle constraint set, see the table's own section above |

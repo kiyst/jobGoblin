@@ -65,9 +65,15 @@ class JobOccurrence(Base):
     trimmed by the ORM, with a database `CHECK` requiring an already
     trimmed, lowercase, non-empty value — casing or whitespace differences
     must never let two logically-identical rows bypass the natural-key
-    indexes below. `source_tenant_id`/`source_job_id`/`requisition_id_raw`
-    are externally assigned identifiers and are deliberately **not**
-    case-folded — only trimmed.
+    indexes below. They are further restricted to a documented lowercase
+    ASCII slug grammar (`^[a-z0-9][a-z0-9._-]*$`) so Python's `str.lower()`
+    (used by the ORM validator) and PostgreSQL's `lower()` (used by the
+    `_normalized` `CHECK`) can never disagree — both are exact no-ops on
+    this character set, unlike arbitrary Unicode input, where the two
+    `lower()` implementations can diverge by locale/collation.
+    `source_tenant_id`/`source_job_id`/`requisition_id_raw` are externally
+    assigned identifiers and are deliberately **not** case-folded or
+    slug-restricted — only trimmed.
 
     `source_url_normalized`/`canonical_url_normalized` are **not** derived
     by this model from `source_url`/`canonical_url` — the database cannot
@@ -133,12 +139,20 @@ class JobOccurrence(Base):
             name="provider_not_empty",
         ),
         CheckConstraint(
+            r"provider ~ '^[a-z0-9][a-z0-9._-]*$'",
+            name="provider_slug_format",
+        ),
+        CheckConstraint(
             r"source = lower(trim(both E'\t\n\r ' from source))",
             name="source_normalized",
         ),
         CheckConstraint(
             r"trim(both E'\t\n\r ' from source) <> ''",
             name="source_not_empty",
+        ),
+        CheckConstraint(
+            r"source ~ '^[a-z0-9][a-z0-9._-]*$'",
+            name="source_slug_format",
         ),
         CheckConstraint(
             r"source_url = trim(both E'\t\n\r ' from source_url)",

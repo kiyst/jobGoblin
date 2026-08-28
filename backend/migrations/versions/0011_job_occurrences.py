@@ -18,10 +18,14 @@ written (not inferred silently):
 - `provider`/`source` are required canonical identifiers: lowercased and
   trimmed by the ORM, with a database `CHECK` requiring an already trimmed,
   lowercase, non-empty value — casing/whitespace differences must never let
-  two logically-identical rows bypass the natural-key indexes below.
+  two logically-identical rows bypass the natural-key indexes below. A
+  second `CHECK` restricts both to a documented lowercase ASCII slug
+  grammar (`^[a-z0-9][a-z0-9._-]*$`) so Python's and PostgreSQL's `lower()`
+  can never disagree on stored values (the two implementations diverge for
+  arbitrary Unicode input, which this grammar excludes by construction).
   `source_tenant_id`/`source_job_id`/`requisition_id_raw` are externally
-  assigned identifiers and are deliberately **not** case-folded, only
-  trimmed (NULL-safe).
+  assigned identifiers and are deliberately **not** case-folded or
+  slug-restricted, only trimmed (NULL-safe).
 - `source_url_normalized`/`canonical_url_normalized` are **not** derived by
   this migration/model from `source_url`/`canonical_url` — the database
   cannot guarantee a Python function's output agrees with its raw input,
@@ -127,12 +131,20 @@ def upgrade() -> None:
             name=op.f("ck_job_occurrences_provider_not_empty"),
         ),
         sa.CheckConstraint(
+            r"provider ~ '^[a-z0-9][a-z0-9._-]*$'",
+            name=op.f("ck_job_occurrences_provider_slug_format"),
+        ),
+        sa.CheckConstraint(
             r"source = lower(trim(both E'\t\n\r ' from source))",
             name=op.f("ck_job_occurrences_source_normalized"),
         ),
         sa.CheckConstraint(
             r"trim(both E'\t\n\r ' from source) <> ''",
             name=op.f("ck_job_occurrences_source_not_empty"),
+        ),
+        sa.CheckConstraint(
+            r"source ~ '^[a-z0-9][a-z0-9._-]*$'",
+            name=op.f("ck_job_occurrences_source_slug_format"),
         ),
         sa.CheckConstraint(
             r"source_url = trim(both E'\t\n\r ' from source_url)",
