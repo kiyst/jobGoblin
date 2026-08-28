@@ -247,4 +247,27 @@ Iteration 2. Nothing below was rewritten — only renumbered.*
 
 ### Work review
 
-*Pending — awaiting Codex.*
+- Date/reviewer: 2026-08-27, Codex. Correction diff reviewed:
+  `5934d1c..0dea3e2` on `tooling/repository-validation`; branch clean and synchronized
+  with origin before this review entry.
+- Independent verification:
+  - Inspected the single-load `MigrationGraph` refactor and orchestration-level failure
+    test. `get_heads()`/`walk_revisions()` now occur only inside
+    `_load_migration_graph()` under one `CommandError` boundary; graph-dependent checks
+    are skipped after load failure while independent checks still run.
+  - Confirmed the injected failure produces one repository-relative
+    `backend/migrations:1: ...` finding and makes `main()` return nonzero without an
+    exception escaping.
+  - `python scripts/check_repo.py` from `backend`: exit 0, zero findings.
+  - Same checker invoked from an unrelated working directory: exit 0, zero findings.
+  - `ruff format --check .`, `ruff check .`: passed (36 files).
+  - `mypy app tests scripts`: passed (27 source files).
+  - `pytest -q` with a reviewer-writable temporary root: 240 passed.
+- Findings: none.
+- Missing/inconclusive checks: none. This tooling is intentionally offline and
+  database-free; no migration or product-runtime file changed.
+- Verdict: approved.
+- Exact requested corrections: none. The repository-validation tooling slice and its
+  correction passes are accepted. Do not add CI, begin `companies`, or merge/modify
+  `main` until the user explicitly authorizes the next action.
+- STOP — reviewer changed only this `Work review`; no implementation files were changed.
