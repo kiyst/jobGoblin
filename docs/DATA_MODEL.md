@@ -654,30 +654,85 @@ FK (`ON DELETE SET NULL`), in a Phase 6 migration alongside `duplicate_groups` i
 not added now as an unconstrained/orphan column.
 
 ### `job_occurrences`
-One observed appearance on one source (§18). **Rev 2** adds the fields identity
-resolution actually needs (§ADR 0004) and removes the circular FK to
-`raw_job_ingestions` (§ADR 0005).
+**Implemented** (`backend/app/db/models/job_occurrence.py`; migration `0011`,
+`down_revision = "0010"`; URL normalization in
+`backend/app/normalization/url.py`). One observed appearance on one source (§18).
+**Rev 2** adds the fields identity resolution actually needs (§ADR 0004) and removes
+the circular FK to `raw_job_ingestions` (§ADR 0005). This is the table the project's
+deterministic identity-resolution scheme is built on — its three partial unique
+indexes below **are** the scoped identity signals ADR 0004 defines. This table
+declares no additional identity-matching logic of its own; the actual
+match-precedence application logic (querying by these indexes in order, deciding
+new-vs-existing-occurrence, writing `identity_conflicts` rows) is Phase 4+ ingestion
+code, out of scope for this schema-only slice.
 
 | column | type | notes |
 |---|---|---|
-| id | UUID PK | |
-| job_id | UUID FK → jobs, `ON DELETE CASCADE` | |
-| provider | text | e.g. "ats_scrapers", "jobspy" |
-| source | text | e.g. "greenhouse", "linkedin" |
-| source_tenant_id | text | **new in Rev 2** — nullable. The ATS-tenant or employer-account identifier *within* `(provider, source)`: a Workday tenant subdomain, a Greenhouse board token, a Lever company slug. Null for sources with no tenant concept (e.g. a LinkedIn/Indeed posting isn't scoped to a "tenant" beyond the site itself). This is what makes requisition-ID matching safe — see [ADR 0004](DECISIONS/0004-scoped-deterministic-identity.md) |
-| source_job_id | text | nullable |
-| requisition_id_raw | text | **new in Rev 2** — nullable. The requisition ID exactly as reported by *this* source, unscoped by itself; only ever compared in combination with `source_tenant_id` or a resolved `company_id`, never alone |
-| source_url | text | as provided by the source |
-| source_url_normalized | text | **new in Rev 2** — normalized per [ADR 0004](DECISIONS/0004-scoped-deterministic-identity.md); used as the fallback natural-key component when `source_job_id` is absent |
-| apply_url | text | nullable |
-| canonical_url | text | nullable, as provided by the source |
-| canonical_url_normalized | text | **new in Rev 2** — normalized per ADR 0004; this is the column identity resolution actually compares, not the raw `canonical_url` |
-| first_seen_at | timestamptz | for *this* occurrence |
-| last_seen_at | timestamptz | updated every time this occurrence is re-observed |
+| id | UUID PK | generated application-side (`uuid.uuid4`) |
+| job_id | UUID FK → jobs, `ON DELETE CASCADE`, not null | |
+| provider | text, not null | e.g. "ats_scrapers", "jobspy" — a required canonical identifier: lowercased and trimmed by the ORM, `CHECK`-enforced already lowercase/trimmed/non-empty (Rev 15) |
+| source | text, not null | e.g. "greenhouse", "linkedin" — same canonical-identifier treatment as `provider` |
+| source_tenant_id | text | **new in Rev 2** — nullable, case-preserving (not case-folded — externally assigned, unlike `provider`/`source`). The ATS-tenant or employer-account identifier *within* `(provider, source)`: a Workday tenant subdomain, a Greenhouse board token, a Lever company slug. Null for sources with no tenant concept (e.g. a LinkedIn/Indeed posting isn't scoped to a "tenant" beyond the site itself). This is what makes requisition-ID matching safe — see [ADR 0004](DECISIONS/0004-scoped-deterministic-identity.md) |
+| source_job_id | text | nullable, case-preserving |
+| requisition_id_raw | text | **new in Rev 2** — nullable, case-preserving. The requisition ID exactly as reported by *this* source, unscoped by itself; only ever compared in combination with `source_tenant_id` or a resolved `company_id`, never alone |
+| source_url | text, not null | as provided by the source; required, trim-only, case-preserving |
+| source_url_normalized | text | **new in Rev 2** — normalized per [ADR 0004](DECISIONS/0004-scoped-deterministic-identity.md); used as the fallback natural-key component when `source_job_id` is absent. **Rev 15: application-owned, not database-derived** — see below |
+| apply_url | text | nullable, case-preserving |
+| canonical_url | text | nullable, as provided by the source, case-preserving |
+| canonical_url_normalized | text | **new in Rev 2** — normalized per ADR 0004; this is the column identity resolution actually compares, not the raw `canonical_url`. **Rev 15: application-owned, not database-derived**; `CHECK` requires `canonical_url IS NULL` to imply this column is also `NULL` — see below |
+| first_seen_at | timestamptz, not null | for *this* occurrence. **Rev 15: no server default, no ORM `onupdate`** — describes observation time, not row-creation time; `CHECK (first_seen_at <= last_seen_at)` |
+| last_seen_at | timestamptz, not null | updated every time this occurrence is re-observed — an explicit business event, not an automatic side effect of any other write (Rev 15) |
 | posted_at | timestamptz | nullable, source-reported |
-| applicant_count | int | nullable, source-specific — never merged across sources |
-| applicant_count_text | text | nullable, original string (e.g. "over 200 applicants") |
-| is_active | boolean | false once the posting disappears from this source |
+| applicant_count | int | nullable, source-specific — never merged across sources; non-negative `CHECK` |
+| applicant_count_text | text | nullable, original string (e.g. "over 200 applicants"), case-preserving |
+| is_active | boolean, not null | `server_default true` (Rev 15) — false once the posting disappears from this source |
+| created_at / updated_at | timestamptz, not null | `server_default now()`, per the established global convention (Rev 15) |
+
+**Rev 15 changes** (tenth Phase 1 implementation slice, `job_occurrences` — Class H
+per docs/LLM_WORKFLOW.md): this table's column list above did not previously state
+several implementation decisions, resolved by explicit approval before migration
+`0011` was written:
+- **`app/normalization/url.py::normalize_url()` is new in this slice** — a narrowly
+  scoped, pure, schema-bound identity canonicalizer (see
+  [PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md)'s Phase 1 clarification),
+  deliberately **not** built on `normalize_domain()`: a URL host must retain `www.`
+  and a valid IP-literal host remains a valid URL host, both of which
+  `normalize_domain()` rejects outright since it's answering a different question
+  (company identity, not "is this a stable, comparable click-through target").
+  Accepts only an absolute `http`/`https` URL with a hostname and no userinfo/
+  credentials; rejects relative/protocol-relative URLs, a missing host, and an
+  invalid port by returning `None`, never raising. Lowercases scheme and host
+  (IDNA/UTS #46 for a domain; preserved-and-reconstructed for an IPv4/bracketed-IPv6
+  literal), drops the fragment, drops the port only when it equals the scheme's
+  default, collapses an empty/root path and `/` to the same `/` while stripping
+  trailing slashes from any other path (case preserved), and strips every query
+  parameter matching a deny-list (case-insensitive `utm_*` prefix, plus the fixed
+  exact names `gh_src`/`lever-source`/`trk`/`li_fat_id`/`ref`/`fbclid`/`gclid`/
+  `mc_cid`/`mc_eid`) unless the caller's `(provider, source)` has that name on its
+  own per-source allow-list — deliberately empty in this slice (ADR 0004: "starts
+  empty/conservative, grows with evidence").
+- **`source_url_normalized`/`canonical_url_normalized` are application-owned, not
+  database-derived.** The database cannot guarantee a Python function's output
+  agrees with its raw input, so no such guarantee is claimed or enforced beyond one
+  `CHECK`: `canonical_url IS NULL` implies `canonical_url_normalized IS NULL` (the
+  one relationship that *is* checkable — a non-null `canonical_url` may still
+  legitimately normalize to `NULL` if malformed, so this is a one-way implication,
+  not full equivalence). Phase 2's persistence path is responsible for calling
+  `normalize_url()` before comparison/write; this slice tests only the pure
+  function and that rows can store its result explicitly.
+- **`provider`/`source` are canonical identifiers**, not free display text: the ORM
+  lowercases and trims them, and a `CHECK` requires the stored value already be
+  lowercase/trimmed/non-empty — casing or whitespace differences must never let two
+  logically-identical rows bypass the natural-key indexes below.
+  `source_tenant_id`/`source_job_id`/`requisition_id_raw` remain case-preserving
+  (externally assigned identifiers, never case-folded).
+- **`first_seen_at`/`last_seen_at` are NOT NULL with no server default and no ORM
+  `onupdate`** — they describe observation time, not row-creation/update time,
+  matching `jobs`' own established treatment; a `CHECK` requires
+  `first_seen_at <= last_seen_at`.
+- `applicant_count` gets the established non-negative `CHECK`. `is_active` is NOT
+  NULL with `server_default true`, matching `saved_searches.is_active`.
+  `created_at`/`updated_at` are added, per the established global convention.
 
 **Removed in Rev 2:** `last_raw_ingestion_id`. Rev 1 gave this table a FK to
 `raw_job_ingestions` *and* gave `raw_job_ingestions` a FK back — a circular reference
@@ -1035,6 +1090,7 @@ reviewed against this list directly:
 | `job_occurrences` | `INDEX (canonical_url_normalized)` | identity-resolution lookup (ADR 0004 tier 2) |
 | `job_occurrences` | `INDEX (provider, source, source_tenant_id, requisition_id_raw)` | identity-resolution lookup (ADR 0004 tier 3 — Rev 3 fix: now scoped by `provider`/`source`, not just `source_tenant_id`, per item 2) |
 | `job_occurrences` | `INDEX (job_id, is_active, last_seen_at DESC)` | "active occurrences for this job, freshest first" — the common feed-rendering query |
+| `job_occurrences` | `CHECK` requiring `provider`/`source` already lowercase/trimmed/non-empty; NULL-safe normalized/non-empty `CHECK` pairs on every other text column (`source_tenant_id`, `source_job_id`, `requisition_id_raw`, `source_url` [not-null], `source_url_normalized`, `apply_url`, `canonical_url`, `canonical_url_normalized`, `applicant_count_text`); `CHECK (canonical_url IS NOT NULL OR canonical_url_normalized IS NULL)`; non-negative `CHECK` on `applicant_count`; `CHECK (first_seen_at <= last_seen_at)` | reject a non-canonical `provider`/`source`, a non-normalized/empty text field, a normalized canonical URL with no raw URL behind it, a negative applicant count, or an inverted observation-time pair — see the table's own section above (Rev 15) |
 | `raw_job_ingestions` | `INDEX (job_occurrence_id, fetched_at DESC)` | derives "latest ingestion for this occurrence" without a stored pointer (ADR 0005) |
 | `identity_conflicts` | `INDEX (status)`, `INDEX (existing_job_occurrence_id)`, `INDEX (incoming_raw_job_ingestion_id)` | **new in Rev 3** — open-conflict queue lookup and traceback to the occurrence/ingestion in dispute |
 | `identity_conflicts` | `CHECK` on `status`, `conflict_type`, `(status, resolved_at)`, `existing_value NOT NULL`, `incoming_value NOT NULL` | **new in Rev 4** — full lifecycle constraint set, see the table's own section above |

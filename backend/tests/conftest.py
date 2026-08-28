@@ -15,6 +15,7 @@ from app.db.models import (
     CandidateSkill,
     Company,
     Job,
+    JobOccurrence,
     SavedSearch,
     SavedSearchLocation,
     SavedSearchTitle,
@@ -461,6 +462,84 @@ async def real_committed_job(
                 if existing_job is not None:
                     await cleanup_session.delete(existing_job)
                     await cleanup_session.commit()
+
+
+@pytest.fixture
+def make_job_occurrence() -> Callable[..., JobOccurrence]:
+    """Factory for a valid `JobOccurrence` — tests only deviate from this
+    intentionally. Like `make_job`, `first_seen_at`/`last_seen_at` have no
+    default at all — every call site must supply both explicitly. `job_id`
+    is also required (no default): a `JobOccurrence` cannot exist without a
+    real `Job` row to reference, and this factory deliberately doesn't
+    create one implicitly, matching `make_candidate_profile`'s
+    take-the-parent-id-explicitly pattern."""
+
+    def _make(
+        *,
+        job_id: uuid.UUID,
+        first_seen_at: datetime,
+        last_seen_at: datetime,
+        provider: str = "ats_scrapers",
+        source: str = "greenhouse",
+        source_url: str = "https://boards.greenhouse.io/acme/jobs/12345",
+    ) -> JobOccurrence:
+        return JobOccurrence(
+            job_id=job_id,
+            provider=provider,
+            source=source,
+            source_url=source_url,
+            first_seen_at=first_seen_at,
+            last_seen_at=last_seen_at,
+        )
+
+    return _make
+
+
+@asynccontextmanager
+async def real_committed_job_occurrence(
+    db_engine: AsyncEngine,
+    *,
+    first_seen_at: datetime,
+    last_seen_at: datetime,
+    job_kwargs: dict[str, object] | None = None,
+    **occurrence_kwargs: object,
+) -> AsyncIterator[tuple[AsyncSession, uuid.UUID, uuid.UUID]]:
+    """Builds on `real_committed_job`: additionally creates a real,
+    separately-committed `JobOccurrence` referencing it, with its own
+    best-effort cleanup (occurrence, then — via the wrapped helper — job)
+    so a partially cascaded state is skipped rather than treated as an
+    error, same rationale as every other `real_committed_*` helper above.
+    """
+    occurrence_kwargs.setdefault("provider", "ats_scrapers")
+    occurrence_kwargs.setdefault("source", "greenhouse")
+    occurrence_kwargs.setdefault("source_url", "https://boards.greenhouse.io/acme/jobs/12345")
+
+    async with real_committed_job(
+        db_engine, first_seen_at=first_seen_at, last_seen_at=last_seen_at, **(job_kwargs or {})
+    ) as (session, job_id):
+        occurrence = JobOccurrence(
+            job_id=job_id,
+            first_seen_at=first_seen_at,
+            last_seen_at=last_seen_at,
+            **occurrence_kwargs,
+        )
+        session.add(occurrence)
+        occurrence_id: uuid.UUID | None = None
+        try:
+            await session.commit()
+            await session.refresh(occurrence)
+            occurrence_id = occurrence.id
+
+            yield session, job_id, occurrence_id
+        finally:
+            if occurrence_id is not None:
+                with suppress(Exception):
+                    await session.rollback()
+                async with AsyncSession(bind=db_engine) as cleanup_session:
+                    existing_occurrence = await cleanup_session.get(JobOccurrence, occurrence_id)
+                    if existing_occurrence is not None:
+                        await cleanup_session.delete(existing_occurrence)
+                        await cleanup_session.commit()
 
 
 @asynccontextmanager

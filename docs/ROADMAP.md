@@ -192,8 +192,16 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   RESTRICT`, explicit ordered observation timestamps, resolved-value constraints,
   coordinate and numeric invariants, mutable certifications/provenance collections, and
   the absence of any job-level identity `UNIQUE` constraint (identity keys belong to the
-  future `job_occurrences` slice; see `docs/DATA_MODEL.md`). No later Phase 1 table is
-  implemented yet;
+  future `job_occurrences` slice; see `docs/DATA_MODEL.md`). The `job_occurrences` slice
+  is also complete and verified (Class H): model
+  (`backend/app/db/models/job_occurrence.py`), the new
+  `backend/app/normalization/url.py::normalize_url()` pure identity canonicalizer,
+  migration `0011` (`down_revision = "0010"`), and database tests cover the three
+  ADR-0004 partial unique indexes (including the exact NULL-tenant loophole ADR 0004
+  fixes, proven both sequentially and under real concurrent inserts), canonical
+  `provider`/`source` identifiers, `ON DELETE CASCADE` isolation from `jobs`, and the
+  explicit-observation-time invariants (see `docs/DATA_MODEL.md`). No later Phase 1
+  table is implemented yet;
   the rest of Phase 1's exit gate (§[PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md))
   remains outstanding.
 - **Phases 2-14: not started.** Begin each phase only after completing its preflight in

@@ -97,100 +97,10 @@ that detail.
 ## Iteration 1
 
 *Rotated in from "Iteration 2" per the two-iteration rule: the prior Iteration 1 (the
-`companies` implementation pass and Codex's first review requesting the normalization
-correction) was removed rather than kept alongside a third entry, since this entry's
-`Work review` and merge record (below) mean it is no longer pending either. Nothing
-below was rewritten — only renumbered.*
-
-### Work done
-
-- Date/agent: 2026-08-28, Claude Code (Sonnet 5). Authorized slice: bounded correction
-  pass addressing the sole finding at review commit `7bd27a7`, on the same
-  `phase-1/companies` branch. Base: `7bd27a7`. No `jobs`, reconciliation, CI, or `main`
-  changes.
-- Outcome: `normalize_domain()`'s structural checks (`www.`/trailing-dot strip,
-  IP-literal rejection, multi-label check) now run on the canonical, post-IDNA/UTS #46
-  value, not the raw pre-mapping input — closing the exact bypasses the review
-  reproduced. Reordered `app/normalization/company.py`: userinfo/port/path/query/
-  fragment extraction is unchanged (pure URI-delimiter syntax, no UTS #46 ambiguity),
-  but `idna.encode(host, uts46=True, std3_rules=True)` now runs immediately on the
-  extracted host, and only the resulting canonical ASCII string is then checked for a
-  leading `www.`, a trailing root dot, an IP literal, and multi-label shape. Verified
-  behavior-preserving for every previously-passing case (pure-ASCII mapping is an
-  identity transform) and confirmed fixed for all four reproduced bypasses.
-- Files changed:
-  - `backend/app/normalization/company.py` — reordered as above; docstring explains why
-    IDNA/UTS #46 must run before the structural checks, with the exact bypass evidence.
-  - `backend/tests/test_companies.py` — 6 new regression tests: an ASCII doubled
-    trailing dot (`acme.com..`) returning `None`; U+3002 (ideographic full stop) and
-    U+FF0E (fullwidth full stop) each proven equivalent to `www.`/a trailing dot for
-    both the leading-`www` and trailing-root-dot cases (4 tests); UTS-46-mapped
-    fullwidth digits producing an IPv4 literal (`１２７.０.０.１` -> `127.0.0.1`)
-    returning `None`.
-  - `docs/DATA_MODEL.md` — corrected the domain-normalization algorithm's step order
-    (IDNA/UTS #46 conversion now documented as running before the `www.`/trailing-dot/
-    IP-literal/multi-label checks, not after); added a "Rev 13" note explaining the bug
-    and fix, with the same four reproduced-bypass examples.
-- Commands run and exact results:
-  - `python scripts/check_repo.py` (from `backend/`) → exit 0, zero findings.
-  - `ruff format --check .`, `ruff check .` → passed (41 files).
-  - `mypy app tests scripts` → success, 31 source files.
-  - `pytest tests/test_companies.py -v` → 75 passed (69 prior + 6 new).
-  - `pytest -q` (full suite) → 315 passed.
-  - `DATABASE_URL=...jobgoblin_test`: `alembic downgrade 0008` / `upgrade head`
-    (round-trip), `alembic check` (`No new upgrade operations detected` — same
-    informational `Computed`-column `UserWarning` as before) — no migration change was
-    needed or made, since this was a pure application-layer normalization bug.
-  - `alembic current` against the **development** database (no override) → `0006`,
-    unchanged.
-  - `git status`/`git diff --check` → only `backend/app/normalization/company.py`,
-    `backend/tests/test_companies.py`, and `docs/DATA_MODEL.md` changed; no whitespace/
-    conflict errors.
-- Deviations/known limitations: none. Migration `0009` was not touched — no schema drift
-  was found or expected, per the review's own condition for touching it.
-- STOP — awaiting Codex review. Do not begin `jobs`, implement reconciliation, add CI, or
-  modify `main`.
-
-### Work review
-
-- Date/reviewer: 2026-08-28, Codex. Correction diff reviewed:
-  `7bd27a7..8917bcd` on `phase-1/companies`; working tree clean and synchronized with
-  origin before this review entry.
-- Independent verification:
-  - Inspected the reordered IDNA/UTS #46 canonicalization, all six regression tests,
-    and the corrected DATA_MODEL algorithm. Final `www.`/root-dot stripping,
-    multi-label validation, and IP-literal rejection now operate on the canonical ASCII
-    hostname, closing the reviewed identity bypass without altering migration `0009`.
-  - `python scripts/check_repo.py`: exit 0, zero findings.
-  - `ruff format --check .`, `ruff check .`: passed (41 files).
-  - `mypy app tests scripts`: passed (31 source files).
-  - `pytest tests/test_companies.py -q`: 75 passed.
-  - `pytest -q --basetemp=.pytest_cache/codex_companies_rereview`: 315 passed.
-  - Direct adversarial probes confirmed U+3002 separator variants converge correctly,
-    full-width/mixed-separator IPv4 forms return `None`, doubled trailing dots return
-    `None`, and `www.127.0.0.1`/`www.local` cannot evade the final checks.
-- Findings: none.
-- Missing/inconclusive checks: the reviewer did not repeat the migration mutation or
-  Docker image build because this correction changed no dependency, model, or migration;
-  Claude's recorded test-database round-trip and `alembic check` passed with development
-  remaining at `0006`.
-- Verdict: approved.
-- Exact requested corrections: none. The `companies` slice and its normalization
-  correction are accepted. Do not begin `jobs`, implement reconciliation, add CI, or
-  merge/modify `main` until the user explicitly authorizes the next action.
-- STOP — reviewer changed only this `Work review`; no implementation files were changed.
-
-**Merge record (appended, not a rewrite of the entry above):** Approved at review
-commit `dd40c0b`. Per user authorization, `phase-1/companies` was fast-forward merged
-into `main` (no merge commit; `main` was a strict ancestor) and pushed. `main`/
-`origin/main` are both now at `dd40c0b`. Verified: `main` has zero content diff against
-the feature branch; `python backend/scripts/check_repo.py` (via the project's own
-virtualenv interpreter) exits 0 with zero findings; working tree clean. No squash/
-rebase/force-push/branch-deletion. `jobs` not started.
-
----
-
-## Iteration 2
+`companies` normalization correction pass, its approval, and the merge record) was
+removed rather than kept alongside a third entry, since this entry's `Work review` and
+merge record (below) mean it is no longer pending either. Nothing below was rewritten —
+only renumbered.*
 
 ### Work done
 
@@ -310,3 +220,100 @@ are both now at `c3f80dd`. Verified: `main` has zero content diff against the fe
 branch; `python backend/scripts/check_repo.py` (via the project's own virtualenv
 interpreter) exits 0 with zero findings; working tree clean. No squash/rebase/
 force-push/branch-deletion. `job_occurrences` not started.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-08-28, Claude Code (Sonnet 5). Authorized slice: `job_occurrences`,
+  Class H per docs/LLM_WORKFLOW.md — this is the table the project's deterministic
+  identity-resolution scheme (ADR 0004) is built on; its three partial unique indexes
+  are the scoped identity signals ADR 0004 defines. Base `04fce4a` on `main` -> branch
+  `phase-1/job-occurrences`.
+- Outcome: new URL-normalization module, model, migration `0011`, factory/real-commit
+  helpers, and 125 new tests implemented and verified against real PostgreSQL.
+  - `app/normalization/url.py::normalize_url()` (new): a narrowly scoped, pure,
+    schema-bound identity canonicalizer (docs/PHASE_RISK_CHECKLIST.md's Phase 1
+    clarification added this slice — schema-bound identity canonicalizers like this
+    and `normalize_domain()` are in scope; content normalization remains Phase 3).
+    Deliberately not built on `normalize_domain()`: retains `www.`, accepts IP-literal
+    hosts. Accepts only absolute `http`/`https` URLs with a hostname and no userinfo;
+    rejects relative/protocol-relative/invalid-port input by returning `None`, never
+    raising. IDNA/UTS #46 host canonicalization, default-port stripping, root/trailing
+    -slash path normalization (case preserved), and a tracking-parameter deny-list
+    (case-insensitive `utm_*` prefix plus nine exact names) with an empty
+    per-`(provider, source)` allow-list hook for future evidence-based additions.
+  - `JobOccurrence` model: `provider`/`source` are canonical identifiers (ORM
+    lowercase+trim, `CHECK` requires already-canonical); `source_tenant_id`/
+    `source_job_id`/`requisition_id_raw`/`apply_url`/`canonical_url`/
+    `applicant_count_text` stay case-preserving, nullable, NULL-safe `CHECK` pairs;
+    `source_url` required, trim-only; `source_url_normalized`/
+    `canonical_url_normalized` are **not** auto-derived by the model — application-
+    owned, matching Phase 2's future persistence-path responsibility — with a `CHECK`
+    that `canonical_url IS NULL` implies `canonical_url_normalized IS NULL`;
+    `first_seen_at`/`last_seen_at` NOT NULL, no default, no `onupdate`, `CHECK
+    (first_seen_at <= last_seen_at)`; `is_active` NOT NULL `server_default true`.
+    Three partial unique indexes implement ADR 0004's scoped natural key exactly
+    (tenant-scoped, no-tenant, fallback-URL); three lookup indexes for match-precedence
+    and the active-occurrences feed query.
+- Files changed:
+  - `backend/app/normalization/url.py` (new).
+  - `backend/app/db/models/job_occurrence.py` (new); `backend/app/db/models/__init__.py`,
+    `backend/app/db/base.py` — registration/docstring.
+  - `backend/migrations/versions/0011_job_occurrences.py` (new, `down_revision =
+    "0010"`).
+  - `backend/tests/conftest.py` — `make_job_occurrence` (requires `job_id`/
+    `first_seen_at`/`last_seen_at` explicitly), `real_committed_job_occurrence`.
+  - `backend/tests/test_job_occurrences.py` (new) — 125 tests: `normalize_url()`
+    adversarially (Unicode/punycode host equivalence, Unicode separator variants,
+    default/non-default ports, IPv4/bracketed-IPv6, credentials/malformed-port/
+    protocol-relative/relative rejection, fragment removal, root/trailing-path
+    equivalence, path-case preservation, repeated/blank query values, case-insensitive
+    exact and arbitrary-`utm_*` tracking-param stripping, deterministic sort, empty-
+    query omission); the complete unique-index partition matrix (9 scenarios, including
+    the exact ADR-0004 NULL-tenant loophole and the null/null fallback-key
+    non-collision); two real concurrent-insert races (no-tenant key, fallback-URL key)
+    each proving exactly one winner with failure-safe cleanup; `ON DELETE CASCADE`
+    isolation between two jobs' occurrences; the `is_active` default proven via a raw
+    SQL insert that omits the column; canonical-identifier/case-preserving/normalized-
+    URL text handling; and timestamps/test isolation.
+  - `docs/PHASE_RISK_CHECKLIST.md` — clarified that Phase 1 may contain narrowly scoped,
+    pure, schema-bound identity canonicalizers (company-domain, occurrence-URL), while
+    content normalization (title/salary/location/skill/etc.) remains excluded until
+    Phase 3.
+  - `docs/DATA_MODEL.md` — `job_occurrences` marked **Implemented**; added "Rev 15" note
+    recording `normalize_url()`, the application-owned (not database-derived) normalized
+    URL columns, canonical `provider`/`source` identifiers, and the explicit-
+    observation-time decisions; added the `job_occurrences` constraints-summary row.
+  - `docs/ROADMAP.md` — Phase 1 status line describes the `job_occurrences` slice as
+    complete.
+- Commands run and exact results:
+  - `python scripts/check_repo.py` (from `backend/`) → exit 0, zero findings.
+  - `ruff format --check .`, `ruff check .` → passed (48 files).
+  - `mypy app tests scripts` → success, 36 source files.
+  - `pytest tests/test_job_occurrences.py -q` → 125 passed.
+  - `pytest -q` (full suite) → 638 passed.
+  - `DATABASE_URL=...jobgoblin_test`: `alembic upgrade head` (`0010 -> 0011`, existing
+    head), `downgrade 0010` / `upgrade head` (round-trip), `downgrade base` / `upgrade
+    head` (fresh `base -> head`), `alembic check` (`No new upgrade operations detected`
+    — same informational `Computed`-column `UserWarning` as before) — all passed.
+  - `alembic current` against the **development** database (no override) → `0006`,
+    unchanged throughout.
+  - Live schema inspected directly (`pg_indexes`, `pg_constraint`) — confirmed all
+    three partial unique indexes' exact `WHERE` clauses, three lookup indexes, and the
+    `job_id` FK/PK.
+  - `git status`/`git diff --check` → only the files listed above; no whitespace/
+    conflict errors.
+- Deviations/known limitations: none. `raw_job_ingestions`, `identity_conflicts`,
+  `duplicate_groups`, and the actual match-precedence application logic remain
+  unimplemented, per explicit scope — ADR 0004/ARCHITECTURE.md §8's end-to-end
+  idempotent re-observation requirement is deferred to Phase 2, since it needs the
+  persistence path, not merely this table.
+- STOP — awaiting Codex review. Do not begin any later table, ingestion, providers,
+  normalization, reconciliation, add CI, or modify `main`.
+
+### Work review
+
+*Pending — awaiting Codex.*
