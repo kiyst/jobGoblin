@@ -303,4 +303,21 @@ pending. Nothing below was rewritten — only renumbered.*
 
 ### Work review
 
-*Pending — awaiting Codex.*
+- Date/reviewer: 2026-08-28, Codex. Diff reviewed: `53a2cad..029be54`.
+- Verdict: **approved**. Findings: none.
+- Verified independently:
+  - Inspected all six requested wording changes across the two model docstrings, two
+    migration docstrings, and two DATA_MODEL passages. They now consistently identify
+    Phase 2's offline fixture pipeline as the first writer/user and Phase 4 as the
+    first live ATS provider reusing that path.
+  - Repository search confirms the stale first-writer claims are gone. The remaining
+    DATA_MODEL "Phase 4+" field-provenance statement is a separate, valid claim and was
+    correctly left unchanged.
+  - `git diff --check`, repository checker, `ruff format --check`, and `ruff check`
+    passed for the bounded correction. Backend/Alembic tests were not repeated because
+    only comments/documentation changed; the implementation review at `53a2cad`
+    already recorded **74 targeted / 737 full-suite tests** and clean schema drift.
+- The `raw_job_ingestions` implementation and correction pass are accepted. Do not
+  merge to `main` or begin `identity_conflicts`/another slice until the user explicitly
+  authorizes the next action.
+- STOP — reviewer changed only this `Work review`; no implementation files changed.
