@@ -347,4 +347,22 @@ Nothing below was rewritten — only renumbered.*
 
 ### Work review
 
-*Pending — awaiting Codex.*
+- Date/reviewer: 2026-08-28, Codex. Diff reviewed: `d400fb7..503c2ab`.
+- Verdict: **approved**. Findings: none.
+- Verified independently:
+  - Every `providers_attempted` fixture/assertion now uses provider identifiers. The
+    Phase 2 partial-success scenario records `fixture_provider` exactly once while its
+    failure retains `source = broken_source`, and explicitly asserts both complete
+    values. No uniqueness constraint or application behavior was added.
+  - The three dangling `§38` references were removed while preserving the surrounding
+    prose. The migration diff changes only its module docstring; migration operations,
+    revision metadata, model mapping, and schema behavior are unchanged.
+  - `git diff --check` is clean; repository checker exits 0; Ruff format/check and mypy
+    pass (**42 source files**); targeted suite **76 passed**. Claude's post-correction
+    full-suite result is **879 passed**; the reviewer did not repeat the full suite for
+    this test/comment-only correction after independently running it on the original
+    implementation review.
+- The `collection_runs` implementation and correction pass are accepted. Do not merge
+  to `main`, begin `collection_run_provider_attempts`/another slice, or otherwise
+  advance without explicit user authorization.
+- STOP — reviewer changed only this `Work review`; no implementation files changed.
