@@ -289,4 +289,29 @@ was rewritten — only renumbered.*
 
 ### Work review
 
-*Pending — awaiting Codex.*
+- Date/reviewer: 2026-08-28, Codex. Correction diff reviewed:
+  `7bd27a7..8917bcd` on `phase-1/companies`; working tree clean and synchronized with
+  origin before this review entry.
+- Independent verification:
+  - Inspected the reordered IDNA/UTS #46 canonicalization, all six regression tests,
+    and the corrected DATA_MODEL algorithm. Final `www.`/root-dot stripping,
+    multi-label validation, and IP-literal rejection now operate on the canonical ASCII
+    hostname, closing the reviewed identity bypass without altering migration `0009`.
+  - `python scripts/check_repo.py`: exit 0, zero findings.
+  - `ruff format --check .`, `ruff check .`: passed (41 files).
+  - `mypy app tests scripts`: passed (31 source files).
+  - `pytest tests/test_companies.py -q`: 75 passed.
+  - `pytest -q --basetemp=.pytest_cache/codex_companies_rereview`: 315 passed.
+  - Direct adversarial probes confirmed U+3002 separator variants converge correctly,
+    full-width/mixed-separator IPv4 forms return `None`, doubled trailing dots return
+    `None`, and `www.127.0.0.1`/`www.local` cannot evade the final checks.
+- Findings: none.
+- Missing/inconclusive checks: the reviewer did not repeat the migration mutation or
+  Docker image build because this correction changed no dependency, model, or migration;
+  Claude's recorded test-database round-trip and `alembic check` passed with development
+  remaining at `0006`.
+- Verdict: approved.
+- Exact requested corrections: none. The `companies` slice and its normalization
+  correction are accepted. Do not begin `jobs`, implement reconciliation, add CI, or
+  merge/modify `main` until the user explicitly authorizes the next action.
+- STOP — reviewer changed only this `Work review`; no implementation files were changed.
