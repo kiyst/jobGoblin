@@ -16,6 +16,7 @@ from app.db.models import (
     Company,
     Job,
     JobOccurrence,
+    RawJobIngestion,
     SavedSearch,
     SavedSearchLocation,
     SavedSearchTitle,
@@ -557,6 +558,110 @@ async def real_committed_job_occurrence(
                     existing_occurrence = await cleanup_session.get(JobOccurrence, occurrence_id)
                     if existing_occurrence is not None:
                         await cleanup_session.delete(existing_occurrence)
+                        await cleanup_session.commit()
+
+
+@pytest.fixture
+def make_raw_job_ingestion() -> Callable[..., RawJobIngestion]:
+    """Factory for a valid `RawJobIngestion` — tests only deviate from this
+    intentionally. `fetched_at` has no default at all (no server default on
+    the column either — it represents the actual fetch event, which may
+    differ from row-insertion time): every call site must supply it
+    explicitly. Defaults to the `fetched` state with `job_occurrence_id =
+    None`, matching that state's own database-enforced requirement."""
+
+    def _make(
+        *,
+        fetched_at: datetime,
+        provider: str = "ats_scrapers",
+        source: str = "greenhouse",
+        source_identifier: str | None = None,
+        job_occurrence_id: uuid.UUID | None = None,
+        raw_payload: dict[str, object] | None = None,
+        raw_content_hash: str = "a" * 64,
+        parser_version: str | None = None,
+        processing_status: str = "fetched",
+        error_message: str | None = None,
+    ) -> RawJobIngestion:
+        return RawJobIngestion(
+            provider=provider,
+            source=source,
+            source_identifier=source_identifier,
+            job_occurrence_id=job_occurrence_id,
+            fetched_at=fetched_at,
+            raw_payload=raw_payload if raw_payload is not None else {"title": "Backend Engineer"},
+            raw_content_hash=raw_content_hash,
+            parser_version=parser_version,
+            processing_status=processing_status,
+            error_message=error_message,
+        )
+
+    return _make
+
+
+@asynccontextmanager
+async def real_committed_raw_job_ingestion(
+    db_engine: AsyncEngine,
+    *,
+    fetched_at: datetime,
+    occurrence_kwargs: dict[str, object] | None = None,
+    job_kwargs: dict[str, object] | None = None,
+    **ingestion_kwargs: object,
+) -> AsyncIterator[tuple[AsyncSession, uuid.UUID, uuid.UUID, uuid.UUID]]:
+    """Builds on `real_committed_job_occurrence`: additionally creates a
+    real, separately-committed `RawJobIngestion` referencing it, with its
+    own best-effort cleanup (ingestion, then — via the wrapped helper —
+    occurrence, then job) so a partially cascaded state is skipped rather
+    than treated as an error, same rationale as every other
+    `real_committed_*` helper above. Defaults `processing_status` to
+    `"normalized"` and `job_occurrence_id` to the bundled occurrence's id
+    (not the factory's own `"fetched"`/`None` defaults) because this helper
+    exists specifically to exercise `ON DELETE SET NULL` against a row that
+    actually has a non-null `job_occurrence_id` to begin with. A caller
+    that needs the row to start unlinked despite a real occurrence already
+    existing (e.g. to later transition it to `normalized` itself) may pass
+    `job_occurrence_id=None` explicitly to override this default.
+
+    Passing `processing_status="fetched"`/`"parse_error"` without also
+    passing `job_occurrence_id=None` fails at `commit()` with an
+    `IntegrityError` — `unprocessed_requires_null_occurrence` rejects a
+    non-null occurrence for those two statuses, and this helper's default
+    always links to the bundled occurrence unless told otherwise.
+    """
+    ingestion_kwargs.setdefault("provider", "ats_scrapers")
+    ingestion_kwargs.setdefault("source", "greenhouse")
+    ingestion_kwargs.setdefault("raw_payload", {"title": "Backend Engineer"})
+    ingestion_kwargs.setdefault("raw_content_hash", "a" * 64)
+    ingestion_kwargs.setdefault("processing_status", "normalized")
+
+    async with real_committed_job_occurrence(
+        db_engine,
+        first_seen_at=fetched_at,
+        last_seen_at=fetched_at,
+        job_kwargs=job_kwargs,
+        **(occurrence_kwargs or {}),
+    ) as (session, job_id, occurrence_id):
+        ingestion_kwargs.setdefault("job_occurrence_id", occurrence_id)
+        ingestion = RawJobIngestion(
+            fetched_at=fetched_at,
+            **ingestion_kwargs,
+        )
+        session.add(ingestion)
+        ingestion_id: uuid.UUID | None = None
+        try:
+            await session.commit()
+            await session.refresh(ingestion)
+            ingestion_id = ingestion.id
+
+            yield session, job_id, occurrence_id, ingestion_id
+        finally:
+            if ingestion_id is not None:
+                with suppress(Exception):
+                    await session.rollback()
+                async with AsyncSession(bind=db_engine) as cleanup_session:
+                    existing_ingestion = await cleanup_session.get(RawJobIngestion, ingestion_id)
+                    if existing_ingestion is not None:
+                        await cleanup_session.delete(existing_ingestion)
                         await cleanup_session.commit()
 
 

@@ -811,23 +811,27 @@ semantically correct key for those sources — their own posting ID is already g
 unique within `(provider, source)` without any tenant qualifier.
 
 ### `raw_job_ingestions`
-Preserved pre-normalization payload (§17), **one row per individual discovered posting**
-— not per provider request/attempt (see [ADR 0005](DECISIONS/0005-raw-ingestion-vs-provider-attempts.md)
-and the new `collection_run_provider_attempts` table below for request-level telemetry).
+**Implemented** (`backend/app/db/models/raw_job_ingestion.py`; migration `0012`,
+`down_revision = "0011"`). Preserved pre-normalization payload (§17), **one row per
+individual discovered posting** — not per provider request/attempt (see
+[ADR 0005](DECISIONS/0005-raw-ingestion-vs-provider-attempts.md) and the new
+`collection_run_provider_attempts` table below for request-level telemetry). Phase 4+
+ingestion code is the first writer; this Phase 1 slice only migrates the schema.
 
 | column | type | notes |
 |---|---|---|
-| id | UUID PK | |
-| provider | text | |
-| source | text | |
-| source_identifier | text | nullable — provider's ID for this specific posting, before we know if it maps to an existing occurrence. Also the reference point a future per-posting detail-fetch feature should key off of (see below), rather than overloading this table |
+| id | UUID PK | generated application-side (`uuid.uuid4`) |
+| provider | text, not null | same canonical-identifier treatment as `job_occurrences.provider`: lowercased/trimmed by the ORM, `CHECK`-enforced already lowercase/trimmed/non-empty and matching the ASCII slug grammar `^[a-z0-9][a-z0-9._-]*$` (Rev 17) — generalized from `job_occurrences` since these are this project's own internal categorization labels, not "raw" external data |
+| source | text, not null | same treatment as `provider` |
+| source_identifier | text | nullable, case-preserving, NULL-safe trim/non-empty `CHECK` — provider's ID for this specific posting, before we know if it maps to an existing occurrence. Also the reference point a future per-posting detail-fetch feature should key off of (see below), rather than overloading this table |
 | job_occurrence_id | UUID | FK → job_occurrences, `ON DELETE SET NULL`, nullable, set once this payload is associated with any occurrence — see nullable-behavior note below |
-| fetched_at | timestamptz | |
-| raw_payload | jsonb | the `DiscoveredJob.raw` dict; **not** full raw HTML (§17 — avoid unbounded storage) |
-| raw_content_hash | text | sha256 of raw_payload, used to skip re-normalizing unchanged content |
-| parser_version | text | which normalization code version produced the linked occurrence, if any |
-| processing_status | text | **renamed from `retrieval_status` in Rev 3** — enum: `fetched` / `parse_error` / `normalized` / `identity_conflict`. Describes only what happens to *this payload* after it exists; request-level failure modes (`http_error`, `rate_limited`, `timeout`) were removed from this enum — see below |
-| error_message | text | nullable |
+| fetched_at | timestamptz, not null | **Rev 17: no server default** — represents the actual fetch event, which may differ from row-insertion time during buffering, replay, or backfill; callers/factories must supply it explicitly |
+| raw_payload | jsonb, not null | the `DiscoveredJob.raw` dict; **not** full raw HTML (§17 — avoid unbounded storage). `CHECK` requires a top-level JSON object (Rev 17). Stays not null through Phase 1 — see the retention note below. Deliberately not `MutableDict`-wrapped: an immutable, write-once snapshot set at insert, unlike `jobs.field_provenance`'s incrementally-updated fields — this is an application-level convention (Phase 2's ingestion code must honor it), not a schema-enforced immutability guarantee |
+| raw_content_hash | text, not null | sha256 of raw_payload, used to skip re-normalizing unchanged content. `CHECK` requires trim/non-empty only (Rev 17) — deliberately no length/hex-format constraint, since this is application-computed, not user input |
+| parser_version | text | nullable, case-preserving, NULL-safe trim/non-empty `CHECK` — which normalization code version produced the linked occurrence, if any |
+| processing_status | text, not null | **renamed from `retrieval_status` in Rev 3** — `CHECK`-restricted enum: `fetched` / `parse_error` / `normalized` / `identity_conflict`. Describes only what happens to *this payload* after it exists; request-level failure modes (`http_error`, `rate_limited`, `timeout`) were removed from this enum — see below |
+| error_message | text | nullable, case-preserving, NULL-safe trim/non-empty `CHECK` |
+| created_at / updated_at | timestamptz, not null | `server_default now()`, per the established global convention (Rev 17) — the standard row-lifecycle pair, distinct from the business timestamp `fetched_at` above |
 
 **Rev 3 fix — narrower enum, correct granularity (item 5):** Rev 2's `retrieval_status`
 enum included `http_error`/`rate_limited`/`timeout`, but those describe a fetch that
@@ -885,6 +889,47 @@ live occurrence is planned for Phase 1–9. **Rev 3 addition:** that same cleanu
 also exclude any row referenced by an `identity_conflicts` row with `status = 'open'` —
 resolving a conflict later may require inspecting the actual disputed payload, so an
 open conflict's evidence must survive even past the normal payload-nulling age cutoff.
+
+**Rev 17 changes** (eleventh Phase 1 implementation slice, `raw_job_ingestions` — Class
+H per docs/LLM_WORKFLOW.md): this table's column list above did not previously state
+several implementation decisions, resolved by explicit approval before migration `0012`
+was written:
+- **`provider`/`source` reuse `job_occurrences`' canonical-identifier `CHECK`s**
+  (trim/lower/non-empty plus the ASCII slug grammar `^[a-z0-9][a-z0-9._-]*$`) —
+  generalized to a second table, since these are this project's own internal
+  categorization labels, not external "raw" data the cross-cutting "preserve raw
+  values" principle protects.
+- **The `processing_status`/`job_occurrence_id` consistency invariant is
+  database-enforced in only one direction.** A `CHECK` requires
+  `processing_status IN ('fetched', 'parse_error') ⟹ job_occurrence_id IS NULL` — safe
+  because those two states can never have an occurrence to link to in the first place,
+  so `ON DELETE SET NULL` never touches them. The reverse (`normalized`/
+  `identity_conflict` implying a non-null `job_occurrence_id`) is deliberately **not**
+  a `CHECK`: it holds at write time (Phase 2's future persistence-service tests will
+  prove that; Phase 1 has no ingestion service to test it against), but a real,
+  already-committed `normalized`/`identity_conflict` row must be allowed to end up with
+  `job_occurrence_id IS NULL` after its target occurrence is later deleted — the exact
+  historical audit-preservation state this section's "Deletion/retention" note above
+  already describes wanting, not a data-integrity violation. Enforcing both directions
+  would make `ON DELETE SET NULL`'s own cascade `UPDATE` violate the `CHECK`, turning it
+  into `RESTRICT` in practice for those rows.
+- `raw_payload` stays NOT NULL through Phase 1 with a `CHECK` requiring a top-level JSON
+  object; the retention job described above that nulls old payloads will need its own
+  deliberate migration to relax this when actually built, not a speculative relaxation
+  now. Not `MutableDict`-wrapped — an immutable, write-once snapshot, unlike
+  `jobs.field_provenance`'s incrementally-updated fields; omitting the wrapper does not
+  itself guarantee immutability (whole-value reassignment and direct SQL `UPDATE`s
+  remain possible), so this is an application-level convention, tested behaviorally,
+  not schema-enforced.
+- `raw_content_hash` gets a trim/non-empty `CHECK` only — no length/hex-format
+  constraint, since it's application-computed, not user input.
+- `fetched_at` is NOT NULL with **no** server default, unlike `created_at`/`updated_at`
+  (added this slice, per the established global convention) — it represents the actual
+  fetch event, which may differ from row-insertion time during buffering, replay, or
+  backfill.
+- No uniqueness constraint of any kind: this table is an intentionally append-only
+  audit log — re-observing the same posting on a later run creates a new row, it does
+  not update or replace the previous one.
 
 ### `identity_conflicts`
 **New in Rev 3** (item 3/4) — the quarantine record for deterministic identity
@@ -1128,6 +1173,7 @@ reviewed against this list directly:
 | `job_occurrences` | `INDEX (job_id, is_active, last_seen_at DESC)` | "active occurrences for this job, freshest first" — the common feed-rendering query |
 | `job_occurrences` | `CHECK` requiring `provider`/`source` already lowercase/trimmed/non-empty and matching the ASCII slug grammar `^[a-z0-9][a-z0-9._-]*$` (Rev 16); NULL-safe normalized/non-empty `CHECK` pairs on every other text column (`source_tenant_id`, `source_job_id`, `requisition_id_raw`, `source_url` [not-null], `source_url_normalized`, `apply_url`, `canonical_url`, `canonical_url_normalized`, `applicant_count_text`); `CHECK (canonical_url IS NOT NULL OR canonical_url_normalized IS NULL)`; non-negative `CHECK` on `applicant_count`; `CHECK (first_seen_at <= last_seen_at)` | reject a non-canonical `provider`/`source`, a non-ASCII-slug `provider`/`source`, a non-normalized/empty text field, a normalized canonical URL with no raw URL behind it, a negative applicant count, or an inverted observation-time pair — see the table's own section above (Rev 15/16) |
 | `raw_job_ingestions` | `INDEX (job_occurrence_id, fetched_at DESC)` | derives "latest ingestion for this occurrence" without a stored pointer (ADR 0005) |
+| `raw_job_ingestions` | `CHECK` requiring `provider`/`source` already lowercase/trimmed/non-empty and matching the ASCII slug grammar `^[a-z0-9][a-z0-9._-]*$`; NULL-safe normalized/non-empty `CHECK` pairs on `source_identifier`/`parser_version`/`error_message`; trim/non-empty `CHECK` on `raw_content_hash` (not-null, no format constraint); `CHECK (jsonb_typeof(raw_payload) = 'object')`; `CHECK` restricting `processing_status` to `fetched`/`parse_error`/`normalized`/`identity_conflict`; `CHECK (processing_status NOT IN ('fetched', 'parse_error') OR job_occurrence_id IS NULL)` (one-directional only — see the table's own section above, Rev 17) | reject a non-canonical `provider`/`source`, a non-normalized/empty text field, a non-object `raw_payload`, an invalid `processing_status`, or a `fetched`/`parse_error` row with a non-null occurrence link — see the table's own section above (Rev 17) |
 | `identity_conflicts` | `INDEX (status)`, `INDEX (existing_job_occurrence_id)`, `INDEX (incoming_raw_job_ingestion_id)` | **new in Rev 3** — open-conflict queue lookup and traceback to the occurrence/ingestion in dispute |
 | `identity_conflicts` | `CHECK` on `status`, `conflict_type`, `(status, resolved_at)`, `existing_value NOT NULL`, `incoming_value NOT NULL` | **new in Rev 4** — full lifecycle constraint set, see the table's own section above |
 | `collection_run_provider_attempts` | `UNIQUE (collection_run_id, provider, source)` | **new in Rev 4** — one aggregate row per run/provider/source, see table's own section |
