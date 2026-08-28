@@ -361,4 +361,86 @@ force-push/branch-deletion. `job_occurrences` not started.
 
 ### Work review
 
-*Pending — awaiting Codex.*
+- Date/reviewer: 2026-08-28, Codex. Effective implementation and self-review diff
+  reviewed: `04fce4a..bbfc422` on `phase-1/job-occurrences`; branch clean and synchronized
+  with origin before this review entry. The workflow-only `main` commit `3d47cd6` was
+  inspected separately because it is not an ancestor of this feature branch.
+- Independent verification:
+  - Inspected URL canonicalization, model/migration parity, all partial-index predicates,
+    concurrent-insert cleanup, cascade isolation, factory behavior, product-document
+    updates, and the retroactive adversarial self-review.
+  - `python scripts/check_repo.py`: exit 0, zero findings.
+  - `ruff format --check .`, `ruff check .`: passed (48 files).
+  - `mypy app tests scripts`: passed (36 source files).
+  - `pytest tests/test_job_occurrences.py -q`: 128 passed.
+  - `pytest -q --basetemp=.pytest_cache/codex_job_occurrences_review`: 641 passed.
+  - `alembic check` against `jobgoblin_test` at `0011 (head)`: no new upgrade
+    operations detected; only the known warning for the pre-existing companies computed
+    column appeared.
+  - Direct probes reproduced the URL and Unicode-identifier findings below; PostgreSQL
+    maps U+0130 to `i` while Python maps it to `i` + U+0307 in this environment.
+- Findings:
+  1. **High — malformed URL whitespace is silently deleted or retained, creating false
+     identity matches.** `backend/app/normalization/url.py:116-154` calls `urlsplit()`
+     before checking the raw input and then strips only the assembled value's outer
+     whitespace. Python's parser silently deletes embedded TAB/LF/CR anywhere in the
+     URL: `https://exa<TAB>mple.com/job` becomes `https://example.com/job`, and
+     `https://example.com/jo<LF>b` becomes `https://example.com/job`. An internal raw
+     space survives (`.../jo b`), despite the function claiming to accept only
+     syntactically valid URLs. These malformed inputs can therefore collide with a
+     different valid occurrence. Trim the approved wrapper whitespace before parsing,
+     reject any covered whitespace remaining inside the trimmed input, and remove the
+     post-assembly `strip()` workaround. Percent-encoded whitespace remains valid.
+     Add regressions for space/TAB/LF/CR in host, path, and query plus ordinary outer
+     wrapper whitespace.
+  2. **Medium — equivalent DNS root-dot hosts do not canonicalize together.**
+     `_canonicalize_host()` returns IDNA output unchanged, so `example.com.` and U+3002
+     variants normalize to `example.com.` rather than `example.com`; they do not match
+     the same URL without the DNS root separator. Strip exactly one trailing root dot
+     from the post-IDNA ASCII domain form; doubled/empty-label forms must return `None`.
+     Add ASCII and Unicode-equivalence regressions.
+  3. **Medium — the acknowledged Python/PostgreSQL lowercase divergence is unsafe in
+     natural-key columns.** `provider` and `source` are controlled machine identifiers,
+     so leaving arbitrary Unicode as a known limitation is unnecessary and lets the ORM
+     and DB disagree before values reach three identity indexes. Add DB/model parity
+     CHECKs restricting each to a documented lowercase ASCII slug grammar, recommended
+     `^[a-z0-9][a-z0-9._-]*$`, while retaining the current trim/lower/non-empty checks.
+     Add ORM and direct-SQL accepted/rejected tests, including non-ASCII. Canonicalize
+     `normalize_url()`'s optional allow-list context with the same trim/lower rule before
+     lookup so future evidence-based entries cannot miss because of caller casing.
+  4. **Medium — the valid-state factory bypasses the fallback identity invariant by
+     default.** `backend/tests/conftest.py:468-498` supplies a valid absolute
+     `source_url` but leaves `source_url_normalized = NULL`; the baseline test asserts
+     that state, and the null/null uniqueness test describes these as malformed URLs
+     while actually using the same valid default URL three times. The model may remain
+     deliberately non-deriving, but the factory is an application caller and must create
+     valid states by default: compute `source_url_normalized = normalize_url(...)` with
+     provider/source context, using distinct defaults or explicit IDs so unrelated test
+     rows do not collide. Keep the model-non-derivation test by constructing/overriding
+     that exceptional state explicitly. Change the null/null fallback test to use
+     genuinely malformed, distinct raw URLs whose normalizer result is `None`.
+  5. **Medium, integration/process — the feature branch omitted the workflow commit it
+     claims to apply.** `3d47cd6` is on `main` but is not an ancestor of `bbfc422`, so
+     `main` and the feature branch have diverged and the usual fast-forward merge is
+     currently impossible. Merge `origin/main` into `phase-1/job-occurrences` with a
+     normal merge commit after fetching (no rebase/force-push); do not modify `main`.
+- Missing/inconclusive checks: the reviewer did not repeat destructive migration
+  downgrade/fresh-rebuild operations; Claude recorded them as passing. The live test DB
+  is at `0011`, autogeneration reports no drift, and all relevant tests passed.
+- Verdict: changes requested (three bounded executable corrections, one valid-factory
+  correction, and one branch-integration correction).
+- Exact bounded correction:
+  1. Address findings 1-4 without changing the three partial-index definitions or
+     expanding into ingestion/match-precedence behavior. Correct implementation and
+     DATA_MODEL wording where the malformed-whitespace/root-dot/ASCII-slug contract
+     changes.
+  2. Add regression tests that fail against `bbfc422`, including the exact reproduced
+     inputs and corrected factory/null-fallback semantics.
+  3. Merge `origin/main` into the feature branch normally so `3d47cd6` becomes an
+     ancestor; do not rebase, squash, force-push, or touch `main`.
+  4. Rerun the fresh-context adversarial self-review plus repository checker, Ruff,
+     mypy, targeted/full tests, migration round-trip/fresh `base -> head`/`alembic check`
+     against `jobgoblin_test`, and confirm development remains untouched. Update the
+     concise `Work done`, commit/push the same branch, and stop for re-review.
+  5. Do not begin later tables, ingestion, providers, matching, reconciliation, or CI.
+- STOP — reviewer changed only this `Work review`; no implementation files were changed.
