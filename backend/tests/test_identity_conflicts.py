@@ -185,6 +185,26 @@ async def test_direct_sql_invalid_status_rejected(db_session: AsyncSession) -> N
     await _assert_direct_sql_insert_rejected(db_session, {"status": "'bogus_status'"})
 
 
+async def test_direct_sql_status_omitted_rejected(db_session: AsyncSession) -> None:
+    """`status` is NOT NULL with no server default (approved decision 7:
+    fresh conflict creation must explicitly supply `'open'`) — an
+    otherwise-valid insert that omits the column entirely must be
+    rejected by PostgreSQL itself, not merely by application code."""
+    columns = dict(_DIRECT_SQL_BASE_COLUMNS)
+    del columns["status"]
+    column_names = ["id", *columns.keys()]
+    column_values = ["gen_random_uuid()", *columns.values()]
+    with pytest.raises(IntegrityError):
+        await db_session.execute(
+            text(
+                f"INSERT INTO identity_conflicts ({', '.join(column_names)}) "
+                f"VALUES ({', '.join(column_values)})"
+            )
+        )
+        await db_session.commit()
+    await db_session.rollback()
+
+
 # --------------------------------------------------------------------------
 # status / resolved_at lifecycle consistency matrix
 # --------------------------------------------------------------------------

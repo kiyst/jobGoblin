@@ -97,81 +97,9 @@ that detail.
 ## Iteration 1
 
 *Rotated in from "Iteration 2" per the two-iteration rule: the prior Iteration 1 (the
-`raw_job_ingestions` initial implementation pass and Codex's changes-requested review at
-`53a2cad`, requesting the stale Phase-4 wording correction) was removed rather than kept
-alongside a third entry — its one finding was addressed in this entry's correction pass,
-which Codex then approved and the user merged. Nothing below was rewritten — only
-renumbered.*
-
-### Work done
-
-- Date/agent: 2026-08-28, Claude Code (Sonnet 5). Authorized slice: the one bounded
-  documentation correction from the review at `53a2cad`, on the same
-  `phase-1/raw-job-ingestions` branch. Base: `53a2cad`. Comment/documentation changes
-  only — no schema, migration operations/revision metadata, test, or product-behavior
-  changes.
-- Outcome: all six stale "Phase 4+ ingestion code is the first writer" claims replaced
-  with consistent wording: Phase 2's offline fixture pipeline is the first writer/user
-  of the raw-ingestion and deterministic-identity persistence path; Phase 4 introduces
-  the first live ATS provider that reuses that same path. A seventh, unrelated "Phase
-  4+" mention (`docs/DATA_MODEL.md`'s field-provenance-merging passage, about
-  `ingestion/persistence.py`'s cross-source merge logic) was left untouched — it is a
-  distinct, correctly-scoped claim (no multi-source merge scenario exists before a
-  second real provider in Phase 4), not part of the six the review identified.
-- Files changed:
-  - `backend/app/db/models/job_occurrence.py` — class docstring.
-  - `backend/app/db/models/raw_job_ingestion.py` — class docstring.
-  - `backend/migrations/versions/0011_job_occurrences.py` — module docstring.
-  - `backend/migrations/versions/0012_raw_job_ingestions.py` — module docstring.
-  - `docs/DATA_MODEL.md` — the `job_occurrences` and `raw_job_ingestions` introduction
-    passages.
-- Commands run and exact results (lightweight, per the review's own scoping — no
-  backend/Alembic reruns for comment-only changes):
-  - `git diff --check` → clean.
-  - `python scripts/check_repo.py` (from `backend/`) → exit 0, zero findings.
-  - `ruff format`, `ruff check` against the four touched Python files → all
-    unchanged/passed.
-- Deviations/known limitations: none. Confirmed via `grep` that no other stale
-  "Phase 4+ ingestion code is the first writer"/"Phase 4+ ingestion code, out of scope"
-  occurrences remain anywhere in the tracked tree, other than Codex's own quoted
-  finding text in this file's prior `Work review` (a historical quotation of the
-  defect, not live documentation, correctly left as-is).
-- STOP — awaiting Codex re-review. Do not begin `identity_conflicts` or any other
-  slice, and do not modify `main`.
-
-### Work review
-
-- Date/reviewer: 2026-08-28, Codex. Diff reviewed: `53a2cad..029be54`.
-- Verdict: **approved**. Findings: none.
-- Verified independently:
-  - Inspected all six requested wording changes across the two model docstrings, two
-    migration docstrings, and two DATA_MODEL passages. They now consistently identify
-    Phase 2's offline fixture pipeline as the first writer/user and Phase 4 as the
-    first live ATS provider reusing that path.
-  - Repository search confirms the stale first-writer claims are gone. The remaining
-    DATA_MODEL "Phase 4+" field-provenance statement is a separate, valid claim and was
-    correctly left unchanged.
-  - `git diff --check`, repository checker, `ruff format --check`, and `ruff check`
-    passed for the bounded correction. Backend/Alembic tests were not repeated because
-    only comments/documentation changed; the implementation review at `53a2cad`
-    already recorded **74 targeted / 737 full-suite tests** and clean schema drift.
-- The `raw_job_ingestions` implementation and correction pass are accepted. Do not
-  merge to `main` or begin `identity_conflicts`/another slice until the user explicitly
-  authorizes the next action.
-- STOP — reviewer changed only this `Work review`; no implementation files changed.
-
-**Merge record (appended, not a rewrite of the entry above):** Approved at review
-commit `82245e5`. Per user authorization, `phase-1/raw-job-ingestions` was merged into
-`main` with a normal merge commit (`863e1d9`; `--no-ff`, no squash/rebase/force-push)
-and pushed. `main`/`origin/main` are both now at `863e1d9`. Verified: `main` has zero
-content diff against the feature branch; migration `0012` (`down_revision = "0011"`)
-is present in `main`; `python backend/scripts/check_repo.py` (via the project's own
-virtualenv interpreter) exits 0 with zero findings; working tree clean. No later
-Phase 1 table (`identity_conflicts` or otherwise) started or proposed.
-
----
-
-## Iteration 2
+`raw_job_ingestions` documentation-correction pass, its approval, and merge record) was
+removed rather than kept alongside a third entry, since it was already merged and is no
+longer pending. Nothing below was rewritten — only renumbered.*
 
 ### Work done
 
@@ -334,3 +262,40 @@ Phase 1 table (`identity_conflicts` or otherwise) started or proposed.
   3. Do not begin `collection_runs`, `user_jobs`, or another slice, and do not modify
      `main`.
 - STOP — reviewer changed only this `Work review`; no implementation files changed.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-08-28, Claude Code (Sonnet 5). Authorized slice: the one bounded
+  test correction from the review at `27eb2d7`, on the same `phase-1/identity-conflicts`
+  branch. Base: `27eb2d7`. Test-only change — no model, migration, schema, product
+  documentation, or behavior changes.
+- Outcome: added `test_direct_sql_status_omitted_rejected` — a raw SQL insert that
+  builds an otherwise-valid `identity_conflicts` row, omits `status` entirely, and
+  asserts PostgreSQL raises `IntegrityError` (rolled back afterward, established
+  pattern), directly proving `status`'s approved NOT-NULL-no-server-default contract
+  at the database boundary, matching the omission tests already used for `fetched_at`
+  and other recent schema decisions.
+- Files changed:
+  - `backend/tests/test_identity_conflicts.py` — one new test, placed beside
+    `test_direct_sql_invalid_status_rejected`.
+- Commands run and exact results (lightweight, per the review's own scoping — no
+  Alembic/migration reruns for a test-only correction):
+  - `ruff format --check .`, `ruff check .` → passed (54 files).
+  - `mypy app tests scripts` → success, 40 source files.
+  - `pytest tests/test_identity_conflicts.py -q` → 66 passed (up from 65).
+  - `pytest -q` (full suite) → 803 passed (up from 802).
+  - `python scripts/check_repo.py` (from `backend/`) → exit 0, zero findings.
+  - `git status`/`git diff --check` → only the file listed above; no whitespace/
+    conflict errors.
+- Deviations/known limitations: none. No model, migration, schema, or product-behavior
+  change — the finding was a test-coverage gap only.
+- STOP — awaiting Codex re-review. Do not begin `collection_runs`, `user_jobs`, or any
+  other slice, and do not modify `main`.
+
+### Work review
+
+*Pending — awaiting Codex.*
