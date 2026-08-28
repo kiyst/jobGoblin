@@ -2,6 +2,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+from alembic.util.exc import CommandError
+
+import scripts.check_repo as check_repo
 from scripts.check_repo import (
     REPO_ROOT,
     _anchors_for_text,
@@ -11,6 +15,7 @@ from scripts.check_repo import (
     check_constraints_table_integrity,
     check_duplicate_constraint_rows,
     check_links_and_anchors,
+    main,
     run_checks,
 )
 
@@ -435,6 +440,38 @@ def test_run_checks_against_the_real_repository_has_zero_findings() -> None:
     findings = run_checks()
 
     assert findings == [], "\n".join(str(finding) for finding in findings)
+
+
+def test_run_checks_and_cli_survive_a_migration_graph_load_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Orchestration-level regression for the reviewer's finding: a prior
+    version called `script.walk_revisions()` a second time, unguarded, to
+    build the revision-citation map, so a broken graph raised past
+    `run_checks()` before the (correctly try/except-guarded)
+    `check_migration_chain_integrity` was ever reached. Injects the
+    `CommandError` at the same seam `_load_migration_graph` reads from
+    (`_script_directory()`'s return value), so both `run_checks()` and the
+    CLI entry point `main()` must survive it and report one normal finding."""
+
+    class _BrokenScriptDirectory:
+        def get_heads(self) -> list[str]:
+            return ["0001"]
+
+        def walk_revisions(self) -> list[object]:
+            raise CommandError("simulated broken migration graph")
+
+    monkeypatch.setattr(check_repo, "_script_directory", lambda: _BrokenScriptDirectory())
+
+    findings = run_checks()
+
+    graph_findings = [f for f in findings if "failed to load migration graph" in f.message]
+    assert len(graph_findings) == 1
+    assert graph_findings[0].path == "backend/migrations"
+    assert graph_findings[0].line == 1
+    assert str(graph_findings[0]).startswith("backend/migrations:1: ")
+
+    assert main() == 1
 
 
 def test_invocation_from_outside_backend_resolves_paths_independent_of_cwd(

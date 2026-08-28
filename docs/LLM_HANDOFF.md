@@ -97,141 +97,10 @@ that detail.
 ## Iteration 1
 
 *Rotated in from "Iteration 2" per the two-iteration rule: the prior Iteration 1 (the
-`saved_search_locations` documentation correction pass and its merge record) was
+initial checker implementation and Codex's first review requesting findings 1-4) was
 removed rather than kept alongside a third entry, since this entry's `Work review`
-(below) requested changes that are being addressed in this rotation's Iteration 2.
-Nothing below was rewritten — only renumbered.*
-
-### Work done
-
-- Date/agent: 2026-08-27, Claude Code (Sonnet 5). Authorized slice: repository-
-  validation tooling, Class R. Base `a47a8f1` on `main` -> branch
-  `tooling/repository-validation`.
-- Outcome: added `backend/scripts/check_repo.py`, a deterministic, offline, database-
-  free checker covering (1) markdown link/heading-anchor validation, (2) duplicate
-  `docs/DATA_MODEL.md` constraints-summary rows detected by per-row UNIQUE/INDEX
-  *signature* comparison (not whole-row or flattened-CHECK-column comparison — the
-  user's explicit correction to the original proposal), (3) stale/nonexistent Alembic
-  revision references in product docs, (4) migration-chain integrity via Alembic's own
-  `ScriptDirectory` (no DB connection). `docs/LLM_HANDOFF.md` is excluded from checks
-  2-3 (rotating ledger preserves superseded wording on purpose) but still covered by
-  check 1.
-- Conventions applied: `Path(__file__).resolve()`-based path resolution (mirrors
-  `app/config.py`'s `REPOSITORY_ROOT`), reusing the existing `alembic` dependency
-  instead of hand-parsing migration files, no new dependency, no console-script entry,
-  no CI wiring (all per explicit instruction).
-- Files changed:
-  - `backend/scripts/__init__.py` (new, empty) — makes `scripts` importable.
-  - `backend/scripts/check_repo.py` (new) — the checker; `main()` prints sorted
-    `path:line: message` findings, exit 1 if any.
-  - `backend/tests/test_check_repo.py` (new) — 22 tests: link/anchor validation
-    (missing target, missing anchor, image targets, fenced/inline code exclusion,
-    GitHub slug-algorithm parity), duplicate-row detection (signature match after
-    `lower(...)`/`trim(...)` normalization, distinct columns not flagged, exact-
-    duplicate fallback for CHECK-only rows, partial-vs-plain UNIQUE not confused,
-    differing `WHERE` not a duplicate, and the explicit `saved_search_locations`
-    Rev 11 regression case), Alembic reference checks, pure `_chain_integrity_findings`
-    unit tests (clean chain, forked chain), a real-repository integration test
-    (`run_checks()` against the actual repo), and a subprocess CWD-independence test.
-  - `README.md` — documented `python scripts/check_repo.py` under a new "Repository
-    consistency checker" section; `mypy` invocation updated to include `scripts`.
-  - `docs/LLM_WORKFLOW.md` — verification matrix's "Mechanical docs only" and "Model or
-    migration" rows now require `python scripts/check_repo.py`.
-- One correction made during self-verification (not by Codex): the first
-  implementation's `_UNIQUE_OR_INDEX_RE` used a `[^)]*` character class that cannot
-  skip past the inner `)` of a wrapped column like `lower(location_text)`, so it never
-  matched any wrapped-column constraint and silently produced zero signatures —
-  caught because the two tests requiring an actual signature match failed (0 findings
-  instead of 1), even though the real-repository integration test still passed
-  trivially (asserts zero findings, which is also true when extraction silently no-ops).
-  Fixed by replacing the regex with a depth-tracking balanced-paren scan
-  (`_match_unique_or_index`) plus a top-level-comma splitter
-  (`_split_top_level_commas`); one test's expected line number was also corrected (the
-  duplicate is reported at the second/duplicate row's own line, not the first row's).
-- Commands run and exact results:
-  - `python scripts/check_repo.py` (from `backend/`) → exit 0, zero findings.
-  - `pytest tests/test_check_repo.py -v` → 22 passed.
-  - `pytest -q` (full suite) → 228 passed.
-  - `ruff format --check .` → 36 files already formatted.
-  - `ruff check .` → all checks passed.
-  - `mypy app tests scripts` → success, 27 source files.
-  - Subprocess invocation from an unrelated `tmp_path`-style directory outside
-    `backend/` → exit 0 (proves path resolution is CWD-independent).
-  - `git diff --check` (after doc edits) → no output.
-- Deviations/known limitations: none beyond the one corrected bug above, fixed before
-  this entry was written. No CI wiring, no `companies` work, no migration changes, no
-  product-behavior changes.
-- STOP — awaiting Codex review. Do not add CI, begin `companies`, modify migrations, or
-  alter product behavior.
-
-### Work review
-
-- Date/reviewer: 2026-08-27, Codex. Diff reviewed: `a47a8f1..3290b31` on
-  `tooling/repository-validation`; branch clean and synchronized with origin before
-  this review entry.
-- Independent verification:
-  - Inspected the full checker, all 22 tests, README/workflow integration, and handoff
-    rotation. The balanced-parenthesis UNIQUE/INDEX parser correctly handles nested
-    `lower(trim(...))` expressions and catches the saved-location regression.
-  - `python scripts/check_repo.py`: exit 0, zero findings.
-  - `ruff format --check .`, `ruff check .`: passed (36 files).
-  - `mypy app tests scripts`: passed (27 source files).
-  - `pytest -q` with a reviewer-writable temporary root: 228 passed.
-  - Direct counterexamples confirmed the findings below: a documented `0010` revision
-    and an orphaned revision parent both currently return no finding.
-- Findings:
-  1. **Medium — duplicate-summary validation still fails open if its target table is
-     missing or no signatures can be parsed.** `backend/scripts/check_repo.py:242-292`
-     returns an empty result when the named heading/table disappears, its Markdown
-     shape changes, or UNIQUE/INDEX extraction silently produces zero signatures;
-     `run_checks()` at `backend/scripts/check_repo.py:458-480` treats that as success.
-     Consequently the real-repository integration test can still pass trivially under
-     the same no-op failure mode described in this pass's own Work done. Make the
-     DATA_MODEL check require exactly one target section with data rows and at least
-     one parsed UNIQUE/INDEX signature, reporting a finding otherwise. Add regression
-     tests for a missing section and an unparseable/no-signature section.
-  2. **Medium — revision-reference detection stops after migration `0009`.**
-     `backend/scripts/check_repo.py:345` uses ``r"`(000\d)`"``, so a current or future
-     citation such as migration `0010` is never inspected. A direct call with `0010`
-     in both the text and revision map returned no finding only because the regex did
-     not match. Support the project's four-digit, leading-zero revision convention
-     (for example `0\d{3}` in the existing backtick context) and add known/nonexistent
-     `0010`-or-later tests without turning ordinary years or ports into revisions.
-  3. **Medium — migration-chain validation does not prove parent existence or graph
-     connectivity.** `backend/scripts/check_repo.py:396-435` checks head/base counts
-     and shared `down_revision` values, but never verifies that every non-null parent
-     exists or that walking from the sole head visits every revision. The synthetic
-     chain `0001 -> NULL`, `0002 -> 9999`, `0003 -> 0002` with head `0003` returns no
-     findings. Add missing-parent and full-connectivity validation (including tests for
-     an orphan/disconnected component; reject tuple/merge parents because this project
-     requires one unbranched chain). Convert Alembic graph-loading failures into a
-     normal sorted finding instead of an uncontrolled traceback where practical.
-  4. **Low — CLI finding paths are checkout-dependent absolute paths.** Production
-     checks construct findings with `str(path)` and `str(MIGRATIONS_DIR)` throughout
-     `backend/scripts/check_repo.py`, so identical defects produce different output on
-     different machines despite the checker being described as deterministic. Render
-     repository files relative to `REPO_ROOT` (for example `docs/DATA_MODEL.md` and
-     `backend/migrations`) while leaving synthetic external paths usable in unit tests.
-- Missing/inconclusive checks: Docker/database state is irrelevant to this offline
-  tooling slice. The initial targeted reviewer run hit sandbox-owned pytest temp-folder
-  permissions; rerunning the complete suite with an explicitly writable temp root
-  passed 228/228, confirming this was environmental rather than a repository failure.
-- Verdict: changes requested.
-- Exact bounded correction:
-  1. Address only findings 1-4 in the checker and its tests. Update README/workflow text
-     only if behavior or invocation wording needs correction; do not expand categories.
-  2. Add focused tests proving fail-closed constraints-table discovery/extraction,
-     `0010`-or-later revision handling, orphan/connectivity rejection, and stable
-     repository-relative CLI paths.
-  3. Rerun the checker from `backend` and an unrelated CWD, Ruff format/check, mypy over
-     `app tests scripts`, targeted checker tests, and the full suite. Record exact
-     outcomes concisely, commit/push the same tooling branch, and stop.
-  4. Do not add CI, begin `companies`, modify migrations, or alter product behavior.
-- STOP — reviewer changed only this `Work review`; no implementation files were changed.
-
----
-
-## Iteration 2
+(below) requested one further change that is being addressed in this rotation's
+Iteration 2. Nothing below was rewritten — only renumbered.*
 
 ### Work done
 
@@ -327,3 +196,55 @@ Nothing below was rewritten — only renumbered.*
      update the concise handoff entry, commit/push the same branch, and stop.
   4. Do not add CI, begin `companies`, modify migrations, or alter product behavior.
 - STOP — reviewer changed only this `Work review`; no implementation files were changed.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-08-27, Claude Code (Sonnet 5). Authorized slice: bounded correction
+  pass addressing the sole remaining finding at review commit `5934d1c`, on the same
+  `tooling/repository-validation` branch. Base: `5934d1c`. No CI, `companies`,
+  migration, or product-behavior changes.
+- Outcome: the migration graph is now walked exactly once in the production path, under
+  one `CommandError` boundary.
+  - Added `MigrationGraph` (a frozen dataclass of `heads`/`revisions`) and
+    `_load_migration_graph(script) -> MigrationGraph | Finding`: the single place that
+    calls `script.get_heads()`/`script.walk_revisions()`; a `CommandError` there returns
+    one `Finding` at `backend/migrations:1` instead of propagating.
+  - `_revision_map` now takes a `MigrationGraph` (derives the citation map from the
+    already-walked `revisions`, no second walk); `check_migration_chain_integrity` now
+    takes a `MigrationGraph` too (pure structural checks only — no longer does its own
+    try/except, since loading already happened once upstream).
+  - `run_checks()` calls `_load_migration_graph` once; on failure it appends that one
+    finding, skips `check_alembic_references` entirely for every file (no valid revision
+    map exists to check citations against), still runs the graph-independent checks
+    (links/anchors, duplicate-summary rows, constraints-table integrity), and skips
+    `check_migration_chain_integrity` (nothing further to say about a graph that failed
+    to load).
+- Files changed:
+  - `backend/scripts/check_repo.py` — the single-load refactor above; module docstring
+    updated to describe it.
+  - `backend/tests/test_check_repo.py` — added
+    `test_run_checks_and_cli_survive_a_migration_graph_load_failure`: monkeypatches
+    `_script_directory` to return a stub whose `walk_revisions()` raises `CommandError`,
+    then asserts `run_checks()` returns exactly one `backend/migrations:1: ...` finding
+    (no exception escapes) and that `main()` returns exit code `1`.
+- Commands run and exact results:
+  - `python scripts/check_repo.py` from `backend/` → exit 0, zero findings.
+  - Same script invoked from an unrelated working directory → exit 0.
+  - `ruff format --check .` → 36 files already formatted.
+  - `ruff check .` → all checks passed.
+  - `mypy app tests scripts` → success, 27 source files.
+  - `pytest tests/test_check_repo.py -v` → 34 passed (33 prior + 1 new).
+  - `pytest -q` (full suite) → 240 passed.
+  - `git status`/`git diff --check` → only `backend/scripts/check_repo.py` and
+    `backend/tests/test_check_repo.py` changed; no whitespace/conflict errors.
+- Deviations/known limitations: none.
+- STOP — awaiting Codex review. Do not add CI, begin `companies`, modify migrations, or
+  alter product behavior.
+
+### Work review
+
+*Pending — awaiting Codex.*

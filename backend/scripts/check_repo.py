@@ -22,8 +22,11 @@ this for documentation and migration changes):
    forked chain, no dangling/nonexistent parent, no merge (multi-parent)
    revision, and full connectivity from the head back to the baseline —
    read via Alembic's own `ScriptDirectory`, never a database connection.
-   A malformed graph that Alembic itself refuses to load is reported as a
-   normal finding rather than an uncontrolled traceback.
+   The graph is walked exactly once (`_load_migration_graph`); a malformed
+   graph that Alembic itself refuses to load is reported as a single normal
+   finding rather than an uncontrolled traceback, and revision-citation
+   checks (category 3) are skipped rather than run against a graph known to
+   be broken.
 
 `docs/LLM_HANDOFF.md` is a rotating historical ledger (see
 docs/LLM_WORKFLOW.md) and is excluded from checks 2 and 3, since it
@@ -417,11 +420,52 @@ def _script_directory() -> ScriptDirectory:
     return ScriptDirectory.from_config(config)
 
 
-def _revision_map(script: ScriptDirectory) -> dict[str, str | None]:
+RevisionParent = str | tuple[str, ...] | None
+
+
+def _normalize_down_revision(down: object) -> RevisionParent:
+    if down is None or isinstance(down, str):
+        return down
+    if isinstance(down, list | tuple):
+        return tuple(str(item) for item in down)
+    return str(down)
+
+
+@dataclass(frozen=True)
+class MigrationGraph:
+    """The result of walking Alembic's revision graph exactly once — reused
+    for both the revision-citation map and chain-integrity checking, so the
+    graph is never walked twice and never partially-loaded across two
+    separately-guarded call sites."""
+
+    heads: list[str]
+    revisions: list[tuple[str, RevisionParent]]
+
+
+def _load_migration_graph(script: ScriptDirectory) -> MigrationGraph | Finding:
+    """Alembic eagerly resolves parent references while walking the graph,
+    so a broken graph (a missing parent, for example) can raise before any
+    of our own structural checks ever run. This is the single place that
+    walks the graph; a `CommandError` here becomes one normal, repository-
+    relative `Finding` instead of an uncontrolled traceback, and callers
+    that need the graph must go through this result rather than walking it
+    again themselves."""
+    location = _display_path(MIGRATIONS_DIR)
+    try:
+        heads = list(script.get_heads())
+        revisions = [
+            (rev.revision, _normalize_down_revision(rev.down_revision))
+            for rev in script.walk_revisions()
+        ]
+    except CommandError as exc:
+        return Finding(location, 1, f"failed to load migration graph: {exc}")
+    return MigrationGraph(heads=heads, revisions=revisions)
+
+
+def _revision_map(graph: MigrationGraph) -> dict[str, str | None]:
     revision_map: dict[str, str | None] = {}
-    for rev in script.walk_revisions():
-        down = rev.down_revision
-        revision_map[rev.revision] = down if isinstance(down, str) or down is None else str(down)
+    for revision, down in graph.revisions:
+        revision_map[revision] = down if isinstance(down, str) or down is None else str(down)
     return revision_map
 
 
@@ -453,9 +497,6 @@ def check_alembic_references(
                 )
             )
     return findings
-
-
-RevisionParent = str | tuple[str, ...] | None
 
 
 def _chain_integrity_findings(
@@ -546,29 +587,11 @@ def _chain_integrity_findings(
     return findings
 
 
-def _normalize_down_revision(down: object) -> RevisionParent:
-    if down is None or isinstance(down, str):
-        return down
-    if isinstance(down, list | tuple):
-        return tuple(str(item) for item in down)
-    return str(down)
-
-
-def check_migration_chain_integrity(script: ScriptDirectory) -> list[Finding]:
-    """Alembic eagerly resolves the whole revision graph while walking it, so
-    a broken parent reference can raise before this function gets a chance
-    to inspect it structurally; convert that into a normal finding instead
-    of an uncontrolled traceback."""
-    location = _display_path(MIGRATIONS_DIR)
-    try:
-        heads = list(script.get_heads())
-        revisions = [
-            (rev.revision, _normalize_down_revision(rev.down_revision))
-            for rev in script.walk_revisions()
-        ]
-    except CommandError as exc:
-        return [Finding(location, 1, f"failed to load migration graph: {exc}")]
-    return _chain_integrity_findings(location, heads, revisions)
+def check_migration_chain_integrity(graph: MigrationGraph) -> list[Finding]:
+    """Structural checks only — the graph itself is loaded once by
+    `_load_migration_graph`, whose `CommandError` handling is the only place
+    that walks Alembic's revision graph."""
+    return _chain_integrity_findings(_display_path(MIGRATIONS_DIR), graph.heads, graph.revisions)
 
 
 # --------------------------------------------------------------------------
@@ -594,18 +617,28 @@ def run_checks() -> list[Finding]:
         findings.extend(check_links_and_anchors(path, text, file_texts))
 
     script = _script_directory()
-    revision_map = _revision_map(script)
+    graph = _load_migration_graph(script)
+    if isinstance(graph, Finding):
+        # No valid revision map exists — citation checks would either raise
+        # again or compare against nothing meaningful, so they're skipped
+        # entirely rather than attempted against a graph we know is broken.
+        findings.append(graph)
+        revision_map = None
+    else:
+        revision_map = _revision_map(graph)
 
     for path in markdown_files:
         if path.name in HISTORICAL_LEDGER_FILES:
             continue
         text = file_texts[path.resolve()]
         findings.extend(check_duplicate_constraint_rows(path, text))
-        findings.extend(check_alembic_references(path, text, revision_map))
+        if revision_map is not None:
+            findings.extend(check_alembic_references(path, text, revision_map))
         if path.name == DATA_MODEL_FILENAME:
             findings.extend(check_constraints_table_integrity(path, text))
 
-    findings.extend(check_migration_chain_integrity(script))
+    if not isinstance(graph, Finding):
+        findings.extend(check_migration_chain_integrity(graph))
 
     return sorted(findings)
 
