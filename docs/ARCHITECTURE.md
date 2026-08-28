@@ -1223,6 +1223,14 @@ validation):**
    `collection_run_provider_attempts` rows for that provider; the no-preference case
    expands to every configured fixture source; re-running the full fixture set is
    idempotent (no duplicate rows, `last_seen_at` advances).
+6. **Deferred from Phase 1 (§13):** a `UserJob` row (created directly via its Phase 1
+   factory, independent of this pipeline — `user_jobs` has no ingestion writer) for the
+   re-observation case's `Job` must be completely unaffected by that `Job`'s
+   re-ingestion — `saved`/`hidden`/`archived`/`status`/`applied_at`/`status_changed_at`
+   all remain exactly as the test set them, even though `last_seen_at` on the
+   underlying `JobOccurrence` advances. This proves user state is never clobbered by
+   source refresh (§37) — it could not be proven in Phase 1 itself, since no ingestion
+   persistence writer exists there yet to re-ingest anything.
 
 This is the acceptance test for Phase 1+2 combined — see §13.
 
@@ -1296,9 +1304,13 @@ This is the acceptance test for Phase 1+2 combined — see §13.
 - Each model has a factory/fixture usable from tests without hitting any network.
 - A seeded `CandidateProfile` and at least one `SavedSearch` can be created, fetched, and
   updated through direct service-layer calls (API routes not required until Phase 8).
-- Unit tests cover: `Job`/`JobOccurrence` creation and the upsert-does-not-duplicate case,
-  and `UserJob` state surviving a re-ingestion of its parent `Job` (proves user state is
-  never clobbered by source refresh, per §37).
+- Unit tests cover: `Job`/`JobOccurrence` creation and the upsert-does-not-duplicate case.
+  **`UserJob` state surviving a re-ingestion/upsert of its parent `Job`** (proving user
+  state is never clobbered by source refresh, per §37) **is deferred to Phase 2's own
+  fixture/persistence acceptance proof (§11)** — no ingestion persistence writer exists
+  in Phase 1, so nothing can actually re-ingest a `Job` yet; Phase 1 proves only the
+  `user_jobs` schema/constraints/CASCADE isolation and `set_status()`'s own behavior in
+  isolation, per docs/DECISIONS/0006.
 - **No provider or external-library implementation exists yet.** `ats-scrapers` and
   `python-jobspy` are not installed or imported anywhere in Phase 1 — Phase 1 proves the
   schema and persistence layer only, against fixtures/factories.
