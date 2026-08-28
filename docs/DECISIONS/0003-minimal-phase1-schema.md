@@ -17,7 +17,18 @@ Phase 3/6/13 design work would likely revise anyway.
 Phase 1 migrates exactly: `users`, `candidate_profiles`, `candidate_skills`,
 `saved_searches`, `saved_search_titles`, `saved_search_locations`, `companies`, `jobs`,
 `job_occurrences`, `raw_job_ingestions`, `identity_conflicts`, `collection_runs`,
-`user_jobs`, `job_notes`.
+`collection_run_provider_attempts`, `user_jobs`, `job_notes`.
+
+**Rev 4 correction — `collection_run_provider_attempts`:** the paragraph below still
+describes this table (as originally written, Rev 2/3) following the same "defer until
+something uses it" logic as `duplicate_groups`. That was superseded: Rev 4 moved
+`collection_run_provider_attempts` into Phase 1 for the same reason `identity_conflicts`
+is here (see the paragraph immediately below) — Phase 2's fixture-driven ingestion proof
+needs to persist partial-provider-result and per-source-failure telemetry, which requires
+this table to already exist (see [ADR 0005](0005-raw-ingestion-vs-provider-attempts.md)
+and [DATA_MODEL.md](../DATA_MODEL.md)'s own Rev 4 changelog). The list above already
+reflects this; only the prose paragraph below was written before that correction and is
+retained for its still-accurate reasoning about `duplicate_groups`.
 
 **Rev 3 addition — `identity_conflicts`:** this looks like it should follow the same
 "defer until something uses it" logic as `duplicate_groups`/`collection_run_provider_attempts`

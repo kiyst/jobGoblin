@@ -14,6 +14,7 @@ from app.db.models import (
     CandidateProfile,
     CandidateSkill,
     CollectionRun,
+    CollectionRunProviderAttempt,
     Company,
     IdentityConflict,
     Job,
@@ -1019,6 +1020,124 @@ async def real_committed_collection_run(
                     existing_run = await cleanup_session.get(CollectionRun, run_id)
                     if existing_run is not None:
                         await cleanup_session.delete(existing_run)
+                        await cleanup_session.commit()
+
+
+@pytest.fixture
+def make_collection_run_provider_attempt() -> Callable[..., CollectionRunProviderAttempt]:
+    """Factory for a valid `CollectionRunProviderAttempt` — tests only
+    deviate from this intentionally. `collection_run_id`, `provider`,
+    `source`, and `started_at` have no defaults (matching the model's own
+    NOT-NULL-no-server-default columns): every call site must supply them
+    explicitly. `status` defaults to `"running"` as a Python-level factory
+    convenience only — the database itself has no server default. Every
+    other field is omitted from the constructed row entirely unless
+    explicitly passed, so the database's own server defaults apply — this
+    factory does not shadow them with Python-side defaults.
+    """
+
+    def _make(
+        *,
+        collection_run_id: uuid.UUID,
+        provider: str,
+        source: str,
+        started_at: datetime,
+        completed_at: datetime | None = None,
+        status: str = "running",
+        jobs_discovered: int | None = None,
+        jobs_inserted: int | None = None,
+        jobs_updated: int | None = None,
+        retry_count: int | None = None,
+        rate_limited: bool | None = None,
+        error_category: str | None = None,
+        error_message: str | None = None,
+        incomplete_results: bool | None = None,
+    ) -> CollectionRunProviderAttempt:
+        kwargs: dict[str, object] = {
+            "collection_run_id": collection_run_id,
+            "provider": provider,
+            "source": source,
+            "started_at": started_at,
+            "completed_at": completed_at,
+            "status": status,
+            "error_category": error_category,
+            "error_message": error_message,
+        }
+        if jobs_discovered is not None:
+            kwargs["jobs_discovered"] = jobs_discovered
+        if jobs_inserted is not None:
+            kwargs["jobs_inserted"] = jobs_inserted
+        if jobs_updated is not None:
+            kwargs["jobs_updated"] = jobs_updated
+        if retry_count is not None:
+            kwargs["retry_count"] = retry_count
+        if rate_limited is not None:
+            kwargs["rate_limited"] = rate_limited
+        if incomplete_results is not None:
+            kwargs["incomplete_results"] = incomplete_results
+        return CollectionRunProviderAttempt(**kwargs)
+
+    return _make
+
+
+@asynccontextmanager
+async def real_committed_collection_run_provider_attempt(
+    db_engine: AsyncEngine,
+    email: str,
+    *,
+    provider: str,
+    source: str,
+    started_at: datetime,
+    collection_run_kwargs: dict[str, object] | None = None,
+    **attempt_kwargs: object,
+) -> AsyncIterator[tuple[AsyncSession, uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID]]:
+    """Builds on `real_committed_collection_run`: additionally creates a
+    real, separately-committed `CollectionRunProviderAttempt` referencing
+    it, with its own best-effort cleanup (attempt, then — via the wrapped
+    helper — run, saved search, then user). `email` has no default
+    (matching the wrapped helper's own signature) — callers must supply a
+    distinct one per test to avoid colliding on `users`' unique email
+    index. `collection_run_kwargs` disambiguates the wrapped
+    `CollectionRun`'s own optional kwargs (e.g. `started_at`) from this
+    helper's own `started_at`, which belongs to the attempt row —
+    `**collection_run_kwargs` cannot be spread directly alongside
+    `**attempt_kwargs` without risking a duplicate-keyword collision if
+    both happened to use the same field name.
+    """
+    attempt_kwargs.setdefault("status", "running")
+
+    async with real_committed_collection_run(
+        db_engine,
+        email,
+        started_at=started_at,
+        saved_search_kwargs=None,
+        **(collection_run_kwargs or {}),
+    ) as (session, user_id, saved_search_id, collection_run_id):
+        attempt = CollectionRunProviderAttempt(
+            collection_run_id=collection_run_id,
+            provider=provider,
+            source=source,
+            started_at=started_at,
+            **attempt_kwargs,
+        )
+        session.add(attempt)
+        attempt_id: uuid.UUID | None = None
+        try:
+            await session.commit()
+            await session.refresh(attempt)
+            attempt_id = attempt.id
+
+            yield session, user_id, saved_search_id, collection_run_id, attempt_id
+        finally:
+            if attempt_id is not None:
+                with suppress(Exception):
+                    await session.rollback()
+                async with AsyncSession(bind=db_engine) as cleanup_session:
+                    existing_attempt = await cleanup_session.get(
+                        CollectionRunProviderAttempt, attempt_id
+                    )
+                    if existing_attempt is not None:
+                        await cleanup_session.delete(existing_attempt)
                         await cleanup_session.commit()
 
 
