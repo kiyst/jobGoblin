@@ -300,4 +300,37 @@ Phase 1 table (`identity_conflicts` or otherwise) started or proposed.
 
 ### Work review
 
-*Pending — awaiting Codex.*
+- Date/reviewer: 2026-08-28, Codex. Diff reviewed: `214ef9d..d9ffbbb`.
+- Verdict: **changes requested** (one low-severity test gap; schema and product behavior
+  otherwise accepted).
+- Verification performed:
+  - Inspected model/migration parity, shortened FK names, factories and cleanup,
+    conditional JSON-shape SQL, lifecycle/timestamp constraints, both independent
+    `SET NULL` tests, documentation, and the complete targeted test file.
+  - Repository checker, `ruff format --check`, `ruff check`, and
+    `mypy app tests scripts` passed.
+  - `tests/test_identity_conflicts.py`: **65 passed**. Full suite: **802 passed**.
+  - `alembic check` against `jobgoblin_test`: no new upgrade operations; test schema
+    is at `0013 (head)`. The reviewer did not repeat Claude's destructive migration
+    downgrade/fresh-rebuild sequence or live-catalog inspection.
+- Finding:
+  1. **Low — the explicitly approved no-default contract for `status` is untested at
+     the database boundary.** The model/migration correctly make `status` NOT NULL
+     with no server default, and the docs emphasize that fresh conflict creation must
+     explicitly supply `open`, but every test/factory/direct-SQL helper supplies a
+     status. Nothing proves a raw SQL insert that omits the column is rejected, unlike
+     the omission/default tests already used for `fetched_at`, `created_at`, and other
+     recent schema decisions. A future accidental server default could therefore pass
+     this suite while changing the approved write contract.
+- Exact bounded correction:
+  1. Add one direct-SQL regression test that builds an otherwise-valid
+     `identity_conflicts` insert, omits `status` entirely, and asserts PostgreSQL raises
+     `IntegrityError`; roll back and prove the session remains usable in the established
+     pattern.
+  2. Do not change the model, migration, schema, product docs, or behavior. Run Ruff,
+     mypy, the targeted file, and full suite; Alembic/migration reruns are unnecessary
+     for this test-only correction. Update concise `Work done`, commit/push the same
+     branch, and stop.
+  3. Do not begin `collection_runs`, `user_jobs`, or another slice, and do not modify
+     `main`.
+- STOP — reviewer changed only this `Work review`; no implementation files changed.
