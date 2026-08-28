@@ -128,16 +128,112 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   PostgreSQL is healthy; Alembic upgrade -> downgrade -> upgrade passes; Ruff, mypy, and
   pytest pass; and live liveness/readiness behavior has been verified with the database
   both available and unavailable.
-- **Phase 1: in progress (2026-08-24). `users` slice complete and verified**: model
+- **Phase 1: in progress (2026-08-24).** `users` slice complete and verified: model
   (`backend/app/db/models/user.py`), migrations `0002` (table, reviewed/hand-edited, not
   autogenerate-as-is) and `0003` (forward corrective migration, reversible, fixing the
   email-normalization `CHECK` constraints' whitespace handling — see
-  `docs/DATA_MODEL.md`), and database tests
-  against real Compose PostgreSQL all pass — including the normalized-email
-  `CHECK`s/unique index, required-field rejection, and `updated_at` advancing on update.
-  No other Phase 1 table is implemented yet; the rest
-  of Phase 1's exit gate (§[PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md)) remains
-  outstanding.
+  `docs/DATA_MODEL.md`), and database tests against real Compose PostgreSQL all pass —
+  including the normalized-email `CHECK`s/unique index, required-field rejection, and
+  `updated_at` advancing on update. `candidate_profiles` slice also complete and
+  verified: model (`backend/app/db/models/candidate_profile.py`), migration `0004`
+  (`down_revision = "0003"`), and database tests all pass — including the one-profile-
+  per-user uniqueness, `ON DELETE CASCADE` from `users`, the `remote_preference` enum
+  `CHECK`, non-negative `CHECK`s on `years_experience`/`salary_expectation_min`/
+  `salary_expectation_max`, the `salary_expectation_min <= salary_expectation_max`
+  `CHECK`, and the NULL-means-unspecified/empty-array-means-explicitly-none distinction
+  on the `text[]` columns (see `docs/DATA_MODEL.md`). `candidate_skills` slice also
+  complete and verified: model (`backend/app/db/models/candidate_skill.py`), migration
+  `0005` (`down_revision = "0004"`), and database tests all pass — including the
+  same-whitespace-set trim/non-empty `CHECK`s and case-preserving normalization used for
+  `users.email`, the case-insensitive `(candidate_profile_id, lower(skill))` unique index,
+  `ON DELETE CASCADE` from `candidate_profiles`, and the `priority` enum `CHECK` (see
+  `docs/DATA_MODEL.md`). `saved_searches` slice also complete and verified (parent table
+  only — `saved_search_titles`/`saved_search_locations` remain future slices): model
+  (`backend/app/db/models/saved_search.py`), migration `0006` (`down_revision = "0005"`),
+  and database tests all pass — including the `name` trim/non-empty `CHECK`s,
+  `remote_rules`/`polling_schedule` enum `CHECK`s, non-negative `CHECK`s on
+  `radius_miles`/`salary_floor`/`preferred_salary`/`recency_limit_hours` (`radius_miles`
+  has no precision/scale, but is still non-negative), the
+  `salary_floor <= preferred_salary` `CHECK`, `ON DELETE CASCADE` from `users`, and — the
+  first `jsonb` columns in this schema — `MutableDict`-tracked top-level mutation with a
+  documented (and tested) nested-mutation limitation, plus a top-level-JSON-object `CHECK`
+  on `enabled_sources`/`scoring_weights` (see `docs/DATA_MODEL.md`). `saved_search_titles`
+  slice also complete and verified (`saved_search_locations` remains a future slice):
+  model (`backend/app/db/models/saved_search_title.py`), migration `0007`
+  (`down_revision = "0006"`), and database tests all pass — including the `title`
+  trim/non-empty `CHECK`s and case-preserving normalization (mirroring `skill`/`name`),
+  the case-insensitive `(saved_search_id, lower(title))` unique index, the partial
+  `UNIQUE (saved_search_id) WHERE is_primary` index enforcing at most one primary title
+  per search while allowing zero, and `ON DELETE CASCADE` from `saved_searches` (see
+  `docs/DATA_MODEL.md`). `saved_search_locations` slice also complete and verified (the
+  final child table of the `saved_searches` group): model
+  (`backend/app/db/models/saved_search_location.py`), migration `0008`
+  (`down_revision = "0007"`), and database tests all pass — including the `location_text`
+  trim/non-empty `CHECK`s and case-preserving normalization (mirroring `title`), the
+  case-insensitive `(saved_search_id, lower(location_text))` unique index, `CHECK`s
+  restricting latitude to `[-90, 90]` and longitude to `[-180, 180]`, a coordinate-pair
+  `CHECK` requiring both be NULL or both be non-NULL, a non-negative `CHECK` on
+  `radius_miles_override`, and `ON DELETE CASCADE` from `saved_searches` (see
+  `docs/DATA_MODEL.md`). `companies` slice also complete and verified (Class H — the
+  first table with a self-referential FK, `ON DELETE SET NULL`, and a PostgreSQL
+  generated column): model (`backend/app/db/models/company.py`), domain normalization
+  (`backend/app/normalization/company.py::normalize_domain()`, IDNA2008/UTS #46 via the
+  `idna` package), migration `0009` (`down_revision = "0008"`), and database tests all
+  pass — including the case-insensitive, NULL-safe partial `UNIQUE (lower(domain))`
+  index (multiple `NULL`-domain companies coexist; a real concurrent-insert race
+  correctly leaves exactly one winner), the `normalized_name` PostgreSQL `GENERATED
+  ALWAYS AS (...) STORED` column (trim/collapse/lowercase of `name`, proven generated
+  even via a direct SQL insert that never mentions it), the `duplicate_of_company_id`
+  self-referential FK's `ON DELETE SET NULL` behavior and its direct-self-reference
+  `CHECK`, and NULL-safe normalization `CHECK`s on `homepage_url`/`career_page_url`/
+  `industry` (see `docs/DATA_MODEL.md`). The `jobs` slice is also complete and verified
+  (Class H): model (`backend/app/db/models/job.py`), migration `0010` (`down_revision =
+  "0009"`), and database tests cover its nullable `company_id` FK with `ON DELETE
+  RESTRICT`, explicit ordered observation timestamps, resolved-value constraints,
+  coordinate and numeric invariants, mutable certifications/provenance collections, and
+  the absence of any job-level identity `UNIQUE` constraint (identity keys belong to the
+  future `job_occurrences` slice; see `docs/DATA_MODEL.md`). The `job_occurrences` slice
+  is also complete and verified (Class H): model
+  (`backend/app/db/models/job_occurrence.py`), the new
+  `backend/app/normalization/url.py::normalize_url()` pure identity canonicalizer,
+  migration `0011` (`down_revision = "0010"`), and database tests cover the three
+  ADR-0004 partial unique indexes (including the exact NULL-tenant loophole ADR 0004
+  fixes, proven both sequentially and under real concurrent inserts), canonical
+  `provider`/`source` identifiers, `ON DELETE CASCADE` isolation from `jobs`, and the
+  explicit-observation-time invariants (see `docs/DATA_MODEL.md`). The
+  `raw_job_ingestions` slice is also complete and verified (Class H): model
+  (`backend/app/db/models/raw_job_ingestion.py`), migration `0012` (`down_revision =
+  "0011"`), and database tests cover the canonical `provider`/`source` identifiers
+  (generalized from `job_occurrences`), the top-level-JSON-object `raw_payload` `CHECK`,
+  the `fetched`/`parse_error`-only-direction `processing_status`/`job_occurrence_id`
+  consistency `CHECK` (deliberately one-directional so `ON DELETE SET NULL` can still
+  preserve a `normalized`/`identity_conflict` row past its occurrence's deletion), and
+  `ON DELETE SET NULL` isolation from `job_occurrences` (see `docs/DATA_MODEL.md`). The
+  `identity_conflicts` slice is also complete and verified (Class H): model
+  (`backend/app/db/models/identity_conflict.py`), migration `0013` (`down_revision =
+  "0012"`), and database tests cover the plain `conflict_type`/`status` enums, the full
+  `status`/`resolved_at` lifecycle consistency matrix plus the new `resolved_at >=
+  created_at` ordering `CHECK`, the `conflict_type`-conditional JSON shape `CHECK` on
+  `existing_value`/`incoming_value` (object for `evidence_mismatch`, array for
+  `ambiguous_match`, including the empty-object/empty-array acceptance case), and both
+  independent `ON DELETE SET NULL` cascades (from `job_occurrences` and from
+  `raw_job_ingestions`) proven in isolation from each other and from an unrelated
+  conflict row (see `docs/DATA_MODEL.md`). The `collection_runs` slice is also complete
+  and verified (Class H): model (`backend/app/db/models/collection_run.py`), migration
+  `0014` (`down_revision = "0013"`), and database tests cover the bidirectional
+  `status`/`completed_at` lifecycle consistency matrix, the `completed_at >= started_at`
+  ordering `CHECK`, the no-server-default `started_at`/`status` contract (raw-SQL
+  omission proven rejected), independent per-row defaults for the three job counters,
+  both JSONB columns, and the provider array, in-place `MutableList` append persistence
+  after a separate-session reload for both `providers_attempted` and `failures`,
+  whole-value-assignment persistence for `providers_enforced_locally`, the top-level
+  JSON object/array shape `CHECK`s (SQL NULL, JSON null, and wrong-shape values all
+  rejected), a planning-time failure existing without any `providers_attempted` entry,
+  `completed_with_errors` retaining accurate non-zero rollups alongside recorded
+  failures, and `ON DELETE SET NULL` isolation from `saved_searches` against an
+  unrelated run (see `docs/DATA_MODEL.md`). No later Phase 1 table is implemented yet;
+  the rest of Phase 1's exit gate (§[PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md))
+  remains outstanding.
 - **Phases 2-14: not started.** Begin each phase only after completing its preflight in
   [PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md) and receiving approval for the next
   smallest slice.

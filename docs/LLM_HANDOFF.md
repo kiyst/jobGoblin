@@ -4,24 +4,33 @@ Purpose: this file is the shared communication ledger between the implementing L
 the reviewing LLM. Update it at the end of every bounded implementation or correction
 pass so the user does not have to copy status messages between agents.
 
+Canonical operating process: [LLM_WORKFLOW.md](LLM_WORKFLOW.md). Both agents must read
+it before proposing, implementing, correcting, or reviewing work. This file is the
+short-lived ledger; `LLM_WORKFLOW.md` defines roles, risk classes, verification depth,
+and the mechanical-documentation correction rule.
+
 This ledger records only the two latest completed iterations. Git remains the source of
 truth for diffs and rollback; record commit or base references whenever they exist.
 
 ## Required workflow
 
-1. Before working, read the master project documentation, `PHASE_RISK_CHECKLIST.md`,
-   and both iterations in this file.
+1. Before working, read `LLM_WORKFLOW.md`, the master project documentation,
+   `PHASE_RISK_CHECKLIST.md`, and both iterations in this file.
 2. The implementing LLM completes only the approved slice, runs the required checks,
    and fills in a new `Work done` section. It must not fill in its own `Work review`.
 3. The reviewing LLM independently inspects the repository and actual diff, runs
    proportionate checks, gives the user its findings, and writes the same findings in
    that iteration's `Work review` section. A review does not authorize code changes.
+   Codex may directly resolve only a mechanical documentation defect that satisfies
+   every condition in `LLM_WORKFLOW.md`; it records that edit in a separate review
+   commit.
 4. The implementing LLM reads the latest review on its next run. It changes only
    findings approved by the user, then records that correction pass as the next
    iteration.
 5. Never allow both LLMs to edit implementation files simultaneously. Only the active
-   implementer writes code; the reviewer writes only its `Work review` entry unless the
-   user explicitly transfers implementation ownership.
+   implementer writes code; the reviewer writes its `Work review` and may make only the
+   mechanical documentation fixes permitted by `LLM_WORKFLOW.md`, unless the user
+   explicitly transfers broader implementation ownership.
 
 ## Two-iteration rotation rule
 
@@ -56,8 +65,9 @@ After completing an authorized pass and updating the agent's assigned handoff se
 Role boundaries:
 
 - The implementing LLM may commit implementation files and its own `Work done` entry.
-- The reviewing LLM may commit only its own `Work review` entry unless the user
-  explicitly authorizes implementation changes.
+- The reviewing LLM may commit its own `Work review` entry and mechanical documentation
+  fixes permitted by `LLM_WORKFLOW.md`; all other changes require explicit user
+  authorization.
 - Neither LLM may rewrite the other LLM's handoff content.
 - Only one LLM may edit or perform Git writes at a time.
 - A successful push is a checkpoint, not approval to begin another slice.
@@ -78,196 +88,196 @@ commit`. After committing, report the actual hash in the agent's final response.
 history already binds the handoff entry to its commit; the following agent must resolve
 and record the actual commit it reviewed.
 
+Keep new entries concise—target roughly 40 lines per agent section. Record command names
+and exact outcomes, but do not narrate every individual test; Git and test files preserve
+that detail.
+
 ---
 
 ## Iteration 1
 
-*Rotated in from "Iteration 2" per the two-iteration rule: its `Work review` (below) is
-no longer pending, so the previous Iteration 1 (the `_COVERED_WHITESPACE`/fail-closed-guard
-implementation pass and Codex's first review of it) was removed rather than kept
-alongside two already-reviewed entries. Nothing below was rewritten — only renumbered.*
+*Rotated in from "Iteration 2" per the two-iteration rule: the prior Iteration 1 (the
+`identity_conflicts` correction pass, its approval, and merge record) was removed rather
+than kept alongside a third entry, since it was already merged and is no longer pending.
+Nothing below was rewritten — only renumbered.*
 
 ### Work done
 
-- Date and agent: 2026-08-24, Claude Code (Sonnet 4.5).
-- Approved phase/slice: second bounded correction pass over the existing Phase 1 `users`
-  slice only — all six corrections in Iteration 1's `Work review` approved as one pass.
-  No other table, no new slice.
-- Outcome: all six approved corrections addressed and verified against real PostgreSQL;
-  both the disposable test database and the `jobgoblin` development database now sit at
-  migration `0003` with the corrected email-normalization constraints. 26 tests passed,
-  0 skipped.
-- Base/starting commit: `3ba2635` ("docs(review): request migration and test safety
-  fixes") on branch `codex/phase1-users-wip` — Codex's own review commit, on top of
-  `28655bb`. Confirmed via `git diff HEAD -- docs/LLM_HANDOFF.md` (empty) before making
-  any changes.
-- Ending commit or working-tree state: this commit (recorded by the agent completing
-  this pass; see the agent's final response for the actual resolved hash, per this file's
-  own "Git workflow" instructions above).
+- Date/agent: 2026-08-28, Claude Code (Sonnet 5). Authorized slice: `collection_runs`,
+  Class H per docs/LLM_WORKFLOW.md — a scheduler-execution rollup record combining a
+  bidirectional status/timestamp lifecycle `CHECK`, differentiated `MutableList`
+  wrapping across a `TEXT[]` and a JSONB array in the same table, and a deliberately
+  un-wrapped JSONB object column. Base `0a58742` on `main` -> branch
+  `phase-1/collection-runs`.
+- Outcome: new model, migration `0014`, factory/real-commit helper, and 76 new tests
+  implemented and verified against real PostgreSQL.
+  - `CollectionRun` model: `status` is a plain `CHECK`-restricted enum (no ORM
+    transform), no server default — fresh creation must explicitly supply `running`.
+    `started_at` is NOT NULL with no server default (matches
+    `raw_job_ingestions.fetched_at`'s treatment); `completed_at` is nullable only while
+    `status = 'running'`, enforced by a bidirectional lifecycle `CHECK` plus a second
+    `CHECK (completed_at IS NULL OR completed_at >= started_at)`. `created_at`/
+    `updated_at` follow the established global convention (added despite this table's
+    own pre-existing `DATA_MODEL.md` column list omitting them — the same tension
+    `identity_conflicts` hit before).
+  - `providers_attempted` (`TEXT[]`, NOT NULL, `server_default '{}'`) and `failures`
+    (jsonb array, NOT NULL, `server_default '[]'`) are both `MutableList`-wrapped for
+    in-place top-level append tracking — the first time `MutableList` wraps a JSONB
+    column (not `ARRAY`) in this codebase. `providers_enforced_locally` (jsonb object,
+    NOT NULL, `server_default '{}'`) is deliberately **not** wrapped: assembled once in
+    memory during planning and assigned as a complete value, matching
+    `jobs.field_provenance`'s existing documented nested-mutation limitation. Each
+    JSONB column has a top-level shape `CHECK` (`= 'object'` / `= 'array'`) — the first
+    time a NOT-NULL JSONB column with a non-null server default carries a shape
+    `CHECK` in this schema (prior shape-checked columns were nullable-with-no-default
+    or NOT-NULL-with-no-default). The three job counters are NOT NULL with
+    `server_default 0` and non-negative `CHECK`s; `duration_ms` stays nullable with a
+    NULL-safe non-negative `CHECK`. No `CHECK` ties `failures`/counters to `status` —
+    `completed_with_errors` may honestly show non-zero rollups alongside recorded
+    failures.
+  - `saved_search_id` is nullable, `ON DELETE SET NULL`; no other column's `CHECK`
+    references its nullness, so — unlike `raw_job_ingestions`/`identity_conflicts` —
+    there is no FK-vs-CHECK asymmetric-direction tension on this table.
+  - Single FK (`saved_search_id`→`saved_searches`) fit under the naming convention's
+    63-byte limit unaided; verified via direct DDL rendering before writing the
+    migration, no explicit short name needed (unlike `identity_conflicts`' two FKs).
+  - Indexes: `(saved_search_id, started_at DESC)` and `(status)` — lookup support
+    only, no uniqueness constraint anywhere; Phase 9's overlapping-run-prevention
+    strategy is an explicitly separate, not-yet-designed invariant.
 - Files changed:
-  - `backend/migrations/versions/0002_users.py` — **restored verbatim** to the exact DDL
-    in checkpoint `3816d0a` (the original, bare-`trim` CHECK constraints) — no longer
-    describes a fix it never actually applied to any database that had already run it.
-  - `backend/migrations/versions/0003_fix_email_whitespace_checks.py` (new) —
-    forward-only migration: `upgrade()` drops and recreates the two email CHECK
-    constraints with the explicit space/tab/LF/CR expression; `downgrade()` restores the
-    original bare-`trim` expressions. Constraint names wrapped in `op.f(...)` — an
-    unwrapped plain string re-applies the naming convention a second time, which is
-    exactly the bug the first attempt at this migration hit (see Deviations below).
-  - `backend/app/config.py` — added `Settings.test_database_url: str | None`, loaded via
-    the same `.env`/pydantic-settings mechanism as every other setting.
-  - `backend/tests/conftest.py` — `assert_is_disposable_test_database` now takes both
-    the test URL and the actual configured development URL, and rejects when their
-    resolved `(host, port, database)` match — not just a hardcoded `"jobgoblin"` string
-    — as well as when the test URL lacks a `"test"` marker. Added `_redact()` and used it
-    in every raised message so a credential-bearing URL is never printed. `db_engine` now
-    reads `Settings.test_database_url` (falling back to `DEFAULT_TEST_DATABASE_URL` only
-    if unset) instead of `os.environ.get(...)` directly.
-  - `backend/tests/test_users.py` — guard tests rewritten for the new two-argument
-    signature; added cases for a custom dev-database name containing "test" that's
-    actually the configured development target, the ordinary development database,
-    a genuinely distinct accepted test database, and credential redaction.
-  - `README.md` — removed the `docker compose down -v` example entirely; replaced with
-    an explicit warning that it destroys the development database's volume and is not
-    part of normal test setup.
-  - `docs/DATA_MODEL.md` — documents the `0002`/`0003` split (Rev 6a note) and explains
-    why the fix is a forward migration, not an in-place rewrite of an applied one.
-  - `docs/ROADMAP.md` — Phase 1 status line now cites both `0002` and `0003`.
-  - `docs/LLM_HANDOFF.md` — this rotation (old Iteration 1 removed; old Iteration 2
-    renumbered to Iteration 1; this entry appended as the new Iteration 2).
-- Migration revisions: `0002` (`down_revision = "0001"`) restored to its original,
-  as-applied DDL, no revision-id change. `0003` (new, `down_revision = "0002"`) —
-  forward-only fix to the two email CHECK constraints.
+  - `backend/app/db/models/collection_run.py` (new).
+  - `backend/app/db/models/__init__.py`, `backend/app/db/base.py` —
+    registration/docstring.
+  - `backend/migrations/versions/0014_collection_runs.py` (new,
+    `down_revision = "0013"`).
+  - `backend/tests/conftest.py` — `make_collection_run` (omits a kwarg entirely rather
+    than passing `None` for defaulted columns, so Postgres's `server_default` applies
+    on `INSERT`), `real_committed_collection_run` (builds on the pre-existing
+    `real_committed_user_and_saved_search` helper).
+  - `backend/tests/test_collection_runs.py` (new) — 76 tests: baseline/defaults;
+    `saved_search_id` FK (nonexistent rejected; `ON DELETE SET NULL` isolation between
+    two real-committed runs); `status` enum validity (ORM + direct SQL) and omission
+    (direct SQL); the full status/`completed_at` lifecycle matrix (3 terminal statuses
+    × both directions, ORM + direct SQL); `completed_at >= started_at` ordering
+    (equal/after accepted, before rejected, ORM + direct SQL); `started_at` omission
+    (direct SQL); `created_at`/`updated_at` defaults, independence, UTC-awareness, and
+    `updated_at` advancing on a real commit; all three counters' defaults/acceptance/
+    negative-rejection (ORM + direct SQL, parametrized); `duration_ms` defaults/
+    acceptance/negative-rejection; `providers_attempted` defaults, order-preserving
+    round-trip, in-place append persisting after a separate-session reload; multi-row
+    default independence (mutable-default trap); `providers_enforced_locally` defaults,
+    whole-value-assignment persistence, SQL-NULL and wrong-shape rejection
+    (parametrized); `failures` defaults, in-place top-level append persistence,
+    SQL-NULL and wrong-shape rejection (parametrized); the Phase 2 fixture scenario —
+    a planning-time failure existing with no `providers_attempted` entry, and
+    `completed_with_errors` retaining accurate non-zero rollups alongside failures.
+  - `docs/DATA_MODEL.md` — `collection_runs` marked **Implemented**; added "Rev 19"
+    note recording every resolved decision; added the missing constraints-summary
+    rows (previously only its sibling `collection_run_provider_attempts` had one).
+  - `docs/ROADMAP.md` — Phase 1 status paragraph describes the `collection_runs` slice
+    as complete.
 - Commands run and exact results:
-  - `git show 3816d0a:backend/migrations/versions/0002_users.py` → fetched the exact
-    original DDL used to restore `0002` verbatim.
-  - `DATABASE_URL=...jobgoblin_test alembic downgrade base` → success, test DB emptied.
-  - `DATABASE_URL=...jobgoblin_test alembic upgrade head` → **failed**:
-    `asyncpg.exceptions.UndefinedObjectError: constraint
-    "ck_users_ck_users_email_normalized" does not exist` — `0003`'s
-    `op.drop_constraint`/`op.create_check_constraint` calls passed already-fully-resolved
-    names as plain strings, which re-applied the naming convention and double-prefixed
-    them. Postgres DDL is transactional and the whole `0001->0002->0003` run was one
-    transaction (no `transaction_per_migration`), so this rolled back completely —
-    confirmed via `psql`: `alembic_version` had 0 rows, `users` table absent. No partial/
-    corrupted state.
-  - Fixed `0003` to wrap both constraint names in `op.f(...)`.
-  - `DATABASE_URL=...jobgoblin_test alembic upgrade head` (retry) → success,
-    `-> 0001 -> 0002 -> 0003`; `alembic current` → `0003 (head)`; `psql \d users` →
-    corrected constraint text confirmed (fresh `base -> head`, scenario 1 of 3).
-  - `DATABASE_URL=...jobgoblin_test alembic downgrade 0002` → success; `psql \d users` →
-    **original** bare-`trim` constraint text confirmed restored (half of scenario 3).
-  - `DATABASE_URL=...jobgoblin_test alembic upgrade head` → success, `0002 -> 0003`;
-    `psql \d users` → corrected text confirmed again (scenario 2 "existing `0002 ->
-    0003`", and completes scenario 3 "`0003 -> 0002 -> 0003`").
-  - `DATABASE_URL=...jobgoblin_test alembic check` → `No new upgrade operations
-    detected.` (model/head parity).
-  - `pytest -v` → **26 passed, 0 skipped** (up from 24 — 5 guard tests rewritten/added,
-    net +2).
-  - `ruff format --check .` → 1 file needed reformatting → `ruff format .` → recheck:
-    18 files formatted.
-  - `ruff check .` → all checks passed (no fixes needed this time).
-  - `mypy app tests` → success, 14 source files.
-  - `pytest -q` (re-run after formatting) → 26 passed.
-  - Development database, before: `SELECT count(*) FROM users` → `0`; `alembic_version`
-    → `0002`.
-  - `alembic upgrade head` against the **development** database (default
-    `DATABASE_URL`, no override) → success, `0002 -> 0003` only — no downgrade, no drop,
-    per the approved correction; `alembic current` → `0003 (head)`.
-  - `psql \d users` (development DB) → corrected constraint text confirmed;
-    `SELECT count(*) FROM users` → `0` (unchanged, table was never touched structurally
-    beyond the constraint swap).
-  - Direct tab/newline probe against the **development** database:
-    `INSERT INTO users (id, email) VALUES (gen_random_uuid(), E'\tperson@example.com\n');`
-    → `ERROR: new row for relation "users" violates check constraint
-    "ck_users_email_normalized"` (rejected, as required). `SELECT count(*) FROM users`
-    after → `0` (confirmed no row persisted).
-- Risks exercised from `PHASE_RISK_CHECKLIST.md`: "every migration is reviewed and
-  tested upgrade -> downgrade -> upgrade" — now genuinely exercised for `0003`
-  specifically, including starting from an already-applied `0002` state matching the
-  real development database's actual history, which is exactly the scenario the first
-  attempt at this fix got wrong; "PostgreSQL behavior is tested against PostgreSQL" —
-  the migration bug itself was only caught by actually running `0003` against real
-  Postgres, not by code review alone; "logs and API responses never expose credentials" —
-  directly addressed via `_redact()` and its dedicated test.
-- Skipped or unavailable verification: none. Every command above executed for real,
-  including the development-database migration and its direct probe.
-- Deviations and ADR impact: the first attempt at migration `0003` failed on first run
-  (naming-convention double-prefixing bug, detailed above) — caught before being
-  reported as verified, fixed, and the full round-trip sequence re-run from scratch
-  afterward. No ADR impact — Phase 1 implementation-slice detail only.
-- Known limitations: none new. The development-database schema drift flagged in
-  Iteration 1's `Work review` is resolved (both databases now at `0003` with matching,
-  corrected constraints). `updated_at` still only advances for ORM-driven writes
-  (unchanged, out of scope for this pass).
-- Recommended next smallest slice: none proposed by the implementing agent — per the
-  workflow, this pass stops for Codex's review before any further slice is considered.
-- STOP — awaiting Codex review and user approval. Do not begin `candidate_profiles`.
+  - `pytest tests/test_collection_runs.py -q` → 76 passed.
+  - `pytest -q` (full suite) → 879 passed (up from 803).
+  - `ruff format --check .`, `ruff check .` → passed (57 files).
+  - `mypy app tests scripts` → success, 42 source files.
+  - `DATABASE_URL=...jobgoblin_test`: `downgrade 0013` / `upgrade head` (round-trip),
+    `downgrade base` / `upgrade head` (fresh `base -> head`), `alembic check` (`No new
+    upgrade operations detected` — same informational `Computed`-column `UserWarning`
+    as before) — all passed.
+  - `alembic current` against the **development** database (no override) → `0006`,
+    unchanged throughout.
+  - Live schema inspected directly (`pg_constraint`, `pg_indexes`,
+    `information_schema.columns`) after the fresh rebuild — confirmed the FK's
+    `ON DELETE SET NULL` (`confdeltype = 'n'`), exactly 9 `CHECK` constraints, both
+    lookup indexes, and every column default, matching the model exactly; nothing
+    drifted through the round-trip.
+  - `python scripts/check_repo.py` (from `backend/`) → exit 0, zero findings.
+  - `git status`/`git diff --check` → only the files listed above; no whitespace/
+    conflict errors.
+- Adversarial self-review (fresh Explore-agent context, no prior knowledge of the
+  implementation, run against the actual uncommitted diff before commit — it also
+  independently re-ran the targeted suite and its own migration round-trip; full
+  12-question Class H depth): three **Low** findings, no Critical/High/Medium.
+  1. Fixed — both the model and migration docstrings cited a nonexistent
+     "ARCHITECTURE.md §38" (that document's headings top out at §13); corrected to
+     cite `docs/DATA_MODEL.md`'s own `collection_runs` section, whose "§38" is a
+     master-spec section number, not an ARCHITECTURE.md one.
+  2. Accepted, not fixed — `status`/`started_at` NOT-NULL omission and the JSONB
+     shape `CHECK`s are proven only via direct SQL, not also via a bare
+     `CollectionRun(...)` ORM construction; Postgres enforces identically either way,
+     and the lifecycle/ordering/counter `CHECK`s already get both-path coverage, so
+     this is a redundant-angle gap, not a behavioral one.
+  3. Accepted, not fixed — the documented "`MutableList` doesn't track nested mutation
+     within an already-appended `failures` entry" limitation has no dedicated negative
+     test; only the successful top-level-append path is tested. A known/accepted
+     SQLAlchemy limitation already documented elsewhere in this schema
+     (`jobs.field_provenance`), not a defect in the shipped code.
+  Explicitly checked and clean: model/migration parity (every `CheckConstraint` body,
+  the FK, all server defaults, both index definitions byte-identical, re-verified
+  live); no ORM-side logic can produce a value violating its own shape `CHECK`;
+  `status`'s exact-string `CHECK` has no case-fold/trim escape; JSON `null` vs SQL
+  `NULL` correctly distinguished and both tested for both JSONB columns; both
+  `MutableList`-wrapped columns proven to persist an in-place append after a genuine
+  separate-session reload, not just same-session identity-map caching; no test
+  overclaims concurrency proof (the migration docstring explicitly disclaims it); no
+  cross-test state leakage (distinct emails per `real_committed_collection_run` call);
+  the `ON DELETE SET NULL` test proves isolation against a second, untouched run; the
+  Phase 2 fixture scenario (one planning-time failure with no attempt row,
+  `completed_with_errors` retaining honest non-zero rollups) is directly exercised and
+  passes against real Postgres.
+- Deviations/known limitations: none new. `collection_run_provider_attempts`,
+  `user_jobs`, and all scheduler/ingestion logic remain unimplemented, per explicit
+  scope. The two accepted Low findings above are coverage gaps around already-safe,
+  database-enforced invariants, not open correctness risks.
+- STOP — awaiting Codex review. Do not begin `collection_run_provider_attempts`,
+  `user_jobs`, or any other slice, and do not modify `main`.
 
 ### Work review
 
-- Date and reviewing agent: 2026-08-24, Codex
-- Diff/revision reviewed: commit `31aa213` (`fix(phase-1): forward-migrate email checks
-  and harden test-db guard`) against review commit `3ba2635` on branch
-  `codex/phase1-users-wip`. The branch matched the remote and the working tree was clean
-  before review.
-- Verification independently performed:
-  - Inspected the complete `3ba2635..31aa213` diff and every changed implementation,
-    migration, test, and documentation file.
-  - Confirmed `backend/migrations/versions/0002_users.py` is byte-for-byte unchanged
-    from checkpoint `3816d0a`.
-  - `ruff format --check .`: 18 files already formatted.
-  - `ruff check .`: passed.
-  - `mypy app tests`: passed for 14 source files.
-  - `pytest -v`: 26 passed, 0 skipped.
-  - Independently ran `0003 -> 0002 -> 0003` on `jobgoblin_test`: passed.
-  - Independently ran `0003 -> base -> 0003` on `jobgoblin_test`: passed.
-  - `alembic check` at test-database head: no new upgrade operations detected.
-  - Live inspection confirmed both `jobgoblin` and `jobgoblin_test` are at revision
-    `0003` with the corrected space/tab/LF/CR constraints.
-  - Direct guard probes showed equivalent spellings of the same test-named database are
-    accepted: `localhost` versus `127.0.0.1`, and omitted default port versus explicit
-    `5432`.
-- Findings, ordered by severity, with file and line references:
-  1. **High — the destructive-test guard still permits the configured development
-     database through common connection aliases.** `backend/tests/conftest.py:55-61`
-     compares raw `(host, port, database)` tuples. Consequently, a development URL of
-     `postgresql+asyncpg://...@127.0.0.1:5432/my_test_env` and test URL of
-     `postgresql+asyncpg://...@localhost:5432/my_test_env` are treated as distinct, even
-     though they normally reach the same database; the same occurs for omitted port
-     versus explicit PostgreSQL port `5432`. Both probes were accepted. The current
-     defaults are safe because their database names differ, but the guard explicitly
-     promises protection for custom development database names containing `test`, and
-     that promise remains bypassable.
-  2. **Low — `0003` is described as “forward-only” despite implementing a downgrade.**
-     `backend/migrations/versions/0003_fix_email_whitespace_checks.py:14` and the newest
-     `Work done` use that term while the migration is intentionally reversible. This is
-     wording only; the downgrade itself passed.
-- Missing or inconclusive verification: No destructive production/development action
-  was attempted. Host equivalence cannot be proven generically from URL text, so the
-  safe invariant should not depend on resolving every possible hostname alias.
-- Architecture/documentation consistency: The forward migration strategy, current live
-  schemas, four-character whitespace rule, `.env` loading, redacted errors, and removal
-  of the destructive volume-reset recommendation are now consistent and verified. Only
-  the guard alias gap and minor wording remain.
-- Verdict: changes requested.
-- Exact requested corrections:
-  1. In addition to the current checks, reject the test target whenever its normalized
-     database name equals the configured development database name, regardless of host,
-     port, credentials, or driver spelling. This conservative rule may reject a
-     same-named database on a genuinely separate server; that is acceptable for a
-     fail-closed destructive-test guard. Keep the requirement that the test name contain
-     `test`.
-  2. Add regression tests for same database name with `localhost` versus `127.0.0.1`,
-     omitted versus explicit default port, case variation, and distinct database names
-     on the same server. Preserve credential-redaction coverage.
-  3. Replace “forward-only migration” with “forward corrective migration” or equivalent
-     wording everywhere it describes reversible `0003`.
-  4. Rerun format, lint, mypy, all tests, and a focused `0003 -> 0002 -> 0003` migration
-     cycle. Rotate the two-entry ledger, record the correction as the newest `Work
-     done`, commit/push only the task branch, and stop. Do not begin
-     `candidate_profiles`.
-- STOP — reviewer changed only this `Work review`; no implementation files were changed.
+- Date/reviewer: 2026-08-28, Codex. Diff reviewed: `0a58742..b98a4ba`.
+- Verdict: **changes requested**. The model, migration, constraints, defaults, mutable-
+  collection choices, and lifecycle behavior are otherwise coherent and independently
+  verified. Findings:
+  1. **Medium — the tests teach source identifiers as provider identifiers.** The
+     documented contract says `providers_attempted` contains providers whose execution
+     began, while provider/source detail is separate. However, the round-trip, mutation,
+     and default-independence tests use `healthy_source`/`broken_source`; most
+     importantly, the claimed Phase 2 partial-success scenario stores both source names
+     in `providers_attempted` even though its failure entry identifies one provider
+     (`fixture_provider`) with one source (`broken_source`). That fixture would cause a
+     Phase 2 writer to record two attempted providers for one provider with two sources,
+     undermining the contract the test claims to prove.
+  2. **Low — the self-review's citation correction is still not resolvable in this
+     repository.** The model docstring, migration docstring, and current table section
+     in `DATA_MODEL.md` all retain `§38`, but `DATA_MODEL.md` has no numbered §38 or
+     anchor to resolve. Calling it a master-spec section number does not make these
+     internal references navigable and contradicts the claim that the stale citation
+     was corrected.
+- Exact bounded corrections requested:
+  1. Replace source-like values in every `providers_attempted` test fixture/assertion
+     with provider identifiers. In the Phase 2 partial-success scenario, record
+     `fixture_provider` exactly once in `providers_attempted`; keep `broken_source` in
+     `failures[*].source`. Add or reshape an assertion/test so it explicitly proves that
+     one provider executing two sources yields one provider entry, with source detail
+     remaining separate. Do not add a database uniqueness constraint: duplicate
+     avoidance remains application-level as approved.
+  2. Remove the three dangling `§38` references or replace them with a real, resolvable
+     Markdown link/heading in this repository. Preserve the substantive prose.
+  3. Do not change table behavior, migration operations/revision metadata, or schema.
+     This correction should be limited to tests and comments/documentation.
+  4. Run `check_repo.py`, `git diff --check`, Ruff format/check, mypy, the targeted
+     collection-run tests, and the full suite. Alembic round-trips are not required for
+     this test/comment-only correction. Record the pass in a new concise `Work done`,
+     commit and push the same feature branch, then stop for re-review.
+- Verified independently on the feature branch: repository checker exit 0; Ruff
+  format/check clean; mypy clean (**42 source files**); targeted suite **76 passed**;
+  full suite **879 passed**; `alembic check` against `jobgoblin_test` reports no new
+  upgrade operations. The development database's older revision is expected and was
+  not modified.
+- STOP — reviewer changed only this `Work review`. Do not begin
+  `collection_run_provider_attempts`, `user_jobs`, another slice, or modify/merge
+  `main` without explicit user authorization.
 
 ---
 
@@ -275,105 +285,84 @@ alongside two already-reviewed entries. Nothing below was rewritten — only ren
 
 ### Work done
 
-- Date and agent: 2026-08-24, Claude Code (Sonnet 4.5).
-- Approved phase/slice: third bounded correction pass over the existing Phase 1 `users`
-  slice only — the guard alias-comparison fix and the "forward-only" wording correction
-  from Iteration 1's `Work review`, approved as one final pass. No other table, no new
-  slice.
-- Outcome: both corrections addressed and verified against real PostgreSQL. 30 tests
-  passed, 0 skipped.
-- Base/starting commit: `50f6e58` ("docs(review): close test-db alias gap") on branch
-  `codex/phase1-users-wip` — Codex's own review commit, on top of `31aa213`
-  ("fix(phase-1): forward-migrate email checks and harden test-db guard"), the commit
-  its review evaluated. Confirmed via `git log --oneline` before making any changes.
-- Ending commit or working-tree state: this commit (recorded by the agent completing
-  this pass; see the agent's final response for the actual resolved hash, per this
-  file's own "Git workflow" instructions above).
+- Date/agent: 2026-08-28, Claude Code (Sonnet 5). Authorized slice: the two bounded
+  corrections from the review at `d400fb7`, on the same `phase-1/collection-runs`
+  branch. Base: `d400fb7`. Test/comment/documentation-only change — no model, migration
+  operations/revision metadata, schema, or behavior changes.
+- Outcome:
+  1. **`providers_attempted` identifier fix.** Replaced every source-like value in a
+     `providers_attempted` test fixture/assertion with a provider identifier, matching
+     this codebase's established provider/source naming (`ats_scrapers`/`jobspy` as
+     providers, per `test_job_occurrences.py`'s existing convention) instead of
+     source-shaped placeholders. In `test_completed_with_errors_retains_successful_
+     nonzero_rollups` (the Phase 2 partial-success scenario), `providers_attempted` now
+     records `fixture_provider` exactly once — reflecting one provider executing two
+     sources, only one of which failed — instead of listing both source names as if
+     they were two separate providers. `failures[*].source` still holds `broken_source`
+     unchanged, per the review's explicit instruction. Added an explicit assertion
+     (`run.providers_attempted == ["fixture_provider"]`) plus a full-value assertion on
+     `run.failures` so the test now directly proves the provider/source identifier
+     spaces stay separate, rather than only asserting rollup counters and a bare
+     `len(failures) == 1`. The order-preserving round-trip, in-place-append, and
+     multi-row-independence tests were updated the same way (`ats_scrapers`/`jobspy`).
+     No database uniqueness constraint added — duplicate avoidance remains
+     application-level, as previously approved.
+  2. **Dangling `§38` citation removed.** Removed the unresolvable bare `§38` citation
+     from all three places it appeared — `backend/app/db/models/collection_run.py`,
+     `backend/migrations/versions/0014_collection_runs.py`, and `docs/DATA_MODEL.md`'s
+     `collection_runs` section — rather than re-labeling it, since this repository has
+     no local anchor or verifiable master-spec section to point it at and asserting one
+     without confirmation would repeat the same defect. All surrounding substantive
+     prose (scheduler-execution-record description, the `collection_runs` section
+     cross-reference) was preserved unchanged.
 - Files changed:
-  - `backend/tests/conftest.py` — `assert_is_disposable_test_database` no longer
-    compares `(host, port, database)` tuples; it now compares **database name only**
-    (case-insensitive), deliberately ignoring host/port/credentials/driver spelling, per
-    the review's explicit conservative-rejection instruction. Docstring rewritten to
-    explain why (a `localhost`/`127.0.0.1` pair, or an omitted vs. explicit default port,
-    can reach the identical database while looking different as tuples).
-  - `backend/tests/test_users.py` — added regression tests: same database name via
-    `localhost` vs. `127.0.0.1`, same name via omitted vs. explicit default port, same
-    name with different case, and a distinct database name on the same server (must
-    still be accepted). Updated the existing "test-named-but-actually-dev" test's
-    expected message substring to match the new wording. Kept the credential-redaction
-    test unchanged.
-  - `backend/migrations/versions/0003_fix_email_whitespace_checks.py` — docstring
-    wording: "forward-only correction" → "forward corrective migration" (it has a
-    working, tested `downgrade()`; "forward-only" incorrectly implied it couldn't be
-    reversed).
-  - `docs/ROADMAP.md` — same wording correction in the Phase 1 status line.
-  - `docs/LLM_HANDOFF.md` — this rotation (Iteration 1 removed; prior Iteration 2
-    renumbered to Iteration 1; this entry appended as the new Iteration 2). Historical
-    "forward-only" wording inside the now-Iteration-1 `Work done`/`Work review` text was
-    **not** edited — per the rotation rule, retained entries are renumbered, not
-    rewritten, even when they use since-corrected wording.
-- Migration revisions: none added or changed — `0002` and `0003` are unchanged from the
-  previous pass; only the guard logic and prose were corrected this time.
-- Commands run and exact results:
-  - `ruff format --check .` → 18 files already formatted (no changes needed).
-  - `ruff check .` → all checks passed.
-  - `mypy app tests` → success, 14 source files.
-  - `pytest -v` → **30 passed, 0 skipped** (up from 26 — 4 new guard regression tests).
-  - Focused migration cycle against `jobgoblin_test`: `alembic current` → `0003 (head)`;
-    `alembic downgrade 0002` → success; `alembic upgrade head` → success, `0002 -> 0003`;
-    `alembic check` → `No new upgrade operations detected.`
-  - Development database, confirmed untouched by the above (test-DB-only commands):
-    `SELECT version_num FROM alembic_version` → `0003`; `SELECT count(*) FROM users` →
-    `0`.
-- Risks exercised from `PHASE_RISK_CHECKLIST.md`: "PostgreSQL behavior is tested against
-  PostgreSQL" — the alias-comparison gap (`localhost` vs `127.0.0.1`, default port) was
-  itself only demonstrable against real connection-string parsing, not by inspection;
-  "every migration is reviewed and tested upgrade -> downgrade -> upgrade" — re-verified
-  for `0003` specifically after this pass's unrelated changes, to confirm nothing in the
-  guard/wording fix touched migration behavior.
-- Skipped or unavailable verification: none. All commands executed for real.
-- Deviations and ADR impact: none. This pass touched only test infrastructure and prose;
-  no schema, model, or ADR-relevant decision changed.
-- Known limitations: the guard's name-only comparison is deliberately conservative — a
-  same-named test database on a genuinely different, unrelated PostgreSQL server would
-  still be rejected (documented in the guard's own docstring as an accepted trade-off,
-  per the review's explicit instruction). `updated_at` still only advances for
-  ORM-driven writes (unchanged, out of scope for this pass).
-- Recommended next smallest slice: none proposed by the implementing agent — per the
-  workflow, this pass stops for Codex's review before any further slice is considered.
-- STOP — awaiting Codex review and user approval. Do not begin `candidate_profiles`.
+  - `backend/tests/test_collection_runs.py` — provider/source identifier fixes across
+    4 tests (`test_providers_attempted_round_trips_order_preserved`,
+    `test_providers_attempted_in_place_append_persists_after_separate_session_reload`,
+    `test_defaults_are_independent_across_multiple_rows`,
+    `test_completed_with_errors_retains_successful_nonzero_rollups`); one new
+    assertion pair added to the last of these.
+  - `backend/app/db/models/collection_run.py`, `backend/migrations/versions/
+    0014_collection_runs.py`, `docs/DATA_MODEL.md` — removed the dangling `§38`
+    citation from each (comment/documentation only).
+- Commands run and exact results (no Alembic round-trips, per the review's own
+  scoping for this test/comment-only correction):
+  - `python scripts/check_repo.py` (from `backend/`) → exit 0, zero findings.
+  - `git diff --check` → clean, no whitespace/conflict errors.
+  - `ruff format --check .`, `ruff check .` → passed (57 files).
+  - `mypy app tests scripts` → one new error surfaced by the added `run.failures[0]
+    [...]` indexing (`failures` is typed `Mapped[list[object]]`, so an element isn't
+    indexable) — resolved by asserting the full `failures` list value instead of
+    indexing into it (matches the pattern already used by
+    `test_failures_in_place_append_persists_after_separate_session_reload`); re-ran →
+    success, 42 source files.
+  - `pytest tests/test_collection_runs.py -q` → 76 passed (unchanged count — no tests
+    added or removed, only fixture/assertion values and one extra assertion pair).
+  - `pytest -q` (full suite) → 879 passed (unchanged, as expected for a test/comment-
+    only correction).
+- Deviations/known limitations: none. No model, migration, schema, or product-behavior
+  change — both findings were test-data-realism and documentation-citation issues only.
+- STOP — awaiting Codex re-review. Do not begin `collection_run_provider_attempts`,
+  `user_jobs`, or any other slice, and do not modify `main`.
 
 ### Work review
 
-- Date and reviewing agent: 2026-08-24, Codex
-- Diff/revision reviewed: commit `d484a90` (`fix(phase-1): compare test/dev database
-  targets by name, fix wording`) against review commit `50f6e58` on branch
-  `codex/phase1-users-wip`. The branch matched `origin/codex/phase1-users-wip`, and the
-  working tree was clean before review.
-- Verification independently performed:
-  - Inspected the complete `50f6e58..d484a90` diff and every changed implementation,
-    test, migration-comment, roadmap, and handoff entry.
-  - Confirmed the guard now compares case-normalized database names independently of
-    host, port, credentials, and driver spelling, while still requiring the test marker.
-  - Re-ran the previously bypassing `localhost`/`127.0.0.1` and omitted/explicit-port
-    scenarios through the committed regression suite.
-  - `ruff format --check .`: 18 files already formatted.
-  - `ruff check .`: passed.
-  - `mypy app tests`: passed for 14 source files.
-  - `pytest -v`: 30 passed, 0 skipped.
-  - Independently ran `0003 -> 0002 -> 0003` against `jobgoblin_test`: passed.
-  - `alembic check` at test-database head: no new upgrade operations detected.
-  - Live PostgreSQL verification: both `jobgoblin` and `jobgoblin_test` remain at
-    revision `0003`; both contain zero user rows after verification.
-- Findings, ordered by severity, with file and line references: none.
-- Missing or inconclusive verification: none material for this bounded correction pass.
-- Architecture/documentation consistency: The conservative name-only guard matches the
-  documented fail-closed trade-off; credential redaction remains covered; `0003` is
-  accurately described as a reversible forward corrective migration; the migration
-  chain, model metadata, live schemas, tests, roadmap, and data-model documentation are
-  consistent.
-- Verdict: approved.
-- Exact requested corrections: none. The Phase 1 `users` slice and its correction chain
-  are accepted. Do not begin another slice until the user approves it; the next proposed
-  bounded slice may be evaluated separately.
-- STOP — reviewer changed only this `Work review`; no implementation files were changed.
+- Date/reviewer: 2026-08-28, Codex. Diff reviewed: `d400fb7..503c2ab`.
+- Verdict: **approved**. Findings: none.
+- Verified independently:
+  - Every `providers_attempted` fixture/assertion now uses provider identifiers. The
+    Phase 2 partial-success scenario records `fixture_provider` exactly once while its
+    failure retains `source = broken_source`, and explicitly asserts both complete
+    values. No uniqueness constraint or application behavior was added.
+  - The three dangling `§38` references were removed while preserving the surrounding
+    prose. The migration diff changes only its module docstring; migration operations,
+    revision metadata, model mapping, and schema behavior are unchanged.
+  - `git diff --check` is clean; repository checker exits 0; Ruff format/check and mypy
+    pass (**42 source files**); targeted suite **76 passed**. Claude's post-correction
+    full-suite result is **879 passed**; the reviewer did not repeat the full suite for
+    this test/comment-only correction after independently running it on the original
+    implementation review.
+- The `collection_runs` implementation and correction pass are accepted. Do not merge
+  to `main`, begin `collection_run_provider_attempts`/another slice, or otherwise
+  advance without explicit user authorization.
+- STOP — reviewer changed only this `Work review`; no implementation files changed.

@@ -5,6 +5,9 @@ or reviewing every phase. It supplements [ARCHITECTURE.md](ARCHITECTURE.md),
 [DATA_MODEL.md](DATA_MODEL.md), and [ROADMAP.md](ROADMAP.md); accepted ADRs remain the
 authority when a checklist item and a recorded decision appear to conflict.
 
+Agent roles, risk-based slice sizing, review disposition, proportionate verification,
+and handoff rules are defined in [LLM_WORKFLOW.md](LLM_WORKFLOW.md).
+
 ## How to use this checklist
 
 For each phase:
@@ -93,7 +96,16 @@ Exit gate:
 - Every migration round trip passes on a fresh PostgreSQL database.
 - FK deletion behavior and check/unique constraints are covered by database tests.
 - User workflow invariants reject contradictory states.
-- No provider, network collection, normalization, or scoring code has entered the phase.
+- No provider, network collection, normalization, or scoring code has entered the phase,
+  **except** a narrowly scoped, pure, schema-bound identity canonicalizer whose entire
+  purpose is to define what a column's stored value *is* (e.g.
+  `companies.domain`/`normalize_domain()`, `job_occurrences.canonical_url_normalized`/
+  `source_url_normalized`/`normalize_url()`) — these have no ORM/provider/network
+  dependency, never raise, and exist so the column's own uniqueness/comparison
+  constraints are testable against real values. This does **not** extend to content
+  normalization (title, salary, location, skill, description, or any other field
+  normalized for matching/scoring/display purposes) — that remains excluded until
+  Phase 3, per the phase's scope.
 
 ## Phase 2 - Provider interface and fixture ingestion
 

@@ -1,4 +1,7 @@
-from collections.abc import AsyncGenerator, Callable
+import uuid
+from collections.abc import AsyncGenerator, AsyncIterator, Callable
+from contextlib import asynccontextmanager, suppress
+from datetime import datetime
 
 import pytest
 import pytest_asyncio
@@ -7,9 +10,23 @@ from sqlalchemy.engine import URL, make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
 from app.config import Settings, get_settings
-from app.db.models import User
+from app.db.models import (
+    CandidateProfile,
+    CandidateSkill,
+    CollectionRun,
+    Company,
+    IdentityConflict,
+    Job,
+    JobOccurrence,
+    RawJobIngestion,
+    SavedSearch,
+    SavedSearchLocation,
+    SavedSearchTitle,
+    User,
+)
 from app.db.session import check_database_connection
 from app.main import app
+from app.normalization.url import normalize_url
 
 # The disposable database `db_engine`/`db_session` run destructive schema
 # tests against. Only used as a fallback when `Settings.test_database_url`
@@ -174,3 +191,958 @@ def make_user() -> Callable[..., User]:
         return User(email=email)
 
     return _make
+
+
+@pytest.fixture
+def make_candidate_profile() -> Callable[..., CandidateProfile]:
+    """Factory for a valid `CandidateProfile` — tests only deviate from this
+    intentionally. Takes the owning `user_id` explicitly rather than creating
+    a `User` itself, so callers control and can inspect that row (e.g. to
+    delete it and observe the cascade)."""
+
+    def _make(
+        user_id: uuid.UUID,
+        *,
+        remote_preference: str = "no_preference",
+    ) -> CandidateProfile:
+        return CandidateProfile(user_id=user_id, remote_preference=remote_preference)
+
+    return _make
+
+
+@pytest.fixture
+def make_candidate_skill() -> Callable[..., CandidateSkill]:
+    """Factory for a valid `CandidateSkill` — tests only deviate from this
+    intentionally. Takes the owning `candidate_profile_id` explicitly rather
+    than creating a `CandidateProfile` itself, matching
+    `make_candidate_profile`'s pattern."""
+
+    def _make(
+        candidate_profile_id: uuid.UUID,
+        *,
+        skill: str = "Python",
+        category: str | None = None,
+        priority: str = "must_have",
+    ) -> CandidateSkill:
+        return CandidateSkill(
+            candidate_profile_id=candidate_profile_id,
+            skill=skill,
+            category=category,
+            priority=priority,
+        )
+
+    return _make
+
+
+@pytest.fixture
+def make_saved_search() -> Callable[..., SavedSearch]:
+    """Factory for a valid `SavedSearch` — tests only deviate from this
+    intentionally. Takes the owning `user_id` explicitly, matching
+    `make_candidate_profile`'s pattern."""
+
+    def _make(
+        user_id: uuid.UUID,
+        *,
+        name: str = "Backend roles",
+        remote_rules: str = "any",
+        polling_schedule: str = "manual",
+    ) -> SavedSearch:
+        return SavedSearch(
+            user_id=user_id,
+            name=name,
+            remote_rules=remote_rules,
+            polling_schedule=polling_schedule,
+        )
+
+    return _make
+
+
+@pytest.fixture
+def make_saved_search_title() -> Callable[..., SavedSearchTitle]:
+    """Factory for a valid `SavedSearchTitle` — tests only deviate from this
+    intentionally. Takes the owning `saved_search_id` explicitly, matching
+    `make_candidate_skill`'s pattern."""
+
+    def _make(
+        saved_search_id: uuid.UUID,
+        *,
+        title: str = "Backend Engineer",
+        is_primary: bool = False,
+    ) -> SavedSearchTitle:
+        return SavedSearchTitle(
+            saved_search_id=saved_search_id,
+            title=title,
+            is_primary=is_primary,
+        )
+
+    return _make
+
+
+@pytest.fixture
+def make_saved_search_location() -> Callable[..., SavedSearchLocation]:
+    """Factory for a valid `SavedSearchLocation` — tests only deviate from
+    this intentionally. Takes the owning `saved_search_id` explicitly,
+    matching `make_saved_search_title`'s pattern."""
+
+    def _make(
+        saved_search_id: uuid.UUID,
+        *,
+        location_text: str = "Ashburn, VA",
+    ) -> SavedSearchLocation:
+        return SavedSearchLocation(
+            saved_search_id=saved_search_id,
+            location_text=location_text,
+        )
+
+    return _make
+
+
+@pytest.fixture
+def make_company() -> Callable[..., Company]:
+    """Factory for a valid `Company` — tests only deviate from this
+    intentionally. Unlike every other factory above, `Company` has no owning
+    parent row to take an id for — it is a top-level Phase 1 table."""
+
+    def _make(
+        *,
+        name: str = "Acme Corp",
+        domain: str | None = None,
+        homepage_url: str | None = None,
+        career_page_url: str | None = None,
+        industry: str | None = None,
+        duplicate_of_company_id: uuid.UUID | None = None,
+    ) -> Company:
+        return Company(
+            name=name,
+            domain=domain,
+            homepage_url=homepage_url,
+            career_page_url=career_page_url,
+            industry=industry,
+            duplicate_of_company_id=duplicate_of_company_id,
+        )
+
+    return _make
+
+
+@asynccontextmanager
+async def real_committed_company(
+    db_engine: AsyncEngine, **company_kwargs: object
+) -> AsyncIterator[tuple[AsyncSession, uuid.UUID]]:
+    """Creates a `Company` via a real, separately-committed transaction on
+    `db_engine` (not the savepoint-isolated `db_session`), for tests that
+    need a genuinely durable commit (e.g. to observe `updated_at` actually
+    advance). Same failure-safe lifecycle/cleanup rationale as
+    `real_committed_user_and_profile` above — cleanup always runs in a fresh
+    session and fetches before deleting, so a row already removed by the
+    test body itself is skipped rather than erroring.
+    """
+    company_kwargs.setdefault("name", "Acme Corp")
+
+    session = AsyncSession(bind=db_engine)
+    company_id: uuid.UUID | None = None
+    try:
+        company = Company(**company_kwargs)
+        session.add(company)
+        await session.commit()
+        await session.refresh(company)
+        company_id = company.id
+
+        yield session, company_id
+    finally:
+        with suppress(Exception):
+            await session.rollback()
+        await session.close()
+
+        async with AsyncSession(bind=db_engine) as cleanup_session:
+            if company_id is not None:
+                existing_company = await cleanup_session.get(Company, company_id)
+                if existing_company is not None:
+                    await cleanup_session.delete(existing_company)
+                    await cleanup_session.commit()
+
+
+@asynccontextmanager
+async def real_committed_duplicate_company_pair(
+    db_engine: AsyncEngine,
+    *,
+    original_kwargs: dict[str, object] | None = None,
+    duplicate_kwargs: dict[str, object] | None = None,
+) -> AsyncIterator[tuple[AsyncSession, uuid.UUID, uuid.UUID]]:
+    """Creates two real, separately-committed `Company` rows — an "original"
+    and a "duplicate" whose `duplicate_of_company_id` points at the
+    original — for tests that exercise the self-referential FK's real
+    `ON DELETE SET NULL` behavior (deleting the original must clear the
+    duplicate's `duplicate_of_company_id`, never cascade-delete it). Cleanup
+    fetches and deletes the duplicate first, then the original, tolerating
+    either already being gone (e.g. the test itself deleted the original).
+    """
+    resolved_original_kwargs: dict[str, object] = {"name": "Acme Corp"}
+    resolved_original_kwargs.update(original_kwargs or {})
+    resolved_duplicate_kwargs: dict[str, object] = {"name": "Acme Corporation"}
+    resolved_duplicate_kwargs.update(duplicate_kwargs or {})
+
+    async with real_committed_company(db_engine, **resolved_original_kwargs) as (
+        session,
+        original_id,
+    ):
+        duplicate = Company(duplicate_of_company_id=original_id, **resolved_duplicate_kwargs)
+        session.add(duplicate)
+        duplicate_id: uuid.UUID | None = None
+        try:
+            await session.commit()
+            await session.refresh(duplicate)
+            duplicate_id = duplicate.id
+
+            yield session, original_id, duplicate_id
+        finally:
+            if duplicate_id is not None:
+                with suppress(Exception):
+                    await session.rollback()
+                async with AsyncSession(bind=db_engine) as cleanup_session:
+                    existing_duplicate = await cleanup_session.get(Company, duplicate_id)
+                    if existing_duplicate is not None:
+                        await cleanup_session.delete(existing_duplicate)
+                        await cleanup_session.commit()
+
+
+@pytest.fixture
+def make_job() -> Callable[..., Job]:
+    """Factory for a valid `Job` — tests only deviate from this
+    intentionally. Unlike every other factory above, `first_seen_at`/
+    `last_seen_at` have **no default here at all**: they describe
+    observation time, not row-creation time (there is no server default on
+    the columns themselves either), so every call site must supply both
+    explicitly. `company_id` defaults to `None` — `Job.company_id` is
+    nullable by design (docs/ARCHITECTURE.md's `DiscoveredJob.company`)."""
+
+    def _make(
+        *,
+        first_seen_at: datetime,
+        last_seen_at: datetime,
+        company_id: uuid.UUID | None = None,
+    ) -> Job:
+        return Job(
+            company_id=company_id,
+            first_seen_at=first_seen_at,
+            last_seen_at=last_seen_at,
+        )
+
+    return _make
+
+
+@asynccontextmanager
+async def real_committed_job(
+    db_engine: AsyncEngine,
+    *,
+    first_seen_at: datetime,
+    last_seen_at: datetime,
+    **job_kwargs: object,
+) -> AsyncIterator[tuple[AsyncSession, uuid.UUID]]:
+    """Creates a `Job` via a real, separately-committed transaction on
+    `db_engine`, for tests that need a genuinely durable commit (e.g. to
+    observe `updated_at` actually advance, or to exercise `company_id`'s
+    `ON DELETE RESTRICT` against a real, separately-committed `Company`
+    row). Same failure-safe lifecycle/cleanup rationale as
+    `real_committed_company` above.
+    """
+    session = AsyncSession(bind=db_engine)
+    job_id: uuid.UUID | None = None
+    try:
+        job = Job(first_seen_at=first_seen_at, last_seen_at=last_seen_at, **job_kwargs)
+        session.add(job)
+        await session.commit()
+        await session.refresh(job)
+        job_id = job.id
+
+        yield session, job_id
+    finally:
+        with suppress(Exception):
+            await session.rollback()
+        await session.close()
+
+        async with AsyncSession(bind=db_engine) as cleanup_session:
+            if job_id is not None:
+                existing_job = await cleanup_session.get(Job, job_id)
+                if existing_job is not None:
+                    await cleanup_session.delete(existing_job)
+                    await cleanup_session.commit()
+
+
+@pytest.fixture
+def make_job_occurrence() -> Callable[..., JobOccurrence]:
+    """Factory for a valid `JobOccurrence` — tests only deviate from this
+    intentionally. Like `make_job`, `first_seen_at`/`last_seen_at` have no
+    default at all — every call site must supply both explicitly. `job_id`
+    is also required (no default): a `JobOccurrence` cannot exist without a
+    real `Job` row to reference, and this factory deliberately doesn't
+    create one implicitly, matching `make_candidate_profile`'s
+    take-the-parent-id-explicitly pattern.
+
+    `source_url_normalized` defaults to `normalize_url(source_url, ...)` —
+    this factory is an application caller, not the model itself, so a
+    "valid occurrence" by default must actually be identity-consistent,
+    the same way a real ingestion write would be. A test that needs the
+    model's own non-derivation behavior, or a deliberately malformed/NULL
+    normalized value, overrides the attribute explicitly after
+    construction (see test_job_occurrences.py)."""
+
+    def _make(
+        *,
+        job_id: uuid.UUID,
+        first_seen_at: datetime,
+        last_seen_at: datetime,
+        provider: str = "ats_scrapers",
+        source: str = "greenhouse",
+        source_url: str = "https://boards.greenhouse.io/acme/jobs/12345",
+    ) -> JobOccurrence:
+        return JobOccurrence(
+            job_id=job_id,
+            provider=provider,
+            source=source,
+            source_url=source_url,
+            source_url_normalized=normalize_url(source_url, provider=provider, source=source),
+            first_seen_at=first_seen_at,
+            last_seen_at=last_seen_at,
+        )
+
+    return _make
+
+
+@asynccontextmanager
+async def real_committed_job_occurrence(
+    db_engine: AsyncEngine,
+    *,
+    first_seen_at: datetime,
+    last_seen_at: datetime,
+    job_kwargs: dict[str, object] | None = None,
+    **occurrence_kwargs: object,
+) -> AsyncIterator[tuple[AsyncSession, uuid.UUID, uuid.UUID]]:
+    """Builds on `real_committed_job`: additionally creates a real,
+    separately-committed `JobOccurrence` referencing it, with its own
+    best-effort cleanup (occurrence, then — via the wrapped helper — job)
+    so a partially cascaded state is skipped rather than treated as an
+    error, same rationale as every other `real_committed_*` helper above.
+    Same "valid by default" rationale as `make_job_occurrence`:
+    `source_url_normalized` defaults to `normalize_url(source_url, ...)`
+    unless the caller already passed one explicitly.
+    """
+    provider = str(occurrence_kwargs.setdefault("provider", "ats_scrapers"))
+    source = str(occurrence_kwargs.setdefault("source", "greenhouse"))
+    source_url = str(
+        occurrence_kwargs.setdefault("source_url", "https://boards.greenhouse.io/acme/jobs/12345")
+    )
+    occurrence_kwargs.setdefault(
+        "source_url_normalized", normalize_url(source_url, provider=provider, source=source)
+    )
+
+    async with real_committed_job(
+        db_engine, first_seen_at=first_seen_at, last_seen_at=last_seen_at, **(job_kwargs or {})
+    ) as (session, job_id):
+        occurrence = JobOccurrence(
+            job_id=job_id,
+            first_seen_at=first_seen_at,
+            last_seen_at=last_seen_at,
+            **occurrence_kwargs,
+        )
+        session.add(occurrence)
+        occurrence_id: uuid.UUID | None = None
+        try:
+            await session.commit()
+            await session.refresh(occurrence)
+            occurrence_id = occurrence.id
+
+            yield session, job_id, occurrence_id
+        finally:
+            if occurrence_id is not None:
+                with suppress(Exception):
+                    await session.rollback()
+                async with AsyncSession(bind=db_engine) as cleanup_session:
+                    existing_occurrence = await cleanup_session.get(JobOccurrence, occurrence_id)
+                    if existing_occurrence is not None:
+                        await cleanup_session.delete(existing_occurrence)
+                        await cleanup_session.commit()
+
+
+@pytest.fixture
+def make_raw_job_ingestion() -> Callable[..., RawJobIngestion]:
+    """Factory for a valid `RawJobIngestion` — tests only deviate from this
+    intentionally. `fetched_at` has no default at all (no server default on
+    the column either — it represents the actual fetch event, which may
+    differ from row-insertion time): every call site must supply it
+    explicitly. Defaults to the `fetched` state with `job_occurrence_id =
+    None`, matching that state's own database-enforced requirement."""
+
+    def _make(
+        *,
+        fetched_at: datetime,
+        provider: str = "ats_scrapers",
+        source: str = "greenhouse",
+        source_identifier: str | None = None,
+        job_occurrence_id: uuid.UUID | None = None,
+        raw_payload: dict[str, object] | None = None,
+        raw_content_hash: str = "a" * 64,
+        parser_version: str | None = None,
+        processing_status: str = "fetched",
+        error_message: str | None = None,
+    ) -> RawJobIngestion:
+        return RawJobIngestion(
+            provider=provider,
+            source=source,
+            source_identifier=source_identifier,
+            job_occurrence_id=job_occurrence_id,
+            fetched_at=fetched_at,
+            raw_payload=raw_payload if raw_payload is not None else {"title": "Backend Engineer"},
+            raw_content_hash=raw_content_hash,
+            parser_version=parser_version,
+            processing_status=processing_status,
+            error_message=error_message,
+        )
+
+    return _make
+
+
+@asynccontextmanager
+async def real_committed_raw_job_ingestion(
+    db_engine: AsyncEngine,
+    *,
+    fetched_at: datetime,
+    occurrence_kwargs: dict[str, object] | None = None,
+    job_kwargs: dict[str, object] | None = None,
+    **ingestion_kwargs: object,
+) -> AsyncIterator[tuple[AsyncSession, uuid.UUID, uuid.UUID, uuid.UUID]]:
+    """Builds on `real_committed_job_occurrence`: additionally creates a
+    real, separately-committed `RawJobIngestion` referencing it, with its
+    own best-effort cleanup (ingestion, then — via the wrapped helper —
+    occurrence, then job) so a partially cascaded state is skipped rather
+    than treated as an error, same rationale as every other
+    `real_committed_*` helper above. Defaults `processing_status` to
+    `"normalized"` and `job_occurrence_id` to the bundled occurrence's id
+    (not the factory's own `"fetched"`/`None` defaults) because this helper
+    exists specifically to exercise `ON DELETE SET NULL` against a row that
+    actually has a non-null `job_occurrence_id` to begin with. A caller
+    that needs the row to start unlinked despite a real occurrence already
+    existing (e.g. to later transition it to `normalized` itself) may pass
+    `job_occurrence_id=None` explicitly to override this default.
+
+    Passing `processing_status="fetched"`/`"parse_error"` without also
+    passing `job_occurrence_id=None` fails at `commit()` with an
+    `IntegrityError` — `unprocessed_requires_null_occurrence` rejects a
+    non-null occurrence for those two statuses, and this helper's default
+    always links to the bundled occurrence unless told otherwise.
+    """
+    ingestion_kwargs.setdefault("provider", "ats_scrapers")
+    ingestion_kwargs.setdefault("source", "greenhouse")
+    ingestion_kwargs.setdefault("raw_payload", {"title": "Backend Engineer"})
+    ingestion_kwargs.setdefault("raw_content_hash", "a" * 64)
+    ingestion_kwargs.setdefault("processing_status", "normalized")
+
+    async with real_committed_job_occurrence(
+        db_engine,
+        first_seen_at=fetched_at,
+        last_seen_at=fetched_at,
+        job_kwargs=job_kwargs,
+        **(occurrence_kwargs or {}),
+    ) as (session, job_id, occurrence_id):
+        ingestion_kwargs.setdefault("job_occurrence_id", occurrence_id)
+        ingestion = RawJobIngestion(
+            fetched_at=fetched_at,
+            **ingestion_kwargs,
+        )
+        session.add(ingestion)
+        ingestion_id: uuid.UUID | None = None
+        try:
+            await session.commit()
+            await session.refresh(ingestion)
+            ingestion_id = ingestion.id
+
+            yield session, job_id, occurrence_id, ingestion_id
+        finally:
+            if ingestion_id is not None:
+                with suppress(Exception):
+                    await session.rollback()
+                async with AsyncSession(bind=db_engine) as cleanup_session:
+                    existing_ingestion = await cleanup_session.get(RawJobIngestion, ingestion_id)
+                    if existing_ingestion is not None:
+                        await cleanup_session.delete(existing_ingestion)
+                        await cleanup_session.commit()
+
+
+@pytest.fixture
+def make_identity_conflict() -> Callable[..., IdentityConflict]:
+    """Factory for a valid `IdentityConflict` — tests only deviate from
+    this intentionally. Both FK columns default to `None`: this table's
+    two parents are each optional (no CASCADE requirement forces either to
+    exist), matching `make_raw_job_ingestion`'s own no-required-parent
+    factory shape. `status` has no server default at the database level
+    (fresh conflict creation must explicitly supply `"open"`) — this
+    factory supplies it in Python as a convenience default, the same way
+    `make_job_occurrence` defaults `provider`/`source` despite neither
+    having a server default either. `existing_value`/`incoming_value`
+    default to an `evidence_mismatch`-shaped object pair; a test exercising
+    `ambiguous_match` must override both to array-shaped values itself."""
+
+    def _make(
+        *,
+        conflict_type: str = "evidence_mismatch",
+        existing_value: dict[str, object] | list[object] | None = None,
+        incoming_value: dict[str, object] | list[object] | None = None,
+        status: str = "open",
+        existing_job_occurrence_id: uuid.UUID | None = None,
+        incoming_raw_job_ingestion_id: uuid.UUID | None = None,
+        resolution: str | None = None,
+        resolved_at: datetime | None = None,
+    ) -> IdentityConflict:
+        return IdentityConflict(
+            existing_job_occurrence_id=existing_job_occurrence_id,
+            incoming_raw_job_ingestion_id=incoming_raw_job_ingestion_id,
+            conflict_type=conflict_type,
+            existing_value=(
+                existing_value
+                if existing_value is not None
+                else {"canonical_url_normalized": "https://example.com/old"}
+            ),
+            incoming_value=(
+                incoming_value
+                if incoming_value is not None
+                else {"canonical_url_normalized": "https://example.com/new"}
+            ),
+            status=status,
+            resolution=resolution,
+            resolved_at=resolved_at,
+        )
+
+    return _make
+
+
+@asynccontextmanager
+async def real_committed_identity_conflict(
+    db_engine: AsyncEngine,
+    *,
+    at: datetime,
+    occurrence_kwargs: dict[str, object] | None = None,
+    ingestion_kwargs: dict[str, object] | None = None,
+    ingestion_occurrence_kwargs: dict[str, object] | None = None,
+    **conflict_kwargs: object,
+) -> AsyncIterator[tuple[AsyncSession, uuid.UUID, uuid.UUID, uuid.UUID]]:
+    """Creates a real, separately-committed `JobOccurrence` (via
+    `real_committed_job_occurrence`, its own independent `Job` parent) AND
+    a real, separately-committed `RawJobIngestion` (via
+    `real_committed_raw_job_ingestion`, which creates its own,
+    independent `Job`/`JobOccurrence` pair) — this table's two FKs are
+    unrelated to each other, unlike `RawJobIngestion`'s own FK, which
+    points at the occurrence it's otherwise associated with — then a
+    real, separately-committed `IdentityConflict` linking both, with its
+    own best-effort cleanup (conflict first, then each independent parent
+    chain via the wrapped helpers) so a partially cascaded state is
+    skipped rather than treated as an error, same rationale as every
+    other `real_committed_*` helper above. `at` is a single shared
+    timestamp for both parent chains — a structural convenience, since
+    this helper's own tests are not about either parent's own timestamp
+    semantics.
+
+    `ingestion_occurrence_kwargs` overrides the *ingestion's own*,
+    entirely independent internal occurrence (not the conflict's primary
+    `existing_job_occurrence_id`) — it defaults to a `source_url` distinct
+    from the primary occurrence's own default, since both would otherwise
+    collide on `job_occurrences`' fallback-URL unique index. A test that
+    calls this helper more than once concurrently must override at least
+    one of `occurrence_kwargs`/`ingestion_occurrence_kwargs` per call with
+    a distinct `source_url`, the same way `real_committed_job_occurrence`
+    callers already must (see `test_job_occurrences.py`).
+    """
+    conflict_kwargs.setdefault("conflict_type", "evidence_mismatch")
+    conflict_kwargs.setdefault(
+        "existing_value", {"canonical_url_normalized": "https://example.com/old"}
+    )
+    conflict_kwargs.setdefault(
+        "incoming_value", {"canonical_url_normalized": "https://example.com/new"}
+    )
+    conflict_kwargs.setdefault("status", "open")
+
+    resolved_occurrence_kwargs: dict[str, object] = occurrence_kwargs or {}
+    resolved_ingestion_kwargs: dict[str, object] = ingestion_kwargs or {}
+    resolved_ingestion_occurrence_kwargs: dict[str, object] = ingestion_occurrence_kwargs or {
+        "source_url": "https://boards.greenhouse.io/incoming-ingestion/jobs/1"
+    }
+
+    async with (
+        real_committed_job_occurrence(
+            db_engine,
+            first_seen_at=at,
+            last_seen_at=at,
+            job_kwargs=None,
+            **resolved_occurrence_kwargs,
+        ) as (_occurrence_session, _occurrence_job_id, occurrence_id),
+        real_committed_raw_job_ingestion(
+            db_engine,
+            fetched_at=at,
+            occurrence_kwargs=resolved_ingestion_occurrence_kwargs,
+            job_kwargs=None,
+            **resolved_ingestion_kwargs,
+        ) as (
+            _ingestion_session,
+            _ingestion_job_id,
+            _ingestion_occurrence_id,
+            ingestion_id,
+        ),
+    ):
+        session = AsyncSession(bind=db_engine)
+        conflict_id: uuid.UUID | None = None
+        try:
+            conflict = IdentityConflict(
+                existing_job_occurrence_id=occurrence_id,
+                incoming_raw_job_ingestion_id=ingestion_id,
+                **conflict_kwargs,
+            )
+            session.add(conflict)
+            await session.commit()
+            await session.refresh(conflict)
+            conflict_id = conflict.id
+
+            yield session, occurrence_id, ingestion_id, conflict_id
+        finally:
+            with suppress(Exception):
+                await session.rollback()
+            await session.close()
+
+            async with AsyncSession(bind=db_engine) as cleanup_session:
+                if conflict_id is not None:
+                    existing_conflict = await cleanup_session.get(IdentityConflict, conflict_id)
+                    if existing_conflict is not None:
+                        await cleanup_session.delete(existing_conflict)
+                        await cleanup_session.commit()
+
+
+@asynccontextmanager
+async def real_committed_user_and_profile(
+    db_engine: AsyncEngine, email: str, **profile_kwargs: object
+) -> AsyncIterator[tuple[AsyncSession, uuid.UUID, uuid.UUID]]:
+    """Creates a `User` and `CandidateProfile` via real, separately-committed
+    transactions on `db_engine` (not the savepoint-isolated `db_session`),
+    for tests that need genuinely durable commits (e.g. to exercise
+    `ON DELETE CASCADE` or observe `updated_at` actually advance). Guarantees
+    cleanup even if the test body raises or leaves the session in a
+    failed-transaction state — an earlier version of these tests committed
+    rows with no cleanup path at all, which left permanent rows in the shared
+    disposable test database on any assertion failure.
+
+    Lives here (not in a single test module) so more than one test module
+    can reuse it without importing from each other — see
+    `real_committed_user_profile_and_skill` below, which builds on this.
+
+    Captures both ids immediately after each row's own commit and yields
+    plain UUIDs, not ORM attribute access after a later commit: `commit()`
+    expires every attribute of every object in the session by default, and
+    reading an expired attribute outside of an active await under asyncpg's
+    async dialect raises `MissingGreenlet` instead of transparently
+    refreshing it.
+
+    Cleanup always runs in a fresh session (the caller's session may be
+    closed, or mid-failed-transaction, by the time cleanup runs) and fetches
+    each row before deleting it, so a row already removed by the test body
+    itself (e.g. the profile, after its owning user was deleted and the
+    delete cascaded) is skipped rather than erroring.
+    """
+    session = AsyncSession(bind=db_engine)
+    user_id: uuid.UUID | None = None
+    profile_id: uuid.UUID | None = None
+    try:
+        user = User(email=email)
+        session.add(user)
+        await session.commit()
+        await session.refresh(user)
+        user_id = user.id
+
+        profile = CandidateProfile(user_id=user_id, **profile_kwargs)
+        session.add(profile)
+        await session.commit()
+        await session.refresh(profile)
+        profile_id = profile.id
+
+        yield session, user_id, profile_id
+    finally:
+        with suppress(Exception):
+            await session.rollback()
+        await session.close()
+
+        async with AsyncSession(bind=db_engine) as cleanup_session:
+            if profile_id is not None:
+                existing_profile = await cleanup_session.get(CandidateProfile, profile_id)
+                if existing_profile is not None:
+                    await cleanup_session.delete(existing_profile)
+                    await cleanup_session.commit()
+            if user_id is not None:
+                existing_user = await cleanup_session.get(User, user_id)
+                if existing_user is not None:
+                    await cleanup_session.delete(existing_user)
+                    await cleanup_session.commit()
+
+
+@asynccontextmanager
+async def real_committed_user_profile_and_skill(
+    db_engine: AsyncEngine,
+    email: str,
+    *,
+    profile_kwargs: dict[str, object] | None = None,
+    **skill_kwargs: object,
+) -> AsyncIterator[tuple[AsyncSession, uuid.UUID, uuid.UUID, uuid.UUID]]:
+    """Builds on `real_committed_user_and_profile`: additionally creates a
+    `CandidateSkill` row on the same real-commit lifecycle, with its own
+    best-effort cleanup (skill, then — via the wrapped helper — profile,
+    then user) so a partially cascaded state is skipped rather than treated
+    as an error, same rationale as the wrapped helper above.
+    """
+    skill_kwargs.setdefault("skill", "Python")
+    skill_kwargs.setdefault("priority", "must_have")
+    resolved_profile_kwargs: dict[str, object] = {"remote_preference": "no_preference"}
+    resolved_profile_kwargs.update(profile_kwargs or {})
+    async with real_committed_user_and_profile(db_engine, email, **resolved_profile_kwargs) as (
+        session,
+        user_id,
+        profile_id,
+    ):
+        skill = CandidateSkill(candidate_profile_id=profile_id, **skill_kwargs)
+        session.add(skill)
+        skill_id: uuid.UUID | None = None
+        try:
+            await session.commit()
+            await session.refresh(skill)
+            skill_id = skill.id
+
+            yield session, user_id, profile_id, skill_id
+        finally:
+            if skill_id is not None:
+                with suppress(Exception):
+                    await session.rollback()
+                async with AsyncSession(bind=db_engine) as cleanup_session:
+                    existing_skill = await cleanup_session.get(CandidateSkill, skill_id)
+                    if existing_skill is not None:
+                        await cleanup_session.delete(existing_skill)
+                        await cleanup_session.commit()
+
+
+@pytest.fixture
+def make_collection_run() -> Callable[..., CollectionRun]:
+    """Factory for a valid `CollectionRun` — tests only deviate from this
+    intentionally. `saved_search_id` defaults to `None` (this table's
+    only FK is optional, matching `make_raw_job_ingestion`'s own
+    no-required-parent factory shape). `started_at` has no default (no
+    server default either — see model docstring): every call site must
+    supply it explicitly. `status` defaults to `"running"` as a
+    Python-level factory convenience only — the database itself has no
+    server default. Every other field is omitted from the constructed
+    row entirely unless explicitly passed, so the database's own server
+    defaults apply — this factory does not shadow them with Python-side
+    defaults.
+    """
+
+    def _make(
+        *,
+        started_at: datetime,
+        saved_search_id: uuid.UUID | None = None,
+        completed_at: datetime | None = None,
+        status: str = "running",
+        providers_attempted: list[str] | None = None,
+        providers_enforced_locally: dict[str, object] | None = None,
+        jobs_discovered: int | None = None,
+        jobs_inserted: int | None = None,
+        jobs_updated: int | None = None,
+        failures: list[object] | None = None,
+        duration_ms: int | None = None,
+    ) -> CollectionRun:
+        kwargs: dict[str, object] = {
+            "saved_search_id": saved_search_id,
+            "started_at": started_at,
+            "completed_at": completed_at,
+            "status": status,
+        }
+        if providers_attempted is not None:
+            kwargs["providers_attempted"] = providers_attempted
+        if providers_enforced_locally is not None:
+            kwargs["providers_enforced_locally"] = providers_enforced_locally
+        if jobs_discovered is not None:
+            kwargs["jobs_discovered"] = jobs_discovered
+        if jobs_inserted is not None:
+            kwargs["jobs_inserted"] = jobs_inserted
+        if jobs_updated is not None:
+            kwargs["jobs_updated"] = jobs_updated
+        if failures is not None:
+            kwargs["failures"] = failures
+        if duration_ms is not None:
+            kwargs["duration_ms"] = duration_ms
+        return CollectionRun(**kwargs)
+
+    return _make
+
+
+@asynccontextmanager
+async def real_committed_collection_run(
+    db_engine: AsyncEngine,
+    email: str,
+    *,
+    started_at: datetime,
+    saved_search_kwargs: dict[str, object] | None = None,
+    **collection_run_kwargs: object,
+) -> AsyncIterator[tuple[AsyncSession, uuid.UUID, uuid.UUID, uuid.UUID]]:
+    """Builds on `real_committed_user_and_saved_search`: additionally
+    creates a real, separately-committed `CollectionRun` referencing it,
+    with its own best-effort cleanup (run, then — via the wrapped helper
+    — saved search, then user) so a partially cascaded state is skipped
+    rather than treated as an error, same rationale as every other
+    `real_committed_*` helper above. `email` has no default (matching
+    the wrapped helper's own signature) — callers must supply a distinct
+    one per test to avoid colliding on `users`' unique email index.
+    """
+    collection_run_kwargs.setdefault("status", "running")
+
+    async with real_committed_user_and_saved_search(
+        db_engine, email, **(saved_search_kwargs or {})
+    ) as (session, user_id, saved_search_id):
+        run = CollectionRun(
+            saved_search_id=saved_search_id,
+            started_at=started_at,
+            **collection_run_kwargs,
+        )
+        session.add(run)
+        run_id: uuid.UUID | None = None
+        try:
+            await session.commit()
+            await session.refresh(run)
+            run_id = run.id
+
+            yield session, user_id, saved_search_id, run_id
+        finally:
+            if run_id is not None:
+                with suppress(Exception):
+                    await session.rollback()
+                async with AsyncSession(bind=db_engine) as cleanup_session:
+                    existing_run = await cleanup_session.get(CollectionRun, run_id)
+                    if existing_run is not None:
+                        await cleanup_session.delete(existing_run)
+                        await cleanup_session.commit()
+
+
+@asynccontextmanager
+async def real_committed_user_and_saved_search(
+    db_engine: AsyncEngine, email: str, **saved_search_kwargs: object
+) -> AsyncIterator[tuple[AsyncSession, uuid.UUID, uuid.UUID]]:
+    """Creates a `User` and `SavedSearch` via real, separately-committed
+    transactions on `db_engine`, for tests that need genuinely durable
+    commits (e.g. to exercise `ON DELETE CASCADE` or observe `updated_at`
+    actually advance). Same failure-safe lifecycle/cleanup rationale as
+    `real_committed_user_and_profile` above.
+    """
+    saved_search_kwargs.setdefault("name", "Backend roles")
+    saved_search_kwargs.setdefault("remote_rules", "any")
+    saved_search_kwargs.setdefault("polling_schedule", "manual")
+
+    session = AsyncSession(bind=db_engine)
+    user_id: uuid.UUID | None = None
+    saved_search_id: uuid.UUID | None = None
+    try:
+        user = User(email=email)
+        session.add(user)
+        await session.commit()
+        await session.refresh(user)
+        user_id = user.id
+
+        saved_search = SavedSearch(user_id=user_id, **saved_search_kwargs)
+        session.add(saved_search)
+        await session.commit()
+        await session.refresh(saved_search)
+        saved_search_id = saved_search.id
+
+        yield session, user_id, saved_search_id
+    finally:
+        with suppress(Exception):
+            await session.rollback()
+        await session.close()
+
+        async with AsyncSession(bind=db_engine) as cleanup_session:
+            if saved_search_id is not None:
+                existing_saved_search = await cleanup_session.get(SavedSearch, saved_search_id)
+                if existing_saved_search is not None:
+                    await cleanup_session.delete(existing_saved_search)
+                    await cleanup_session.commit()
+            if user_id is not None:
+                existing_user = await cleanup_session.get(User, user_id)
+                if existing_user is not None:
+                    await cleanup_session.delete(existing_user)
+                    await cleanup_session.commit()
+
+
+@asynccontextmanager
+async def real_committed_user_saved_search_and_title(
+    db_engine: AsyncEngine,
+    email: str,
+    *,
+    saved_search_kwargs: dict[str, object] | None = None,
+    **title_kwargs: object,
+) -> AsyncIterator[tuple[AsyncSession, uuid.UUID, uuid.UUID, uuid.UUID]]:
+    """Builds on `real_committed_user_and_saved_search`: additionally creates
+    a `SavedSearchTitle` row on the same real-commit lifecycle, with its own
+    best-effort cleanup (title, then — via the wrapped helper — saved
+    search, then user) so a partially cascaded state is skipped rather than
+    treated as an error, same rationale as the wrapped helper above.
+    """
+    title_kwargs.setdefault("title", "Backend Engineer")
+    async with real_committed_user_and_saved_search(
+        db_engine, email, **(saved_search_kwargs or {})
+    ) as (session, user_id, saved_search_id):
+        title = SavedSearchTitle(saved_search_id=saved_search_id, **title_kwargs)
+        session.add(title)
+        title_id: uuid.UUID | None = None
+        try:
+            await session.commit()
+            await session.refresh(title)
+            title_id = title.id
+
+            yield session, user_id, saved_search_id, title_id
+        finally:
+            if title_id is not None:
+                with suppress(Exception):
+                    await session.rollback()
+                async with AsyncSession(bind=db_engine) as cleanup_session:
+                    existing_title = await cleanup_session.get(SavedSearchTitle, title_id)
+                    if existing_title is not None:
+                        await cleanup_session.delete(existing_title)
+                        await cleanup_session.commit()
+
+
+@asynccontextmanager
+async def real_committed_user_saved_search_and_location(
+    db_engine: AsyncEngine,
+    email: str,
+    *,
+    saved_search_kwargs: dict[str, object] | None = None,
+    **location_kwargs: object,
+) -> AsyncIterator[tuple[AsyncSession, uuid.UUID, uuid.UUID, uuid.UUID]]:
+    """Builds on `real_committed_user_and_saved_search`: additionally creates
+    a `SavedSearchLocation` row on the same real-commit lifecycle, with its
+    own best-effort cleanup (location, then — via the wrapped helper —
+    saved search, then user) so a partially cascaded state is skipped
+    rather than treated as an error, same rationale as the wrapped helper
+    above.
+    """
+    location_kwargs.setdefault("location_text", "Ashburn, VA")
+    async with real_committed_user_and_saved_search(
+        db_engine, email, **(saved_search_kwargs or {})
+    ) as (session, user_id, saved_search_id):
+        location = SavedSearchLocation(saved_search_id=saved_search_id, **location_kwargs)
+        session.add(location)
+        location_id: uuid.UUID | None = None
+        try:
+            await session.commit()
+            await session.refresh(location)
+            location_id = location.id
+
+            yield session, user_id, saved_search_id, location_id
+        finally:
+            if location_id is not None:
+                with suppress(Exception):
+                    await session.rollback()
+                async with AsyncSession(bind=db_engine) as cleanup_session:
+                    existing_location = await cleanup_session.get(SavedSearchLocation, location_id)
+                    if existing_location is not None:
+                        await cleanup_session.delete(existing_location)
+                        await cleanup_session.commit()
