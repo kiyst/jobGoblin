@@ -119,9 +119,9 @@ Run the smallest set that can actually detect regressions in the changed surface
 
 | Change surface | Required verification |
 |---|---|
-| Mechanical docs only | `git diff --check`; targeted repository searches; link/anchor validation when references changed |
+| Mechanical docs only | `git diff --check`; targeted repository searches; link/anchor validation when references changed; `python scripts/check_repo.py` |
 | Python without schema | Ruff format/check, mypy, targeted tests, full suite before approval |
-| Model or migration | All Python checks; targeted and full tests; existing-head upgrade; downgrade/upgrade; fresh `base -> head`; `alembic check`; development DB confirmed untouched unless separately authorized |
+| Model or migration | All Python checks; targeted and full tests; existing-head upgrade; downgrade/upgrade; fresh `base -> head`; `alembic check`; `python scripts/check_repo.py`; development DB confirmed untouched unless separately authorized |
 | External provider/integration | Offline fixtures/contract tests by default; failure/partial-success behavior; opt-in minimal live test only when explicitly authorized |
 | High-risk identity/state/concurrency | Full relevant suite plus adversarial, rollback, isolation, idempotency, and real concurrency/database cases |
 

@@ -136,14 +136,29 @@ No test contacts the public internet.
 One command that runs everything (formatting check, lint, type-check, tests) from `backend/`:
 
 ```bash
-ruff format --check . && ruff check . && mypy app tests && pytest
+ruff format --check . && ruff check . && mypy app tests scripts && pytest
 ```
 
 PowerShell 7 (stops at the first failed check):
 
 ```powershell
-ruff format --check . && ruff check . && mypy app tests && pytest
+ruff format --check . && ruff check . && mypy app tests scripts && pytest
 ```
+
+### Repository consistency checker
+
+A deterministic, offline, database-free check for documentation/migration drift —
+broken markdown links and heading anchors, duplicate rows in `docs/DATA_MODEL.md`'s
+constraints-summary table, stale Alembic revision references, and migration-chain
+integrity. Run from `backend/` after any documentation or migration change:
+
+```bash
+python scripts/check_repo.py
+```
+
+Prints sorted `path:line: message` findings and exits non-zero if any are found. It is
+also run as part of the ordinary `pytest` suite (`tests/test_check_repo.py`), so CI/local
+test runs catch this drift without a separate step.
 
 To also prove the full migration cycle against real PostgreSQL, use the **dedicated test
 database** (see above) — never run destructive migration verification against the
