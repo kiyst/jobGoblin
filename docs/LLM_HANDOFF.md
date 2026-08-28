@@ -97,133 +97,9 @@ that detail.
 ## Iteration 1
 
 *Rotated in from "Iteration 2" per the two-iteration rule: the prior Iteration 1 (the
-`companies` normalization correction pass, its approval, and the merge record) was
-removed rather than kept alongside a third entry, since this entry's `Work review` and
-merge record (below) mean it is no longer pending either. Nothing below was rewritten —
-only renumbered.*
-
-### Work done
-
-- Date/agent: 2026-08-28, Claude Code (Sonnet 5). Authorized slice: `jobs`, Class H per
-  docs/LLM_WORKFLOW.md (first migration to actually exercise `ON DELETE RESTRICT`; a
-  large canonical record with many downstream dependencies, even though identity
-  resolution itself is out of scope — that lives entirely on `job_occurrences`, a
-  separate, later slice). Base `80c0425` on `main` -> branch `phase-1/jobs`.
-- Outcome: model, migration `0010`, factory/real-commit helpers, and 198 new tests
-  implemented and verified against real PostgreSQL.
-  - `Job` model (~46 columns, no UNIQUE constraint of its own): `company_id` nullable
-    FK -> `companies`, `ON DELETE RESTRICT`, plain non-unique index (`DiscoveredJob.
-    company` is nullable in ARCHITECTURE.md — requiring one would force ingestion to
-    reject a valid job or manufacture a fake company); `remote_type`/`salary_period`
-    nullable text with `CHECK`-restricted enums (`'unknown'` sentinel deliberately not
-    implemented — `NULL` means unknown); `compensation_explicit` nullable boolean, no
-    default; 25 nullable free-text columns sharing one `@validates` handler (trim,
-    blank-to-`None`) and a NULL-safe trim/non-empty `CHECK` pair each (generated via a
-    small `_trim_not_empty_checks` helper — 50 CHECKs, not hand-duplicated); non-negative
-    + min<=max `CHECK`s on the three numeric pairs; `saved_search_locations`-style
-    coordinate range/pairing `CHECK`s; `certifications` (`MutableList`-wrapped
-    `ARRAY(Text)`) and `field_provenance` (`MutableDict`-wrapped `JSONB`, top-level-object
-    `CHECK`); `first_seen_at`/`last_seen_at` NOT NULL with **no** server default plus
-    `CHECK (first_seen_at <= last_seen_at)` — they describe observation time, not
-    row-creation time, so the factory requires both explicitly, matching the columns.
-    `duplicate_group_id` omitted entirely (target table `duplicate_groups` is Phase 6,
-    doesn't exist yet — deferred to that phase's own migration, not added unconstrained).
-- Files changed:
-  - `backend/app/db/models/job.py` (new); `backend/app/db/models/__init__.py`,
-    `backend/app/db/base.py` — registration/docstring.
-  - `backend/migrations/versions/0010_jobs.py` (new, `down_revision = "0009"`).
-  - `backend/tests/conftest.py` — `make_job` (requires `first_seen_at`/`last_seen_at`
-    explicitly, no default), `real_committed_job`.
-  - `backend/tests/test_jobs.py` (new) — 198 tests, heavily parametrized per instruction
-    rather than repetitive bodies: all 25 nullable-text columns (default/blank-to-none/
-    trim/direct-SQL empty/direct-SQL wrapped); `remote_type`/`salary_period` valid+NULL
-    accepted, invalid rejected (including `'unknown'` explicitly rejected); non-negative
-    and min<=max checks across all three numeric pairs; coordinate range/pairing
-    (ORM+direct SQL); `field_provenance` NULL/valid-object/non-object-array/string/
-    JSON-null rejection, top-level `MutableDict` mutation persisting after reload,
-    documented nested-mutation limitation, and the replace-whole-object workaround;
-    `certifications` NULL-vs-empty-list and `MutableList` append persisting after
-    reload; `company_id` NULL/valid/nonexistent, deleting an unrelated company,
-    deleting a referenced company rejected with both rows surviving, deleting the job
-    then the company succeeding; `first_seen_at`/`last_seen_at` equal/ordered/inverted
-    (ORM + direct SQL); timestamps and test isolation.
-  - `docs/DATA_MODEL.md` — `jobs` marked **Implemented**; added "Rev 14" note recording
-    the nullable `company_id`, removed `'unknown'` sentinel, nullable
-    `compensation_explicit`, deferred `duplicate_group_id`, and explicit-observation-time
-    decisions; updated the FK summary rows and added the `jobs` constraints-summary row.
-- Commands run and exact results:
-  - `python scripts/check_repo.py` (from `backend/`) → exit 0, zero findings.
-  - `ruff format --check .`, `ruff check .` → passed (44 files).
-  - `mypy app tests scripts` → success, 33 source files.
-  - `pytest tests/test_jobs.py -q` → 198 passed.
-  - `pytest -q` (full suite) → 513 passed.
-  - `DATABASE_URL=...jobgoblin_test`: `alembic upgrade head` (`0009 -> 0010`, existing
-    head), `downgrade 0009` / `upgrade head` (round-trip), `downgrade base` / `upgrade
-    head` (fresh `base -> head`), `alembic check` (`No new upgrade operations detected`
-    — same informational `Computed`-column `UserWarning` as before) — all passed.
-  - `alembic current` against the **development** database (no override) → `0006`,
-    unchanged throughout.
-  - Live schema inspected directly (`information_schema.columns`, `pg_constraint`,
-    `pg_indexes`) — confirmed the FK's `ON DELETE RESTRICT` (`confdeltype = 'r'`) and
-    the `company_id` index.
-  - `git status`/`git diff --check` → only the files listed above; no whitespace/
-    conflict errors.
-- Deviations/known limitations: none. `job_occurrences`, `raw_job_ingestions`,
-  `identity_conflicts`, and `duplicate_groups` remain unimplemented, per explicit scope.
-- STOP — awaiting Codex review. Do not begin `job_occurrences`, ingestion, providers,
-  normalization, reconciliation, add CI, or modify `main`.
-
-### Work review
-
-- Date/reviewer: 2026-08-28, Codex. Implementation diff reviewed:
-  `80c0425..819c682` on `phase-1/jobs`; branch clean and synchronized with origin before
-  the review's documentation-only corrections.
-- Independent verification:
-  - Manually compared all model and migration columns, nullability, types, server
-    defaults, 50 nullable-text CHECKs, enum/range/ordering/coordinate/JSON checks,
-    `company_id` FK/index, and downgrade behavior. Model and migration match.
-  - Inspected all 198 tests, including separate-session mutable collection proofs and
-    real-commit `ON DELETE RESTRICT` failure/recovery/cleanup behavior.
-  - `python scripts/check_repo.py`: exit 0, zero findings.
-  - `ruff format --check .`, `ruff check .`: passed (44 files).
-  - `mypy app tests scripts`: passed (33 source files).
-  - `pytest tests/test_jobs.py -q`: 198 passed.
-  - `pytest -q --basetemp=.pytest_cache/codex_jobs_review`: 513 passed.
-  - `alembic check` against `jobgoblin_test` at `0010 (head)`: no new upgrade
-    operations detected; only the known informational warning for the pre-existing
-    `companies.normalized_name` computed column appeared.
-- Findings:
-  1. **Low, mechanical documentation only — phase status and counts were stale.**
-     `docs/ROADMAP.md` still ended the `companies` status with "No other Phase 1 table is
-     implemented yet," omitting the now-implemented `jobs`/`0010` slice. The `Work done`
-     summary also said 24 nullable-text columns/48 generated CHECKs, while the actual
-     synchronized tuple contains 25 columns/50 CHECKs. Under
-     `docs/LLM_WORKFLOW.md`'s standing mechanical-documentation rule, the reviewer
-     updated the roadmap status and corrected only those three numeric references.
-- Missing/inconclusive checks: the reviewer did not repeat destructive migration
-  downgrade/fresh-rebuild operations; Claude recorded existing-head, round-trip, fresh
-  `base -> head`, live-schema inspection, and development-database isolation as passing.
-  The reviewer independently confirmed the test database is at `0010` and model/schema
-  autogeneration reports no drift.
-- Verdict: approved after mechanical documentation corrections; no executable finding.
-- Exact requested corrections: none. The `jobs` slice is accepted. Do not begin
-  `job_occurrences`, ingestion, providers, normalization, reconciliation, add CI, or
-  merge/modify `main` until the user explicitly authorizes the next action.
-- STOP — reviewer changed only the mechanical documentation described above and this
-  `Work review`; no implementation, migration, test, dependency, or product behavior
-  was changed.
-
-**Merge record (appended, not a rewrite of the entry above):** Approved at review
-commit `c3f80dd`. Per user authorization, `phase-1/jobs` was fast-forward merged into
-`main` (no merge commit; `main` was a strict ancestor) and pushed. `main`/`origin/main`
-are both now at `c3f80dd`. Verified: `main` has zero content diff against the feature
-branch; `python backend/scripts/check_repo.py` (via the project's own virtualenv
-interpreter) exits 0 with zero findings; working tree clean. No squash/rebase/
-force-push/branch-deletion. `job_occurrences` not started.
-
----
-
-## Iteration 2
+`jobs` implementation pass, its approval, and merge record) was removed rather than kept
+alongside a third entry, since it was already merged and is no longer pending. Nothing
+below was rewritten — only renumbered.*
 
 ### Work done
 
@@ -343,7 +219,9 @@ force-push/branch-deletion. `job_occurrences` not started.
     beyond this slice's 21-point authorization, not a bug-fix within it. In practice
     `provider`/`source` are fixed ASCII machine identifiers set by this project's own
     ingestion code (`ats_scrapers`, `greenhouse`, `jobspy`, etc.), never external
-    user input, so the risk is latent rather than reachable today.
+    user input, so the risk is latent rather than reachable today. **Superseded in
+    Iteration 2 below** — Codex's review found this unsafe enough in natural-key
+    columns to fix directly rather than accept.
   - Verification rerun after the fix: `ruff format --check .`/`ruff check .` (48
     files, passed), `mypy app tests scripts` (36 files, success),
     `pytest tests/test_job_occurrences.py -q` (128 passed, up from 125),
@@ -444,3 +322,114 @@ force-push/branch-deletion. `job_occurrences` not started.
      concise `Work done`, commit/push the same branch, and stop for re-review.
   5. Do not begin later tables, ingestion, providers, matching, reconciliation, or CI.
 - STOP — reviewer changed only this `Work review`; no implementation files were changed.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-08-28, Claude Code (Sonnet 5). Authorized slice: bounded correction
+  pass addressing the five findings at review commit `5ad85bd`, on the same
+  `phase-1/job-occurrences` branch. Base: `5ad85bd`. No later table, ingestion,
+  provider, normalization, reconciliation, CI, or `main` changes.
+- Outcome: all five findings addressed; 22 new regression tests (150 total, up from
+  128); fresh-context adversarial self-review run against the correction diff itself,
+  which surfaced and closed one additional low test-coverage gap.
+  1. **`normalize_url()` whitespace handling (High).** Now trims only symmetric outer
+     wrapper whitespace before parsing (`value.strip(_TRIM_CHARS)`), then rejects
+     (`None`) the whole input if any covered whitespace (`\t\n\r `) remains anywhere
+     inside — instead of letting `urlsplit()` silently delete an embedded `\t`/`\n`/`\r`
+     while leaving an embedded space untouched. Removed the prior post-assembly
+     `.strip()` workaround (now redundant/unreachable). Percent-encoded whitespace
+     (`%20`) is unaffected.
+  2. **DNS root-dot host equivalence (Medium).** `_canonicalize_host()` now strips
+     exactly one trailing dot from the post-IDNA ASCII form, so `example.com.` and its
+     UTS #46-mapped equivalents (U+3002, U+FF0E) canonicalize identically to
+     `example.com`. A doubled/empty label (`example.com..`, `.example.com`) still
+     returns `None` — `idna.encode()` already treats these as errors.
+  3. **ASCII slug-format `CHECK` on `provider`/`source` (Medium).** Added
+     `provider_slug_format`/`source_slug_format` CHECKs (`^[a-z0-9][a-z0-9._-]*$`) to
+     both the model and migration `0011` (amended in place — not yet merged to `main`),
+     alongside the existing trim/lower/non-empty CHECKs. Makes the Python
+     `str.lower()`-vs-PostgreSQL-`lower()` divergence on non-ASCII input structurally
+     impossible rather than an accepted limitation.
+     `normalize_url()`'s per-`(provider, source)` allow-list lookup is now
+     canonicalized (trim+lower) before the dict lookup.
+  4. **Valid-state test factory (Medium).** `make_job_occurrence`/
+     `real_committed_job_occurrence` (`backend/tests/conftest.py`) now compute
+     `source_url_normalized = normalize_url(source_url, provider=provider,
+     source=source)` by default. The model's own non-derivation test
+     (`test_normalized_url_columns_are_not_auto_derived_from_raw_urls`) now
+     constructs `JobOccurrence` directly, bypassing the factory, to isolate the
+     model's behavior from the factory's. The null/null fallback-key test
+     (`test_multiple_rows_with_null_source_job_id_and_null_normalized_url_accepted`)
+     now uses three distinct, genuinely malformed raw URLs (each independently
+     verified via `assert normalize_url(...) is None`), not the same valid default
+     URL three times.
+  5. **Branch integration.** Merged `origin/main` into `phase-1/job-occurrences` with
+     a real merge commit (`git merge --no-ff`, no rebase/squash/force-push) so
+     `3d47cd6` (the adversarial-self-review workflow doc change) is now an ancestor.
+     `main`/`origin/main` unchanged at `3d47cd6` throughout; no conflicts.
+- Adversarial self-review (fresh Explore-agent context, no prior knowledge of this
+  correction pass, run against the actual working-tree diff before commit): all 12
+  questions checked, including hand-executed edge cases (bare `.` host, doubled
+  root-dot, userinfo-whitespace ordering, all-whitespace input, IP-with-trailing-dot,
+  `%20`) and a full run of the DB-backed suite to confirm the new Postgres `~`
+  regex/`lower()`/`trim()` CHECK SQL actually executes as intended.
+  - One **Low** finding: `test_direct_sql_embedded_space_provider_or_source_rejected`
+    only tested the slug-format violation via direct SQL, not the ORM path (unlike
+    the non-ASCII case, which had both). Fixed: added
+    `test_embedded_space_provider_or_source_rejected_on_orm_path`.
+  - No Critical/High/Medium findings. Explicitly checked and clean: no path lets
+    validated `provider`/`source` violate the new CHECK; whitespace/root-dot edge
+    cases (bare `.`, doubled dot, userinfo ordering, all-whitespace, IP-with-dot,
+    `%20`) all behave correctly; no array/JSONB columns; the three partial-index
+    definitions are byte-identical before/after; both concurrency tests construct
+    `JobOccurrence` directly and are unaffected by the factory change;
+    `monkeypatch.setitem` on the module-level allow-list dict is guaranteed
+    torn down by pytest regardless of test outcome; migration/model CHECK names and
+    SQL text are byte-identical; `docs/DATA_MODEL.md`'s new "Rev 16" section matches
+    actual code behavior; the whitespace-rejection behavior change is documented for
+    Phase 2's future consumer in both the module docstring and DATA_MODEL.md.
+- Files changed:
+  - `backend/app/normalization/url.py` — whitespace rejection, root-dot stripping,
+    allow-list canonicalization.
+  - `backend/app/db/models/job_occurrence.py` — `provider_slug_format`/
+    `source_slug_format` CHECKs, docstring update.
+  - `backend/migrations/versions/0011_job_occurrences.py` — matching CHECKs (amended
+    in place; migration not yet merged to `main`).
+  - `backend/tests/conftest.py` — `make_job_occurrence`/`real_committed_job_occurrence`
+    compute `source_url_normalized` by default.
+  - `backend/tests/test_job_occurrences.py` — 22 new/rewritten tests (root-dot
+    equivalence, embedded-whitespace rejection ×6, outer-wrapper-whitespace,
+    percent-encoded-whitespace, allow-list canonicalization, non-ASCII/embedded-space/
+    leading-hyphen slug-format rejection ×3 columns×ORM+direct-SQL, slug-format
+    positive case, rewritten non-auto-derivation and null/null fallback tests).
+  - `docs/DATA_MODEL.md` — "Rev 16 corrections" note; updated `provider` column row
+    and the Phase 1 constraints-summary row for the new CHECK.
+- Commands run and exact results:
+  - `python scripts/check_repo.py` (from `backend/`) → exit 0, zero findings (checked
+    before and after the `origin/main` merge).
+  - `ruff format --check .`, `ruff check .` → passed (48 files).
+  - `mypy app tests scripts` → success, 36 source files.
+  - `pytest tests/test_job_occurrences.py -q` → 150 passed (up from 128).
+  - `pytest -q` (full suite) → 663 passed (up from 641).
+  - `DATABASE_URL=...jobgoblin_test`: `alembic downgrade 0010` / `upgrade head`
+    (reapply amended `0011`), round-trip, `downgrade base` / `upgrade head` (fresh
+    `base -> head`, re-run again after the `origin/main` merge), `alembic check`
+    (`No new upgrade operations detected` — same informational `Computed`-column
+    warning as before) — all passed.
+  - `alembic current` against the **development** database (no override) → `0006`,
+    unchanged throughout.
+  - `git status`/`git diff --check` → only the files listed above; no whitespace/
+    conflict errors. Merge commit contains only `docs/LLM_WORKFLOW.md` from `main`.
+- Deviations/known limitations: none new. `raw_job_ingestions`, `identity_conflicts`,
+  `duplicate_groups`, and the actual match-precedence application logic remain
+  unimplemented, per explicit scope (unchanged from Iteration 1).
+- STOP — awaiting Codex re-review. Do not begin any later table, ingestion, providers,
+  normalization, reconciliation, add CI, or modify `main`.
+
+### Work review
+
+*Pending — awaiting Codex re-review.*
