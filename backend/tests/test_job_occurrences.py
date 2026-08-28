@@ -178,6 +178,16 @@ def test_normalize_url_preserves_path_casing() -> None:
     assert normalize_url("http://acme.com/CaReErS") == "http://acme.com/CaReErS"
 
 
+def test_normalize_url_strips_trailing_space_in_path() -> None:
+    # A raw, unencoded trailing space in the path survives `urlsplit()`
+    # untouched (unlike \t/\n/\r, which `urlsplit()` already strips
+    # anywhere in the input). Without stripping it here, the returned
+    # value would violate the `*_normalized` columns' own
+    # trim/non-empty CHECK constraints when written outside the ORM's
+    # `@validates` path (e.g. a future raw-SQL/Core insert).
+    assert normalize_url("http://acme.com/careers ") == "http://acme.com/careers"
+
+
 def test_normalize_url_repeated_and_blank_query_values_retained() -> None:
     assert normalize_url("http://acme.com/?a=1&a=2&b=") == "http://acme.com/?a=1&a=2&b="
 
@@ -838,6 +848,33 @@ async def test_same_id_under_different_provider_accepted(
     assert count == 2
 
 
+async def test_same_id_under_different_source_accepted(
+    db_session: AsyncSession,
+    make_job: Callable[..., Job],
+    make_job_occurrence: Callable[..., JobOccurrence],
+) -> None:
+    """Same as test_same_id_under_different_provider_accepted, but holds
+    `provider` fixed and varies `source` instead — the composite natural
+    key is `(provider, source, ...)`, and both halves must independently
+    permit reuse of the same identifier."""
+    job_id = await _insert_job(db_session, make_job)
+    first = make_job_occurrence(
+        job_id=job_id, first_seen_at=_SEEN_AT, last_seen_at=_SEEN_AT, source="greenhouse"
+    )
+    first.source_job_id = "job-1"
+    db_session.add(first)
+
+    second = make_job_occurrence(
+        job_id=job_id, first_seen_at=_SEEN_AT, last_seen_at=_SEEN_AT, source="lever"
+    )
+    second.source_job_id = "job-1"
+    db_session.add(second)
+    await db_session.commit()  # must not raise
+
+    count = (await db_session.execute(select(func.count()).select_from(JobOccurrence))).scalar_one()
+    assert count == 2
+
+
 async def test_tenant_null_and_tenant_present_rows_coexist(
     db_session: AsyncSession,
     make_job: Callable[..., Job],
@@ -891,6 +928,31 @@ async def test_same_fallback_url_under_different_provider_accepted(
 
     second = make_job_occurrence(
         job_id=job_id, first_seen_at=_SEEN_AT, last_seen_at=_SEEN_AT, provider="jobspy"
+    )
+    second.source_url_normalized = "https://acme.com/careers/1"
+    db_session.add(second)
+    await db_session.commit()  # must not raise
+
+    count = (await db_session.execute(select(func.count()).select_from(JobOccurrence))).scalar_one()
+    assert count == 2
+
+
+async def test_same_fallback_url_under_different_source_accepted(
+    db_session: AsyncSession,
+    make_job: Callable[..., Job],
+    make_job_occurrence: Callable[..., JobOccurrence],
+) -> None:
+    """Same as test_same_fallback_url_under_different_provider_accepted,
+    but holds `provider` fixed and varies `source` instead."""
+    job_id = await _insert_job(db_session, make_job)
+    first = make_job_occurrence(
+        job_id=job_id, first_seen_at=_SEEN_AT, last_seen_at=_SEEN_AT, source="greenhouse"
+    )
+    first.source_url_normalized = "https://acme.com/careers/1"
+    db_session.add(first)
+
+    second = make_job_occurrence(
+        job_id=job_id, first_seen_at=_SEEN_AT, last_seen_at=_SEEN_AT, source="lever"
     )
     second.source_url_normalized = "https://acme.com/careers/1"
     db_session.add(second)

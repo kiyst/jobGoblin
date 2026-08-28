@@ -25,6 +25,12 @@ import idna
 
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 
+# Matches the trim set the `*_normalized` columns' own DB CHECK constraints
+# use (`trim(both E'\t\n\r ' from ...)`). `urlsplit()` only strips `\t`/`\n`/
+# `\r` from the whole input already; a literal, unencoded space is not
+# rejected by `urlsplit()` and can otherwise survive verbatim in `.path`.
+_TRIM_CHARS = " \t\n\r"
+
 # Stripped regardless of case: exact tracking-parameter names named in
 # ADR 0004, plus every parameter whose name starts with "utm_" (checked
 # separately in _should_strip_param, not just these five enumerated here).
@@ -144,4 +150,5 @@ def normalize_url(
     retained.sort()
     query_suffix = f"?{urlencode(retained)}" if retained else ""
 
-    return f"{scheme}://{host}{port_suffix}{path}{query_suffix}"
+    result = f"{scheme}://{host}{port_suffix}{path}{query_suffix}"
+    return result.strip(_TRIM_CHARS)

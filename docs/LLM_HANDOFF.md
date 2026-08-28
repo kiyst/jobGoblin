@@ -233,7 +233,8 @@ force-push/branch-deletion. `job_occurrences` not started.
   are the scoped identity signals ADR 0004 defines. Base `04fce4a` on `main` -> branch
   `phase-1/job-occurrences`.
 - Outcome: new URL-normalization module, model, migration `0011`, factory/real-commit
-  helpers, and 125 new tests implemented and verified against real PostgreSQL.
+  helpers, and 128 new tests implemented and verified against real PostgreSQL (125
+  from initial implementation, plus 3 from the adversarial self-review below).
   - `app/normalization/url.py::normalize_url()` (new): a narrowly scoped, pure,
     schema-bound identity canonicalizer (docs/PHASE_RISK_CHECKLIST.md's Phase 1
     clarification added this slice — schema-bound identity canonicalizers like this
@@ -266,7 +267,7 @@ force-push/branch-deletion. `job_occurrences` not started.
     "0010"`).
   - `backend/tests/conftest.py` — `make_job_occurrence` (requires `job_id`/
     `first_seen_at`/`last_seen_at` explicitly), `real_committed_job_occurrence`.
-  - `backend/tests/test_job_occurrences.py` (new) — 125 tests: `normalize_url()`
+  - `backend/tests/test_job_occurrences.py` (new) — 128 tests: `normalize_url()`
     adversarially (Unicode/punycode host equivalence, Unicode separator variants,
     default/non-default ports, IPv4/bracketed-IPv6, credentials/malformed-port/
     protocol-relative/relative rejection, fragment removal, root/trailing-path
@@ -293,8 +294,8 @@ force-push/branch-deletion. `job_occurrences` not started.
   - `python scripts/check_repo.py` (from `backend/`) → exit 0, zero findings.
   - `ruff format --check .`, `ruff check .` → passed (48 files).
   - `mypy app tests scripts` → success, 36 source files.
-  - `pytest tests/test_job_occurrences.py -q` → 125 passed.
-  - `pytest -q` (full suite) → 638 passed.
+  - `pytest tests/test_job_occurrences.py -q` → 128 passed.
+  - `pytest -q` (full suite) → 641 passed.
   - `DATABASE_URL=...jobgoblin_test`: `alembic upgrade head` (`0010 -> 0011`, existing
     head), `downgrade 0010` / `upgrade head` (round-trip), `downgrade base` / `upgrade
     head` (fresh `base -> head`), `alembic check` (`No new upgrade operations detected`
@@ -306,11 +307,55 @@ force-push/branch-deletion. `job_occurrences` not started.
     `job_id` FK/PK.
   - `git status`/`git diff --check` → only the files listed above; no whitespace/
     conflict errors.
-- Deviations/known limitations: none. `raw_job_ingestions`, `identity_conflicts`,
-  `duplicate_groups`, and the actual match-precedence application logic remain
-  unimplemented, per explicit scope — ADR 0004/ARCHITECTURE.md §8's end-to-end
-  idempotent re-observation requirement is deferred to Phase 2, since it needs the
-  persistence path, not merely this table.
+- Adversarial self-review (per docs/LLM_WORKFLOW.md's new self-review step, run
+  retroactively against this already-committed diff by a fresh Explore-agent
+  context with no prior knowledge of the implementation): all 12 questions checked
+  against `git show`/current file contents, not against this entry's own summary.
+  - Assumptions challenged: that `normalize_url()`'s output always already satisfies
+    the `*_normalized` columns' own trim/non-empty `CHECK`s; that ORM-side
+    `lower()`/DB-side `lower()` always agree for `provider`/`source`; that the
+    partition-matrix tests actually exercise both halves of the `(provider, source)`
+    compound key, not just one.
+  - Findings fixed (2):
+    1. **High** — `normalize_url()` could return a non-`None` value with a literal
+       trailing space (e.g. `normalize_url("http://acme.com/careers ")`), because
+       `urlsplit()` only strips `\t`/`\n`/`\r` from the whole input, not a raw space,
+       and `path.rstrip("/")` doesn't touch it either. That value would fail the
+       column's own trim `CHECK` if ever written outside the ORM's `@validates` path
+       (e.g. a future raw-SQL/Core insert on Phase 2's persistence path) — silently
+       contradicting the "malformed input returns `None`" contract. Fixed in
+       `backend/app/normalization/url.py` by stripping the assembled result against
+       the same trim-character set the DB `CHECK`s use, before returning. Regression
+       test: `test_normalize_url_strips_trailing_space_in_path` (fails against the
+       pre-fix function).
+    2. **Low** — the unique-index partition-matrix tests for "different
+       provider/source accepted" only ever varied `provider`, never `source`, leaving
+       half the compound key's claim unverified. Added
+       `test_same_id_under_different_source_accepted` and
+       `test_same_fallback_url_under_different_source_accepted` in
+       `backend/tests/test_job_occurrences.py`, mirroring the existing
+       provider-variation tests with `source` varied instead.
+  - Not fixed, recorded as a known limitation: **Medium** — `provider`/`source`
+    canonicalization relies on Python's `str.lower()` (ORM) matching PostgreSQL's
+    `lower()` (DB `CHECK`), which can diverge for non-ASCII input depending on server
+    locale/collation (e.g. Turkish dotted-İ). Not fixed because a fix (e.g.
+    restricting these columns to ASCII) would be a new schema/semantic decision
+    beyond this slice's 21-point authorization, not a bug-fix within it. In practice
+    `provider`/`source` are fixed ASCII machine identifiers set by this project's own
+    ingestion code (`ats_scrapers`, `greenhouse`, `jobspy`, etc.), never external
+    user input, so the risk is latent rather than reachable today.
+  - Verification rerun after the fix: `ruff format --check .`/`ruff check .` (48
+    files, passed), `mypy app tests scripts` (36 files, success),
+    `pytest tests/test_job_occurrences.py -q` (128 passed, up from 125),
+    `pytest -q` full suite (641 passed, up from 638), `check_repo.py` (exit 0),
+    `git diff --check` (clean). No schema/migration file changed by this pass, so
+    migration round-trip/fresh-rebuild checks were not rerun (unaffected surface).
+- Deviations/known limitations: the ORM/DB `lower()` divergence above. Otherwise
+  none. `raw_job_ingestions`, `identity_conflicts`, `duplicate_groups`, and the
+  actual match-precedence application logic remain unimplemented, per explicit
+  scope — ADR 0004/ARCHITECTURE.md §8's end-to-end idempotent re-observation
+  requirement is deferred to Phase 2, since it needs the persistence path, not
+  merely this table.
 - STOP — awaiting Codex review. Do not begin any later table, ingestion, providers,
   normalization, reconciliation, add CI, or modify `main`.
 
