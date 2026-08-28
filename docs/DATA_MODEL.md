@@ -190,6 +190,39 @@ the resulting empty label. See the corrected algorithm above (step 4 now runs be
 step 5) for the fix; no schema/migration change was needed since this was an
 application-layer normalization bug, not a database-constraint gap.
 
+**Rev 14 changes** (eighth Phase 1 implementation slice, `jobs` — Class H per
+docs/LLM_WORKFLOW.md: the first migration to actually exercise `ON DELETE RESTRICT`,
+and a large canonical record with many downstream dependencies, even though identity
+resolution itself is entirely out of scope): this table's column list above did not
+previously state several implementation decisions, resolved by explicit approval before
+migration `0010` was written:
+- `company_id` is **nullable**, not required — `DiscoveredJob.company` is explicitly
+  nullable in ARCHITECTURE.md, and requiring a resolved company would force ingestion to
+  either reject an otherwise-valid job or manufacture a fake "unknown company" row.
+  `ON DELETE RESTRICT` still applies whenever it is set. A plain, non-unique index on
+  `company_id` supports the "list a company's jobs" query.
+- `remote_type`'s previously-documented 4th enum value, `'unknown'`, is **not**
+  implemented — it contradicted this schema's own global NULL-means-unknown convention.
+  `NULL` means unknown; the `CHECK` restricts a non-null value to exactly `remote`/
+  `hybrid`/`onsite`.
+- `compensation_explicit` is nullable with no server default — `NULL` means not yet
+  classified, distinct from both `true` and `false`.
+- `duplicate_group_id` is omitted entirely from this migration (see the table's own
+  section above) — deferred to Phase 6 alongside `duplicate_groups` itself, rather than
+  added now as an unconstrained/orphan column with no FK.
+- `first_seen_at`/`last_seen_at` are NOT NULL with **no** server default — they describe
+  observation time, not row-creation time, so nothing may silently substitute `now()`
+  for an omitted value; a `CHECK` requires `first_seen_at <= last_seen_at`.
+- Every other nullable free-text column gets the established NULL-safe trim/non-empty
+  `CHECK` pair (no URL-format validation, no new enums beyond `remote_type`/
+  `salary_period`, which were already documented); numeric ranges get the established
+  non-negative + min≤max `CHECK` pattern; `latitude`/`longitude` get the established
+  coordinate-range and both-or-neither `CHECK`s; `field_provenance` gets the established
+  top-level-JSON-object `CHECK`, matching `saved_searches.enabled_sources`/
+  `scoring_weights`.
+- `created_at`/`updated_at` are added, per the same recurring gap already fixed for
+  every prior table.
+
 Conventions used throughout:
 
 - **Minimum supported PostgreSQL version: 16.** See
@@ -560,7 +593,8 @@ points at the one being retired; it is not populated or enforced by anything in 
 — it's schema reserved for a phase that isn't scoped yet.
 
 ### `jobs`
-The canonical opening (§20). Fields here are **resolved** values — see
+**Implemented** (`backend/app/db/models/job.py`; migration `0010`, `down_revision =
+"0009"`). The canonical opening (§20). Fields here are **resolved** values — see
 [Provenance](#provenance) below for how they're chosen when occurrences disagree.
 Every resolved field has a paired `*_provenance` and, for anything not sourced verbatim,
 a pointer to which occurrence supplied it — modeled here as a single
@@ -568,16 +602,19 @@ a pointer to which occurrence supplied it — modeled here as a single
 rather than one provenance column per field, to avoid a ~20-column-wide provenance
 shadow-table for Phase 1. This can be split into a normalized `job_field_provenance`
 table later without changing anything upstream, if per-field querying becomes common.
+This table declares **no UNIQUE constraint of its own** — identity/matching keys live
+entirely on `job_occurrences` (a separate, later slice); `requisition_id`/`canonical_url`
+below are resolved *display* values only.
 
 | column | type | notes |
 |---|---|---|
-| id | UUID PK | |
+| id | UUID PK | generated application-side (`uuid.uuid4`) |
+| company_id | UUID FK → companies, `ON DELETE RESTRICT` | **nullable** (Rev 14) — `DiscoveredJob.company` is explicitly nullable in [ARCHITECTURE.md](ARCHITECTURE.md); requiring a resolved company would force ingestion to either reject an otherwise-valid job or manufacture a fake "unknown company" row. `ON DELETE RESTRICT` still applies whenever non-null: a company merge/delete must be an explicit reconciliation step, never an accidental cascade. Indexed (plain, non-unique) for the "list a company's jobs" query |
 | requisition_id | text | nullable, **resolved display value only — not an identity/matching key** (Rev 2: see [ARCHITECTURE.md §8](ARCHITECTURE.md#8-deterministic-identity-resolution) and [ADR 0004](DECISIONS/0004-scoped-deterministic-identity.md); the actual matching key lives on `job_occurrences`, scoped by tenant or company) |
 | canonical_url | text | nullable, resolved display value — the identity-matching comparison happens on `job_occurrences.canonical_url_normalized`, not this column |
 | preferred_apply_url | text | nullable |
-| company_id | UUID FK → companies, `ON DELETE RESTRICT` | restrict, not cascade/set-null — deleting a company that still has jobs attached must be an explicit, deliberate reconciliation step (see `companies.duplicate_of_company_id` above), never an accidental cascade |
 | title | text | nullable |
-| normalized_title | text | nullable until Phase 3 |
+| normalized_title | text | nullable until Phase 3 — a plain nullable column in this slice (nothing populates it yet), not a generated column; any non-null value must already be trimmed and non-empty, same as every other nullable text column below |
 | job_family | text | nullable |
 | department | text | nullable |
 | team | text | nullable |
@@ -585,30 +622,36 @@ table later without changing anything upstream, if per-field querying becomes co
 | description_clean | text | nullable |
 | location_raw | text | nullable |
 | city / state / country / postal_code | text | all nullable |
-| latitude / longitude | numeric | nullable |
-| remote_type | text | enum: remote / hybrid / onsite / unknown |
-| employment_type | text | nullable |
-| seniority | text | nullable |
-| contract_type | text | nullable |
-| shift | text | nullable |
-| salary_min / salary_max | int | nullable, as originally stated |
+| latitude / longitude | numeric | nullable, same range/pairing `CHECK`s as `saved_search_locations` |
+| remote_type | text | nullable (Rev 14) — `CHECK` restricts to exactly `remote`/`hybrid`/`onsite` when non-null. **No `'unknown'` sentinel is stored**; `NULL` means unknown, consistent with this schema's global NULL-means-unknown convention. (Previously documented as a 4-value enum including `unknown`, which contradicted that convention — corrected here, not implemented as originally written.) |
+| employment_type | text | nullable, free text (no enum — documented examples are illustrative, matching `candidate_skills.category`'s precedent) |
+| seniority | text | nullable, free text |
+| contract_type | text | nullable, free text |
+| shift | text | nullable, free text |
+| salary_min / salary_max | int | nullable; non-negative `CHECK`s; `CHECK (salary_min <= salary_max)` when both non-null |
 | salary_currency | text | nullable |
-| salary_period | text | enum: hourly / daily / monthly / annual |
-| annualized_salary_min / max | int | nullable, derived |
+| salary_period | text | nullable — `CHECK` restricts to exactly `hourly`/`daily`/`monthly`/`annual` when non-null |
+| annualized_salary_min / max | int | nullable, derived (application concern, not enforced/computed by this migration); same non-negative + min≤max `CHECK`s as `salary_min`/`salary_max` |
 | compensation_text | text | nullable, original string |
-| compensation_explicit | boolean | true = employer-stated, false = third-party estimate |
-| years_experience_min / max | int | nullable |
-| education_requirement | text | nullable |
-| certifications | text[] | |
-| clearance_requirement | text | nullable |
-| visa_sponsorship_status | text | nullable |
-| travel_requirement | text | nullable |
+| compensation_explicit | boolean | nullable (Rev 14), **no server default** — `true` = employer-stated, `false` = third-party estimate, `NULL` = not yet classified |
+| years_experience_min / max | int | nullable; non-negative `CHECK`s; `CHECK (years_experience_min <= years_experience_max)` when both non-null |
+| education_requirement | text | nullable, free text |
+| certifications | text[] | nullable, `MutableList.as_mutable`-wrapped (same rationale as `candidate_profiles`' array columns) |
+| clearance_requirement | text | nullable, free text |
+| visa_sponsorship_status | text | nullable, free text |
+| travel_requirement | text | nullable, free text |
 | posted_at | timestamptz | nullable — original source date, if any |
-| first_seen_at | timestamptz | earliest across all occurrences |
-| last_seen_at | timestamptz | latest across all occurrences |
+| first_seen_at | timestamptz, not null | **no server default** (Rev 14) — describes observation time, not row-creation time; nothing may silently substitute `now()` for an omitted value. Writers (and the test factory) must supply it explicitly |
+| last_seen_at | timestamptz, not null | same as `first_seen_at`; `CHECK (first_seen_at <= last_seen_at)` |
 | application_deadline | timestamptz | nullable |
-| field_provenance | jsonb | see above |
-| duplicate_group_id | UUID | nullable, FK → duplicate_groups (Phase 6), `ON DELETE SET NULL` |
+| field_provenance | jsonb | nullable, `MutableDict.as_mutable`-wrapped; `CHECK` restricts to a top-level JSON object when non-null, matching `saved_searches.enabled_sources`/`scoring_weights` — same documented nested-mutation limitation (replace the complete per-field object, e.g. `job.field_provenance["salary_min"] = updated_entry`, rather than mutating a nested dict in place) |
+| created_at / updated_at | timestamptz, not null | `server_default now()`, per the established global convention |
+
+**Deferred (Rev 14): `duplicate_group_id` is omitted from this migration entirely.**
+`duplicate_groups` is a Phase 6 table that does not exist yet (see "Later tables"
+below), so no FK constraint could be declared against it now. It will be added, with its
+FK (`ON DELETE SET NULL`), in a Phase 6 migration alongside `duplicate_groups` itself —
+not added now as an unconstrained/orphan column.
 
 ### `job_occurrences`
 One observed appearance on one source (§18). **Rev 2** adds the fields identity
@@ -985,6 +1028,7 @@ reviewed against this list directly:
 | `saved_search_titles` | `UNIQUE (saved_search_id, lower(title))`; `CHECK (title = trim(both E'\t\n\r ' from title))`; `CHECK (trim(both E'\t\n\r ' from title) <> '')`; partial `UNIQUE (saved_search_id) WHERE is_primary` | one entry per title per search, case-insensitive; reject a non-normalized or empty title; at most one primary title per search, zero allowed — see the table's own section above (Rev 10) |
 | `saved_search_locations` | `UNIQUE (saved_search_id, lower(location_text))`; `CHECK (location_text = trim(both E'\t\n\r ' from location_text))`; `CHECK (trim(both E'\t\n\r ' from location_text) <> '')`; `CHECK` on latitude/longitude range; `CHECK ((latitude IS NULL) = (longitude IS NULL))`; `CHECK (radius_miles_override IS NULL OR radius_miles_override >= 0)` | one entry per location per search, case-insensitive; reject a non-normalized/empty location, an out-of-range or half-geocoded coordinate pair, or a negative radius override — see the table's own section above (Rev 11) |
 | `companies` | `UNIQUE (lower(domain)) WHERE domain IS NOT NULL`; `INDEX (normalized_name)`; `CHECK (name = trim(both E'\t\n\r ' from name))`; `CHECK (trim(both E'\t\n\r ' from name) <> '')`; NULL-safe normalized/non-empty `CHECK` pairs on `homepage_url`/`career_page_url`/`industry`; `CHECK (duplicate_of_company_id IS NULL OR duplicate_of_company_id <> id)` | strongest available company identity signal, case-normalized, NULL-safe (any number of `NULL`-domain companies coexist); **no** uniqueness on `normalized_name` (see conservative collision behavior above) — it is a `GENERATED ALWAYS AS (...) STORED` column, not an independently writable one; reject a non-normalized/empty `name`, an optional text field that's present-but-blank/wrapped, or direct self-reference on `duplicate_of_company_id` — see the table's own section above (Rev 12) |
+| `jobs` | `INDEX (company_id)`; `CHECK` on `remote_type`/`salary_period` enums; NULL-safe normalized/non-empty `CHECK` pairs on every nullable text column (`requisition_id`, `canonical_url`, `preferred_apply_url`, `title`, `normalized_title`, `job_family`, `department`, `team`, `description_raw`, `description_clean`, `location_raw`, `city`, `state`, `country`, `postal_code`, `employment_type`, `seniority`, `contract_type`, `shift`, `salary_currency`, `education_requirement`, `clearance_requirement`, `visa_sponsorship_status`, `travel_requirement`, `compensation_text`); non-negative + min≤max `CHECK`s on `salary_min`/`salary_max`, `annualized_salary_min`/`max`, `years_experience_min`/`max`; `CHECK` on latitude/longitude range; `CHECK ((latitude IS NULL) = (longitude IS NULL))`; `CHECK` requiring `field_provenance` be a top-level JSON object when non-null; `CHECK (first_seen_at <= last_seen_at)` | no UNIQUE constraint — identity/matching keys live entirely on `job_occurrences`; `company_id` is nullable (`DiscoveredJob.company` is nullable in ARCHITECTURE.md) but `ON DELETE RESTRICT` whenever non-null; reject an invalid enum, a non-normalized/empty optional text field, a negative or inverted numeric range, an out-of-range/half-geocoded coordinate pair, a non-object `field_provenance`, or an inverted observation-time pair — see the table's own section above (Rev 14) |
 | `job_occurrences` | `UNIQUE (provider, source, source_tenant_id, source_job_id) WHERE source_job_id IS NOT NULL AND source_tenant_id IS NOT NULL` | natural key for tenant-scoped sources (Rev 3 split — see ADR 0004) |
 | `job_occurrences` | `UNIQUE (provider, source, source_job_id) WHERE source_job_id IS NOT NULL AND source_tenant_id IS NULL` | natural key for sources with no tenant concept, e.g. LinkedIn/Indeed (Rev 3 split — the fix for the NULL-distinctness bug, ADR 0004) |
 | `job_occurrences` | `UNIQUE (provider, source, source_url_normalized) WHERE source_job_id IS NULL` | fallback natural key when no stable ID is available |
@@ -1008,12 +1052,12 @@ Foreign-key `ON DELETE` behavior (all noted inline above; summarized here for re
 | `candidate_skills.candidate_profile_id → candidate_profiles` | CASCADE | |
 | `saved_searches.user_id → users` | CASCADE | |
 | `saved_search_titles/locations.saved_search_id → saved_searches` | CASCADE | |
-| `jobs.company_id → companies` | **RESTRICT** | company merges/deletes must be an explicit reconciliation step, never accidental |
+| `jobs.company_id → companies` | **RESTRICT** (nullable column) | `company_id` is nullable (Rev 14 — `DiscoveredJob.company` is nullable in ARCHITECTURE.md), but company merges/deletes must be an explicit reconciliation step, never accidental, whenever it is set |
 | `job_occurrences.job_id → jobs` | CASCADE | occurrence is meaningless without its job |
 | `raw_job_ingestions.job_occurrence_id → job_occurrences` | **SET NULL** | preserve the raw audit trail even if the occurrence is later removed (ADR 0005) |
 | `identity_conflicts.existing_job_occurrence_id → job_occurrences` | SET NULL (nullable column) | conflict record survives even if the disputed occurrence is later removed; also naturally NULL for `ambiguous_match` (new in Rev 3) |
 | `identity_conflicts.incoming_raw_job_ingestion_id → raw_job_ingestions` | SET NULL (nullable column) | the conflict's own `existing_value`/`incoming_value` jsonb snapshots make the record self-contained even without the FK (new in Rev 3) |
-| `jobs.duplicate_group_id → duplicate_groups` | SET NULL | a job outlives the grouping mechanism's own lifecycle |
+| `jobs.duplicate_group_id → duplicate_groups` | SET NULL (not yet implemented) | a job outlives the grouping mechanism's own lifecycle — deferred to Phase 6 alongside `duplicate_groups` itself (Rev 14); `jobs` migration `0010` does not include this column at all |
 | `collection_runs.saved_search_id → saved_searches` | **SET NULL** (nullable column) | run history is a historical fact independent of the search's continued existence |
 | `collection_run_provider_attempts.collection_run_id → collection_runs` | CASCADE | attempt rows are meaningless without their parent run |
 | `user_jobs.user_id → users` | CASCADE | |

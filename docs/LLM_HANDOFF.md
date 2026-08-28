@@ -97,146 +97,10 @@ that detail.
 ## Iteration 1
 
 *Rotated in from "Iteration 2" per the two-iteration rule: the prior Iteration 1 (the
-final tooling checker correction pass, its approval, and the merge record) was removed
-rather than kept alongside a third entry, since this entry's `Work review` (below)
-requested changes that are being addressed in this rotation's Iteration 2. Nothing below
-was rewritten — only renumbered.*
-
-### Work done
-
-- Date/agent: 2026-08-28, Claude Code (Sonnet 5). Authorized slice: `companies`, Class H
-  per docs/LLM_WORKFLOW.md (first self-referential FK, first `ON DELETE SET NULL`, first
-  PostgreSQL generated column). Base `a8d7456` on `main` -> branch `phase-1/companies`.
-- Outcome: model, domain-normalization module, migration `0009`, factory/real-commit
-  helpers, and 69 new tests implemented and verified against real PostgreSQL.
-  - `app/normalization/company.py::normalize_domain()`: pure function, trim/lowercase,
-    bare-host-or-`scheme://`-URL parsing (custom, not `urlsplit`, which misparses a bare
-    `host:port` as scheme+path), strips userinfo/port/path/query/fragment/one leading
-    `www.`/one trailing dot, rejects single-label hosts/IP literals/invalid ports/
-    missing hosts, converts through `idna.encode(host, uts46=True, std3_rules=True)`.
-    Never raises — unparseable input returns `None`.
-  - `Company` model: `name` (trim-only `@validates`, matching `CHECK`s);
-    `normalized_name` as SQLAlchemy `Computed(..., persisted=True)` — a real PostgreSQL
-    `GENERATED ALWAYS AS (...) STORED` column, verified via `information_schema.columns`
-    and a direct-SQL insert that omits it entirely; `domain` (`@validates` delegates to
-    `normalize_domain()`) with a partial `UNIQUE (lower(domain)) WHERE domain IS NOT
-    NULL` index; `duplicate_of_company_id` self-referential FK (`ON DELETE SET NULL`)
-    plus a `CHECK` rejecting direct self-reference; `homepage_url`/`career_page_url`/
-    `industry` nullable text with NULL-safe normalization `CHECK`s, ORM blank-to-`None`.
-  - `idna==3.19` added as a **direct** runtime dependency (`backend/pyproject.toml`,
-    BSD-3-Clause, documented consumer/replacement-boundary inline) — not relied on
-    transitively; stdlib `str.encode("idna")` only implements IDNA2003 and doesn't
-    support UTS #46 validation/mapping (`uts46=True`, `std3_rules=True`).
-- Files changed:
-  - `backend/app/normalization/__init__.py`, `backend/app/normalization/company.py` (new).
-  - `backend/app/db/models/company.py` (new); `backend/app/db/models/__init__.py`,
-    `backend/app/db/base.py` — registration/docstring.
-  - `backend/migrations/versions/0009_companies.py` (new, `down_revision = "0008"`).
-  - `backend/pyproject.toml` — `idna==3.19` direct dependency.
-  - `backend/tests/conftest.py` — `make_company`, `real_committed_company`,
-    `real_committed_duplicate_company_pair` (two real-committed companies, one
-    `duplicate_of` the other, for the `ON DELETE SET NULL` test).
-  - `backend/tests/test_companies.py` (new) — 69 tests: every `normalize_domain()` step/
-    case (casing/`www`/Unicode-punycode collisions, distinct domains, single-label/IP-
-    literal/empty-label/invalid-port/missing-host/oversized/invalid-IDNA -> `None`);
-    generated `normalized_name` on insert and name-update (real commit), direct-SQL
-    omission proving PostgreSQL generates it, direct-SQL attempt to set it directly
-    rejected (`ProgrammingError`, not `IntegrityError` — a `GeneratedAlwaysError`, a
-    different condition from a constraint violation); two colliding `normalized_name`s
-    accepted; case-insensitive/direct-SQL domain collision, multiple `NULL` domains, a
-    real concurrent same-domain insert race (exactly one winner); self-reference and
-    nonexistent-target rejection, valid reference accepted, real-commit `ON DELETE SET
-    NULL`; nullable-text blank-to-`None` and direct-SQL rejection (parametrized across
-    all three columns); timestamps and test isolation.
-  - `docs/DATA_MODEL.md` — `companies` marked **Implemented**; added "Rev 12" note;
-    corrected the domain-normalization algorithm description to the actual
-    IDNA2008/UTS#46 implementation; updated the "Phase 1 constraints & indexes" row.
-  - `docs/ROADMAP.md` — Phase 1 status line describes the `companies` slice as complete.
-- Commands run and exact results:
-  - `python scripts/check_repo.py` (from `backend/`) → exit 0, zero findings.
-  - `ruff format --check .`, `ruff check .` → passed (41 files).
-  - `mypy app tests scripts` → success, 31 source files.
-  - `pytest tests/test_companies.py -v` → 69 passed.
-  - `pytest -q` (full suite) → 309 passed.
-  - `DATABASE_URL=...jobgoblin_test`: `alembic upgrade head` (`0008 -> 0009`),
-    `downgrade 0008` / `upgrade head` (round-trip), `downgrade base` / `upgrade head`
-    (fresh `base -> head`), `alembic check` (`No new upgrade operations detected` — one
-    informational `UserWarning` that computed defaults aren't diffable, expected/known
-    Alembic limitation for `Computed` columns) — all passed.
-  - `alembic current` against the **development** database (no `DATABASE_URL` override)
-    → `0006`, unchanged throughout.
-  - Live schema inspected directly (`information_schema.columns`, `pg_constraint`,
-    `pg_indexes`) — confirmed the generated column, all named checks/FK, and both
-    indexes match the model exactly.
-  - `git status`/`git diff --check` → only the files listed above; no whitespace/
-    conflict errors.
-  - `docker compose build backend` → succeeded, `idna-3.19` confirmed installed in the
-    image (dependency changed, per instruction).
-- Deviations/known limitations: none. `jobs.company_id` (`ON DELETE RESTRICT`) does not
-  exist yet — `jobs` isn't implemented; no reconciliation/merge workflow exists or is
-  implied by `duplicate_of_company_id`, per explicit scope.
-- STOP — awaiting Codex review. Do not begin `jobs`, implement reconciliation, add CI, or
-  modify `main`.
-
-### Work review
-
-- Date/reviewer: 2026-08-28, Codex. Implementation diff reviewed:
-  `a8d7456..80c595e` on `phase-1/companies`; working tree clean before this review.
-- Independent verification:
-  - Inspected the domain normalizer, model/migration parity, generated-column expression,
-    self-referential FK and cleanup helpers, concurrency test, dependency declaration,
-    and product-document updates.
-  - `python scripts/check_repo.py`: exit 0, zero findings.
-  - `ruff format --check .`, `ruff check .`: passed (41 files).
-  - `mypy app tests scripts`: passed (31 source files).
-  - `pytest tests/test_companies.py -q`: 69 passed.
-  - `pytest -q --basetemp=.pytest_cache/codex_companies_review`: 309 passed. The first
-    full-suite invocation used pytest's default Windows temp root and produced eight
-    setup errors because that external directory was inaccessible to the reviewer
-    account; rerunning with the repository-owned ignored temp root passed completely.
-  - Direct adversarial calls reproduced the canonicalization bypasses below.
-- Findings:
-  1. **High — structural hostname checks run before UTS #46 mapping, allowing identity
-     and IP-rejection bypasses.** `backend/app/normalization/company.py:83-101` strips
-     ASCII `www.`/`.` and rejects IP literals *before* `idna.encode(..., uts46=True)`.
-     UTS #46 can itself map separator and digit characters into those ASCII forms, so
-     the post-mapping value is never checked against the approved invariants. Reproduced:
-     `www\u3002acme.com -> www.acme.com` (does not collide with `acme.com`),
-     `acme.com\u3002 -> acme.com.` (retains a root separator), and
-     `\uff11\uff12\uff17.\uff10.\uff10.\uff11 -> 127.0.0.1` (a mapped IP literal is
-     accepted). Separately, `acme.com.. -> acme.com.` because one dot is removed before
-     IDNA sees the remaining empty/root label. These outcomes contradict the documented
-     one-`www`/one-root-dot canonicalization, empty-label rejection, and IP-literal
-     rejection, and they create distinct unique-index keys for equivalent identities.
-- Missing/inconclusive checks: the reviewer did not repeat the already-recorded Docker
-  image build or Alembic mutation sequence; Docker access is unavailable to this
-  execution account. The committed migration evidence plus model/migration inspection,
-  checker/static checks, all 69 targeted tests, and all 309 tests were conclusive for
-  everything except the finding above.
-- Verdict: changes requested (one bounded normalization/test correction).
-- Exact bounded correction:
-  1. Reorder/refactor `normalize_domain()` so IDNA/UTS #46 produces the canonical ASCII
-     hostname before final structural canonicalization and validation. Strip exactly one
-     leading `www.` and one permitted root-label dot from that canonical form, then
-     re-check non-empty labels/multi-label shape and reject IP literals on the final
-     stored value. A doubled trailing separator must return `None`, not leave one behind.
-  2. Add regression tests for an ASCII doubled trailing dot, U+3002/U+FF0E separator
-     variants affecting leading `www` and the trailing root dot, and UTS-46-mapped
-     full-width digits producing an IPv4 literal. Prove equivalent `www`/root-dot inputs
-     converge and mapped IPs return `None`.
-  3. Update implementation/doc wording only where needed to state that final structural
-     validation occurs after UTS #46 mapping. Do not change migration `0009` unless
-     `alembic check` demonstrates actual schema drift.
-  4. Rerun the repository checker, Ruff, mypy, targeted company tests, full suite,
-     migration round-trip/`alembic check` against `jobgoblin_test`, and confirm the
-     development database remains untouched. Commit/push the same branch and stop.
-  5. Do not begin `jobs`, implement reconciliation, add CI, merge/modify `main`, or expand
-     the normalization contract beyond this canonical-form validation fix.
-- STOP — reviewer changed only this `Work review`; no implementation files were changed.
-
----
-
-## Iteration 2
+`companies` implementation pass and Codex's first review requesting the normalization
+correction) was removed rather than kept alongside a third entry, since this entry's
+`Work review` and merge record (below) mean it is no longer pending either. Nothing
+below was rewritten — only renumbered.*
 
 ### Work done
 
@@ -323,3 +187,82 @@ into `main` (no merge commit; `main` was a strict ancestor) and pushed. `main`/
 the feature branch; `python backend/scripts/check_repo.py` (via the project's own
 virtualenv interpreter) exits 0 with zero findings; working tree clean. No squash/
 rebase/force-push/branch-deletion. `jobs` not started.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-08-28, Claude Code (Sonnet 5). Authorized slice: `jobs`, Class H per
+  docs/LLM_WORKFLOW.md (first migration to actually exercise `ON DELETE RESTRICT`; a
+  large canonical record with many downstream dependencies, even though identity
+  resolution itself is out of scope — that lives entirely on `job_occurrences`, a
+  separate, later slice). Base `80c0425` on `main` -> branch `phase-1/jobs`.
+- Outcome: model, migration `0010`, factory/real-commit helpers, and 198 new tests
+  implemented and verified against real PostgreSQL.
+  - `Job` model (~46 columns, no UNIQUE constraint of its own): `company_id` nullable
+    FK -> `companies`, `ON DELETE RESTRICT`, plain non-unique index (`DiscoveredJob.
+    company` is nullable in ARCHITECTURE.md — requiring one would force ingestion to
+    reject a valid job or manufacture a fake company); `remote_type`/`salary_period`
+    nullable text with `CHECK`-restricted enums (`'unknown'` sentinel deliberately not
+    implemented — `NULL` means unknown); `compensation_explicit` nullable boolean, no
+    default; 24 nullable free-text columns sharing one `@validates` handler (trim,
+    blank-to-`None`) and a NULL-safe trim/non-empty `CHECK` pair each (generated via a
+    small `_trim_not_empty_checks` helper — 48 CHECKs, not hand-duplicated); non-negative
+    + min<=max `CHECK`s on the three numeric pairs; `saved_search_locations`-style
+    coordinate range/pairing `CHECK`s; `certifications` (`MutableList`-wrapped
+    `ARRAY(Text)`) and `field_provenance` (`MutableDict`-wrapped `JSONB`, top-level-object
+    `CHECK`); `first_seen_at`/`last_seen_at` NOT NULL with **no** server default plus
+    `CHECK (first_seen_at <= last_seen_at)` — they describe observation time, not
+    row-creation time, so the factory requires both explicitly, matching the columns.
+    `duplicate_group_id` omitted entirely (target table `duplicate_groups` is Phase 6,
+    doesn't exist yet — deferred to that phase's own migration, not added unconstrained).
+- Files changed:
+  - `backend/app/db/models/job.py` (new); `backend/app/db/models/__init__.py`,
+    `backend/app/db/base.py` — registration/docstring.
+  - `backend/migrations/versions/0010_jobs.py` (new, `down_revision = "0009"`).
+  - `backend/tests/conftest.py` — `make_job` (requires `first_seen_at`/`last_seen_at`
+    explicitly, no default), `real_committed_job`.
+  - `backend/tests/test_jobs.py` (new) — 198 tests, heavily parametrized per instruction
+    rather than repetitive bodies: all 24 nullable-text columns (default/blank-to-none/
+    trim/direct-SQL empty/direct-SQL wrapped); `remote_type`/`salary_period` valid+NULL
+    accepted, invalid rejected (including `'unknown'` explicitly rejected); non-negative
+    and min<=max checks across all three numeric pairs; coordinate range/pairing
+    (ORM+direct SQL); `field_provenance` NULL/valid-object/non-object-array/string/
+    JSON-null rejection, top-level `MutableDict` mutation persisting after reload,
+    documented nested-mutation limitation, and the replace-whole-object workaround;
+    `certifications` NULL-vs-empty-list and `MutableList` append persisting after
+    reload; `company_id` NULL/valid/nonexistent, deleting an unrelated company,
+    deleting a referenced company rejected with both rows surviving, deleting the job
+    then the company succeeding; `first_seen_at`/`last_seen_at` equal/ordered/inverted
+    (ORM + direct SQL); timestamps and test isolation.
+  - `docs/DATA_MODEL.md` — `jobs` marked **Implemented**; added "Rev 14" note recording
+    the nullable `company_id`, removed `'unknown'` sentinel, nullable
+    `compensation_explicit`, deferred `duplicate_group_id`, and explicit-observation-time
+    decisions; updated the FK summary rows and added the `jobs` constraints-summary row.
+- Commands run and exact results:
+  - `python scripts/check_repo.py` (from `backend/`) → exit 0, zero findings.
+  - `ruff format --check .`, `ruff check .` → passed (44 files).
+  - `mypy app tests scripts` → success, 33 source files.
+  - `pytest tests/test_jobs.py -q` → 198 passed.
+  - `pytest -q` (full suite) → 513 passed.
+  - `DATABASE_URL=...jobgoblin_test`: `alembic upgrade head` (`0009 -> 0010`, existing
+    head), `downgrade 0009` / `upgrade head` (round-trip), `downgrade base` / `upgrade
+    head` (fresh `base -> head`), `alembic check` (`No new upgrade operations detected`
+    — same informational `Computed`-column `UserWarning` as before) — all passed.
+  - `alembic current` against the **development** database (no override) → `0006`,
+    unchanged throughout.
+  - Live schema inspected directly (`information_schema.columns`, `pg_constraint`,
+    `pg_indexes`) — confirmed the FK's `ON DELETE RESTRICT` (`confdeltype = 'r'`) and
+    the `company_id` index.
+  - `git status`/`git diff --check` → only the files listed above; no whitespace/
+    conflict errors.
+- Deviations/known limitations: none. `job_occurrences`, `raw_job_ingestions`,
+  `identity_conflicts`, and `duplicate_groups` remain unimplemented, per explicit scope.
+- STOP — awaiting Codex review. Do not begin `job_occurrences`, ingestion, providers,
+  normalization, reconciliation, add CI, or modify `main`.
+
+### Work review
+
+*Pending — awaiting Codex.*

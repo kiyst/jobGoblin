@@ -1,6 +1,7 @@
 import uuid
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
+from datetime import datetime
 
 import pytest
 import pytest_asyncio
@@ -13,6 +14,7 @@ from app.db.models import (
     CandidateProfile,
     CandidateSkill,
     Company,
+    Job,
     SavedSearch,
     SavedSearchLocation,
     SavedSearchTitle,
@@ -396,6 +398,69 @@ async def real_committed_duplicate_company_pair(
                     if existing_duplicate is not None:
                         await cleanup_session.delete(existing_duplicate)
                         await cleanup_session.commit()
+
+
+@pytest.fixture
+def make_job() -> Callable[..., Job]:
+    """Factory for a valid `Job` — tests only deviate from this
+    intentionally. Unlike every other factory above, `first_seen_at`/
+    `last_seen_at` have **no default here at all**: they describe
+    observation time, not row-creation time (there is no server default on
+    the columns themselves either), so every call site must supply both
+    explicitly. `company_id` defaults to `None` — `Job.company_id` is
+    nullable by design (docs/ARCHITECTURE.md's `DiscoveredJob.company`)."""
+
+    def _make(
+        *,
+        first_seen_at: datetime,
+        last_seen_at: datetime,
+        company_id: uuid.UUID | None = None,
+    ) -> Job:
+        return Job(
+            company_id=company_id,
+            first_seen_at=first_seen_at,
+            last_seen_at=last_seen_at,
+        )
+
+    return _make
+
+
+@asynccontextmanager
+async def real_committed_job(
+    db_engine: AsyncEngine,
+    *,
+    first_seen_at: datetime,
+    last_seen_at: datetime,
+    **job_kwargs: object,
+) -> AsyncIterator[tuple[AsyncSession, uuid.UUID]]:
+    """Creates a `Job` via a real, separately-committed transaction on
+    `db_engine`, for tests that need a genuinely durable commit (e.g. to
+    observe `updated_at` actually advance, or to exercise `company_id`'s
+    `ON DELETE RESTRICT` against a real, separately-committed `Company`
+    row). Same failure-safe lifecycle/cleanup rationale as
+    `real_committed_company` above.
+    """
+    session = AsyncSession(bind=db_engine)
+    job_id: uuid.UUID | None = None
+    try:
+        job = Job(first_seen_at=first_seen_at, last_seen_at=last_seen_at, **job_kwargs)
+        session.add(job)
+        await session.commit()
+        await session.refresh(job)
+        job_id = job.id
+
+        yield session, job_id
+    finally:
+        with suppress(Exception):
+            await session.rollback()
+        await session.close()
+
+        async with AsyncSession(bind=db_engine) as cleanup_session:
+            if job_id is not None:
+                existing_job = await cleanup_session.get(Job, job_id)
+                if existing_job is not None:
+                    await cleanup_session.delete(existing_job)
+                    await cleanup_session.commit()
 
 
 @asynccontextmanager
