@@ -263,4 +263,56 @@ deletion. `companies` not started.
 
 ### Work review
 
-*Pending — awaiting Codex.*
+- Date/reviewer: 2026-08-28, Codex. Implementation diff reviewed:
+  `a8d7456..80c595e` on `phase-1/companies`; working tree clean before this review.
+- Independent verification:
+  - Inspected the domain normalizer, model/migration parity, generated-column expression,
+    self-referential FK and cleanup helpers, concurrency test, dependency declaration,
+    and product-document updates.
+  - `python scripts/check_repo.py`: exit 0, zero findings.
+  - `ruff format --check .`, `ruff check .`: passed (41 files).
+  - `mypy app tests scripts`: passed (31 source files).
+  - `pytest tests/test_companies.py -q`: 69 passed.
+  - `pytest -q --basetemp=.pytest_cache/codex_companies_review`: 309 passed. The first
+    full-suite invocation used pytest's default Windows temp root and produced eight
+    setup errors because that external directory was inaccessible to the reviewer
+    account; rerunning with the repository-owned ignored temp root passed completely.
+  - Direct adversarial calls reproduced the canonicalization bypasses below.
+- Findings:
+  1. **High — structural hostname checks run before UTS #46 mapping, allowing identity
+     and IP-rejection bypasses.** `backend/app/normalization/company.py:83-101` strips
+     ASCII `www.`/`.` and rejects IP literals *before* `idna.encode(..., uts46=True)`.
+     UTS #46 can itself map separator and digit characters into those ASCII forms, so
+     the post-mapping value is never checked against the approved invariants. Reproduced:
+     `www\u3002acme.com -> www.acme.com` (does not collide with `acme.com`),
+     `acme.com\u3002 -> acme.com.` (retains a root separator), and
+     `\uff11\uff12\uff17.\uff10.\uff10.\uff11 -> 127.0.0.1` (a mapped IP literal is
+     accepted). Separately, `acme.com.. -> acme.com.` because one dot is removed before
+     IDNA sees the remaining empty/root label. These outcomes contradict the documented
+     one-`www`/one-root-dot canonicalization, empty-label rejection, and IP-literal
+     rejection, and they create distinct unique-index keys for equivalent identities.
+- Missing/inconclusive checks: the reviewer did not repeat the already-recorded Docker
+  image build or Alembic mutation sequence; Docker access is unavailable to this
+  execution account. The committed migration evidence plus model/migration inspection,
+  checker/static checks, all 69 targeted tests, and all 309 tests were conclusive for
+  everything except the finding above.
+- Verdict: changes requested (one bounded normalization/test correction).
+- Exact bounded correction:
+  1. Reorder/refactor `normalize_domain()` so IDNA/UTS #46 produces the canonical ASCII
+     hostname before final structural canonicalization and validation. Strip exactly one
+     leading `www.` and one permitted root-label dot from that canonical form, then
+     re-check non-empty labels/multi-label shape and reject IP literals on the final
+     stored value. A doubled trailing separator must return `None`, not leave one behind.
+  2. Add regression tests for an ASCII doubled trailing dot, U+3002/U+FF0E separator
+     variants affecting leading `www` and the trailing root dot, and UTS-46-mapped
+     full-width digits producing an IPv4 literal. Prove equivalent `www`/root-dot inputs
+     converge and mapped IPs return `None`.
+  3. Update implementation/doc wording only where needed to state that final structural
+     validation occurs after UTS #46 mapping. Do not change migration `0009` unless
+     `alembic check` demonstrates actual schema drift.
+  4. Rerun the repository checker, Ruff, mypy, targeted company tests, full suite,
+     migration round-trip/`alembic check` against `jobgoblin_test`, and confirm the
+     development database remains untouched. Commit/push the same branch and stop.
+  5. Do not begin `jobs`, implement reconciliation, add CI, merge/modify `main`, or expand
+     the normalization contract beyond this canonical-form validation fix.
+- STOP — reviewer changed only this `Work review`; no implementation files were changed.
