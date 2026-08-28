@@ -10,7 +10,10 @@ project's deterministic identity-resolution scheme is built on — its three
 partial unique indexes below implement ADR 0004's scoped natural key
 directly. The actual match-precedence application logic (querying by these
 indexes in order, deciding new-vs-existing-occurrence, writing
-`identity_conflicts` rows) is Phase 4+ ingestion code, out of scope here.
+`identity_conflicts` rows) is Phase 2+ ingestion code — Phase 2's offline
+fixture pipeline is the first writer/user of this persistence and
+deterministic-identity path; Phase 4 introduces the first live ATS
+provider to reuse it. Out of scope here.
 
 Product rules resolved by explicit approval before this migration was
 written (not inferred silently):

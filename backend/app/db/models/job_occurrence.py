@@ -58,8 +58,10 @@ class JobOccurrence(Base):
     three partial unique indexes below *are* the scoped identity signals
     ADR 0004 defines. The actual match-precedence application logic
     (querying by these indexes in order, deciding new-vs-existing-occurrence,
-    writing `identity_conflicts` rows) is Phase 4+ ingestion code, out of
-    scope for this schema-only slice.
+    writing `identity_conflicts` rows) is Phase 2+ ingestion code — Phase 2's
+    offline fixture pipeline is the first writer/user of this persistence and
+    deterministic-identity path; Phase 4 introduces the first live ATS
+    provider to reuse it. Out of scope for this schema-only slice.
 
     `provider`/`source` are required canonical identifiers: lowercased and
     trimmed by the ORM, with a database `CHECK` requiring an already
