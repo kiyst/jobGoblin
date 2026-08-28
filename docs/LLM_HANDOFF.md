@@ -353,4 +353,49 @@ otherwise) started or proposed.
 
 ### Work review
 
-*Pending — awaiting Codex.*
+- Date/reviewer: 2026-08-28, Codex. Diff reviewed: `0ac9635..755b219`.
+- Verdict: **changes requested**. The table design, model/migration parity, constraints,
+  canonicalization, CASCADE behavior, enum values, defaults, indexes, and documentation
+  are otherwise coherent. Findings:
+  1. **Low — the approved timestamp test matrix is incomplete.** The binding instruction
+     required equal, later, and earlier `completed_at` cases through both ORM and raw SQL.
+     Equal/later are accepted only through ORM; raw SQL covers only the rejected earlier
+     case. The handoff consequently overstates completion of the approved matrix.
+  2. **Low — `rate_limited=True` is never exercised.** Tests prove its ORM and database
+     defaults are `false`, but the approved proposal also required both explicit boolean
+     values and independence from status/`incomplete_results`. The sole independence
+     test varies only `incomplete_results`; no test ever writes `rate_limited=True`.
+  3. **Low — three comments incorrectly imply PostgreSQL creates an index for a
+     referencing foreign-key column.** PostgreSQL does not automatically index
+     `collection_run_id` merely because it is an FK. The explicit index is correct and
+     useful, but the model comment, migration docstring, and `DATA_MODEL.md` currently
+     describe it as additional to “whatever index the FK itself implies.”
+  4. **Low — the handoff claims timestamp-default independence without a corresponding
+     test.** The test file proves raw-SQL defaults, UTC awareness, and ORM-driven
+     `updated_at` advancement, but not a two-row independence case. Correct the claim;
+     no redundant test is required for this point.
+- Exact bounded corrections requested:
+  1. Add raw-SQL accepted cases for `completed_at == started_at` and `completed_at >
+     started_at`, complementing the existing raw-SQL rejection of an earlier timestamp.
+  2. Add an ORM persistence/reload case with `rate_limited=True` in a valid row and an
+     explicit `incomplete_results` value/status combination that demonstrates the
+     approved independence. Do not add any new CHECK.
+  3. Correct the three FK-index comments to state that PostgreSQL does not automatically
+     index the referencing FK column and that this explicit index supports “all attempts
+     for this run” lookups (and efficient parent-side FK maintenance). Do not alter the
+     index itself.
+  4. Remove `independence` from the handoff's timestamp-test claim, or accurately limit
+     the claim to what the tests prove. Do not add a timestamp-independence test solely
+     to preserve that wording.
+  5. Limit changes to tests, comments/docs, and the handoff. Do not alter model mapping,
+     schema behavior, migration operations/revision metadata, constraint/index
+     definitions, or begin another slice. Run `git diff --check`, repository checker,
+     Ruff, mypy, targeted tests, and the full suite; then update `Work done`, commit and
+     push the same branch, and stop for re-review. Alembic round-trips are unnecessary
+     for this test/comment-only correction.
+- Verified independently: repository checker exit 0; Ruff format/check clean; mypy
+  clean (**44 source files**); targeted suite **98 passed**; full suite **977 passed**;
+  test database is at Alembic head `0015` and `alembic check` reports no new upgrade
+  operations.
+- STOP — reviewer changed only this `Work review`. Do not begin `user_jobs`,
+  `job_notes`, another slice, or modify/merge `main` without explicit authorization.
