@@ -298,4 +298,16 @@ longer pending. Nothing below was rewritten — only renumbered.*
 
 ### Work review
 
-*Pending — awaiting Codex.*
+- Date/reviewer: 2026-08-28, Codex. Diff reviewed: `27eb2d7..aa78487`.
+- Verdict: **approved**. Findings: none.
+- Verified independently:
+  - The new test constructs an otherwise-valid raw SQL insert, removes `status`
+    entirely, asserts PostgreSQL raises `IntegrityError`, and rolls the session back.
+    No model, migration, schema, or product-document files changed.
+  - `git diff --check`, repository checker, Ruff format/check, and the targeted file
+    passed: **66 tests**. Claude's recorded full-suite result is **803 passed**; the
+    reviewer did not repeat the full suite for this single test-only correction.
+- The `identity_conflicts` implementation and correction pass are accepted. Do not
+  merge to `main` or begin `collection_runs`/another slice until the user explicitly
+  authorizes the next action.
+- STOP — reviewer changed only this `Work review`; no implementation files changed.
