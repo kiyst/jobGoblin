@@ -293,4 +293,46 @@ Phase 1 table (`collection_runs`, `user_jobs`, or otherwise) started or proposed
 
 ### Work review
 
-*Pending — awaiting Codex.*
+- Date/reviewer: 2026-08-28, Codex. Diff reviewed: `0a58742..b98a4ba`.
+- Verdict: **changes requested**. The model, migration, constraints, defaults, mutable-
+  collection choices, and lifecycle behavior are otherwise coherent and independently
+  verified. Findings:
+  1. **Medium — the tests teach source identifiers as provider identifiers.** The
+     documented contract says `providers_attempted` contains providers whose execution
+     began, while provider/source detail is separate. However, the round-trip, mutation,
+     and default-independence tests use `healthy_source`/`broken_source`; most
+     importantly, the claimed Phase 2 partial-success scenario stores both source names
+     in `providers_attempted` even though its failure entry identifies one provider
+     (`fixture_provider`) with one source (`broken_source`). That fixture would cause a
+     Phase 2 writer to record two attempted providers for one provider with two sources,
+     undermining the contract the test claims to prove.
+  2. **Low — the self-review's citation correction is still not resolvable in this
+     repository.** The model docstring, migration docstring, and current table section
+     in `DATA_MODEL.md` all retain `§38`, but `DATA_MODEL.md` has no numbered §38 or
+     anchor to resolve. Calling it a master-spec section number does not make these
+     internal references navigable and contradicts the claim that the stale citation
+     was corrected.
+- Exact bounded corrections requested:
+  1. Replace source-like values in every `providers_attempted` test fixture/assertion
+     with provider identifiers. In the Phase 2 partial-success scenario, record
+     `fixture_provider` exactly once in `providers_attempted`; keep `broken_source` in
+     `failures[*].source`. Add or reshape an assertion/test so it explicitly proves that
+     one provider executing two sources yields one provider entry, with source detail
+     remaining separate. Do not add a database uniqueness constraint: duplicate
+     avoidance remains application-level as approved.
+  2. Remove the three dangling `§38` references or replace them with a real, resolvable
+     Markdown link/heading in this repository. Preserve the substantive prose.
+  3. Do not change table behavior, migration operations/revision metadata, or schema.
+     This correction should be limited to tests and comments/documentation.
+  4. Run `check_repo.py`, `git diff --check`, Ruff format/check, mypy, the targeted
+     collection-run tests, and the full suite. Alembic round-trips are not required for
+     this test/comment-only correction. Record the pass in a new concise `Work done`,
+     commit and push the same feature branch, then stop for re-review.
+- Verified independently on the feature branch: repository checker exit 0; Ruff
+  format/check clean; mypy clean (**42 source files**); targeted suite **76 passed**;
+  full suite **879 passed**; `alembic check` against `jobgoblin_test` reports no new
+  upgrade operations. The development database's older revision is expected and was
+  not modified.
+- STOP — reviewer changed only this `Work review`. Do not begin
+  `collection_run_provider_attempts`, `user_jobs`, another slice, or modify/merge
+  `main` without explicit user authorization.
