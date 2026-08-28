@@ -315,4 +315,38 @@ Phase 1 table started or proposed.
 
 ### Work review
 
-*Pending — awaiting Codex.*
+- Date/reviewer: 2026-08-28, Codex. Diff reviewed: `e7a0a60..caa36c8`.
+- Verdict: **changes requested** (one bounded documentation-phase correction; schema
+  and executable behavior otherwise accepted).
+- Verification performed:
+  - Inspected the model, migration, factories/real-commit cleanup, complete targeted
+    test file, DATA_MODEL/ROADMAP changes, and the asymmetric status/FK contract.
+  - Repository checker, `ruff format --check`, `ruff check`, and
+    `mypy app tests scripts` passed.
+  - `tests/test_raw_job_ingestions.py`: **74 passed**. Full suite: **737 passed**.
+  - `alembic check` against `jobgoblin_test`: no new upgrade operations; test schema
+    is at `0012 (head)`. The reviewer did not repeat Claude's destructive migration
+    downgrade/fresh-rebuild sequence or the live-schema catalog inspection.
+- Findings:
+  1. **Low — the new first-writer wording assigns fixture ingestion to the wrong
+     phase.** `backend/app/db/models/raw_job_ingestion.py`, migration `0012`, and the
+     implemented `raw_job_ingestions` introduction in `docs/DATA_MODEL.md` say
+     "Phase 4+ ingestion code is the first writer." The canonical roadmap explicitly
+     makes Phase 2's offline fixture pipeline write `RawJobIngestion` as part of
+     `Fixture -> RawJobIngestion -> identity resolution -> Job -> JobOccurrence`;
+     Phase 4 introduces the first real `ats-scrapers` provider. The same stale
+     "Phase 4+" ownership wording also remains in the previously merged
+     `JobOccurrence` model/migration/DATA_MODEL text. This is documentation-only, but
+     it misstates the immediate consumer contract the new schema was designed for.
+- Exact bounded correction:
+  1. Replace all six stale Phase-4 ownership claims in the two model docstrings, the
+     `0011`/`0012` migration docstrings, and the corresponding two DATA_MODEL passages
+     with consistent wording: Phase 2's fixture ingestion is the first writer/user of
+     the persistence and deterministic-identity path; Phase 4 is the first live ATS
+     provider to reuse that path.
+  2. Do not alter schema, migrations' operations/revision metadata, tests, or product
+     behavior. Run `git diff --check`, the repository checker, and Ruff against the
+     touched Python files; backend/Alembic test reruns are unnecessary for comment-only
+     changes. Update concise `Work done`, commit/push the same branch, and stop.
+  3. Do not begin `identity_conflicts` or any other slice, and do not modify `main`.
+- STOP — reviewer changed only this `Work review`; no implementation files changed.
