@@ -302,3 +302,11 @@ rebase/force-push/branch-deletion. `jobs` not started.
 - STOP — reviewer changed only the mechanical documentation described above and this
   `Work review`; no implementation, migration, test, dependency, or product behavior
   was changed.
+
+**Merge record (appended, not a rewrite of the entry above):** Approved at review
+commit `c3f80dd`. Per user authorization, `phase-1/jobs` was fast-forward merged into
+`main` (no merge commit; `main` was a strict ancestor) and pushed. `main`/`origin/main`
+are both now at `c3f80dd`. Verified: `main` has zero content diff against the feature
+branch; `python backend/scripts/check_repo.py` (via the project's own virtualenv
+interpreter) exits 0 with zero findings; working tree clean. No squash/rebase/
+force-push/branch-deletion. `job_occurrences` not started.
