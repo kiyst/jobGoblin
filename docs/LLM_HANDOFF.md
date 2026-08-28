@@ -311,3 +311,12 @@ longer pending. Nothing below was rewritten — only renumbered.*
   merge to `main` or begin `collection_runs`/another slice until the user explicitly
   authorizes the next action.
 - STOP — reviewer changed only this `Work review`; no implementation files changed.
+
+**Merge record (appended, not a rewrite of the entry above):** Approved at review
+commit `5794f20`. Per user authorization, `phase-1/identity-conflicts` was merged into
+`main` with a normal merge commit (`0f5bf7b`; `--no-ff`, no squash/rebase/force-push)
+and pushed. `main`/`origin/main` are both now at `0f5bf7b`. Verified: `main` has zero
+content diff against the feature branch; migration `0013` (`down_revision = "0012"`)
+is present in `main`; `python backend/scripts/check_repo.py` (via the project's own
+virtualenv interpreter) exits 0 with zero findings; working tree clean. No later
+Phase 1 table (`collection_runs`, `user_jobs`, or otherwise) started or proposed.
