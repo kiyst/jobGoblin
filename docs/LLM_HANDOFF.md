@@ -321,3 +321,12 @@ pending. Nothing below was rewritten — only renumbered.*
   merge to `main` or begin `identity_conflicts`/another slice until the user explicitly
   authorizes the next action.
 - STOP — reviewer changed only this `Work review`; no implementation files changed.
+
+**Merge record (appended, not a rewrite of the entry above):** Approved at review
+commit `82245e5`. Per user authorization, `phase-1/raw-job-ingestions` was merged into
+`main` with a normal merge commit (`863e1d9`; `--no-ff`, no squash/rebase/force-push)
+and pushed. `main`/`origin/main` are both now at `863e1d9`. Verified: `main` has zero
+content diff against the feature branch; migration `0012` (`down_revision = "0011"`)
+is present in `main`; `python backend/scripts/check_repo.py` (via the project's own
+virtualenv interpreter) exits 0 with zero findings; working tree clean. No later
+Phase 1 table (`identity_conflicts` or otherwise) started or proposed.
