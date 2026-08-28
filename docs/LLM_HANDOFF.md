@@ -338,4 +338,46 @@ with zero findings; working tree clean. No later Phase 1 table (`user_jobs`,
 
 ### Work review
 
-*Pending — awaiting Codex.*
+- Date/reviewer: 2026-08-28, Codex. Diff reviewed: `8a9f4d3..e072539`
+  (`phase-1/user-jobs`). Verdict: **changes requested**.
+- Findings, highest severity first:
+  1. **Medium — `set_status()` does not fully enforce its timezone-aware timestamp
+     contract.** `backend/app/services/user_jobs.py` checks only
+     `changed_at.tzinfo is None`. Under Python's datetime contract, a datetime is
+     aware only when `tzinfo` is non-NULL **and** `utcoffset()` is non-NULL. A custom
+     `tzinfo` whose `utcoffset()` returns `None` passes the current guard; I reproduced
+     the function mutating the row and reaching `flush()` with that value. Exact
+     correction: reject when `changed_at.tzinfo is None or changed_at.utcoffset() is
+     None`, before any mutation, and add a service regression test using such a
+     `tzinfo` implementation that proves `ValueError` and zero mutation.
+  2. **Low — the approved direct-SQL acceptance half of the nine-status matrix is
+     missing, while durable documentation says it exists.** The ORM acceptance tests
+     cover all two pre-application and seven post-application statuses, and direct SQL
+     covers all invalid pairings, but direct-SQL valid acceptance is exercised only for
+     the default `interested`/NULL row. This was mandatory item 1 in the approved
+     proposal, yet `docs/ROADMAP.md` and this iteration's `Work done` claim the full
+     matrix is covered by both ORM and direct SQL. Exact correction: add parameterized
+     direct-SQL acceptance coverage for all nine correctly paired statuses (NULL for
+     the two pre-application values, non-NULL for the seven post-application values).
+     Keep the claims only after those tests exist; do not rewrite the prior `Work done`
+     entry—record the correction in the next one.
+  3. **Low — the approved flag-independence test does not prove each flag
+     independently.** `test_saved_hidden_archived_independent_of_status_and_each_other`
+     sets all three flags to `True` in one row, so it proves that one combined state is
+     accepted, not that each flag can vary independently of the other two as the
+     approved extended matrix requested. Its docstring also describes an “unsaved” row
+     while the fixture passes `saved=True`. Exact correction: parameterize the three
+     flags (one `True`, the other two `False`) and assert the persisted/reloaded values;
+     retain a post-application status so independence from workflow status remains
+     covered, and correct the misleading prose.
+- Independently verified: targeted `user_jobs` suites pass (55/55); repository checker,
+  Ruff format/check, and mypy pass. A full-suite run reached 1027 passes with 8 setup
+  errors confined to pytest's inaccessible host temp directory
+  (`AppData/Local/Temp/pytest-of-Kiwi`), not product/test assertions. Model/migration
+  parity, migration `0016` ancestry, FK/CHECK/index definitions, service transition
+  branches, CASCADE cleanup/isolation, and the Phase 1/Phase 10 documentation boundary
+  were also inspected; no further findings.
+- Scope for the correction pass: service validation, the bounded tests above, truthful
+  documentation wording where needed, and a new concise `Work done` entry only. No
+  migration/schema change is needed; do not start `job_notes`, merge to or modify
+  `main`, or advance to another slice.
