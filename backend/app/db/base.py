@@ -25,8 +25,10 @@ class Base(DeclarativeBase):
     (`app/db/models/company.py`), `Job` (`app/db/models/job.py`),
     `JobOccurrence` (`app/db/models/job_occurrence.py`),
     `RawJobIngestion` (`app/db/models/raw_job_ingestion.py`),
-    `IdentityConflict` (`app/db/models/identity_conflict.py`), and
-    `CollectionRun` (`app/db/models/collection_run.py`) are the Phase 1
+    `IdentityConflict` (`app/db/models/identity_conflict.py`),
+    `CollectionRun` (`app/db/models/collection_run.py`), and
+    `CollectionRunProviderAttempt`
+    (`app/db/models/collection_run_provider_attempt.py`) are the Phase 1
     models registered against this base so far; every other Phase 1
     table will follow the same pattern. This is also Alembic's
     `target_metadata` (see

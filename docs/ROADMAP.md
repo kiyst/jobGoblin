@@ -231,9 +231,22 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   rejected), a planning-time failure existing without any `providers_attempted` entry,
   `completed_with_errors` retaining accurate non-zero rollups alongside recorded
   failures, and `ON DELETE SET NULL` isolation from `saved_searches` against an
-  unrelated run (see `docs/DATA_MODEL.md`). No later Phase 1 table is implemented yet;
-  the rest of Phase 1's exit gate (§[PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md))
-  remains outstanding.
+  unrelated run (see `docs/DATA_MODEL.md`). The `collection_run_provider_attempts`
+  slice is also complete and verified (Class H): model
+  (`backend/app/db/models/collection_run_provider_attempt.py`), migration `0015`
+  (`down_revision = "0014"`), and database tests cover the bidirectional
+  `status`/`completed_at` lifecycle consistency matrix, the new `completed_at >=
+  started_at` ordering `CHECK`, the canonical `provider`/`source` identifiers
+  (generalized from `job_occurrences`/`raw_job_ingestions`), the closed `error_category`
+  enum `CHECK` reused from `ProviderErrorCategory` (ARCHITECTURE.md §6.3), the
+  trim/blank-to-`NULL` `error_message` treatment, independence of `incomplete_results`
+  from `status` (no `CHECK` ties them), the `UNIQUE (collection_run_id, provider,
+  source)` constraint (proven to allow one provider's two distinct sources to coexist
+  under the same run — the exact Phase 2 fixture-proof shape from ARCHITECTURE.md §11),
+  and `ON DELETE CASCADE` isolation from `collection_runs` against an unrelated run's
+  own attempt row (see `docs/DATA_MODEL.md`). No later Phase 1 table (`user_jobs`,
+  `job_notes`) is implemented yet; the rest of Phase 1's exit gate
+  (§[PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md)) remains outstanding.
 - **Phases 2-14: not started.** Begin each phase only after completing its preflight in
   [PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md) and receiving approval for the next
   smallest slice.

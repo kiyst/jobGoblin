@@ -97,187 +97,209 @@ that detail.
 ## Iteration 1
 
 *Rotated in from "Iteration 2" per the two-iteration rule: the prior Iteration 1 (the
-`identity_conflicts` correction pass, its approval, and merge record) was removed rather
+`collection_runs` correction pass, its approval, and merge record) was removed rather
 than kept alongside a third entry, since it was already merged and is no longer pending.
 Nothing below was rewritten — only renumbered.*
 
 ### Work done
 
-- Date/agent: 2026-08-28, Claude Code (Sonnet 5). Authorized slice: `collection_runs`,
-  Class H per docs/LLM_WORKFLOW.md — a scheduler-execution rollup record combining a
-  bidirectional status/timestamp lifecycle `CHECK`, differentiated `MutableList`
-  wrapping across a `TEXT[]` and a JSONB array in the same table, and a deliberately
-  un-wrapped JSONB object column. Base `0a58742` on `main` -> branch
-  `phase-1/collection-runs`.
-- Outcome: new model, migration `0014`, factory/real-commit helper, and 76 new tests
-  implemented and verified against real PostgreSQL.
-  - `CollectionRun` model: `status` is a plain `CHECK`-restricted enum (no ORM
-    transform), no server default — fresh creation must explicitly supply `running`.
-    `started_at` is NOT NULL with no server default (matches
-    `raw_job_ingestions.fetched_at`'s treatment); `completed_at` is nullable only while
-    `status = 'running'`, enforced by a bidirectional lifecycle `CHECK` plus a second
-    `CHECK (completed_at IS NULL OR completed_at >= started_at)`. `created_at`/
-    `updated_at` follow the established global convention (added despite this table's
-    own pre-existing `DATA_MODEL.md` column list omitting them — the same tension
-    `identity_conflicts` hit before).
-  - `providers_attempted` (`TEXT[]`, NOT NULL, `server_default '{}'`) and `failures`
-    (jsonb array, NOT NULL, `server_default '[]'`) are both `MutableList`-wrapped for
-    in-place top-level append tracking — the first time `MutableList` wraps a JSONB
-    column (not `ARRAY`) in this codebase. `providers_enforced_locally` (jsonb object,
-    NOT NULL, `server_default '{}'`) is deliberately **not** wrapped: assembled once in
-    memory during planning and assigned as a complete value, matching
-    `jobs.field_provenance`'s existing documented nested-mutation limitation. Each
-    JSONB column has a top-level shape `CHECK` (`= 'object'` / `= 'array'`) — the first
-    time a NOT-NULL JSONB column with a non-null server default carries a shape
-    `CHECK` in this schema (prior shape-checked columns were nullable-with-no-default
-    or NOT-NULL-with-no-default). The three job counters are NOT NULL with
-    `server_default 0` and non-negative `CHECK`s; `duration_ms` stays nullable with a
-    NULL-safe non-negative `CHECK`. No `CHECK` ties `failures`/counters to `status` —
-    `completed_with_errors` may honestly show non-zero rollups alongside recorded
-    failures.
-  - `saved_search_id` is nullable, `ON DELETE SET NULL`; no other column's `CHECK`
-    references its nullness, so — unlike `raw_job_ingestions`/`identity_conflicts` —
-    there is no FK-vs-CHECK asymmetric-direction tension on this table.
-  - Single FK (`saved_search_id`→`saved_searches`) fit under the naming convention's
-    63-byte limit unaided; verified via direct DDL rendering before writing the
-    migration, no explicit short name needed (unlike `identity_conflicts`' two FKs).
-  - Indexes: `(saved_search_id, started_at DESC)` and `(status)` — lookup support
-    only, no uniqueness constraint anywhere; Phase 9's overlapping-run-prevention
-    strategy is an explicitly separate, not-yet-designed invariant.
+- Date/agent: 2026-08-28, Claude Code (Sonnet 5). Authorized slice:
+  `collection_run_provider_attempts`, Class H per docs/LLM_WORKFLOW.md — the
+  authoritative per-source telemetry record feeding Phase 12's provider-health
+  analysis, Phase 2's second fixture-proof writer alongside `identity_conflicts`, and
+  this schema's first table whose own name is long enough to force four explicit
+  shortened constraint names. Base `0ac9635` on `main` -> branch
+  `phase-1/collection-run-provider-attempts`.
+- Outcome: new model, migration `0015`, factory/real-commit helper, and 98 new tests
+  implemented and verified against real PostgreSQL, per the user's binding corrections
+  to the prior proposal:
+  1. `error_category` is nullable text, database-`CHECK`-restricted to exactly the 8
+     `ProviderErrorCategory` values (ARCHITECTURE.md §6.3): `timeout`, `rate_limited`,
+     `auth_error`, `blocked`, `parse_error`, `not_found`, `upstream_error`, `unknown`.
+     Kept as a plain string column (not a native Postgres enum type) — a future 9th
+     category is a single additive migration. No ORM case-fold (plain closed-enum
+     column like `status`; tested that an otherwise-valid value in the wrong case is
+     rejected, not silently normalized). Phase 2+ must keep this list synchronized with
+     the Python enum by hand.
+  2. No `CHECK` ties `incomplete_results` to `status` — both independent at the
+     database level, tested with an explicit accepted-combination case (`completed` +
+     `incomplete_results=true`, `partial` + `incomplete_results=false`).
+  3. New `CHECK (completed_at IS NULL OR completed_at >= started_at)`, extending the
+     ordering convention already established on `job_occurrences`/`identity_conflicts`/
+     `collection_runs`. Tested equal/later accepted, earlier rejected, via ORM and
+     direct SQL.
+  4. Corrected the prior proposal's factual claim that `ON DELETE CASCADE` would be
+     this schema's first use of it — `job_occurrences.job_id`,
+     `candidate_skills.candidate_profile_id`, and the `saved_search_*` child tables
+     already use it; only the parent-table identity (`collection_runs`, not an
+     audit-trail table) is new here. `collection_run_id` is NOT NULL, `ON DELETE
+     CASCADE` — an attempt row has no independent meaning without its run.
+  5. `provider`/`source` get the exact established canonical-identifier treatment from
+     `job_occurrences`/`raw_job_ingestions`: ORM-trimmed (four-character whitespace
+     set) and lowercased; database `CHECK` requires an already-canonical, non-empty
+     ASCII-slug value (`^[a-z0-9][a-z0-9._-]*$`). Tests distinguish ORM normalization
+     (uppercase/whitespace-wrapped accepted and stored canonically) from the database
+     backstop (non-ASCII/embedded-space values survive ORM normalization unchanged but
+     are rejected by the slug `CHECK`; direct SQL independently proves the same
+     rejection bypassing the ORM entirely) — mirroring `test_job_occurrences.py`'s own
+     battery exactly.
+  6. `error_message` gets the established nullable-free-text treatment: ORM-trimmed
+     with whitespace-only collapsed to `None`, case/internal-whitespace preserved,
+     NULL-safe trim/non-empty `CHECK` pair proven via direct SQL. Documented (not
+     tested, since it isn't a database property) that sanitization against
+     secrets/tokens remains an application-level responsibility.
+  7. ADR 0003's Decision-section table list corrected to include
+     `collection_run_provider_attempts` (previously present only in its own
+     now-superseded Rev-2/3-era prose paragraph), alongside the usual DATA_MODEL.md
+     implementation marker/constraints-summary rows and ROADMAP.md status update.
+  - Four constraint names required an explicit, shortened form beyond the naming
+    convention's default template — this table's own name (33 characters) is long
+    enough that the FK and three `CHECK`s (`status`/`completed_at` consistency,
+    `completed_at`/`started_at` ordering, `jobs_discovered` non-negative) would
+    otherwise exceed Postgres's 63-byte identifier limit; verified via direct DDL
+    rendering before writing the migration, and re-verified against the live schema
+    after a fresh rebuild.
+  - `UNIQUE (collection_run_id, provider, source)` — this schema's first plain,
+    non-functional multi-column `UniqueConstraint` (every prior multi-column
+    uniqueness in this schema needed a functional/partial `Index` instead, since
+    `UniqueConstraint` only covers plain columns).
+  - No JSONB/array columns at all on this table — every column is scalar, so no
+    `MutableList`/`MutableDict` wrapping decisions were needed.
 - Files changed:
-  - `backend/app/db/models/collection_run.py` (new).
+  - `backend/app/db/models/collection_run_provider_attempt.py` (new).
   - `backend/app/db/models/__init__.py`, `backend/app/db/base.py` —
     registration/docstring.
-  - `backend/migrations/versions/0014_collection_runs.py` (new,
-    `down_revision = "0013"`).
-  - `backend/tests/conftest.py` — `make_collection_run` (omits a kwarg entirely rather
-    than passing `None` for defaulted columns, so Postgres's `server_default` applies
-    on `INSERT`), `real_committed_collection_run` (builds on the pre-existing
-    `real_committed_user_and_saved_search` helper).
-  - `backend/tests/test_collection_runs.py` (new) — 76 tests: baseline/defaults;
-    `saved_search_id` FK (nonexistent rejected; `ON DELETE SET NULL` isolation between
-    two real-committed runs); `status` enum validity (ORM + direct SQL) and omission
-    (direct SQL); the full status/`completed_at` lifecycle matrix (3 terminal statuses
-    × both directions, ORM + direct SQL); `completed_at >= started_at` ordering
-    (equal/after accepted, before rejected, ORM + direct SQL); `started_at` omission
-    (direct SQL); `created_at`/`updated_at` defaults, independence, UTC-awareness, and
-    `updated_at` advancing on a real commit; all three counters' defaults/acceptance/
-    negative-rejection (ORM + direct SQL, parametrized); `duration_ms` defaults/
-    acceptance/negative-rejection; `providers_attempted` defaults, order-preserving
-    round-trip, in-place append persisting after a separate-session reload; multi-row
-    default independence (mutable-default trap); `providers_enforced_locally` defaults,
-    whole-value-assignment persistence, SQL-NULL and wrong-shape rejection
-    (parametrized); `failures` defaults, in-place top-level append persistence,
-    SQL-NULL and wrong-shape rejection (parametrized); the Phase 2 fixture scenario —
-    a planning-time failure existing with no `providers_attempted` entry, and
-    `completed_with_errors` retaining accurate non-zero rollups alongside failures.
-  - `docs/DATA_MODEL.md` — `collection_runs` marked **Implemented**; added "Rev 19"
-    note recording every resolved decision; added the missing constraints-summary
-    rows (previously only its sibling `collection_run_provider_attempts` had one).
-  - `docs/ROADMAP.md` — Phase 1 status paragraph describes the `collection_runs` slice
-    as complete.
+  - `backend/migrations/versions/0015_collection_run_provider_attempts.py` (new,
+    `down_revision = "0014"`).
+  - `backend/tests/conftest.py` — `make_collection_run_provider_attempt` (omits a
+    kwarg entirely rather than passing `None` for defaulted columns, so Postgres's
+    `server_default` applies on `INSERT`), `real_committed_collection_run_provider_
+    attempt` (builds on the pre-existing `real_committed_collection_run` helper, with
+    a `collection_run_kwargs` disambiguation parameter mirroring
+    `real_committed_identity_conflict`'s own `job_kwargs=None`-style mypy fix).
+  - `backend/tests/test_collection_run_provider_attempts.py` (new) — 98 tests:
+    baseline/defaults; `collection_run_id` FK (nonexistent rejected, omission
+    rejected via direct SQL, `ON DELETE CASCADE` deletion proven isolated from an
+    unrelated run's own attempt row); `UNIQUE (collection_run_id, provider, source)`
+    (duplicate rejected via ORM and direct SQL; one provider's two distinct sources
+    proven to coexist under the same run — the exact Phase 2 fixture-proof shape from
+    ARCHITECTURE.md §11, using `fixture_provider`/`healthy_source`/`broken_source`);
+    `status` enum validity/omission; the full status/`completed_at` lifecycle matrix
+    (3 terminal statuses × both directions, ORM + direct SQL); the new
+    `completed_at >= started_at` ordering; `started_at` omission; `created_at`/
+    `updated_at` defaults/independence/UTC-awareness/advancing-on-commit; all four
+    counters' (including `retry_count`) defaults/acceptance/negative-rejection;
+    `rate_limited`/`incomplete_results` defaults and independence from `status`;
+    the full `provider`/`source` canonicalization battery (8 tests, mirroring
+    `test_job_occurrences.py`); `error_category`'s 8 valid values, invalid-value
+    rejection (ORM + direct SQL), and no-case-fold proof; `error_message`'s
+    trim/blank-to-`None`/case-preservation/direct-SQL-backstop battery (mirroring
+    `test_raw_job_ingestions.py`).
+  - `docs/DATA_MODEL.md` — `collection_run_provider_attempts` marked
+    **Implemented**; added "Rev 20" note recording every resolved decision; updated
+    the constraints-summary rows to reflect the actual implemented constraint set.
+  - `docs/ROADMAP.md` — Phase 1 status paragraph describes the
+    `collection_run_provider_attempts` slice as complete.
+  - `docs/DECISIONS/0003-minimal-phase1-schema.md` — added
+    `collection_run_provider_attempts` to the Decision section's literal table list,
+    with a "Rev 4 correction" note reconciling it with the still-accurate
+    `duplicate_groups` prose paragraph above it.
 - Commands run and exact results:
-  - `pytest tests/test_collection_runs.py -q` → 76 passed.
-  - `pytest -q` (full suite) → 879 passed (up from 803).
-  - `ruff format --check .`, `ruff check .` → passed (57 files).
-  - `mypy app tests scripts` → success, 42 source files.
-  - `DATABASE_URL=...jobgoblin_test`: `downgrade 0013` / `upgrade head` (round-trip),
+  - `pytest tests/test_collection_run_provider_attempts.py -q` → 98 passed.
+  - `pytest -q` (full suite) → 977 passed (up from 879), re-confirmed again after the
+    fresh migration rebuild below.
+  - `ruff format --check .`, `ruff check .` → passed (60 files).
+  - `mypy app tests scripts` → success, 44 source files.
+  - `DATABASE_URL=...jobgoblin_test`: `downgrade 0014` / `upgrade head` (round-trip),
     `downgrade base` / `upgrade head` (fresh `base -> head`), `alembic check` (`No new
     upgrade operations detected` — same informational `Computed`-column `UserWarning`
     as before) — all passed.
   - `alembic current` against the **development** database (no override) → `0006`,
     unchanged throughout.
   - Live schema inspected directly (`pg_constraint`, `pg_indexes`,
-    `information_schema.columns`) after the fresh rebuild — confirmed the FK's
-    `ON DELETE SET NULL` (`confdeltype = 'n'`), exactly 9 `CHECK` constraints, both
-    lookup indexes, and every column default, matching the model exactly; nothing
-    drifted through the round-trip.
+    `information_schema.columns`) after the fresh rebuild — confirmed 19 constraints,
+    the FK's `ON DELETE CASCADE` (`confdeltype = 'c'`), the `UNIQUE`'s exact column
+    order, both lookup indexes, and every column default, matching the model exactly.
   - `python scripts/check_repo.py` (from `backend/`) → exit 0, zero findings.
   - `git status`/`git diff --check` → only the files listed above; no whitespace/
     conflict errors.
 - Adversarial self-review (fresh Explore-agent context, no prior knowledge of the
-  implementation, run against the actual uncommitted diff before commit — it also
-  independently re-ran the targeted suite and its own migration round-trip; full
-  12-question Class H depth): three **Low** findings, no Critical/High/Medium.
-  1. Fixed — both the model and migration docstrings cited a nonexistent
-     "ARCHITECTURE.md §38" (that document's headings top out at §13); corrected to
-     cite `docs/DATA_MODEL.md`'s own `collection_runs` section, whose "§38" is a
-     master-spec section number, not an ARCHITECTURE.md one.
-  2. Accepted, not fixed — `status`/`started_at` NOT-NULL omission and the JSONB
-     shape `CHECK`s are proven only via direct SQL, not also via a bare
-     `CollectionRun(...)` ORM construction; Postgres enforces identically either way,
-     and the lifecycle/ordering/counter `CHECK`s already get both-path coverage, so
-     this is a redundant-angle gap, not a behavioral one.
-  3. Accepted, not fixed — the documented "`MutableList` doesn't track nested mutation
-     within an already-appended `failures` entry" limitation has no dedicated negative
-     test; only the successful top-level-append path is tested. A known/accepted
-     SQLAlchemy limitation already documented elsewhere in this schema
-     (`jobs.field_provenance`), not a defect in the shipped code.
-  Explicitly checked and clean: model/migration parity (every `CheckConstraint` body,
-  the FK, all server defaults, both index definitions byte-identical, re-verified
-  live); no ORM-side logic can produce a value violating its own shape `CHECK`;
-  `status`'s exact-string `CHECK` has no case-fold/trim escape; JSON `null` vs SQL
-  `NULL` correctly distinguished and both tested for both JSONB columns; both
-  `MutableList`-wrapped columns proven to persist an in-place append after a genuine
-  separate-session reload, not just same-session identity-map caching; no test
-  overclaims concurrency proof (the migration docstring explicitly disclaims it); no
-  cross-test state leakage (distinct emails per `real_committed_collection_run` call);
-  the `ON DELETE SET NULL` test proves isolation against a second, untouched run; the
-  Phase 2 fixture scenario (one planning-time failure with no attempt row,
-  `completed_with_errors` retaining honest non-zero rollups) is directly exercised and
-  passes against real Postgres.
-- Deviations/known limitations: none new. `collection_run_provider_attempts`,
-  `user_jobs`, and all scheduler/ingestion logic remain unimplemented, per explicit
-  scope. The two accepted Low findings above are coverage gaps around already-safe,
-  database-enforced invariants, not open correctness risks.
-- STOP — awaiting Codex review. Do not begin `collection_run_provider_attempts`,
-  `user_jobs`, or any other slice, and do not modify `main`.
+  implementation, run against the actual uncommitted diff before commit; full
+  12-question Class H depth): **no substantiated findings**. Explicitly checked and
+  clean: model/migration parity for every constraint including all 4 shortened names
+  (byte-counts re-verified against the docstring's stated overflow amounts);
+  no ORM-side logic can produce a value violating its own `CHECK`; no case-fold/
+  Unicode bypass on `status`/`error_category` (plain equality, no normalization) or on
+  `provider`/`source` (ASCII-slug `CHECK` blocks non-ASCII homoglyphs); ORM/direct-SQL/
+  DB-default paths all covered where they matter; confirmed no JSONB/array columns
+  exist at all (no mutable-collection gap possible); `UNIQUE`/index column order
+  verified against live introspection; no test overclaims concurrency; no cross-test
+  state leakage; the `ON DELETE CASCADE` test proves isolation against a second,
+  untouched run's own attempt row, not merely the deleted run's own row being gone;
+  every docstring cross-reference (ARCHITECTURE.md §9/§11/§6.3, ADR 0005,
+  PHASE_RISK_CHECKLIST.md) resolves to a real, matching section — no repeat of the
+  earlier `collection_runs` "§38" dangling-citation mistake; the Phase 2 fixture
+  scenario (`fixture_provider` executing `healthy_source`/`broken_source`, one
+  `completed`, one `failed`) is directly exercised and proves the `UNIQUE` constraint
+  keys on all three columns, not `(collection_run_id, provider)` alone. One
+  informational, non-actionable note: this table's own tests have no ORM-path test for
+  an empty-string `provider`/`source` (only direct-SQL) — the reviewer confirmed this
+  exact gap already exists identically in `test_job_occurrences.py`/
+  `test_raw_job_ingestions.py`, so it is established project convention, not a new
+  omission.
+- Deviations/known limitations: none. `user_jobs`/`job_notes` remain unimplemented,
+  per explicit scope.
+- STOP — awaiting Codex review. Do not begin `user_jobs`/`job_notes`, another slice,
+  or modify `main`.
 
 ### Work review
 
-- Date/reviewer: 2026-08-28, Codex. Diff reviewed: `0a58742..b98a4ba`.
-- Verdict: **changes requested**. The model, migration, constraints, defaults, mutable-
-  collection choices, and lifecycle behavior are otherwise coherent and independently
-  verified. Findings:
-  1. **Medium — the tests teach source identifiers as provider identifiers.** The
-     documented contract says `providers_attempted` contains providers whose execution
-     began, while provider/source detail is separate. However, the round-trip, mutation,
-     and default-independence tests use `healthy_source`/`broken_source`; most
-     importantly, the claimed Phase 2 partial-success scenario stores both source names
-     in `providers_attempted` even though its failure entry identifies one provider
-     (`fixture_provider`) with one source (`broken_source`). That fixture would cause a
-     Phase 2 writer to record two attempted providers for one provider with two sources,
-     undermining the contract the test claims to prove.
-  2. **Low — the self-review's citation correction is still not resolvable in this
-     repository.** The model docstring, migration docstring, and current table section
-     in `DATA_MODEL.md` all retain `§38`, but `DATA_MODEL.md` has no numbered §38 or
-     anchor to resolve. Calling it a master-spec section number does not make these
-     internal references navigable and contradicts the claim that the stale citation
-     was corrected.
+- Date/reviewer: 2026-08-28, Codex. Diff reviewed: `0ac9635..755b219`.
+- Verdict: **changes requested**. The table design, model/migration parity, constraints,
+  canonicalization, CASCADE behavior, enum values, defaults, indexes, and documentation
+  are otherwise coherent. Findings:
+  1. **Low — the approved timestamp test matrix is incomplete.** The binding instruction
+     required equal, later, and earlier `completed_at` cases through both ORM and raw SQL.
+     Equal/later are accepted only through ORM; raw SQL covers only the rejected earlier
+     case. The handoff consequently overstates completion of the approved matrix.
+  2. **Low — `rate_limited=True` is never exercised.** Tests prove its ORM and database
+     defaults are `false`, but the approved proposal also required both explicit boolean
+     values and independence from status/`incomplete_results`. The sole independence
+     test varies only `incomplete_results`; no test ever writes `rate_limited=True`.
+  3. **Low — three comments incorrectly imply PostgreSQL creates an index for a
+     referencing foreign-key column.** PostgreSQL does not automatically index
+     `collection_run_id` merely because it is an FK. The explicit index is correct and
+     useful, but the model comment, migration docstring, and `DATA_MODEL.md` currently
+     describe it as additional to “whatever index the FK itself implies.”
+  4. **Low — the handoff claims timestamp-default independence without a corresponding
+     test.** The test file proves raw-SQL defaults, UTC awareness, and ORM-driven
+     `updated_at` advancement, but not a two-row independence case. Correct the claim;
+     no redundant test is required for this point.
 - Exact bounded corrections requested:
-  1. Replace source-like values in every `providers_attempted` test fixture/assertion
-     with provider identifiers. In the Phase 2 partial-success scenario, record
-     `fixture_provider` exactly once in `providers_attempted`; keep `broken_source` in
-     `failures[*].source`. Add or reshape an assertion/test so it explicitly proves that
-     one provider executing two sources yields one provider entry, with source detail
-     remaining separate. Do not add a database uniqueness constraint: duplicate
-     avoidance remains application-level as approved.
-  2. Remove the three dangling `§38` references or replace them with a real, resolvable
-     Markdown link/heading in this repository. Preserve the substantive prose.
-  3. Do not change table behavior, migration operations/revision metadata, or schema.
-     This correction should be limited to tests and comments/documentation.
-  4. Run `check_repo.py`, `git diff --check`, Ruff format/check, mypy, the targeted
-     collection-run tests, and the full suite. Alembic round-trips are not required for
-     this test/comment-only correction. Record the pass in a new concise `Work done`,
-     commit and push the same feature branch, then stop for re-review.
-- Verified independently on the feature branch: repository checker exit 0; Ruff
-  format/check clean; mypy clean (**42 source files**); targeted suite **76 passed**;
-  full suite **879 passed**; `alembic check` against `jobgoblin_test` reports no new
-  upgrade operations. The development database's older revision is expected and was
-  not modified.
-- STOP — reviewer changed only this `Work review`. Do not begin
-  `collection_run_provider_attempts`, `user_jobs`, another slice, or modify/merge
-  `main` without explicit user authorization.
+  1. Add raw-SQL accepted cases for `completed_at == started_at` and `completed_at >
+     started_at`, complementing the existing raw-SQL rejection of an earlier timestamp.
+  2. Add an ORM persistence/reload case with `rate_limited=True` in a valid row and an
+     explicit `incomplete_results` value/status combination that demonstrates the
+     approved independence. Do not add any new CHECK.
+  3. Correct the three FK-index comments to state that PostgreSQL does not automatically
+     index the referencing FK column and that this explicit index supports “all attempts
+     for this run” lookups (and efficient parent-side FK maintenance). Do not alter the
+     index itself.
+  4. Remove `independence` from the handoff's timestamp-test claim, or accurately limit
+     the claim to what the tests prove. Do not add a timestamp-independence test solely
+     to preserve that wording.
+  5. Limit changes to tests, comments/docs, and the handoff. Do not alter model mapping,
+     schema behavior, migration operations/revision metadata, constraint/index
+     definitions, or begin another slice. Run `git diff --check`, repository checker,
+     Ruff, mypy, targeted tests, and the full suite; then update `Work done`, commit and
+     push the same branch, and stop for re-review. Alembic round-trips are unnecessary
+     for this test/comment-only correction.
+- Verified independently: repository checker exit 0; Ruff format/check clean; mypy
+  clean (**44 source files**); targeted suite **98 passed**; full suite **977 passed**;
+  test database is at Alembic head `0015` and `alembic check` reports no new upgrade
+  operations.
+- STOP — reviewer changed only this `Work review`. Do not begin `user_jobs`,
+  `job_notes`, another slice, or modify/merge `main` without explicit authorization.
 
 ---
 
@@ -285,94 +307,87 @@ Nothing below was rewritten — only renumbered.*
 
 ### Work done
 
-- Date/agent: 2026-08-28, Claude Code (Sonnet 5). Authorized slice: the two bounded
-  corrections from the review at `d400fb7`, on the same `phase-1/collection-runs`
-  branch. Base: `d400fb7`. Test/comment/documentation-only change — no model, migration
-  operations/revision metadata, schema, or behavior changes.
+- Date/agent: 2026-08-28, Claude Code (Sonnet 5). Authorized slice: the four bounded
+  corrections from the review at `5b6aee0`, on the same
+  `phase-1/collection-run-provider-attempts` branch. Base: `5b6aee0`.
+  Test/comment/documentation-only change — no model mapping, schema behavior,
+  migration operations/revision metadata, or constraint/index definitions changed.
 - Outcome:
-  1. **`providers_attempted` identifier fix.** Replaced every source-like value in a
-     `providers_attempted` test fixture/assertion with a provider identifier, matching
-     this codebase's established provider/source naming (`ats_scrapers`/`jobspy` as
-     providers, per `test_job_occurrences.py`'s existing convention) instead of
-     source-shaped placeholders. In `test_completed_with_errors_retains_successful_
-     nonzero_rollups` (the Phase 2 partial-success scenario), `providers_attempted` now
-     records `fixture_provider` exactly once — reflecting one provider executing two
-     sources, only one of which failed — instead of listing both source names as if
-     they were two separate providers. `failures[*].source` still holds `broken_source`
-     unchanged, per the review's explicit instruction. Added an explicit assertion
-     (`run.providers_attempted == ["fixture_provider"]`) plus a full-value assertion on
-     `run.failures` so the test now directly proves the provider/source identifier
-     spaces stay separate, rather than only asserting rollup counters and a bare
-     `len(failures) == 1`. The order-preserving round-trip, in-place-append, and
-     multi-row-independence tests were updated the same way (`ats_scrapers`/`jobspy`).
-     No database uniqueness constraint added — duplicate avoidance remains
-     application-level, as previously approved.
-  2. **Dangling `§38` citation removed.** Removed the unresolvable bare `§38` citation
-     from all three places it appeared — `backend/app/db/models/collection_run.py`,
-     `backend/migrations/versions/0014_collection_runs.py`, and `docs/DATA_MODEL.md`'s
-     `collection_runs` section — rather than re-labeling it, since this repository has
-     no local anchor or verifiable master-spec section to point it at and asserting one
-     without confirmation would repeat the same defect. All surrounding substantive
-     prose (scheduler-execution-record description, the `collection_runs` section
-     cross-reference) was preserved unchanged.
+  1. **Timestamp test matrix completed.** Added
+     `test_direct_sql_completed_at_equal_started_at_accepted` and
+     `test_direct_sql_completed_at_after_started_at_accepted`, complementing the
+     existing raw-SQL rejection of an earlier timestamp — the approved matrix (equal/
+     later accepted, earlier rejected, both ORM and direct SQL) is now actually
+     complete rather than only ORM-covered for the accepted cases.
+  2. **`rate_limited=True` now exercised.** Added
+     `test_rate_limited_true_persists_after_reload_and_is_independent_of_status` — an
+     ORM persistence/reload case with `rate_limited=True`, `status="partial"`, and
+     `incomplete_results=False` in the same row, proving all three vary independently
+     at the database level (no new `CHECK` added, per the review's explicit
+     instruction).
+  3. **Three FK-index comments corrected.** `backend/app/db/models/
+     collection_run_provider_attempt.py`, `backend/migrations/versions/
+     0015_collection_run_provider_attempts.py`, and `docs/DATA_MODEL.md` all
+     previously implied the explicit `(collection_run_id)` index was "in addition to
+     whatever index the FK itself implies" — PostgreSQL does not automatically index a
+     referencing FK column, so that phrasing was backwards. Corrected all three to
+     state plainly that PostgreSQL does not auto-index it, and that this index exists
+     to support "all attempts for this run" lookups (and efficient parent-side FK-
+     maintenance lookups on `collection_runs` deletes). The index definition itself is
+     unchanged.
+  4. **Timestamp-independence overclaim corrected.** The prior iteration's `Work done`
+     entry (now Iteration 1 above, unedited per this ledger's append-only convention)
+     described the test file's `created_at`/`updated_at` coverage as including
+     "independence" — no test proves two-row `created_at`/`updated_at` independence;
+     the tests actually prove server defaults, UTC-awareness, and `updated_at`
+     advancing on a real commit. Corrected here rather than editing the prior entry,
+     per the review's explicit instruction not to add a redundant test solely to
+     preserve that wording.
 - Files changed:
-  - `backend/tests/test_collection_runs.py` — provider/source identifier fixes across
-    4 tests (`test_providers_attempted_round_trips_order_preserved`,
-    `test_providers_attempted_in_place_append_persists_after_separate_session_reload`,
-    `test_defaults_are_independent_across_multiple_rows`,
-    `test_completed_with_errors_retains_successful_nonzero_rollups`); one new
-    assertion pair added to the last of these.
-  - `backend/app/db/models/collection_run.py`, `backend/migrations/versions/
-    0014_collection_runs.py`, `docs/DATA_MODEL.md` — removed the dangling `§38`
-    citation from each (comment/documentation only).
+  - `backend/tests/test_collection_run_provider_attempts.py` — 3 new tests (items
+    1–2 above).
+  - `backend/app/db/models/collection_run_provider_attempt.py`,
+    `backend/migrations/versions/0015_collection_run_provider_attempts.py`,
+    `docs/DATA_MODEL.md` — FK-index comment corrections (item 3 above;
+    comment/documentation only, no behavior change).
 - Commands run and exact results (no Alembic round-trips, per the review's own
   scoping for this test/comment-only correction):
   - `python scripts/check_repo.py` (from `backend/`) → exit 0, zero findings.
   - `git diff --check` → clean, no whitespace/conflict errors.
-  - `ruff format --check .`, `ruff check .` → passed (57 files).
-  - `mypy app tests scripts` → one new error surfaced by the added `run.failures[0]
-    [...]` indexing (`failures` is typed `Mapped[list[object]]`, so an element isn't
-    indexable) — resolved by asserting the full `failures` list value instead of
-    indexing into it (matches the pattern already used by
-    `test_failures_in_place_append_persists_after_separate_session_reload`); re-ran →
-    success, 42 source files.
-  - `pytest tests/test_collection_runs.py -q` → 76 passed (unchanged count — no tests
-    added or removed, only fixture/assertion values and one extra assertion pair).
-  - `pytest -q` (full suite) → 879 passed (unchanged, as expected for a test/comment-
-    only correction).
+  - `ruff format --check .`, `ruff check .` → passed (60 files).
+  - `mypy app tests scripts` → success, 44 source files.
+  - `pytest tests/test_collection_run_provider_attempts.py -q` → 101 passed (up from
+    98 — exactly the 3 new tests, nothing else added or removed).
+  - `pytest -q` (full suite) → 980 passed (up from 977).
 - Deviations/known limitations: none. No model, migration, schema, or product-behavior
-  change — both findings were test-data-realism and documentation-citation issues only.
-- STOP — awaiting Codex re-review. Do not begin `collection_run_provider_attempts`,
-  `user_jobs`, or any other slice, and do not modify `main`.
+  change — all four findings were test-coverage and documentation-accuracy issues
+  only.
+- STOP — awaiting Codex re-review. Do not begin `user_jobs`, `job_notes`, or any other
+  slice, and do not modify `main`.
 
 ### Work review
 
-- Date/reviewer: 2026-08-28, Codex. Diff reviewed: `d400fb7..503c2ab`.
+- Date/reviewer: 2026-08-28, Codex. Diff reviewed: `5b6aee0..f174b35`.
 - Verdict: **approved**. Findings: none.
 - Verified independently:
-  - Every `providers_attempted` fixture/assertion now uses provider identifiers. The
-    Phase 2 partial-success scenario records `fixture_provider` exactly once while its
-    failure retains `source = broken_source`, and explicitly asserts both complete
-    values. No uniqueness constraint or application behavior was added.
-  - The three dangling `§38` references were removed while preserving the surrounding
-    prose. The migration diff changes only its module docstring; migration operations,
-    revision metadata, model mapping, and schema behavior are unchanged.
+  - Raw SQL now proves both accepted ordering boundaries (`completed_at == started_at`
+    and `completed_at > started_at`), complementing the existing rejected-before-start
+    case and completing the approved ORM/direct-SQL matrix.
+  - A committed and refreshed valid row now proves `rate_limited=True` persists while
+    `status='partial'` and `incomplete_results=False`; no CHECK or schema behavior was
+    added.
+  - The model comment, migration module docstring, and `DATA_MODEL.md` now correctly
+    state that PostgreSQL does not automatically index a referencing FK column. The
+    index definition, migration operations/revision metadata, model mapping, and all
+    constraint definitions are unchanged.
+  - The current handoff accurately limits the timestamp coverage claim rather than
+    adding a redundant two-row test.
   - `git diff --check` is clean; repository checker exits 0; Ruff format/check and mypy
-    pass (**42 source files**); targeted suite **76 passed**. Claude's post-correction
-    full-suite result is **879 passed**; the reviewer did not repeat the full suite for
-    this test/comment-only correction after independently running it on the original
-    implementation review.
-- The `collection_runs` implementation and correction pass are accepted. Do not merge
-  to `main`, begin `collection_run_provider_attempts`/another slice, or otherwise
-  advance without explicit user authorization.
+    pass (**44 source files**); targeted suite **101 passed**. Claude's post-correction
+    full-suite result is **980 passed**; the reviewer did not repeat the full suite for
+    this test/comment-only correction after independently running **977 tests** on the
+    original implementation review.
+- The `collection_run_provider_attempts` implementation and correction pass are
+  accepted. Do not merge to `main`, begin `user_jobs`/`job_notes`/another slice, or
+  otherwise advance without explicit user authorization.
 - STOP — reviewer changed only this `Work review`; no implementation files changed.
-
-**Merge record (appended, not a rewrite of the entry above):** Approved at review
-commit `fe51e03`. Per user authorization, `phase-1/collection-runs` was merged into
-`main` with a normal merge commit (`5e8395b`; `--no-ff`, no squash/rebase/force-push)
-and pushed. `main`/`origin/main` are both now at `5e8395b`. Verified: `main` has zero
-content diff against the feature branch; migration `0014` (`down_revision = "0013"`)
-is present and is the sole Alembic head; `python backend/scripts/check_repo.py` (via
-the project's own virtualenv interpreter) exits 0 with zero findings; working tree
-clean. No later Phase 1 table (`collection_run_provider_attempts`, `user_jobs`, or
-otherwise) started or proposed.
