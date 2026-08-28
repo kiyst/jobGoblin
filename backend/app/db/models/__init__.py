@@ -1,6 +1,7 @@
 from app.db.models.candidate_profile import CandidateProfile
 from app.db.models.candidate_skill import CandidateSkill
 from app.db.models.collection_run import CollectionRun
+from app.db.models.collection_run_provider_attempt import CollectionRunProviderAttempt
 from app.db.models.company import Company
 from app.db.models.identity_conflict import IdentityConflict
 from app.db.models.job import Job
@@ -15,6 +16,7 @@ __all__ = [
     "CandidateProfile",
     "CandidateSkill",
     "CollectionRun",
+    "CollectionRunProviderAttempt",
     "Company",
     "IdentityConflict",
     "Job",

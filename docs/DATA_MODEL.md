@@ -1109,10 +1109,11 @@ approval before migration `0014` was written, in addition to the columns/notes a
   explicitly separate, not-yet-designed invariant.
 
 ### `collection_run_provider_attempts`
-**Moved into Phase 1 in Rev 4** (was a "later table," deferred to Phase 9/12 in Rev 2/3 —
-see [ADR 0003](DECISIONS/0003-minimal-phase1-schema.md) and
-[ADR 0005](DECISIONS/0005-raw-ingestion-vs-provider-attempts.md) for why that was wrong:
-Phase 2's fixture-driven ingestion proof already needs to persist partial provider
+**Implemented** (`backend/app/db/models/collection_run_provider_attempt.py`; migration
+`0015`, `down_revision = "0014"`). **Moved into Phase 1 in Rev 4** (was a "later table,"
+deferred to Phase 9/12 in Rev 2/3 — see [ADR 0003](DECISIONS/0003-minimal-phase1-schema.md)
+and [ADR 0005](DECISIONS/0005-raw-ingestion-vs-provider-attempts.md) for why that was
+wrong: Phase 2's fixture-driven ingestion proof already needs to persist partial provider
 results, record source-specific failures, and prove `SourceRunStats` (§ARCHITECTURE.md
 §6.3) round-trips into the database — none of that is possible if this table doesn't
 exist until Phase 9). **Migrated in Phase 1; Phase 2's fixture pipeline is its first
@@ -1130,22 +1131,22 @@ cardinality.
 | column | type | notes |
 |---|---|---|
 | id | UUID PK | |
-| collection_run_id | UUID FK → collection_runs, `ON DELETE CASCADE`, not null | |
-| provider | text, not null | |
-| source | text, not null | |
-| started_at | timestamptz, not null | |
-| completed_at | timestamptz, nullable | nullable only while `status = 'running'` — see `CHECK` below |
-| status | text, not null | enum: `running` / `completed` / `partial` / `failed` |
+| collection_run_id | UUID FK → collection_runs, `ON DELETE CASCADE`, not null | an attempt row has no independent meaning without its parent run — unlike this schema's audit-trail FKs (all `SET NULL`) |
+| provider | text, not null | canonical identifier: lowercased/trimmed by the ORM, `CHECK`-restricted to an already-canonical ASCII-slug value (`^[a-z0-9][a-z0-9._-]*$`) — same treatment as `job_occurrences`/`raw_job_ingestions` |
+| source | text, not null | same canonical-identifier treatment as `provider` |
+| started_at | timestamptz, not null, no server default | supplied explicitly by the attempt-recording code |
+| completed_at | timestamptz, nullable | nullable only while `status = 'running'` — see `CHECK` below; `CHECK (completed_at IS NULL OR completed_at >= started_at)` |
+| status | text, not null, no server default | enum: `running` / `completed` / `partial` / `failed` |
 | jobs_discovered | int, not null, default 0 | `CHECK (jobs_discovered >= 0)` |
 | jobs_inserted | int, not null, default 0 | `CHECK (jobs_inserted >= 0)` |
 | jobs_updated | int, not null, default 0 | `CHECK (jobs_updated >= 0)` |
 | retry_count | int, not null, default 0 | `CHECK (retry_count >= 0)` — summarizes retries within this one source's execution, see cardinality note above |
-| rate_limited | boolean, not null, default false | |
-| error_category | text, nullable | `ProviderErrorCategory` value (ARCHITECTURE.md §6.3) |
-| error_message | text, nullable | sanitized — no secrets/tokens/full stack traces |
-| incomplete_results | boolean, not null, default false | true if this source's own result set may be partial (e.g. hit a result cap, paginated fetch stopped early on rate limit) — distinct from total failure; see the `status = 'partial'`/no-error-required note below |
-| created_at | timestamptz, not null | |
-| updated_at | timestamptz, not null | |
+| rate_limited | boolean, not null, default false | independent of `incomplete_results` and of `status` — no `CHECK` relates any of the three |
+| error_category | text, nullable | `CHECK`-restricted to exactly 8 values reused from `ProviderErrorCategory` (ARCHITECTURE.md §6.3): `timeout`, `rate_limited`, `auth_error`, `blocked`, `parse_error`, `not_found`, `upstream_error`, `unknown`. Kept as a plain string column, not a native Postgres enum type, so adding a category is a single migration adding one `CHECK` value. No ORM case-fold (plain closed-enum column, like `status`) — Phase 2+ must keep this list synchronized with the Python enum by hand |
+| error_message | text, nullable | case-preserving free text: ORM-trimmed with a covered-whitespace-only value collapsed to `NULL` (same treatment as `raw_job_ingestions.error_message`), NULL-safe trim/non-empty `CHECK` pair. Sanitization against secrets/tokens/stack traces is an application-level responsibility — not proven by this `CHECK` |
+| incomplete_results | boolean, not null, default false | true if this source's own result set may be partial (e.g. hit a result cap, paginated fetch stopped early on rate limit) — distinct from total failure; no `CHECK` ties this to `status` (see below) — Phase 2's application logic establishes the normal `status = 'partial'` pairing, not the database |
+| created_at | timestamptz, not null, server_default `now()` | |
+| updated_at | timestamptz, not null, server_default `now()`, ORM `onupdate=func.now()` | |
 
 **Constraints:**
 
@@ -1159,22 +1160,79 @@ CHECK (
   OR
   (status IN ('completed', 'partial', 'failed') AND completed_at IS NOT NULL)
 )
+
+CHECK (completed_at IS NULL OR completed_at >= started_at)
+
+CHECK (jobs_discovered >= 0)
+CHECK (jobs_inserted >= 0)
+CHECK (jobs_updated >= 0)
+CHECK (retry_count >= 0)
+
+CHECK (provider = lower(trim(both E'\t\n\r ' from provider)))
+CHECK (trim(both E'\t\n\r ' from provider) <> '')
+CHECK (provider ~ '^[a-z0-9][a-z0-9._-]*$')
+-- same three, mirrored for source
+
+CHECK (error_category IS NULL OR error_category IN
+  ('timeout', 'rate_limited', 'auth_error', 'blocked', 'parse_error',
+   'not_found', 'upstream_error', 'unknown'))
+
+CHECK (error_message IS NULL OR error_message = trim(both E'\t\n\r ' from error_message))
+CHECK (error_message IS NULL OR trim(both E'\t\n\r ' from error_message) <> '')
 ```
 
-**No `CHECK` ties `error_category`/`error_message` to `status`.** Both are simply
-nullable, for every status. In particular, a `status = 'partial'` row does **not**
-require an error to be populated — incomplete pagination or a hit result cap is a
-successful-but-truncated outcome (`incomplete_results = true`), not necessarily an error
-condition, and forcing one would misrepresent "we got some results, cleanly, just not
-all of them" as a failure. `status = 'failed'` rows are expected (by application
-convention, not a database rule) to populate `error_category`, but nothing in the schema
-enforces that either — the same "don't enforce narrative/soft expectations with `CHECK`"
-principle applied to `identity_conflicts.resolution` above.
+Four constraint names required an explicit, shortened form beyond the naming
+convention's default template: the `collection_run_id` FK, the `status`/`completed_at`
+consistency `CHECK`, the `completed_at`/`started_at` ordering `CHECK`, and the
+`jobs_discovered` non-negative `CHECK` — this table's own name (33 characters) is long
+enough that four of its full constraint names would otherwise exceed Postgres's 63-byte
+identifier limit, verified via direct DDL rendering before the migration was written.
+
+**No `CHECK` ties `error_category`/`error_message` to `status`, nor `incomplete_results`
+to `status`.** All are simply independent columns, for every status. In particular, a
+`status = 'partial'` row does **not** require an error to be populated — incomplete
+pagination or a hit result cap is a successful-but-truncated outcome
+(`incomplete_results = true`), not necessarily an error condition, and forcing one would
+misrepresent "we got some results, cleanly, just not all of them" as a failure. `status =
+'failed'` rows are expected (by application convention, not a database rule) to populate
+`error_category`, but nothing in the schema enforces that either — the same "don't
+enforce narrative/soft expectations with `CHECK`" principle applied to
+`identity_conflicts.resolution` above. Likewise, `incomplete_results = true` is not
+required to imply, nor implied by, `status = 'partial'` at the database level — Phase 2's
+application logic establishes that normal mapping.
 
 **Indexes:** `INDEX (provider, source, started_at DESC)` (the volume-trend query Phase
 12 reads — "give me this source's `jobs_discovered` over time"); `INDEX
 (collection_run_id)` (explicit, in addition to whatever index the FK itself implies, for
 the "all attempts for this run" query).
+
+**Rev 20 changes** (fourteenth Phase 1 implementation slice, `collection_run_provider_
+attempts` — Class H per docs/LLM_WORKFLOW.md): this table's design had several decisions
+resolved by explicit approval before migration `0015` was written, beyond what this
+section already specified:
+- **`error_category` is now database-enforced** as a `CHECK`-restricted enum mirroring
+  `ProviderErrorCategory`'s 8 current values, rather than left as unconstrained free
+  text — matching this schema's general posture of enforcing closed sets at the
+  database. Kept as a plain string column (not a native Postgres enum type) so a future
+  9th category is a single additive migration. Phase 2+ must keep this list
+  synchronized with the Python enum by hand.
+- **A `completed_at >= started_at` ordering `CHECK` was added**, extending the pattern
+  already established on `job_occurrences`/`identity_conflicts`/`collection_runs` —
+  not previously specified for this table.
+- **`provider`/`source` now get the same canonical-identifier `CHECK`/ORM-validator
+  treatment as `job_occurrences`/`raw_job_ingestions`** (lowercased/trimmed, ASCII-slug
+  `CHECK`) — this table's own earlier column list (above, pre-Rev-20) only said "text,
+  not null" with no canonicalization specified.
+- **`error_message` gets the standard nullable-free-text treatment** (ORM trim +
+  blank-to-`NULL`, NULL-safe trim/non-empty `CHECK`) already used for `raw_job_
+  ingestions.error_message` — not previously specified in this table's own column list.
+- **No `CHECK` ties `incomplete_results` to `status`** — considered and explicitly
+  rejected, for the same "don't enforce narrative/soft expectations with `CHECK`"
+  reasoning already applied to `error_category`/`error_message` above.
+- **`collection_run_id` uses `ON DELETE CASCADE`**, confirmed as not a new pattern for
+  this schema (`job_occurrences.job_id`, `candidate_skills.candidate_profile_id`, and
+  the `saved_search_*` child tables already use it) — only the parent-table identity is
+  new here.
 
 ### `user_jobs`
 User state, deliberately isolated from source data (§36). **Rewritten in Rev 2** — see
@@ -1281,9 +1339,9 @@ reviewed against this list directly:
 | `identity_conflicts` | `CHECK` on `status` enum, `conflict_type` enum, `(status, resolved_at)` consistency, `resolved_at >= created_at`, `existing_value`/`incoming_value` shape conditional on `conflict_type` (object for `evidence_mismatch`, array for `ambiguous_match`), `conflict_type <> 'ambiguous_match' OR existing_job_occurrence_id IS NULL` | reject an invalid `status`/`conflict_type`, an inconsistent status/resolution-timestamp pairing, a resolution timestamp before creation, a snapshot with the wrong top-level JSON shape for its conflict type, or an `ambiguous_match` row with a non-null occurrence link — see the table's own section above (Rev 4/18) |
 | `collection_runs` | `INDEX (saved_search_id, started_at DESC)`, `INDEX (status)` | **new in Rev 19** — run history per search and abandoned/still-running-row lookup; lookup support only, does not prevent overlapping runs under concurrency (Phase 9's own database-lock/partial-unique strategy is a separate invariant) |
 | `collection_runs` | `CHECK` on `status` enum, `(status, completed_at)` consistency, `completed_at >= started_at`, non-negative `jobs_discovered`/`jobs_inserted`/`jobs_updated`, NULL-safe non-negative `duration_ms`, `jsonb_typeof(providers_enforced_locally) = 'object'`, `jsonb_typeof(failures) = 'array'` | **new in Rev 19** — reject an invalid `status`, an inconsistent status/`completed_at` pairing, a `completed_at` before `started_at`, a negative counter/duration, or a wrong-shape JSONB value; no `CHECK` ties `failures`/counters to `status` — see the table's own section above (Rev 19) |
-| `collection_run_provider_attempts` | `UNIQUE (collection_run_id, provider, source)` | **new in Rev 4** — one aggregate row per run/provider/source, see table's own section |
-| `collection_run_provider_attempts` | `CHECK` on `status`, `(status, completed_at)`, non-negative `jobs_discovered`/`jobs_inserted`/`jobs_updated`/`retry_count` | **new in Rev 4** |
-| `collection_run_provider_attempts` | `INDEX (provider, source, started_at DESC)`, `INDEX (collection_run_id)` | **new in Rev 4** — Phase 12's volume-trend query and "all attempts for this run" |
+| `collection_run_provider_attempts` | `UNIQUE (collection_run_id, provider, source)` | one aggregate row per run/provider/source, see table's own section |
+| `collection_run_provider_attempts` | `CHECK` on `status` enum, `(status, completed_at)` consistency, `completed_at >= started_at`, non-negative `jobs_discovered`/`jobs_inserted`/`jobs_updated`/`retry_count`, `provider`/`source` canonical-identifier (lowercase/trim/ASCII-slug), `error_category` enum-or-null, `error_message` NULL-safe trim/non-empty | **new in Rev 20** — reject an invalid `status`/`error_category`, an inconsistent status/`completed_at` pairing, a `completed_at` before `started_at`, a negative counter, a non-canonical `provider`/`source`, or a non-normalized/empty `error_message`; no `CHECK` ties `error_category`/`error_message`/`incomplete_results` to `status` — see the table's own section above (Rev 20) |
+| `collection_run_provider_attempts` | `INDEX (provider, source, started_at DESC)`, `INDEX (collection_run_id)` | Phase 12's volume-trend query and "all attempts for this run" |
 | `user_jobs` | `UNIQUE (user_id, job_id)` | one state row per user per job |
 | `user_jobs` | `CHECK` on `(status, applied_at)` | see ADR 0006 — the core invariant fix |
 
