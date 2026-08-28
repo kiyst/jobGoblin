@@ -367,4 +367,27 @@ Nothing below was rewritten — only renumbered.*
 
 ### Work review
 
-*Pending — awaiting Codex.*
+- Date/reviewer: 2026-08-28, Codex. Diff reviewed: `5b6aee0..f174b35`.
+- Verdict: **approved**. Findings: none.
+- Verified independently:
+  - Raw SQL now proves both accepted ordering boundaries (`completed_at == started_at`
+    and `completed_at > started_at`), complementing the existing rejected-before-start
+    case and completing the approved ORM/direct-SQL matrix.
+  - A committed and refreshed valid row now proves `rate_limited=True` persists while
+    `status='partial'` and `incomplete_results=False`; no CHECK or schema behavior was
+    added.
+  - The model comment, migration module docstring, and `DATA_MODEL.md` now correctly
+    state that PostgreSQL does not automatically index a referencing FK column. The
+    index definition, migration operations/revision metadata, model mapping, and all
+    constraint definitions are unchanged.
+  - The current handoff accurately limits the timestamp coverage claim rather than
+    adding a redundant two-row test.
+  - `git diff --check` is clean; repository checker exits 0; Ruff format/check and mypy
+    pass (**44 source files**); targeted suite **101 passed**. Claude's post-correction
+    full-suite result is **980 passed**; the reviewer did not repeat the full suite for
+    this test/comment-only correction after independently running **977 tests** on the
+    original implementation review.
+- The `collection_run_provider_attempts` implementation and correction pass are
+  accepted. Do not merge to `main`, begin `user_jobs`/`job_notes`/another slice, or
+  otherwise advance without explicit user authorization.
+- STOP — reviewer changed only this `Work review`; no implementation files changed.
