@@ -108,6 +108,55 @@ def test_normalize_domain_invalid_idna_returns_none(value: str) -> None:
 
 
 # --------------------------------------------------------------------------
+# Regression: structural checks (www./trailing-dot/IP-literal/multi-label)
+# must run on the canonical, post-UTS-#46-mapping form, not the raw input —
+# UTS #46 mapping can itself turn a Unicode look-alike into the exact ASCII
+# form those checks watch for, letting it bypass a pre-mapping check.
+# Reproduced against the pre-fix implementation at commit 7bd27a7.
+# --------------------------------------------------------------------------
+
+
+def test_normalize_domain_doubled_ascii_trailing_dot_returns_none() -> None:
+    """Two trailing dots must not survive as one — the pre-fix
+    implementation stripped exactly one trailing dot before IDNA ever saw
+    the input, silently discarding evidence of the second (empty) label."""
+    assert normalize_domain("acme.com..") is None
+
+
+def test_normalize_domain_ideographic_full_stop_leading_www_collides() -> None:
+    """U+3002 (IDEOGRAPHIC FULL STOP) maps to ASCII "." under UTS #46, so
+    "www。acme.com" is the same www-prefixed domain as "www.acme.com",
+    not a distinct one."""
+    assert normalize_domain("www。acme.com") == normalize_domain("www.acme.com")
+    assert normalize_domain("www。acme.com") == "acme.com"
+
+
+def test_normalize_domain_fullwidth_full_stop_leading_www_collides() -> None:
+    """U+FF0E (FULLWIDTH FULL STOP) maps to ASCII "." under UTS #46, same
+    rationale as the ideographic full stop above."""
+    assert normalize_domain("www．acme.com") == normalize_domain("www.acme.com")
+    assert normalize_domain("www．acme.com") == "acme.com"
+
+
+def test_normalize_domain_ideographic_full_stop_trailing_root_dot_stripped() -> None:
+    """A UTS-#46-mapped trailing root-label separator must be stripped just
+    like an ASCII trailing dot — it must not survive in the stored value."""
+    assert normalize_domain("acme.com。") == "acme.com"
+
+
+def test_normalize_domain_fullwidth_full_stop_trailing_root_dot_stripped() -> None:
+    assert normalize_domain("acme.com．") == "acme.com"
+
+
+def test_normalize_domain_uts46_mapped_fullwidth_digits_ip_literal_returns_none() -> None:
+    """Fullwidth digits (U+FF10-U+FF19) map to their ASCII equivalents under
+    UTS #46, so "１２７.０.０.１" maps to the IPv4
+    literal "127.0.0.1" — this must be rejected exactly like the plain-ASCII
+    IP literal is, not accepted as an ordinary-looking hostname."""
+    assert normalize_domain("１２７.０.０.１") is None
+
+
+# --------------------------------------------------------------------------
 # Company model — database-backed
 # --------------------------------------------------------------------------
 

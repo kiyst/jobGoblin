@@ -180,6 +180,16 @@ state several implementation decisions, resolved by explicit approval before mig
   rather than failing ingestion — these fields are optional, so a blank value is "not
   provided," not invalid input.
 
+**Rev 13 changes** (first `companies` correction pass, per independent review): fixed a
+real canonicalization-ordering bug in `normalize_domain()` — the `www.`/trailing-dot/
+IP-literal/multi-label structural checks ran on the *pre*-IDNA/UTS #46 input, so a
+Unicode look-alike (the ideographic/fullwidth full stop, fullwidth digits) could bypass
+them by only becoming `www.`/a trailing dot/an IP literal *after* UTS #46 mapping, and a
+doubled ASCII trailing dot lost one dot to pre-mapping stripping before IDNA ever saw
+the resulting empty label. See the corrected algorithm above (step 4 now runs before
+step 5) for the fix; no schema/migration change was needed since this was an
+application-layer normalization bug, not a database-constraint gap.
+
 Conventions used throughout:
 
 - **Minimum supported PostgreSQL version: 16.** See
@@ -465,24 +475,40 @@ company identity resolution is a hard, ongoing problem, not a one-time schema de
 | updated_at | timestamptz, not null | `server_default now()`, ORM `onupdate` |
 
 **Domain normalization (Rev 3, item 8b; completed Rev 4, item 3; implementation detail
-corrected at Rev 12 — see below):** `domain` is always stored pre-normalized by
-`app/normalization/company.py::normalize_domain()` before any insert/update touches this
-column. Full algorithm:
+corrected at Rev 12; ordering corrected at Rev 13 — see below):** `domain` is always
+stored pre-normalized by `app/normalization/company.py::normalize_domain()` before any
+insert/update touches this column. Full algorithm:
 1. Trim, then lowercase the input.
 2. Accept either a bare host or an arbitrary `scheme://` URL — detected only by the
    presence of `://`, so a bare host with a port (e.g. `acme.com:8080`) is never
    misparsed as scheme `acme.com` with path `8080`.
 3. Strip userinfo/credentials (`user:pass@`), the port, path, query string, and
-   fragment — only the host remains.
-4. Strip one leading `www.` and one trailing dot (the DNS root-label separator, e.g.
-   `acme.com.` → `acme.com`).
-5. Reject (return `None`) a single-label host, an IP literal (IPv4 or IPv6, bracketed
-   or bare), an invalid port, or a missing host.
-6. Convert through IDNA2008/UTS #46 (`idna.encode(host, uts46=True, std3_rules=True)` —
-   see Rev 12), which additionally rejects empty labels, invalid punycode, disallowed
-   codepoints (e.g. embedded whitespace, underscores under STD3 rules), and oversized
-   labels/names.
-7. Return the ASCII, lowercase result.
+   fragment — only the host remains. An invalid or missing host/port is rejected
+   (returns `None`) here.
+4. Convert the remaining host through IDNA2008/UTS #46
+   (`idna.encode(host, uts46=True, std3_rules=True)` — see Rev 12), which rejects empty
+   labels, invalid punycode, disallowed codepoints (e.g. embedded whitespace,
+   underscores under STD3 rules), and oversized labels/names.
+5. **Only on this already-canonical, already-ASCII result:** strip one leading `www.`
+   and one trailing dot (the DNS root-label separator, e.g. `acme.com.` → `acme.com`),
+   then reject (return `None`) a single-label host or an IP literal (IPv4 or IPv6,
+   bracketed or bare).
+6. Return the canonical ASCII, lowercase result.
+
+**Why step 4 (IDNA/UTS #46 conversion) must run *before* step 5's structural checks, not
+after (Rev 13 correction — a real bug, not a style preference):** UTS #46 mapping can
+itself turn a Unicode look-alike into the exact ASCII form step 5 is watching for — the
+ideographic full stop `U+3002` and fullwidth full stop `U+FF0E` both map to ASCII `.`;
+fullwidth digits `U+FF10`-`U+FF19` map to ASCII `0`-`9`. Checking "does this look like
+`www.`/an IP literal/a doubled trailing dot" on the *pre-mapping* string lets a Unicode
+form that only becomes that *after* mapping bypass the check entirely. Confirmed against
+the pre-fix implementation: `www。acme.com` (ideographic full stop) failed to collide
+with `www.acme.com`; `acme.com。` kept a root-label separator instead of being stripped;
+a fullwidth-digit rendering of `127.0.0.1` was accepted as an ordinary hostname instead
+of rejected as an IP literal; and `acme.com..` (two ASCII dots) lost one dot to
+pre-mapping stripping before IDNA ever saw the doubled/empty label it should have
+rejected. Running every structural check on the already-canonical output closes all
+four.
 
 **Explicit rule for malformed input:** if the input cannot be parsed into a valid
 hostname at all (empty string, garbage input, a URL with no discernible host, an IP

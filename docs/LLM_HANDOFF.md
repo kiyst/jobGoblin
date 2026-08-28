@@ -97,93 +97,10 @@ that detail.
 ## Iteration 1
 
 *Rotated in from "Iteration 2" per the two-iteration rule: the prior Iteration 1 (the
-first checker correction pass and Codex's review requesting the single-load fix) was
-removed rather than kept alongside a third entry, since this entry's `Work review` and
-merge record (below) mean it is no longer pending either. Nothing below was rewritten —
-only renumbered.*
-
-### Work done
-
-- Date/agent: 2026-08-27, Claude Code (Sonnet 5). Authorized slice: bounded correction
-  pass addressing the sole remaining finding at review commit `5934d1c`, on the same
-  `tooling/repository-validation` branch. Base: `5934d1c`. No CI, `companies`,
-  migration, or product-behavior changes.
-- Outcome: the migration graph is now walked exactly once in the production path, under
-  one `CommandError` boundary.
-  - Added `MigrationGraph` (a frozen dataclass of `heads`/`revisions`) and
-    `_load_migration_graph(script) -> MigrationGraph | Finding`: the single place that
-    calls `script.get_heads()`/`script.walk_revisions()`; a `CommandError` there returns
-    one `Finding` at `backend/migrations:1` instead of propagating.
-  - `_revision_map` now takes a `MigrationGraph` (derives the citation map from the
-    already-walked `revisions`, no second walk); `check_migration_chain_integrity` now
-    takes a `MigrationGraph` too (pure structural checks only — no longer does its own
-    try/except, since loading already happened once upstream).
-  - `run_checks()` calls `_load_migration_graph` once; on failure it appends that one
-    finding, skips `check_alembic_references` entirely for every file (no valid revision
-    map exists to check citations against), still runs the graph-independent checks
-    (links/anchors, duplicate-summary rows, constraints-table integrity), and skips
-    `check_migration_chain_integrity` (nothing further to say about a graph that failed
-    to load).
-- Files changed:
-  - `backend/scripts/check_repo.py` — the single-load refactor above; module docstring
-    updated to describe it.
-  - `backend/tests/test_check_repo.py` — added
-    `test_run_checks_and_cli_survive_a_migration_graph_load_failure`: monkeypatches
-    `_script_directory` to return a stub whose `walk_revisions()` raises `CommandError`,
-    then asserts `run_checks()` returns exactly one `backend/migrations:1: ...` finding
-    (no exception escapes) and that `main()` returns exit code `1`.
-- Commands run and exact results:
-  - `python scripts/check_repo.py` from `backend/` → exit 0, zero findings.
-  - Same script invoked from an unrelated working directory → exit 0.
-  - `ruff format --check .` → 36 files already formatted.
-  - `ruff check .` → all checks passed.
-  - `mypy app tests scripts` → success, 27 source files.
-  - `pytest tests/test_check_repo.py -v` → 34 passed (33 prior + 1 new).
-  - `pytest -q` (full suite) → 240 passed.
-  - `git status`/`git diff --check` → only `backend/scripts/check_repo.py` and
-    `backend/tests/test_check_repo.py` changed; no whitespace/conflict errors.
-- Deviations/known limitations: none.
-- STOP — awaiting Codex review. Do not add CI, begin `companies`, modify migrations, or
-  alter product behavior.
-
-### Work review
-
-- Date/reviewer: 2026-08-27, Codex. Correction diff reviewed:
-  `5934d1c..0dea3e2` on `tooling/repository-validation`; branch clean and synchronized
-  with origin before this review entry.
-- Independent verification:
-  - Inspected the single-load `MigrationGraph` refactor and orchestration-level failure
-    test. `get_heads()`/`walk_revisions()` now occur only inside
-    `_load_migration_graph()` under one `CommandError` boundary; graph-dependent checks
-    are skipped after load failure while independent checks still run.
-  - Confirmed the injected failure produces one repository-relative
-    `backend/migrations:1: ...` finding and makes `main()` return nonzero without an
-    exception escaping.
-  - `python scripts/check_repo.py` from `backend`: exit 0, zero findings.
-  - Same checker invoked from an unrelated working directory: exit 0, zero findings.
-  - `ruff format --check .`, `ruff check .`: passed (36 files).
-  - `mypy app tests scripts`: passed (27 source files).
-  - `pytest -q` with a reviewer-writable temporary root: 240 passed.
-- Findings: none.
-- Missing/inconclusive checks: none. This tooling is intentionally offline and
-  database-free; no migration or product-runtime file changed.
-- Verdict: approved.
-- Exact requested corrections: none. The repository-validation tooling slice and its
-  correction passes are accepted. Do not add CI, begin `companies`, or merge/modify
-  `main` until the user explicitly authorizes the next action.
-- STOP — reviewer changed only this `Work review`; no implementation files were changed.
-
-**Merge record (appended, not a rewrite of the entry above):** Approved at review
-commit `fc12091`. Per user authorization, `tooling/repository-validation` was
-fast-forward merged into `main` (no merge commit; `main` was a strict ancestor) and
-pushed. `main`/`origin/main` are both now at `fc12091`. Verified: `main` has zero
-content diff against the feature branch; `python scripts/check_repo.py` from `backend/`
-exits 0 with zero findings; working tree clean. No squash/rebase/force-push/branch-
-deletion. `companies` not started.
-
----
-
-## Iteration 2
+final tooling checker correction pass, its approval, and the merge record) was removed
+rather than kept alongside a third entry, since this entry's `Work review` (below)
+requested changes that are being addressed in this rotation's Iteration 2. Nothing below
+was rewritten — only renumbered.*
 
 ### Work done
 
@@ -316,3 +233,60 @@ deletion. `companies` not started.
   5. Do not begin `jobs`, implement reconciliation, add CI, merge/modify `main`, or expand
      the normalization contract beyond this canonical-form validation fix.
 - STOP — reviewer changed only this `Work review`; no implementation files were changed.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-08-28, Claude Code (Sonnet 5). Authorized slice: bounded correction
+  pass addressing the sole finding at review commit `7bd27a7`, on the same
+  `phase-1/companies` branch. Base: `7bd27a7`. No `jobs`, reconciliation, CI, or `main`
+  changes.
+- Outcome: `normalize_domain()`'s structural checks (`www.`/trailing-dot strip,
+  IP-literal rejection, multi-label check) now run on the canonical, post-IDNA/UTS #46
+  value, not the raw pre-mapping input — closing the exact bypasses the review
+  reproduced. Reordered `app/normalization/company.py`: userinfo/port/path/query/
+  fragment extraction is unchanged (pure URI-delimiter syntax, no UTS #46 ambiguity),
+  but `idna.encode(host, uts46=True, std3_rules=True)` now runs immediately on the
+  extracted host, and only the resulting canonical ASCII string is then checked for a
+  leading `www.`, a trailing root dot, an IP literal, and multi-label shape. Verified
+  behavior-preserving for every previously-passing case (pure-ASCII mapping is an
+  identity transform) and confirmed fixed for all four reproduced bypasses.
+- Files changed:
+  - `backend/app/normalization/company.py` — reordered as above; docstring explains why
+    IDNA/UTS #46 must run before the structural checks, with the exact bypass evidence.
+  - `backend/tests/test_companies.py` — 6 new regression tests: an ASCII doubled
+    trailing dot (`acme.com..`) returning `None`; U+3002 (ideographic full stop) and
+    U+FF0E (fullwidth full stop) each proven equivalent to `www.`/a trailing dot for
+    both the leading-`www` and trailing-root-dot cases (4 tests); UTS-46-mapped
+    fullwidth digits producing an IPv4 literal (`１２７.０.０.１` -> `127.0.0.1`)
+    returning `None`.
+  - `docs/DATA_MODEL.md` — corrected the domain-normalization algorithm's step order
+    (IDNA/UTS #46 conversion now documented as running before the `www.`/trailing-dot/
+    IP-literal/multi-label checks, not after); added a "Rev 13" note explaining the bug
+    and fix, with the same four reproduced-bypass examples.
+- Commands run and exact results:
+  - `python scripts/check_repo.py` (from `backend/`) → exit 0, zero findings.
+  - `ruff format --check .`, `ruff check .` → passed (41 files).
+  - `mypy app tests scripts` → success, 31 source files.
+  - `pytest tests/test_companies.py -v` → 75 passed (69 prior + 6 new).
+  - `pytest -q` (full suite) → 315 passed.
+  - `DATABASE_URL=...jobgoblin_test`: `alembic downgrade 0008` / `upgrade head`
+    (round-trip), `alembic check` (`No new upgrade operations detected` — same
+    informational `Computed`-column `UserWarning` as before) — no migration change was
+    needed or made, since this was a pure application-layer normalization bug.
+  - `alembic current` against the **development** database (no override) → `0006`,
+    unchanged.
+  - `git status`/`git diff --check` → only `backend/app/normalization/company.py`,
+    `backend/tests/test_companies.py`, and `docs/DATA_MODEL.md` changed; no whitespace/
+    conflict errors.
+- Deviations/known limitations: none. Migration `0009` was not touched — no schema drift
+  was found or expected, per the review's own condition for touching it.
+- STOP — awaiting Codex review. Do not begin `jobs`, implement reconciliation, add CI, or
+  modify `main`.
+
+### Work review
+
+*Pending — awaiting Codex.*

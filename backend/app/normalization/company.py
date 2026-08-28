@@ -34,11 +34,25 @@ def normalize_domain(value: str | None) -> str | None:
     single ASCII hostname used for `companies.domain` identity matching.
 
     Steps: trim; lowercase; accept either a bare host or a `scheme://` URL;
-    strip userinfo, port, path, query, and fragment; strip one leading
-    `www.` and one trailing DNS root-label dot; convert through IDNA2008/
-    UTS #46 (rejecting anything that isn't a syntactically valid multi-label
-    hostname — single-label hosts, IP literals, empty labels, invalid ports,
-    and oversized names all return `None`, never raise).
+    strip userinfo, port, path, query, and fragment; convert the remaining
+    host through IDNA2008/UTS #46 into its canonical ASCII form; only then
+    strip one leading `www.` and one trailing DNS root-label dot, and
+    reject anything that isn't a syntactically valid multi-label hostname
+    (single-label hosts, IP literals, empty labels, invalid ports, and
+    oversized names all return `None`, never raise).
+
+    IDNA/UTS #46 conversion must happen *before* the `www.`/trailing-dot/
+    IP-literal/multi-label checks, not after: UTS #46 mapping can itself
+    turn a Unicode look-alike into the exact ASCII form those checks are
+    watching for (e.g. the ideographic full stop U+3002 or fullwidth
+    U+FF0E both map to ASCII "."; fullwidth digits U+FF10-U+FF19 map to
+    ASCII "0"-"9"). Checking the *pre-mapping* string lets a Unicode form
+    that only becomes `www.`/a trailing dot/an IP literal *after* mapping
+    bypass every one of those checks — confirmed at commit `7bd27a7`:
+    `www。acme.com` failed to collide with `acme.com`, `acme.com。`
+    kept a root-label separator, and full-width `127.0.0.1` was accepted as
+    a hostname. Running the checks on the already-canonical, already-ASCII
+    output closes all three.
     """
     if value is None:
         return None
@@ -60,8 +74,11 @@ def normalize_domain(value: str | None) -> str | None:
         return None
 
     if authority.startswith("["):
-        # Bracketed IPv6 literal, e.g. "[::1]:8080" — the bracketed content
-        # is the host; it is rejected as an IP literal below regardless.
+        # Bracketed IPv6 literal, e.g. "[::1]:8080" — RFC 3986 defines
+        # bracket syntax only for an IP literal, never a hostname; the
+        # bracketed content is extracted as "host" purely so IDNA encoding
+        # below fails on it (colons are not valid hostname codepoints)
+        # rather than on the surrounding bracket/port syntax.
         end = authority.find("]")
         if end == -1:
             return None
@@ -76,30 +93,34 @@ def normalize_domain(value: str | None) -> str | None:
     else:
         # No colon (no port), or more than one colon (a bare, unbracketed
         # IPv6 literal) — treat the whole thing as the host either way; a
-        # bare IPv6 literal is rejected as an IP literal below, and any
-        # other multi-colon garbage fails IDNA encoding below.
+        # bare IPv6 literal fails IDNA encoding below (colons are not valid
+        # hostname codepoints), as does any other multi-colon garbage.
         host = authority
 
-    if host.startswith("www."):
-        host = host[4:]
-    if host.endswith("."):
-        host = host[:-1]
     if not host:
         return None
-
-    try:
-        ipaddress.ip_address(host)
-    except ValueError:
-        pass
-    else:
-        return None  # an IP literal is not a valid company domain
-
-    if "." not in host:
-        return None  # a single-label host is not a valid company domain
 
     try:
         encoded = idna.encode(host, uts46=True, std3_rules=True)
     except (idna.IDNAError, UnicodeError, ValueError):
         return None
+    canonical = encoded.decode("ascii").lower()
 
-    return encoded.decode("ascii").lower()
+    if canonical.startswith("www."):
+        canonical = canonical[4:]
+    if canonical.endswith("."):
+        canonical = canonical[:-1]
+    if not canonical:
+        return None
+
+    try:
+        ipaddress.ip_address(canonical)
+    except ValueError:
+        pass
+    else:
+        return None  # an IP literal is not a valid company domain
+
+    if "." not in canonical:
+        return None  # a single-label host is not a valid company domain
+
+    return canonical
