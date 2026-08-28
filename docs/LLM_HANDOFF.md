@@ -391,3 +391,13 @@ Nothing below was rewritten — only renumbered.*
   accepted. Do not merge to `main`, begin `user_jobs`/`job_notes`/another slice, or
   otherwise advance without explicit user authorization.
 - STOP — reviewer changed only this `Work review`; no implementation files changed.
+
+**Merge record (appended, not a rewrite of the entry above):** Approved at review
+commit `6a0b907`. Per user authorization, `phase-1/collection-run-provider-attempts`
+was merged into `main` with a normal merge commit (`936c8ad`; `--no-ff`, no
+squash/rebase/force-push) and pushed. `main`/`origin/main` are both now at `936c8ad`.
+Verified: `main` has zero content diff against the feature branch; migration `0015`
+(`down_revision = "0014"`) is present and is the sole Alembic head; `python
+backend/scripts/check_repo.py` (via the project's own virtualenv interpreter) exits 0
+with zero findings; working tree clean. No later Phase 1 table (`user_jobs`,
+`job_notes`) started or proposed.
