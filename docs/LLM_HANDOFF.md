@@ -432,4 +432,25 @@ below was rewritten — only renumbered.*
 
 ### Work review
 
-*Pending — awaiting Codex re-review.*
+- Date/reviewer: 2026-08-28, Codex. Diff reviewed: correction commit `112c6d8`,
+  integration merge `d79ddec`, and handoff commit `5ea43ca`, against the requested
+  corrections recorded at `5ad85bd`.
+- Verdict: **approved**. Findings: none.
+- Verified independently:
+  - Inspected the implementation, migration/model parity, factory changes, tests,
+    documentation, and branch ancestry. `3d47cd6` is now an ancestor of the feature
+    branch; `main`/`origin/main` remain untouched at `3d47cd6`.
+  - Manual adversarial probes confirmed embedded space/TAB/LF/CR rejection, accepted
+    outer wrapper whitespace, percent-encoded whitespace preservation, ASCII and
+    UTS #46 root-dot equivalence, and doubled/bare-dot rejection.
+  - Repository checker, `ruff format --check`, `ruff check`, and
+    `mypy app tests scripts` passed.
+  - `tests/test_job_occurrences.py`: **150 passed**. Full suite: **663 passed**.
+  - `alembic check` against `jobgoblin_test`: no new upgrade operations; test schema
+    is at `0011 (head)`. The reviewer did not repeat Claude's destructive migration
+    downgrade/fresh-rebuild sequence.
+- The five bounded findings from `5ad85bd` are resolved. The `job_occurrences` slice
+  is accepted. Do not merge it to `main`, begin another table, or advance into
+  ingestion/providers/matching/reconciliation until the user explicitly authorizes
+  the next action.
+- STOP — reviewer changed only this `Work review`; no implementation files changed.
