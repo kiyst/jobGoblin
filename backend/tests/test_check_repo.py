@@ -3,9 +3,12 @@ import sys
 from pathlib import Path
 
 from scripts.check_repo import (
+    REPO_ROOT,
     _anchors_for_text,
     _chain_integrity_findings,
+    _display_path,
     check_alembic_references,
+    check_constraints_table_integrity,
     check_duplicate_constraint_rows,
     check_links_and_anchors,
     run_checks,
@@ -218,6 +221,45 @@ def test_different_where_predicate_is_not_a_duplicate() -> None:
 
 
 # --------------------------------------------------------------------------
+# Constraints-table fail-closed integrity (guards against silent no-op
+# extraction failure in check_duplicate_constraint_rows)
+# --------------------------------------------------------------------------
+
+
+def test_missing_constraints_summary_section_is_flagged() -> None:
+    text = "# Some Other Document\n\nThere is no constraints table here at all.\n"
+
+    findings = check_constraints_table_integrity(Path("fake.md"), text)
+
+    assert len(findings) == 1
+    assert "constraints-summary table not found" in findings[0].message
+
+
+def test_section_with_no_extractable_signatures_is_flagged() -> None:
+    """Rows exist, but none contain a parseable UNIQUE/INDEX span — e.g. the
+    heading was kept but every row is CHECK-only, or the backtick syntax
+    changed enough that extraction silently produces nothing at all."""
+    text = _TABLE_HEADER + "| `widgets` | `CHECK` on `status` | first |\n"
+
+    findings = check_constraints_table_integrity(Path("fake.md"), text)
+
+    assert len(findings) == 1
+    assert "no UNIQUE/INDEX signature could be parsed" in findings[0].message
+
+
+def test_section_with_at_least_one_signature_is_not_flagged() -> None:
+    text = (
+        _TABLE_HEADER
+        + "| `widgets` | `CHECK` on `status` | first |\n"
+        + "| `gadgets` | `UNIQUE (a)` | second |\n"
+    )
+
+    findings = check_constraints_table_integrity(Path("fake.md"), text)
+
+    assert findings == []
+
+
+# --------------------------------------------------------------------------
 # Stale/nonexistent Alembic revision references
 # --------------------------------------------------------------------------
 
@@ -230,6 +272,25 @@ def test_nonexistent_revision_reference_is_flagged() -> None:
 
     assert len(findings) == 1
     assert "0002" in findings[0].message
+
+
+def test_existing_revision_at_0010_or_later_is_not_flagged() -> None:
+    revision_map: dict[str, str | None] = {"0001": None, "0010": "0001"}
+    text = "See migration `0010` for details.\n"
+
+    findings = check_alembic_references(Path("fake.md"), text, revision_map)
+
+    assert findings == []
+
+
+def test_nonexistent_revision_at_0010_or_later_is_flagged() -> None:
+    revision_map: dict[str, str | None] = {"0001": None, "0010": "0001"}
+    text = "See migration `0099` for details.\n"
+
+    findings = check_alembic_references(Path("fake.md"), text, revision_map)
+
+    assert len(findings) == 1
+    assert "0099" in findings[0].message
 
 
 def test_down_revision_mismatch_is_flagged() -> None:
@@ -255,8 +316,15 @@ def test_correct_down_revision_citation_is_not_flagged() -> None:
 # --------------------------------------------------------------------------
 
 
+RevisionParentT = str | tuple[str, ...] | None
+
+
 def test_clean_linear_chain_has_no_findings() -> None:
-    revisions = [("0001", None), ("0002", "0001"), ("0003", "0002")]
+    revisions: list[tuple[str, RevisionParentT]] = [
+        ("0001", None),
+        ("0002", "0001"),
+        ("0003", "0002"),
+    ]
 
     findings = _chain_integrity_findings("migrations", ["0003"], revisions)
 
@@ -264,13 +332,93 @@ def test_clean_linear_chain_has_no_findings() -> None:
 
 
 def test_forked_chain_is_flagged() -> None:
-    revisions = [("0001", None), ("0002", "0001"), ("0003", "0001")]
+    revisions: list[tuple[str, RevisionParentT]] = [
+        ("0001", None),
+        ("0002", "0001"),
+        ("0003", "0001"),
+    ]
 
     findings = _chain_integrity_findings("migrations", ["0002", "0003"], revisions)
 
     messages = " ".join(f.message for f in findings)
     assert "head" in messages
     assert "0001" in messages
+
+
+def test_missing_migration_parent_is_flagged() -> None:
+    """`0002` claims a down_revision of `9999`, which no revision in the
+    chain actually has."""
+    revisions: list[tuple[str, RevisionParentT]] = [("0001", None), ("0002", "9999")]
+
+    findings = _chain_integrity_findings("migrations", ["0002"], revisions)
+
+    assert any("nonexistent parent" in f.message and "9999" in f.message for f in findings)
+
+
+def test_disconnected_migration_graph_is_flagged() -> None:
+    """`0004`/`0005` form their own closed loop, sharing no down_revision
+    with the real `0001 -> 0002 -> 0003` chain and never being cited as
+    anyone else's parent — so the head/base/shared-down-revision checks
+    alone cannot see them; only walking the graph from the head can."""
+    revisions: list[tuple[str, RevisionParentT]] = [
+        ("0001", None),
+        ("0002", "0001"),
+        ("0003", "0002"),
+        ("0004", "0005"),
+        ("0005", "0004"),
+    ]
+
+    findings = _chain_integrity_findings("migrations", ["0003"], revisions)
+
+    messages = " ".join(f.message for f in findings)
+    assert "disconnected" in messages or "not reachable" in messages
+    assert "0004" in messages
+    assert "0005" in messages
+
+
+def test_rejection_of_tuple_or_merge_parents() -> None:
+    """This project requires a single unbranched migration chain — a merge
+    revision (multiple parents, as Alembic represents with a tuple
+    down_revision) must be rejected outright, not silently followed."""
+    revisions: list[tuple[str, str | tuple[str, ...] | None]] = [
+        ("0001", None),
+        ("0002", "0001"),
+        ("0003", ("0001", "0002")),
+    ]
+
+    findings = _chain_integrity_findings("migrations", ["0003"], revisions)
+
+    assert any(
+        "0003" in f.message and ("merge" in f.message or "multiple parents" in f.message)
+        for f in findings
+    )
+
+
+# --------------------------------------------------------------------------
+# Repository-relative CLI finding paths
+# --------------------------------------------------------------------------
+
+
+def test_real_repository_file_path_is_rendered_repository_relative() -> None:
+    real_file = Path(__file__).resolve()
+
+    assert _display_path(real_file) == "backend/tests/test_check_repo.py"
+
+
+def test_synthetic_nonexistent_path_is_left_unchanged() -> None:
+    assert _display_path(Path("fake.md")) == "fake.md"
+
+
+def test_broken_link_finding_uses_a_repository_relative_path() -> None:
+    """Exercises `_display_path` through the production `check_links_and_
+    anchors` entry point against a real file, not just directly."""
+    real_readme = REPO_ROOT / "README.md"
+    source_text = "See [missing](does-not-exist-anywhere.md) for details.\n"
+
+    findings = check_links_and_anchors(real_readme, source_text, {})
+
+    assert len(findings) == 1
+    assert findings[0].path == "README.md"
 
 
 # --------------------------------------------------------------------------

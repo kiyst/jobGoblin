@@ -12,17 +12,26 @@ this for documentation and migration changes):
    predicate) per table — not by comparing whole rows or every column any
    CHECK happens to mention, which would miss a duplicate whose other row
    documents additional CHECKs (the exact defect this tool was built to
-   catch; see the `saved_search_locations` regression test).
-3. Stale or nonexistent Alembic migration-revision references in product
+   catch; see the `saved_search_locations` regression test). A companion
+   check fails closed if the table itself goes missing or its syntax
+   changes enough that zero signatures can be parsed from it at all.
+3. Stale or nonexistent Alembic migration-revision references (any
+   four-digit, leading-zero revision, not just `0000`-`0009`) in product
    documentation.
-4. Migration-chain integrity (exactly one head, exactly one baseline,
-   no forked chain), read via Alembic's own `ScriptDirectory` — never a
-   database connection.
+4. Migration-chain integrity — exactly one head, exactly one baseline, no
+   forked chain, no dangling/nonexistent parent, no merge (multi-parent)
+   revision, and full connectivity from the head back to the baseline —
+   read via Alembic's own `ScriptDirectory`, never a database connection.
+   A malformed graph that Alembic itself refuses to load is reported as a
+   normal finding rather than an uncontrolled traceback.
 
 `docs/LLM_HANDOFF.md` is a rotating historical ledger (see
 docs/LLM_WORKFLOW.md) and is excluded from checks 2 and 3, since it
 deliberately preserves superseded wording verbatim as review history. It is
 still covered by check 1 — a broken link is a bug regardless of file.
+
+Every finding's path is rendered repository-relative (e.g.
+`docs/DATA_MODEL.md`), not an absolute, checkout-dependent path.
 
 Run from anywhere; all paths are resolved from this file's own location, not
 the current working directory:
@@ -42,6 +51,7 @@ from pathlib import Path
 
 from alembic.config import Config
 from alembic.script import ScriptDirectory
+from alembic.util.exc import CommandError
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 BACKEND_DIR = SCRIPTS_DIR.parent
@@ -55,6 +65,7 @@ MIGRATIONS_DIR = BACKEND_DIR / "migrations"
 HISTORICAL_LEDGER_FILES = frozenset({"LLM_HANDOFF.md"})
 
 CONSTRAINTS_TABLE_HEADING = "## Phase 1 constraints & indexes"
+DATA_MODEL_FILENAME = "DATA_MODEL.md"
 
 
 @dataclass(frozen=True, order=True)
@@ -65,6 +76,21 @@ class Finding:
 
     def __str__(self) -> str:
         return f"{self.path}:{self.line}: {self.message}"
+
+
+def _display_path(path: Path) -> str:
+    """Repository-relative path (forward-slash, checkout-independent) for a
+    real file inside this repository, e.g. `docs/DATA_MODEL.md` instead of
+    an absolute path that differs between machines. Falls back to the given
+    path unchanged when it doesn't exist on disk — synthetic paths used by
+    unit tests (e.g. `Path("fake.md")`) are left exactly as given."""
+    resolved = path.resolve()
+    if resolved.exists():
+        try:
+            return str(resolved.relative_to(REPO_ROOT)).replace("\\", "/")
+        except ValueError:
+            pass
+    return str(path)
 
 
 # --------------------------------------------------------------------------
@@ -137,7 +163,11 @@ def check_links_and_anchors(
             target_path = (path.parent / file_part).resolve()
             if not target_path.exists():
                 findings.append(
-                    Finding(str(path), line_no, f"broken link: target does not exist: {file_part}")
+                    Finding(
+                        _display_path(path),
+                        line_no,
+                        f"broken link: target does not exist: {file_part}",
+                    )
                 )
                 continue
         else:
@@ -150,7 +180,7 @@ def check_links_and_anchors(
             if anchor_part not in _anchors_for_text(target_text):
                 findings.append(
                     Finding(
-                        str(path),
+                        _display_path(path),
                         line_no,
                         f"broken anchor: #{anchor_part} not found in " f"{file_part or path.name}",
                     )
@@ -294,6 +324,7 @@ def _parse_constraints_table(text: str) -> list[tuple[int, str, str]]:
 
 def check_duplicate_constraint_rows(path: Path, text: str) -> list[Finding]:
     findings: list[Finding] = []
+    display_path = _display_path(path)
     by_table: dict[str, list[tuple[int, str]]] = {}
     for line_no, table_name, cell in _parse_constraints_table(text):
         by_table.setdefault(table_name, []).append((line_no, cell))
@@ -309,7 +340,7 @@ def check_duplicate_constraint_rows(path: Path, text: str) -> list[Finding]:
             if first_line is not None:
                 findings.append(
                     Finding(
-                        str(path),
+                        display_path,
                         line_no,
                         f"duplicate constraints-summary row for `{table_name}` is "
                         f"identical to the row at line {first_line}",
@@ -326,7 +357,7 @@ def check_duplicate_constraint_rows(path: Path, text: str) -> list[Finding]:
                     kind, columns, where = signature
                     findings.append(
                         Finding(
-                            str(path),
+                            display_path,
                             line_no,
                             f"duplicate constraints-summary row for `{table_name}`: "
                             f"{kind} on {columns} (where={where!r}) already declared "
@@ -338,11 +369,41 @@ def check_duplicate_constraint_rows(path: Path, text: str) -> list[Finding]:
     return findings
 
 
+def check_constraints_table_integrity(path: Path, text: str) -> list[Finding]:
+    """Guards against `check_duplicate_constraint_rows` failing open: that
+    function returns an empty (indistinguishable-from-clean) result if the
+    "Phase 1 constraints & indexes" heading disappears, its table shape
+    changes so no rows parse, or every row's UNIQUE/INDEX syntax changes so
+    no signature can be extracted at all. Only meaningful for
+    `docs/DATA_MODEL.md`, the file that must contain this table."""
+    rows = _parse_constraints_table(text)
+    display_path = _display_path(path)
+    if not rows:
+        return [
+            Finding(
+                display_path,
+                1,
+                f"'{CONSTRAINTS_TABLE_HEADING}' constraints-summary table not found "
+                "or has no data rows",
+            )
+        ]
+    if not any(_extract_constraint_signatures(cell) for _, _, cell in rows):
+        return [
+            Finding(
+                display_path,
+                1,
+                f"'{CONSTRAINTS_TABLE_HEADING}' table has {len(rows)} row(s) but no "
+                "UNIQUE/INDEX signature could be parsed from any of them",
+            )
+        ]
+    return []
+
+
 # --------------------------------------------------------------------------
 # Alembic revision references and migration-chain integrity
 # --------------------------------------------------------------------------
 
-_BARE_REVISION_RE = re.compile(r"`(000\d)`")
+_BARE_REVISION_RE = re.compile(r"`(0\d{3})`")
 _MIGRATION_CITATION_RE = re.compile(
     r"migration\s+`(\d{4})`[^`]{0,60}`down_revision\s*=\s*\"(\d{4})\"`", re.DOTALL
 )
@@ -368,12 +429,13 @@ def check_alembic_references(
     path: Path, text: str, revision_map: dict[str, str | None]
 ) -> list[Finding]:
     findings: list[Finding] = []
+    display_path = _display_path(path)
     for match in _BARE_REVISION_RE.finditer(text):
         revision = match.group(1)
         if revision not in revision_map:
             line_no = text.count("\n", 0, match.start()) + 1
             findings.append(
-                Finding(str(path), line_no, f"references nonexistent migration `{revision}`")
+                Finding(display_path, line_no, f"references nonexistent migration `{revision}`")
             )
     for match in _MIGRATION_CITATION_RE.finditer(text):
         revision, claimed_down = match.groups()
@@ -384,7 +446,7 @@ def check_alembic_references(
             line_no = text.count("\n", 0, match.start()) + 1
             findings.append(
                 Finding(
-                    str(path),
+                    display_path,
                     line_no,
                     f"migration `{revision}` documented with down_revision "
                     f'"{claimed_down}", but its actual down_revision is {actual_down!r}',
@@ -393,12 +455,17 @@ def check_alembic_references(
     return findings
 
 
+RevisionParent = str | tuple[str, ...] | None
+
+
 def _chain_integrity_findings(
-    location: str, heads: list[str], revisions: list[tuple[str, str | None]]
+    location: str, heads: list[str], revisions: list[tuple[str, RevisionParent]]
 ) -> list[Finding]:
     """Pure logic, independent of Alembic's API — takes plain (revision,
     down_revision) pairs so it's directly unit-testable with synthetic data,
-    not just against the real migrations/ directory."""
+    not just against the real migrations/ directory. `down_revision` may be
+    a tuple for a merge revision; this project requires a single unbranched
+    chain, so any tuple parent is rejected outright rather than followed."""
     findings: list[Finding] = []
 
     if len(heads) != 1:
@@ -406,12 +473,37 @@ def _chain_integrity_findings(
             Finding(location, 1, f"expected exactly one migration head, found {sorted(heads)}")
         )
 
-    down_revision_owners: dict[str | None, list[str]] = {}
+    all_revisions = {revision for revision, _ in revisions}
+    down_revision_owners: dict[RevisionParent, list[str]] = {}
     bases: list[str] = []
+    parent_of: dict[str, str] = {}
+    merge_revisions: set[str] = set()
+
     for revision, down in revisions:
         down_revision_owners.setdefault(down, []).append(revision)
+        if isinstance(down, tuple):
+            merge_revisions.add(revision)
+            findings.append(
+                Finding(
+                    location,
+                    1,
+                    f"migration `{revision}` has multiple parents {sorted(down)} (a "
+                    "merge revision); this project requires a single unbranched chain",
+                )
+            )
+            continue
         if down is None:
             bases.append(revision)
+            continue
+        parent_of[revision] = down
+        if down not in all_revisions:
+            findings.append(
+                Finding(
+                    location,
+                    1,
+                    f"migration `{revision}` references nonexistent parent `{down}`",
+                )
+            )
 
     if len(bases) != 1:
         findings.append(
@@ -431,21 +523,52 @@ def _chain_integrity_findings(
                     f"multiple migrations share down_revision {down!r}: {sorted(owners)}",
                 )
             )
+
+    if len(heads) == 1:
+        head = heads[0]
+        reachable: set[str] = set()
+        current: str | None = head
+        while current is not None and current not in reachable:
+            reachable.add(current)
+            current = parent_of.get(current)
+        unreachable = all_revisions - reachable - merge_revisions
+        if unreachable:
+            findings.append(
+                Finding(
+                    location,
+                    1,
+                    "migration graph is disconnected: revision(s) "
+                    f"{sorted(unreachable)} are not reachable by walking parents "
+                    f"from head `{head}`",
+                )
+            )
+
     return findings
 
 
+def _normalize_down_revision(down: object) -> RevisionParent:
+    if down is None or isinstance(down, str):
+        return down
+    if isinstance(down, list | tuple):
+        return tuple(str(item) for item in down)
+    return str(down)
+
+
 def check_migration_chain_integrity(script: ScriptDirectory) -> list[Finding]:
-    heads = list(script.get_heads())
-    revisions = [
-        (
-            rev.revision,
-            rev.down_revision
-            if isinstance(rev.down_revision, str) or rev.down_revision is None
-            else str(rev.down_revision),
-        )
-        for rev in script.walk_revisions()
-    ]
-    return _chain_integrity_findings(str(MIGRATIONS_DIR), heads, revisions)
+    """Alembic eagerly resolves the whole revision graph while walking it, so
+    a broken parent reference can raise before this function gets a chance
+    to inspect it structurally; convert that into a normal finding instead
+    of an uncontrolled traceback."""
+    location = _display_path(MIGRATIONS_DIR)
+    try:
+        heads = list(script.get_heads())
+        revisions = [
+            (rev.revision, _normalize_down_revision(rev.down_revision))
+            for rev in script.walk_revisions()
+        ]
+    except CommandError as exc:
+        return [Finding(location, 1, f"failed to load migration graph: {exc}")]
+    return _chain_integrity_findings(location, heads, revisions)
 
 
 # --------------------------------------------------------------------------
@@ -479,6 +602,8 @@ def run_checks() -> list[Finding]:
         text = file_texts[path.resolve()]
         findings.extend(check_duplicate_constraint_rows(path, text))
         findings.extend(check_alembic_references(path, text, revision_map))
+        if path.name == DATA_MODEL_FILENAME:
+            findings.extend(check_constraints_table_integrity(path, text))
 
     findings.extend(check_migration_chain_integrity(script))
 

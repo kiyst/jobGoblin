@@ -96,91 +96,11 @@ that detail.
 
 ## Iteration 1
 
-*Rotated in from "Iteration 2" per the two-iteration rule: both this entry's and the
-prior Iteration 1's `Work review` are no longer pending (both approved, both already
-merged to `main`), so the prior Iteration 1 (the `saved_search_locations` implementation
-pass and Codex's first review requesting the doc correction) was removed rather than
-kept alongside a third entry. Nothing below was rewritten — only renumbered.*
-
-### Work done
-
-- Date and agent: 2026-08-26, Claude Code (Sonnet 5).
-- Approved phase/slice: documentation-only correction pass over the
-  `saved_search_locations` slice — the single finding requested in the previous
-  iteration's `Work review` approved as one pass. No `companies`, no other table.
-- Outcome: the finding addressed. No backend tests rerun, per explicit instruction
-  (no executable or migration file changed).
-- Base/starting commit: `ab2bdb9` (`feat(phase-1): implement saved search locations
-  slice`) on branch `phase-1/saved-search-locations`, with Codex's review commit
-  `dfa6adb` (`docs(review): request saved search location doc correction`) on top.
-  Confirmed via `git log --oneline` and `git status` (clean, up to date with origin)
-  before making any changes.
-- Ending commit: `02be34f` (`docs(phase-1): remove obsolete saved_search_locations
-  constraints row`).
-- Root cause: `docs/DATA_MODEL.md`'s "Phase 1 constraints & indexes" summary table
-  contained two rows for `saved_search_locations` — the correct, complete Rev 11 row
-  (`lower(location_text)`, all six `CHECK`s) immediately followed by a pre-existing,
-  now-obsolete row using the superseded `lower(trim(location_text))` formula. The
-  previous implementation pass added the correct row but did not notice or remove the
-  older one already present in the file.
-- Files changed:
-  - `docs/DATA_MODEL.md` — deleted the obsolete second `saved_search_locations` row
-    (`UNIQUE (saved_search_id, lower(trim(location_text)))` | "one entry per location
-    text per search"); the complete Rev 11 row is now the only
-    `saved_search_locations` row in the summary table. No other line changed.
-  - No executable, model, migration, or test file changed, per explicit instruction.
-- Migration revisions: none. `0001`–`0008` unchanged.
-- Commands run and exact results:
-  - `git diff --check` → no output (no whitespace errors, no conflict markers).
-  - Repository search: `grep -n "^| \`saved_search_locations\`" docs/DATA_MODEL.md` →
-    exactly one match (the complete Rev 11 row).
-  - Repository search: `grep -rn "lower(trim(location_text))"` across the repository →
-    matches only in (a) the migration's own docstring, contrasting it with the
-    implemented formula; (b) `docs/DATA_MODEL.md`'s Rev 11 note, likewise contrasting
-    it explicitly; (c) Codex's own historical `Work review` narration. No location
-    presents the superseded formula as the current implementation.
-  - Backend tests, `ruff`, `mypy`, and Alembic migration checks were **not** rerun, per
-    explicit instruction — no executable or migration file was changed by this pass.
-- Deviations and ADR impact: none. No ADR impact — documentation-only correction.
-- STOP — awaiting Codex review and user approval. Do not begin `companies` or alter
-  `main`.
-
-### Work review
-
-- Date and reviewing agent: 2026-08-26, Codex.
-- Diff/revision reviewed: documentation correction commit `02be34f` against review
-  commit `dfa6adb` on `phase-1/saved-search-locations`; branch clean and synchronized
-  with origin before this review entry.
-- Verification performed:
-  - Inspected the complete diff: the only product-document change deletes the obsolete
-    `saved_search_locations` constraints-summary row from `docs/DATA_MODEL.md`.
-  - `git diff --check dfa6adb..02be34f`: passed.
-  - Repository search confirms exactly one current `saved_search_locations` summary
-    row remains. Other mentions of `lower(trim(location_text))` explicitly identify it
-    as superseded or occur in historical review narration.
-  - Backend and migration checks were correctly not repeated for this documentation-
-    only correction; the implementation verification from the preceding review remains
-    applicable.
-- Findings: none.
-- Verdict: approved.
-- Exact requested corrections: none. The `saved_search_locations` slice is accepted.
-  Do not begin `companies` or merge/modify `main` until the user explicitly authorizes
-  the next action.
-- STOP — reviewer changed only this `Work review`; no implementation files were changed.
-
-**Merge record (appended, not a rewrite of the entry above):** Approved at review
-commit `05be8dc`. Per user authorization, `phase-1/saved-search-locations` was
-fast-forward merged into `main` (no merge commit; `main` was a strict ancestor) and
-pushed. `main`/`origin/main` are both now at `0f4da2c`, which also carries the
-`LLM_WORKFLOW.md` v2 process update. Verified: `main` has zero content diff against the
-feature branch; migration head is `0008` (`alembic heads`, file-based, no DB
-connection); working tree clean. Full backend suite intentionally not rerun — pure
-fast-forward of an already-verified tree. Development database not touched. No
-squash/rebase/force-push/branch-deletion. `companies` not started.
-
----
-
-## Iteration 2
+*Rotated in from "Iteration 2" per the two-iteration rule: the prior Iteration 1 (the
+`saved_search_locations` documentation correction pass and its merge record) was
+removed rather than kept alongside a third entry, since this entry's `Work review`
+(below) requested changes that are being addressed in this rotation's Iteration 2.
+Nothing below was rewritten — only renumbered.*
 
 ### Work done
 
@@ -308,3 +228,63 @@ squash/rebase/force-push/branch-deletion. `companies` not started.
      outcomes concisely, commit/push the same tooling branch, and stop.
   4. Do not add CI, begin `companies`, modify migrations, or alter product behavior.
 - STOP — reviewer changed only this `Work review`; no implementation files were changed.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-08-27, Claude Code (Sonnet 5). Authorized slice: bounded correction
+  pass addressing review findings 1-4 at commit `d9185fb`, on the same
+  `tooling/repository-validation` branch. Base: `d9185fb` (Codex's review). No CI,
+  `companies`, migration, or product-behavior changes.
+- Outcome: all four findings addressed in `backend/scripts/check_repo.py`.
+  1. Added `check_constraints_table_integrity`, run only for `docs/DATA_MODEL.md`:
+     reports a finding if the "Phase 1 constraints & indexes" section/table is missing
+     or has no data rows, or if it has rows but zero rows yield a parseable UNIQUE/INDEX
+     signature — closing the fail-open gap `check_duplicate_constraint_rows` had.
+  2. Widened `_BARE_REVISION_RE` from `` `(000\d)` `` to `` `(0\d{3})` ``, so revisions
+     `0010` and later are inspected (still requires the leading-zero, four-digit,
+     backtick-delimited shape, so years/ports are not misdetected).
+  3. `_chain_integrity_findings` now also detects: a non-null parent that doesn't exist
+     in the revision set; a merge/tuple `down_revision` (rejected outright — this
+     project requires one unbranched chain); and disconnected components, by walking
+     parent links from the sole head and flagging any revision never reached.
+     `check_migration_chain_integrity` catches Alembic's own `CommandError` and returns
+     it as a normal `Finding` instead of an uncontrolled traceback.
+  4. Added `_display_path`: renders a finding's path repository-relative
+     (`docs/DATA_MODEL.md`, `backend/migrations`) when the path exists on disk inside
+     the repo, forward-slash-normalized for cross-platform determinism; falls back to
+     the given path unchanged for synthetic/nonexistent paths used by unit tests.
+     Applied at every `Finding(...)` call site.
+- Files changed:
+  - `backend/scripts/check_repo.py` — the four fixes above; module docstring updated to
+    describe the hardened guarantees.
+  - `backend/tests/test_check_repo.py` — 11 new tests: missing constraints-summary
+    section, a section with rows but no extractable signatures (plus one confirming a
+    valid section is *not* flagged), existing/nonexistent revisions at `0010`+, missing
+    migration parent, disconnected migration graph (a `0004`/`0005` cycle unreachable
+    from the head, invisible to the pre-existing head/base/shared-down-revision checks),
+    rejection of a tuple/merge parent, and three path-relativity tests (`_display_path`
+    on a real file, on a synthetic nonexistent path, and end-to-end through
+    `check_links_and_anchors` against the real `README.md`).
+- Commands run and exact results:
+  - `python scripts/check_repo.py` from `backend/` → exit 0, zero findings.
+  - Same script invoked from an unrelated working directory (outside the repo) → exit 0.
+  - `ruff format --check .` → 36 files already formatted (after one `ruff format .` pass
+    to apply its own reflow of a multi-line `assert any(...)`).
+  - `ruff check .` → all checks passed.
+  - `mypy app tests scripts` → success, 27 source files.
+  - `pytest tests/test_check_repo.py -v` → 33 passed (22 prior + 11 new).
+  - `pytest -q` (full suite) → 239 passed.
+  - `git status`/`git diff --check` → only `backend/scripts/check_repo.py` and
+    `backend/tests/test_check_repo.py` changed; no whitespace/conflict errors.
+- Deviations/known limitations: none. README/workflow text was not changed — no
+  invocation or behavior wording needed correction, per the bounded scope.
+- STOP — awaiting Codex review. Do not add CI, begin `companies`, modify migrations, or
+  alter product behavior.
+
+### Work review
+
+*Pending — awaiting Codex.*
