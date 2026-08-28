@@ -26,6 +26,8 @@ The user remains the scope and merge authority.
 - Proposes and implements only the authorized slice.
 - Owns code, migrations, tests, and product-document updates during implementation and
   correction passes.
+- Runs the adversarial self-review below before committing implementation or writing
+  `Work done`.
 - Records a concise `Work done` entry and stops after pushing the task branch.
 - Never edits its own `Work review` or advances automatically to another slice.
 
@@ -65,7 +67,8 @@ When uncertain, use the higher-risk class. A phase boundary never expands author
 4. **User authorization.** The user approves the slice and any new semantic decisions.
    A review finding or proposal is not authorization by itself.
 5. **Implementation.** Claude creates/uses the task branch, implements only the approved
-   slice, runs risk-proportionate verification, writes `Work done`, commits, pushes, and
+   slice, runs risk-proportionate verification, performs the adversarial self-review
+   below, writes `Work done` (including its self-review section), commits, pushes, and
    stops.
 6. **Independent review.** Codex reviews the actual diff and relevant runtime state,
    records findings by severity with precise references, writes `Work review`, commits,
@@ -80,6 +83,38 @@ When uncertain, use the higher-risk class. A phase boundary never expands author
      either agent writes implementation changes.
 8. **Merge checkpoint.** Only the user authorizes merging to `main`. After merge, verify
    branch/main state and propose—but do not start—the next slice.
+
+## Adversarial implementer self-review
+
+Before committing implementation or writing `Work done`, use a fresh Claude subagent or
+context that did not write the implementation, whenever one is available. It inspects
+the actual diff without editing first and answers:
+
+1. What assumptions do the implementation and tests share that could both be wrong?
+2. Can normalization create a prohibited value after validation?
+3. Can whitespace, casing, Unicode, `NULL`, JSON null, or malformed data bypass a
+   constraint or identity?
+4. Do the ORM, direct-SQL, and database-default paths behave differently?
+5. Are mutable collections and separate-session persistence covered?
+6. Are all partial-index predicate partitions tested?
+7. Is real concurrency required for this invariant?
+8. Can a failed test or a committed transaction leak data?
+9. Are FK deletion tests isolated?
+10. Do the model, migration, live schema, tests, and documentation agree?
+11. Did roadmap status, constraint summaries, revision references, or counts go stale?
+12. Does the design support the next phase's consumer, not merely the current table?
+
+Produce severity-ranked findings with file/line evidence first, before making any edit.
+Then, within the authorized scope, correct only substantiated findings, add a
+regression test that fails against the pre-fix behavior for each one, and rerun
+verification. A "no findings" result must still list the adversarial cases attempted,
+not merely assert that none were found.
+
+Scale the depth to the slice's risk class: run the full twelve-question review for
+Class H; run a proportionate abbreviated pass (only the questions that actually apply)
+for Class R; Class D does not require it. This step supplements, and never replaces,
+Codex's independent review, and passing it does not itself authorize starting another
+slice.
 
 ## Standing rule for mechanical documentation fixes
 
@@ -143,6 +178,8 @@ Base -> ending commit; branch
 Outcome and conventions/new decisions applied
 Files changed (grouped, one line each)
 Verification commands and exact result counts
+Adversarial self-review: assumptions challenged, findings fixed, regression tests
+  added, remaining limitations
 Deviations/known limitations
 STOP and excluded next scope
 ```
