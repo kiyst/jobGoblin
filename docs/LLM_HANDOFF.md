@@ -97,108 +97,9 @@ that detail.
 ## Iteration 1
 
 *Rotated in from "Iteration 2" per the two-iteration rule: the prior Iteration 1 (the
-`collection_runs` initial implementation pass and its "changes requested" review) was
-removed rather than kept alongside a third entry, since the correction pass below
-superseded it and the whole slice is now merged. Nothing below was rewritten — only
-renumbered.*
-
-### Work done
-
-- Date/agent: 2026-08-28, Claude Code (Sonnet 5). Authorized slice: the two bounded
-  corrections from the review at `d400fb7`, on the same `phase-1/collection-runs`
-  branch. Base: `d400fb7`. Test/comment/documentation-only change — no model, migration
-  operations/revision metadata, schema, or behavior changes.
-- Outcome:
-  1. **`providers_attempted` identifier fix.** Replaced every source-like value in a
-     `providers_attempted` test fixture/assertion with a provider identifier, matching
-     this codebase's established provider/source naming (`ats_scrapers`/`jobspy` as
-     providers, per `test_job_occurrences.py`'s existing convention) instead of
-     source-shaped placeholders. In `test_completed_with_errors_retains_successful_
-     nonzero_rollups` (the Phase 2 partial-success scenario), `providers_attempted` now
-     records `fixture_provider` exactly once — reflecting one provider executing two
-     sources, only one of which failed — instead of listing both source names as if
-     they were two separate providers. `failures[*].source` still holds `broken_source`
-     unchanged, per the review's explicit instruction. Added an explicit assertion
-     (`run.providers_attempted == ["fixture_provider"]`) plus a full-value assertion on
-     `run.failures` so the test now directly proves the provider/source identifier
-     spaces stay separate, rather than only asserting rollup counters and a bare
-     `len(failures) == 1`. The order-preserving round-trip, in-place-append, and
-     multi-row-independence tests were updated the same way (`ats_scrapers`/`jobspy`).
-     No database uniqueness constraint added — duplicate avoidance remains
-     application-level, as previously approved.
-  2. **Dangling `§38` citation removed.** Removed the unresolvable bare `§38` citation
-     from all three places it appeared — `backend/app/db/models/collection_run.py`,
-     `backend/migrations/versions/0014_collection_runs.py`, and `docs/DATA_MODEL.md`'s
-     `collection_runs` section — rather than re-labeling it, since this repository has
-     no local anchor or verifiable master-spec section to point it at and asserting one
-     without confirmation would repeat the same defect. All surrounding substantive
-     prose (scheduler-execution-record description, the `collection_runs` section
-     cross-reference) was preserved unchanged.
-- Files changed:
-  - `backend/tests/test_collection_runs.py` — provider/source identifier fixes across
-    4 tests (`test_providers_attempted_round_trips_order_preserved`,
-    `test_providers_attempted_in_place_append_persists_after_separate_session_reload`,
-    `test_defaults_are_independent_across_multiple_rows`,
-    `test_completed_with_errors_retains_successful_nonzero_rollups`); one new
-    assertion pair added to the last of these.
-  - `backend/app/db/models/collection_run.py`, `backend/migrations/versions/
-    0014_collection_runs.py`, `docs/DATA_MODEL.md` — removed the dangling `§38`
-    citation from each (comment/documentation only).
-- Commands run and exact results (no Alembic round-trips, per the review's own
-  scoping for this test/comment-only correction):
-  - `python scripts/check_repo.py` (from `backend/`) → exit 0, zero findings.
-  - `git diff --check` → clean, no whitespace/conflict errors.
-  - `ruff format --check .`, `ruff check .` → passed (57 files).
-  - `mypy app tests scripts` → one new error surfaced by the added `run.failures[0]
-    [...]` indexing (`failures` is typed `Mapped[list[object]]`, so an element isn't
-    indexable) — resolved by asserting the full `failures` list value instead of
-    indexing into it (matches the pattern already used by
-    `test_failures_in_place_append_persists_after_separate_session_reload`); re-ran →
-    success, 42 source files.
-  - `pytest tests/test_collection_runs.py -q` → 76 passed (unchanged count — no tests
-    added or removed, only fixture/assertion values and one extra assertion pair).
-  - `pytest -q` (full suite) → 879 passed (unchanged, as expected for a test/comment-
-    only correction).
-- Deviations/known limitations: none. No model, migration, schema, or product-behavior
-  change — both findings were test-data-realism and documentation-citation issues only.
-- STOP — awaiting Codex re-review. Do not begin `collection_run_provider_attempts`,
-  `user_jobs`, or any other slice, and do not modify `main`.
-
-### Work review
-
-- Date/reviewer: 2026-08-28, Codex. Diff reviewed: `d400fb7..503c2ab`.
-- Verdict: **approved**. Findings: none.
-- Verified independently:
-  - Every `providers_attempted` fixture/assertion now uses provider identifiers. The
-    Phase 2 partial-success scenario records `fixture_provider` exactly once while its
-    failure retains `source = broken_source`, and explicitly asserts both complete
-    values. No uniqueness constraint or application behavior was added.
-  - The three dangling `§38` references were removed while preserving the surrounding
-    prose. The migration diff changes only its module docstring; migration operations,
-    revision metadata, model mapping, and schema behavior are unchanged.
-  - `git diff --check` is clean; repository checker exits 0; Ruff format/check and mypy
-    pass (**42 source files**); targeted suite **76 passed**. Claude's post-correction
-    full-suite result is **879 passed**; the reviewer did not repeat the full suite for
-    this test/comment-only correction after independently running it on the original
-    implementation review.
-- The `collection_runs` implementation and correction pass are accepted. Do not merge
-  to `main`, begin `collection_run_provider_attempts`/another slice, or otherwise
-  advance without explicit user authorization.
-- STOP — reviewer changed only this `Work review`; no implementation files changed.
-
-**Merge record (appended, not a rewrite of the entry above):** Approved at review
-commit `fe51e03`. Per user authorization, `phase-1/collection-runs` was merged into
-`main` with a normal merge commit (`5e8395b`; `--no-ff`, no squash/rebase/force-push)
-and pushed. `main`/`origin/main` are both now at `5e8395b`. Verified: `main` has zero
-content diff against the feature branch; migration `0014` (`down_revision = "0013"`)
-is present and is the sole Alembic head; `python backend/scripts/check_repo.py` (via
-the project's own virtualenv interpreter) exits 0 with zero findings; working tree
-clean. No later Phase 1 table (`collection_run_provider_attempts`, `user_jobs`, or
-otherwise) started or proposed.
-
----
-
-## Iteration 2
+`collection_runs` correction pass, its approval, and merge record) was removed rather
+than kept alongside a third entry, since it was already merged and is no longer pending.
+Nothing below was rewritten — only renumbered.*
 
 ### Work done
 
@@ -399,3 +300,71 @@ otherwise) started or proposed.
   operations.
 - STOP — reviewer changed only this `Work review`. Do not begin `user_jobs`,
   `job_notes`, another slice, or modify/merge `main` without explicit authorization.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-08-28, Claude Code (Sonnet 5). Authorized slice: the four bounded
+  corrections from the review at `5b6aee0`, on the same
+  `phase-1/collection-run-provider-attempts` branch. Base: `5b6aee0`.
+  Test/comment/documentation-only change — no model mapping, schema behavior,
+  migration operations/revision metadata, or constraint/index definitions changed.
+- Outcome:
+  1. **Timestamp test matrix completed.** Added
+     `test_direct_sql_completed_at_equal_started_at_accepted` and
+     `test_direct_sql_completed_at_after_started_at_accepted`, complementing the
+     existing raw-SQL rejection of an earlier timestamp — the approved matrix (equal/
+     later accepted, earlier rejected, both ORM and direct SQL) is now actually
+     complete rather than only ORM-covered for the accepted cases.
+  2. **`rate_limited=True` now exercised.** Added
+     `test_rate_limited_true_persists_after_reload_and_is_independent_of_status` — an
+     ORM persistence/reload case with `rate_limited=True`, `status="partial"`, and
+     `incomplete_results=False` in the same row, proving all three vary independently
+     at the database level (no new `CHECK` added, per the review's explicit
+     instruction).
+  3. **Three FK-index comments corrected.** `backend/app/db/models/
+     collection_run_provider_attempt.py`, `backend/migrations/versions/
+     0015_collection_run_provider_attempts.py`, and `docs/DATA_MODEL.md` all
+     previously implied the explicit `(collection_run_id)` index was "in addition to
+     whatever index the FK itself implies" — PostgreSQL does not automatically index a
+     referencing FK column, so that phrasing was backwards. Corrected all three to
+     state plainly that PostgreSQL does not auto-index it, and that this index exists
+     to support "all attempts for this run" lookups (and efficient parent-side FK-
+     maintenance lookups on `collection_runs` deletes). The index definition itself is
+     unchanged.
+  4. **Timestamp-independence overclaim corrected.** The prior iteration's `Work done`
+     entry (now Iteration 1 above, unedited per this ledger's append-only convention)
+     described the test file's `created_at`/`updated_at` coverage as including
+     "independence" — no test proves two-row `created_at`/`updated_at` independence;
+     the tests actually prove server defaults, UTC-awareness, and `updated_at`
+     advancing on a real commit. Corrected here rather than editing the prior entry,
+     per the review's explicit instruction not to add a redundant test solely to
+     preserve that wording.
+- Files changed:
+  - `backend/tests/test_collection_run_provider_attempts.py` — 3 new tests (items
+    1–2 above).
+  - `backend/app/db/models/collection_run_provider_attempt.py`,
+    `backend/migrations/versions/0015_collection_run_provider_attempts.py`,
+    `docs/DATA_MODEL.md` — FK-index comment corrections (item 3 above;
+    comment/documentation only, no behavior change).
+- Commands run and exact results (no Alembic round-trips, per the review's own
+  scoping for this test/comment-only correction):
+  - `python scripts/check_repo.py` (from `backend/`) → exit 0, zero findings.
+  - `git diff --check` → clean, no whitespace/conflict errors.
+  - `ruff format --check .`, `ruff check .` → passed (60 files).
+  - `mypy app tests scripts` → success, 44 source files.
+  - `pytest tests/test_collection_run_provider_attempts.py -q` → 101 passed (up from
+    98 — exactly the 3 new tests, nothing else added or removed).
+  - `pytest -q` (full suite) → 980 passed (up from 977).
+- Deviations/known limitations: none. No model, migration, schema, or product-behavior
+  change — all four findings were test-coverage and documentation-accuracy issues
+  only.
+- STOP — awaiting Codex re-review. Do not begin `user_jobs`, `job_notes`, or any other
+  slice, and do not modify `main`.
+
+### Work review
+
+*Pending — awaiting Codex.*

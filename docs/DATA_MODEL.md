@@ -1203,8 +1203,10 @@ application logic establishes that normal mapping.
 
 **Indexes:** `INDEX (provider, source, started_at DESC)` (the volume-trend query Phase
 12 reads — "give me this source's `jobs_discovered` over time"); `INDEX
-(collection_run_id)` (explicit, in addition to whatever index the FK itself implies, for
-the "all attempts for this run" query).
+(collection_run_id)` — PostgreSQL does not automatically index a referencing
+foreign-key column, so this index is added explicitly to support the "all attempts for
+this run" query (and efficient parent-side FK-maintenance lookups on `collection_runs`
+deletes).
 
 **Rev 20 changes** (fourteenth Phase 1 implementation slice, `collection_run_provider_
 attempts` — Class H per docs/LLM_WORKFLOW.md): this table's design had several decisions

@@ -58,8 +58,11 @@ written (not inferred silently):
 - `UNIQUE (collection_run_id, provider, source)` — one aggregate row per
   source execution per run.
 - Indexes: `(provider, source, started_at DESC)` (Phase 12's volume-trend
-  query) and `(collection_run_id)` (explicit, in addition to whatever the
-  FK itself implies, for "all attempts for this run").
+  query) and `(collection_run_id)` — PostgreSQL does not automatically
+  index a referencing foreign-key column, so this index is added
+  explicitly to support "all attempts for this run" lookups (and
+  efficient parent-side FK-maintenance lookups on `collection_runs`
+  deletes).
 - Four constraint names required an explicit, shortened form: the FK and
   three `CHECK`s (`status`/`completed_at` consistency,
   `completed_at`/`started_at` ordering, `jobs_discovered`'s non-negative

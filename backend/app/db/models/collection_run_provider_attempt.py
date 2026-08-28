@@ -271,8 +271,10 @@ Index(
     CollectionRunProviderAttempt.source,
     CollectionRunProviderAttempt.started_at.desc(),
 )
-# Explicit, in addition to whatever index the FK itself implies — "all
-# attempts for this run."
+# PostgreSQL does not automatically index a referencing foreign-key
+# column, so this index is added explicitly to support "all attempts for
+# this run" lookups (and efficient parent-side FK-maintenance lookups on
+# `collection_runs` deletes).
 Index(
     "ix_collection_run_provider_attempts_collection_run_id",
     CollectionRunProviderAttempt.collection_run_id,

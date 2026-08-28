@@ -553,6 +553,36 @@ async def test_completed_at_before_started_at_rejected_on_orm_path(
     await db_session.rollback()
 
 
+async def test_direct_sql_completed_at_equal_started_at_accepted(
+    db_session: AsyncSession, make_collection_run: Callable[..., CollectionRun]
+) -> None:
+    run_id = await _insert_collection_run(db_session, make_collection_run)
+    await _assert_direct_sql_insert_accepted(
+        db_session,
+        run_id,
+        {
+            "status": "'completed'",
+            "started_at": "'2026-01-01T00:00:00+00'::timestamptz",
+            "completed_at": "'2026-01-01T00:00:00+00'::timestamptz",
+        },
+    )
+
+
+async def test_direct_sql_completed_at_after_started_at_accepted(
+    db_session: AsyncSession, make_collection_run: Callable[..., CollectionRun]
+) -> None:
+    run_id = await _insert_collection_run(db_session, make_collection_run)
+    await _assert_direct_sql_insert_accepted(
+        db_session,
+        run_id,
+        {
+            "status": "'completed'",
+            "started_at": "'2026-01-01T00:00:00+00'::timestamptz",
+            "completed_at": "'2026-01-02T00:00:00+00'::timestamptz",
+        },
+    )
+
+
 async def test_direct_sql_completed_at_before_started_at_rejected(
     db_session: AsyncSession, make_collection_run: Callable[..., CollectionRun]
 ) -> None:
@@ -778,6 +808,35 @@ async def test_direct_sql_rate_limited_and_incomplete_results_default_to_false(
     assert row is not None
     assert row.rate_limited is False
     assert row.incomplete_results is False
+
+
+async def test_rate_limited_true_persists_after_reload_and_is_independent_of_status(
+    db_session: AsyncSession,
+    make_collection_run: Callable[..., CollectionRun],
+    make_collection_run_provider_attempt: Callable[..., CollectionRunProviderAttempt],
+) -> None:
+    """`rate_limited` is an independent boolean like `incomplete_results` —
+    no `CHECK` ties it to `status` or to `incomplete_results`. A `partial`
+    row may be `rate_limited = true` while `incomplete_results = false`,
+    proving all three vary independently at the database level."""
+    run_id = await _insert_collection_run(db_session, make_collection_run)
+    attempt = make_collection_run_provider_attempt(
+        collection_run_id=run_id,
+        provider="fixture_provider",
+        source="greenhouse",
+        started_at=_STARTED_AT,
+        status="partial",
+        completed_at=_LATER,
+        rate_limited=True,
+        incomplete_results=False,
+    )
+    db_session.add(attempt)
+    await db_session.commit()
+    await db_session.refresh(attempt)
+
+    assert attempt.rate_limited is True
+    assert attempt.incomplete_results is False
+    assert attempt.status == "partial"
 
 
 async def test_incomplete_results_independent_of_status(
