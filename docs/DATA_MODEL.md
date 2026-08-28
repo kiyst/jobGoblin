@@ -936,8 +936,9 @@ was written:
   not update or replace the previous one.
 
 ### `identity_conflicts`
-**New in Rev 3** (item 3/4) — the quarantine record for deterministic identity
-resolution's two conflict outcomes (see
+**Implemented** (`backend/app/db/models/identity_conflict.py`; migration `0013`,
+`down_revision = "0012"`). **New in Rev 3** (item 3/4) — the quarantine record for
+deterministic identity resolution's two conflict outcomes (see
 [ARCHITECTURE.md §8](ARCHITECTURE.md#8-deterministic-identity-resolution) and
 [ADR 0007](DECISIONS/0007-identity-conflict-quarantine.md)). Deliberately **not**
 `duplicate_groups`: this table holds *exact-match signals that couldn't be safely
@@ -949,16 +950,17 @@ cases into; see [ADR 0003](DECISIONS/0003-minimal-phase1-schema.md)'s update.
 
 | column | type | notes |
 |---|---|---|
-| id | UUID PK | |
-| existing_job_occurrence_id | UUID | FK → job_occurrences, nullable, `ON DELETE SET NULL`. Set for `evidence_mismatch` (the one existing occurrence in dispute). `NULL` for `ambiguous_match`, where there isn't one single existing occurrence to point at — see `existing_value` |
-| incoming_raw_job_ingestion_id | UUID | FK → raw_job_ingestions, nullable, `ON DELETE SET NULL`. The payload that triggered this conflict. Nullable (rather than `NOT NULL`/cascade) so the conflict record — including its own `existing_value`/`incoming_value` snapshots — survives even if the raw ingestion row it originated from is ever cleaned up; the snapshots make this table self-contained regardless |
-| conflict_type | text | enum: `evidence_mismatch` (Tier 1 natural-key match, conflicting corroborating evidence — see ARCHITECTURE.md §8) / `ambiguous_match` (Tiers 2–4, more than one candidate `Job`) |
-| existing_value | jsonb | for `evidence_mismatch`: the existing occurrence's disputed field value(s), e.g. `{"canonical_url_normalized": "..."}`. For `ambiguous_match`: a JSON array of the candidate `job_id`/`job_occurrence_id` values that matched |
-| incoming_value | jsonb | the incoming payload's corresponding value(s) — same shape convention as `existing_value` |
-| status | text | enum: `open` / `resolved` / `ignored` |
-| resolution | text | nullable free-form note recorded when a human resolves or ignores the conflict — e.g. "confirmed different postings, kept separate" or "same posting, canonical URL corrected manually." No automated merge action exists yet; resolution is narrative/manual, consistent with this project's "never auto-merge" principle applied elsewhere (`companies.duplicate_of_company_id`, Tier 2 duplicate groups) |
-| created_at | timestamptz | |
-| resolved_at | timestamptz | nullable until `status` leaves `open` |
+| id | UUID PK | generated application-side (`uuid.uuid4`) |
+| existing_job_occurrence_id | UUID | FK → job_occurrences, nullable, `ON DELETE SET NULL`. Set for `evidence_mismatch` (the one existing occurrence in dispute). `NULL` for `ambiguous_match`, where there isn't one single existing occurrence to point at — see `existing_value`. **Rev 18: `CHECK` requires `ambiguous_match ⟹ NULL`; the reverse is deliberately not a `CHECK`** — see below |
+| incoming_raw_job_ingestion_id | UUID | FK → raw_job_ingestions, nullable, `ON DELETE SET NULL`. The payload that triggered this conflict. Nullable (rather than `NOT NULL`/cascade) so the conflict record — including its own `existing_value`/`incoming_value` snapshots — survives even if the raw ingestion row it originated from is ever cleaned up; the snapshots make this table self-contained regardless. **Rev 18: no `CHECK` of any kind** — populated for both conflict types at write time, but must remain legitimately nullable after its own cascade fires |
+| conflict_type | text, not null | enum: `evidence_mismatch` (Tier 1 natural-key match, conflicting corroborating evidence — see ARCHITECTURE.md §8) / `ambiguous_match` (Tiers 2–4, more than one candidate `Job`). **Rev 18**: plain `CHECK`-restricted enum, no ORM trim/case transform — matches `raw_job_ingestions.processing_status`'s treatment (a closed literal set, not a cross-table join key) |
+| existing_value | jsonb, not null | for `evidence_mismatch`: the existing occurrence's disputed field value(s), e.g. `{"canonical_url_normalized": "..."}`. For `ambiguous_match`: a JSON array of the candidate `job_id`/`job_occurrence_id` values that matched. **Rev 18: `CHECK` enforces this shape by type** (object vs. array) — see below. Not `MutableDict`/`MutableList`-wrapped: an immutable, write-once snapshot, same rationale as `raw_job_ingestions.raw_payload` |
+| incoming_value | jsonb, not null | the incoming payload's corresponding value(s) — same shape convention and `CHECK` as `existing_value` |
+| status | text, not null | enum: `open` / `resolved` / `ignored`. **Rev 18: no server default** — fresh conflict creation must explicitly supply `'open'` |
+| resolution | text | nullable free-form note recorded when a human resolves or ignores the conflict — e.g. "confirmed different postings, kept separate" or "same posting, canonical URL corrected manually." No automated merge action exists yet; resolution is narrative/manual, consistent with this project's "never auto-merge" principle applied elsewhere (`companies.duplicate_of_company_id`, Tier 2 duplicate groups). **Rev 18**: ORM trims and collapses blank to `NULL`, but a direct SQL write is **not** promised this normalization — no backing `CHECK`, unlike every other nullable text column in this schema |
+| created_at | timestamptz, not null | `server_default now()` (Rev 18) — a conflict row's creation moment is its detection moment, unlike `raw_job_ingestions.fetched_at` |
+| updated_at | timestamptz, not null | `server_default now()` + ORM `onupdate` (Rev 18) — the standard lifecycle pair |
+| resolved_at | timestamptz | nullable until `status` leaves `open`. **Rev 18: `CHECK (resolved_at IS NULL OR resolved_at >= created_at)`** in addition to the lifecycle consistency check below |
 
 Indexes: `INDEX (status)` (the "show me all open conflicts" query);
 `INDEX (existing_job_occurrence_id)`; `INDEX (incoming_raw_job_ingestion_id)` — no
@@ -966,7 +968,7 @@ uniqueness constraint on any of these, since a single raw ingestion could in pri
 raise more than one conflict record (e.g. disputing more than one field at once) and a
 single existing occurrence could accumulate multiple conflicts over time.
 
-**Lifecycle `CHECK` constraints (Rev 4, item 4):**
+**Lifecycle `CHECK` constraints (Rev 4, item 4; extended Rev 18):**
 
 ```sql
 CHECK (status IN ('open', 'resolved', 'ignored'))
@@ -976,19 +978,70 @@ CHECK (
   OR
   (status IN ('resolved', 'ignored') AND resolved_at IS NOT NULL)
 )
-CHECK (existing_value IS NOT NULL)
-CHECK (incoming_value IS NOT NULL)
+CHECK (resolved_at IS NULL OR resolved_at >= created_at)
+CHECK (
+  (conflict_type = 'evidence_mismatch' AND jsonb_typeof(existing_value) = 'object')
+  OR
+  (conflict_type = 'ambiguous_match' AND jsonb_typeof(existing_value) = 'array')
+)
+CHECK (
+  (conflict_type = 'evidence_mismatch' AND jsonb_typeof(incoming_value) = 'object')
+  OR
+  (conflict_type = 'ambiguous_match' AND jsonb_typeof(incoming_value) = 'array')
+)
+CHECK (conflict_type <> 'ambiguous_match' OR existing_job_occurrence_id IS NULL)
 ```
 
 `existing_value`/`incoming_value` are always populated by construction (§ADR 0004/0007 —
-every conflict path snapshots both sides before writing the row), so `NOT NULL` here is a
-hard invariant, not merely expected application behavior. `resolution` (the free-form
+every conflict path snapshots both sides before writing the row), so `NOT NULL` on the
+column itself is the hard invariant (no separate redundant `CHECK`, matching
+`raw_job_ingestions.raw_payload`'s own treatment). `resolution` (the free-form
 narrative field) is **not** constrained by a `CHECK` — it may legitimately stay `NULL`
 for an `ignored` conflict (a human decided it wasn't worth writing up) and should
 normally be populated for a `resolved` one, but that's a documented convention, not a
 database rule: enforcing non-empty narrative text via `CHECK` would be enforcing writing
 quality, which this project does not attempt to do anywhere else in the schema, and
 nothing about the product requires it here either.
+
+**Rev 18 changes** (twelfth Phase 1 implementation slice, `identity_conflicts` — Class H
+per docs/LLM_WORKFLOW.md): this table's design had several decisions resolved by explicit
+approval before migration `0013` was written:
+- **The JSON shape of `existing_value`/`incoming_value` is now database-enforced**,
+  conditional on `conflict_type`: a top-level JSON object for `evidence_mismatch`, a
+  top-level JSON array for `ambiguous_match` — using the same `jsonb_typeof()` primitive
+  already established (`jobs.field_provenance`, `raw_job_ingestions.raw_payload`), applied
+  conditionally on another column for the first time in this schema. Neither non-empty
+  objects/arrays nor inner element schemas are enforced — only the top-level shape,
+  matching this project's posture of not validating what isn't demonstrated necessary
+  (an empty object/array is explicitly accepted).
+- **The `conflict_type`/`existing_job_occurrence_id` relationship is enforced in only
+  one direction**, for the same reason `raw_job_ingestions.processing_status`/
+  `job_occurrence_id` is: `ambiguous_match` requires `existing_job_occurrence_id IS
+  NULL` (safe — an `ambiguous_match` row never has a non-null value to begin with, so
+  `ON DELETE SET NULL` never touches it in a way that could violate this). The reverse
+  (`evidence_mismatch` implying non-null) is deliberately **not** a `CHECK`: a real,
+  already-committed `evidence_mismatch` row must be allowed to end up with
+  `existing_job_occurrence_id IS NULL` after its disputed occurrence is later deleted —
+  the historical audit-preservation state this table exists to support, not a violation.
+  Enforcing both directions would turn `ON DELETE SET NULL` into `RESTRICT` in practice.
+- **`incoming_raw_job_ingestion_id` gets no `CHECK` at all** — populated for both
+  conflict types at write time, but must remain legitimately nullable after its own
+  `ON DELETE SET NULL` fires.
+- **`resolved_at >= created_at`** is a new ordering `CHECK`, matching this project's
+  established before/after invariant pattern elsewhere (`first_seen_at <=
+  last_seen_at`, etc.) — not previously specified for this table.
+- **`status` has no server default** — fresh conflict creation must explicitly supply
+  `'open'`, consistent with this project's "no silent substitution for a business-
+  meaningful value" posture.
+- **`created_at`/`updated_at` follow the established global convention** — a conflict
+  row's creation moment is its detection moment (unlike `raw_job_ingestions.fetched_at`),
+  so no separate business timestamp is needed; `updated_at` is new (not previously
+  specified for this table).
+- Both FK constraints (`existing_job_occurrence_id → job_occurrences`,
+  `incoming_raw_job_ingestion_id → raw_job_ingestions`) required explicit, shortened
+  constraint names — the naming convention's full template exceeds Postgres's 63-byte
+  identifier limit for both and would otherwise be silently truncated with an
+  auto-appended hash suffix.
 
 ### `collection_runs`
 Scheduler execution record (§38), one row per saved-search execution — the parent
@@ -1179,7 +1232,7 @@ reviewed against this list directly:
 | `raw_job_ingestions` | `INDEX (job_occurrence_id, fetched_at DESC)` | derives "latest ingestion for this occurrence" without a stored pointer (ADR 0005) |
 | `raw_job_ingestions` | `CHECK` requiring `provider`/`source` already lowercase/trimmed/non-empty and matching the ASCII slug grammar `^[a-z0-9][a-z0-9._-]*$`; NULL-safe normalized/non-empty `CHECK` pairs on `source_identifier`/`parser_version`/`error_message`; trim/non-empty `CHECK` on `raw_content_hash` (not-null, no format constraint); `CHECK (jsonb_typeof(raw_payload) = 'object')`; `CHECK` restricting `processing_status` to `fetched`/`parse_error`/`normalized`/`identity_conflict`; `CHECK (processing_status NOT IN ('fetched', 'parse_error') OR job_occurrence_id IS NULL)` (one-directional only — see the table's own section above, Rev 17) | reject a non-canonical `provider`/`source`, a non-normalized/empty text field, a non-object `raw_payload`, an invalid `processing_status`, or a `fetched`/`parse_error` row with a non-null occurrence link — see the table's own section above (Rev 17) |
 | `identity_conflicts` | `INDEX (status)`, `INDEX (existing_job_occurrence_id)`, `INDEX (incoming_raw_job_ingestion_id)` | **new in Rev 3** — open-conflict queue lookup and traceback to the occurrence/ingestion in dispute |
-| `identity_conflicts` | `CHECK` on `status`, `conflict_type`, `(status, resolved_at)`, `existing_value NOT NULL`, `incoming_value NOT NULL` | **new in Rev 4** — full lifecycle constraint set, see the table's own section above |
+| `identity_conflicts` | `CHECK` on `status` enum, `conflict_type` enum, `(status, resolved_at)` consistency, `resolved_at >= created_at`, `existing_value`/`incoming_value` shape conditional on `conflict_type` (object for `evidence_mismatch`, array for `ambiguous_match`), `conflict_type <> 'ambiguous_match' OR existing_job_occurrence_id IS NULL` | reject an invalid `status`/`conflict_type`, an inconsistent status/resolution-timestamp pairing, a resolution timestamp before creation, a snapshot with the wrong top-level JSON shape for its conflict type, or an `ambiguous_match` row with a non-null occurrence link — see the table's own section above (Rev 4/18) |
 | `collection_run_provider_attempts` | `UNIQUE (collection_run_id, provider, source)` | **new in Rev 4** — one aggregate row per run/provider/source, see table's own section |
 | `collection_run_provider_attempts` | `CHECK` on `status`, `(status, completed_at)`, non-negative `jobs_discovered`/`jobs_inserted`/`jobs_updated`/`retry_count` | **new in Rev 4** |
 | `collection_run_provider_attempts` | `INDEX (provider, source, started_at DESC)`, `INDEX (collection_run_id)` | **new in Rev 4** — Phase 12's volume-trend query and "all attempts for this run" |

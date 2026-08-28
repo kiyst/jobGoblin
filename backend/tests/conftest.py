@@ -14,6 +14,7 @@ from app.db.models import (
     CandidateProfile,
     CandidateSkill,
     Company,
+    IdentityConflict,
     Job,
     JobOccurrence,
     RawJobIngestion,
@@ -662,6 +663,152 @@ async def real_committed_raw_job_ingestion(
                     existing_ingestion = await cleanup_session.get(RawJobIngestion, ingestion_id)
                     if existing_ingestion is not None:
                         await cleanup_session.delete(existing_ingestion)
+                        await cleanup_session.commit()
+
+
+@pytest.fixture
+def make_identity_conflict() -> Callable[..., IdentityConflict]:
+    """Factory for a valid `IdentityConflict` — tests only deviate from
+    this intentionally. Both FK columns default to `None`: this table's
+    two parents are each optional (no CASCADE requirement forces either to
+    exist), matching `make_raw_job_ingestion`'s own no-required-parent
+    factory shape. `status` has no server default at the database level
+    (fresh conflict creation must explicitly supply `"open"`) — this
+    factory supplies it in Python as a convenience default, the same way
+    `make_job_occurrence` defaults `provider`/`source` despite neither
+    having a server default either. `existing_value`/`incoming_value`
+    default to an `evidence_mismatch`-shaped object pair; a test exercising
+    `ambiguous_match` must override both to array-shaped values itself."""
+
+    def _make(
+        *,
+        conflict_type: str = "evidence_mismatch",
+        existing_value: dict[str, object] | list[object] | None = None,
+        incoming_value: dict[str, object] | list[object] | None = None,
+        status: str = "open",
+        existing_job_occurrence_id: uuid.UUID | None = None,
+        incoming_raw_job_ingestion_id: uuid.UUID | None = None,
+        resolution: str | None = None,
+        resolved_at: datetime | None = None,
+    ) -> IdentityConflict:
+        return IdentityConflict(
+            existing_job_occurrence_id=existing_job_occurrence_id,
+            incoming_raw_job_ingestion_id=incoming_raw_job_ingestion_id,
+            conflict_type=conflict_type,
+            existing_value=(
+                existing_value
+                if existing_value is not None
+                else {"canonical_url_normalized": "https://example.com/old"}
+            ),
+            incoming_value=(
+                incoming_value
+                if incoming_value is not None
+                else {"canonical_url_normalized": "https://example.com/new"}
+            ),
+            status=status,
+            resolution=resolution,
+            resolved_at=resolved_at,
+        )
+
+    return _make
+
+
+@asynccontextmanager
+async def real_committed_identity_conflict(
+    db_engine: AsyncEngine,
+    *,
+    at: datetime,
+    occurrence_kwargs: dict[str, object] | None = None,
+    ingestion_kwargs: dict[str, object] | None = None,
+    ingestion_occurrence_kwargs: dict[str, object] | None = None,
+    **conflict_kwargs: object,
+) -> AsyncIterator[tuple[AsyncSession, uuid.UUID, uuid.UUID, uuid.UUID]]:
+    """Creates a real, separately-committed `JobOccurrence` (via
+    `real_committed_job_occurrence`, its own independent `Job` parent) AND
+    a real, separately-committed `RawJobIngestion` (via
+    `real_committed_raw_job_ingestion`, which creates its own,
+    independent `Job`/`JobOccurrence` pair) — this table's two FKs are
+    unrelated to each other, unlike `RawJobIngestion`'s own FK, which
+    points at the occurrence it's otherwise associated with — then a
+    real, separately-committed `IdentityConflict` linking both, with its
+    own best-effort cleanup (conflict first, then each independent parent
+    chain via the wrapped helpers) so a partially cascaded state is
+    skipped rather than treated as an error, same rationale as every
+    other `real_committed_*` helper above. `at` is a single shared
+    timestamp for both parent chains — a structural convenience, since
+    this helper's own tests are not about either parent's own timestamp
+    semantics.
+
+    `ingestion_occurrence_kwargs` overrides the *ingestion's own*,
+    entirely independent internal occurrence (not the conflict's primary
+    `existing_job_occurrence_id`) — it defaults to a `source_url` distinct
+    from the primary occurrence's own default, since both would otherwise
+    collide on `job_occurrences`' fallback-URL unique index. A test that
+    calls this helper more than once concurrently must override at least
+    one of `occurrence_kwargs`/`ingestion_occurrence_kwargs` per call with
+    a distinct `source_url`, the same way `real_committed_job_occurrence`
+    callers already must (see `test_job_occurrences.py`).
+    """
+    conflict_kwargs.setdefault("conflict_type", "evidence_mismatch")
+    conflict_kwargs.setdefault(
+        "existing_value", {"canonical_url_normalized": "https://example.com/old"}
+    )
+    conflict_kwargs.setdefault(
+        "incoming_value", {"canonical_url_normalized": "https://example.com/new"}
+    )
+    conflict_kwargs.setdefault("status", "open")
+
+    resolved_occurrence_kwargs: dict[str, object] = occurrence_kwargs or {}
+    resolved_ingestion_kwargs: dict[str, object] = ingestion_kwargs or {}
+    resolved_ingestion_occurrence_kwargs: dict[str, object] = ingestion_occurrence_kwargs or {
+        "source_url": "https://boards.greenhouse.io/incoming-ingestion/jobs/1"
+    }
+
+    async with (
+        real_committed_job_occurrence(
+            db_engine,
+            first_seen_at=at,
+            last_seen_at=at,
+            job_kwargs=None,
+            **resolved_occurrence_kwargs,
+        ) as (_occurrence_session, _occurrence_job_id, occurrence_id),
+        real_committed_raw_job_ingestion(
+            db_engine,
+            fetched_at=at,
+            occurrence_kwargs=resolved_ingestion_occurrence_kwargs,
+            job_kwargs=None,
+            **resolved_ingestion_kwargs,
+        ) as (
+            _ingestion_session,
+            _ingestion_job_id,
+            _ingestion_occurrence_id,
+            ingestion_id,
+        ),
+    ):
+        session = AsyncSession(bind=db_engine)
+        conflict_id: uuid.UUID | None = None
+        try:
+            conflict = IdentityConflict(
+                existing_job_occurrence_id=occurrence_id,
+                incoming_raw_job_ingestion_id=ingestion_id,
+                **conflict_kwargs,
+            )
+            session.add(conflict)
+            await session.commit()
+            await session.refresh(conflict)
+            conflict_id = conflict.id
+
+            yield session, occurrence_id, ingestion_id, conflict_id
+        finally:
+            with suppress(Exception):
+                await session.rollback()
+            await session.close()
+
+            async with AsyncSession(bind=db_engine) as cleanup_session:
+                if conflict_id is not None:
+                    existing_conflict = await cleanup_session.get(IdentityConflict, conflict_id)
+                    if existing_conflict is not None:
+                        await cleanup_session.delete(existing_conflict)
                         await cleanup_session.commit()
 
 
