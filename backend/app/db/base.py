@@ -24,9 +24,10 @@ class Base(DeclarativeBase):
     (`app/db/models/saved_search_location.py`), `Company`
     (`app/db/models/company.py`), `Job` (`app/db/models/job.py`),
     `JobOccurrence` (`app/db/models/job_occurrence.py`),
-    `RawJobIngestion` (`app/db/models/raw_job_ingestion.py`), and
-    `IdentityConflict` (`app/db/models/identity_conflict.py`) are the Phase
-    1 models registered against this base so far; every other Phase 1
+    `RawJobIngestion` (`app/db/models/raw_job_ingestion.py`),
+    `IdentityConflict` (`app/db/models/identity_conflict.py`), and
+    `CollectionRun` (`app/db/models/collection_run.py`) are the Phase 1
+    models registered against this base so far; every other Phase 1
     table will follow the same pattern. This is also Alembic's
     `target_metadata` (see
     `migrations/env.py`, which imports `app.db.models` so autogenerate has

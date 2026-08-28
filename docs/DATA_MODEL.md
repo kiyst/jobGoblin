@@ -1044,23 +1044,69 @@ approval before migration `0013` was written:
   auto-appended hash suffix.
 
 ### `collection_runs`
-Scheduler execution record (§38), one row per saved-search execution — the parent
-aggregate over the new `collection_run_provider_attempts` table below.
+**Implemented** (`backend/app/db/models/collection_run.py`; migration `0014`,
+`down_revision = "0013"`). Scheduler execution record (§38), one row per saved-search
+execution — the parent aggregate over the new `collection_run_provider_attempts` table
+below.
 
 | column | type | notes |
 |---|---|---|
 | id | UUID PK | |
-| saved_search_id | UUID FK → saved_searches, nullable, `ON DELETE SET NULL` | nullable so a run's history survives deletion of the saved search that triggered it — the run is a historical fact independent of whether the search still exists |
-| started_at | timestamptz | |
-| completed_at | timestamptz | nullable while running |
-| status | text | enum: running / completed / completed_with_errors / failed |
-| providers_attempted | text[] | |
-| providers_enforced_locally | jsonb | **shape (Rev 4): `{provider: {source: [field, ...]}}`** — which `SourceQuery` filters fell back to local enforcement, per provider *and* per source within that provider (filter support is a per-source `SourceCapabilities` fact — see [ARCHITECTURE.md §6.6](ARCHITECTURE.md#66-queryplanner-behavior-rev-4) — so two sources under the same provider can legitimately have different entries here); supports §31's observability requirement |
-| jobs_discovered | int | run-level rollup; authoritative per-provider/source detail lives in `collection_run_provider_attempts` |
-| jobs_inserted | int | run-level rollup |
-| jobs_updated | int | run-level rollup |
-| failures | jsonb | run-level summary rollup of `{provider, source, error}` — **Rev 2 note**: this is now a denormalized convenience copy; the authoritative per-attempt error detail (category, retryable, retry_count, rate_limited) lives in `collection_run_provider_attempts`, not here |
-| duration_ms | int | nullable |
+| saved_search_id | UUID FK → saved_searches, nullable, `ON DELETE SET NULL` | nullable so a run's history survives deletion of the saved search that triggered it — the run is a historical fact independent of whether the search still exists; no other column's `CHECK` references this column's nullness, so unlike `raw_job_ingestions`/`identity_conflicts` there is no FK-vs-CHECK asymmetric-direction tension here |
+| started_at | timestamptz, not null, no server default | supplied explicitly by the scheduler/pipeline code, matching `raw_job_ingestions.fetched_at`'s treatment |
+| completed_at | timestamptz, nullable | nullable only while `status = 'running'` — see the lifecycle `CHECK` below; `CHECK (completed_at IS NULL OR completed_at >= started_at)` |
+| status | text, not null, no server default | enum: running / completed / completed_with_errors / failed; `CHECK` restricts to these four values; a second `CHECK` requires `completed_at IS NULL` for `running` and `completed_at IS NOT NULL` for every terminal status; fresh creation must explicitly supply `'running'` |
+| providers_attempted | text[], not null, server default `'{}'` | providers whose execution *actually began* — not merely planned; a provider rejected during planning with no `discover()` call is recorded in `failures` instead, never here; `MutableList`-wrapped for in-place append tracking |
+| providers_enforced_locally | jsonb, not null, server default `'{}'` | **shape (Rev 4): `{provider: {source: [field, ...]}}`** — which `SourceQuery` filters fell back to local enforcement, per provider *and* per source within that provider (filter support is a per-source `SourceCapabilities` fact — see [ARCHITECTURE.md §6.6](ARCHITECTURE.md#66-queryplanner-behavior-rev-4) — so two sources under the same provider can legitimately have different entries here); supports §31's observability requirement; `CHECK` requires a top-level JSON object; deliberately **not** `MutableDict`-wrapped — assembled once in memory during planning and assigned as a complete value, matching `jobs.field_provenance`'s own documented nested-mutation limitation |
+| jobs_discovered | int, not null, server default 0 | run-level rollup; authoritative per-provider/source detail lives in `collection_run_provider_attempts`; `CHECK (jobs_discovered >= 0)` |
+| jobs_inserted | int, not null, server default 0 | run-level rollup; `CHECK (jobs_inserted >= 0)` |
+| jobs_updated | int, not null, server default 0 | run-level rollup; `CHECK (jobs_updated >= 0)` |
+| failures | jsonb, not null, server default `'[]'` | run-level summary rollup of `{provider, source, error}` — **Rev 2 note**: this is now a denormalized convenience copy; the authoritative per-attempt error detail (category, retryable, retry_count, rate_limited) lives in `collection_run_provider_attempts`, not here; can accumulate at both planning time (no attempt row exists) and execution time, potentially across more than one write; `CHECK` requires a top-level JSON array; `MutableList`-wrapped for top-level append tracking — nested mutation within an already-appended entry is not tracked, correcting an entry requires replacing the whole list; no `CHECK` ties `failures` or the three job counters to `status` — `completed_with_errors` may legitimately show accurate non-zero rollups alongside a non-empty `failures` array |
+| duration_ms | int, nullable | `CHECK (duration_ms IS NULL OR duration_ms >= 0)` |
+| created_at | timestamptz, not null, server_default `now()` | added in Rev 19 despite this table's own earlier column list omitting it, per the established global convention |
+| updated_at | timestamptz, not null, server_default `now()`, ORM `onupdate=func.now()` | added in Rev 19, same global convention |
+
+Indexes: `(saved_search_id, started_at DESC)` (run history per search; also serves Phase
+9's "is there already a run for this search" lookup by leading column) and `(status)`
+(Phase 9's "find all still-running rows" abandoned-run detection, not scoped to one
+search) — lookup support only, they do not prevent overlapping runs under concurrency;
+Phase 9's own database-lock/partial-unique strategy for that is a separate, explicitly
+designed scheduler invariant, out of scope here. No uniqueness constraint of any kind in
+this slice.
+
+**Rev 19 changes** (thirteenth Phase 1 implementation slice, `collection_runs` — Class H
+per docs/LLM_WORKFLOW.md): this table's design had several decisions resolved by explicit
+approval before migration `0014` was written, in addition to the columns/notes above:
+- **`created_at`/`updated_at` were added**, even though this table's own original column
+  list (above, pre-Rev-19) omitted them — the same tension `identity_conflicts` hit in
+  Rev 18, resolved the same way: they follow the established global convention regardless
+  of what an individual table's earlier design note happened to list.
+- **The bidirectional lifecycle `CHECK`** (`status`/`completed_at` consistency) and the
+  **`completed_at >= started_at` ordering `CHECK`** both extend patterns already
+  established elsewhere in this schema (`identity_conflicts.status`/`.resolved_at`;
+  `job_occurrences.first_seen_at <= last_seen_at`) rather than introducing new ones.
+  `collection_run_provider_attempts` already documented an equivalent status/
+  `completed_at` pattern for itself before this table implemented its own.
+  Never enforced in both directions in a way that would fight `saved_search_id`'s
+  `ON DELETE SET NULL` — no CHECK here references that column's nullness, so the
+  FK-vs-CHECK asymmetric-direction tension seen on `raw_job_ingestions`/
+  `identity_conflicts` does not arise for this table.
+- **`providers_attempted` and `failures` are both `MutableList`-wrapped; `providers_
+  enforced_locally` is deliberately not.** This is the first table in this schema where
+  a JSONB (not `ARRAY`) column (`failures`) is `MutableList`-wrapped, and the first
+  table where a NOT-NULL JSONB/array column with a non-null `server_default` (rather
+  than nullable-with-no-default, or NOT-NULL-with-no-default) carries a shape `CHECK`.
+  The wrapping choice is driven purely by mutation semantics: append-incrementally
+  (`providers_attempted`, `failures`) is wrapped; assign-once-as-a-whole-value
+  (`providers_enforced_locally`) is not, matching `jobs.field_provenance`'s existing
+  precedent for the latter.
+- **No `CHECK` ties `failures` or the three job counters to `status`** — mirroring
+  `collection_run_provider_attempts`' own already-documented "no `CHECK` ties
+  `error_category`/status" reasoning, so `completed_with_errors` can honestly retain
+  non-zero successful rollups alongside recorded failures.
+- **No uniqueness constraint of any kind in this slice** — the two indexes are lookup
+  support only; the Phase 9 scheduler-level overlapping-run-prevention strategy is an
+  explicitly separate, not-yet-designed invariant.
 
 ### `collection_run_provider_attempts`
 **Moved into Phase 1 in Rev 4** (was a "later table," deferred to Phase 9/12 in Rev 2/3 —
@@ -1233,6 +1279,8 @@ reviewed against this list directly:
 | `raw_job_ingestions` | `CHECK` requiring `provider`/`source` already lowercase/trimmed/non-empty and matching the ASCII slug grammar `^[a-z0-9][a-z0-9._-]*$`; NULL-safe normalized/non-empty `CHECK` pairs on `source_identifier`/`parser_version`/`error_message`; trim/non-empty `CHECK` on `raw_content_hash` (not-null, no format constraint); `CHECK (jsonb_typeof(raw_payload) = 'object')`; `CHECK` restricting `processing_status` to `fetched`/`parse_error`/`normalized`/`identity_conflict`; `CHECK (processing_status NOT IN ('fetched', 'parse_error') OR job_occurrence_id IS NULL)` (one-directional only — see the table's own section above, Rev 17) | reject a non-canonical `provider`/`source`, a non-normalized/empty text field, a non-object `raw_payload`, an invalid `processing_status`, or a `fetched`/`parse_error` row with a non-null occurrence link — see the table's own section above (Rev 17) |
 | `identity_conflicts` | `INDEX (status)`, `INDEX (existing_job_occurrence_id)`, `INDEX (incoming_raw_job_ingestion_id)` | **new in Rev 3** — open-conflict queue lookup and traceback to the occurrence/ingestion in dispute |
 | `identity_conflicts` | `CHECK` on `status` enum, `conflict_type` enum, `(status, resolved_at)` consistency, `resolved_at >= created_at`, `existing_value`/`incoming_value` shape conditional on `conflict_type` (object for `evidence_mismatch`, array for `ambiguous_match`), `conflict_type <> 'ambiguous_match' OR existing_job_occurrence_id IS NULL` | reject an invalid `status`/`conflict_type`, an inconsistent status/resolution-timestamp pairing, a resolution timestamp before creation, a snapshot with the wrong top-level JSON shape for its conflict type, or an `ambiguous_match` row with a non-null occurrence link — see the table's own section above (Rev 4/18) |
+| `collection_runs` | `INDEX (saved_search_id, started_at DESC)`, `INDEX (status)` | **new in Rev 19** — run history per search and abandoned/still-running-row lookup; lookup support only, does not prevent overlapping runs under concurrency (Phase 9's own database-lock/partial-unique strategy is a separate invariant) |
+| `collection_runs` | `CHECK` on `status` enum, `(status, completed_at)` consistency, `completed_at >= started_at`, non-negative `jobs_discovered`/`jobs_inserted`/`jobs_updated`, NULL-safe non-negative `duration_ms`, `jsonb_typeof(providers_enforced_locally) = 'object'`, `jsonb_typeof(failures) = 'array'` | **new in Rev 19** — reject an invalid `status`, an inconsistent status/`completed_at` pairing, a `completed_at` before `started_at`, a negative counter/duration, or a wrong-shape JSONB value; no `CHECK` ties `failures`/counters to `status` — see the table's own section above (Rev 19) |
 | `collection_run_provider_attempts` | `UNIQUE (collection_run_id, provider, source)` | **new in Rev 4** — one aggregate row per run/provider/source, see table's own section |
 | `collection_run_provider_attempts` | `CHECK` on `status`, `(status, completed_at)`, non-negative `jobs_discovered`/`jobs_inserted`/`jobs_updated`/`retry_count` | **new in Rev 4** |
 | `collection_run_provider_attempts` | `INDEX (provider, source, started_at DESC)`, `INDEX (collection_run_id)` | **new in Rev 4** — Phase 12's volume-trend query and "all attempts for this run" |
