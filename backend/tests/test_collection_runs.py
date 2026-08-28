@@ -522,13 +522,13 @@ async def test_providers_attempted_round_trips_order_preserved(
     make_collection_run: Callable[..., CollectionRun],
 ) -> None:
     run = make_collection_run(
-        started_at=_STARTED_AT, providers_attempted=["healthy_source", "broken_source"]
+        started_at=_STARTED_AT, providers_attempted=["ats_scrapers", "jobspy"]
     )
     db_session.add(run)
     await db_session.commit()
     await db_session.refresh(run)
 
-    assert run.providers_attempted == ["healthy_source", "broken_source"]
+    assert run.providers_attempted == ["ats_scrapers", "jobspy"]
 
 
 async def test_providers_attempted_in_place_append_persists_after_separate_session_reload(
@@ -541,17 +541,17 @@ async def test_providers_attempted_in_place_append_persists_after_separate_sessi
         db_engine,
         "collection-run-providers-append@example.com",
         started_at=_STARTED_AT,
-        providers_attempted=["healthy_source"],
+        providers_attempted=["ats_scrapers"],
     ) as (session, _user_id, _saved_search_id, run_id):
         run = await session.get(CollectionRun, run_id)
         assert run is not None
-        run.providers_attempted.append("broken_source")
+        run.providers_attempted.append("jobspy")
         await session.commit()
 
         async with AsyncSession(bind=db_engine) as verify_session:
             reloaded = await verify_session.get(CollectionRun, run_id)
             assert reloaded is not None
-            assert reloaded.providers_attempted == ["healthy_source", "broken_source"]
+            assert reloaded.providers_attempted == ["ats_scrapers", "jobspy"]
 
 
 async def test_defaults_are_independent_across_multiple_rows(
@@ -568,15 +568,15 @@ async def test_defaults_are_independent_across_multiple_rows(
     await db_session.refresh(run_1)
     await db_session.refresh(run_2)
 
-    run_1.providers_attempted.append("healthy_source")
-    run_1.failures.append({"provider": "broken_source", "source": "x", "error": "boom"})
+    run_1.providers_attempted.append("ats_scrapers")
+    run_1.failures.append({"provider": "ats_scrapers", "source": "x", "error": "boom"})
     await db_session.commit()
     await db_session.refresh(run_1)
     await db_session.refresh(run_2)
 
-    assert run_1.providers_attempted == ["healthy_source"]
+    assert run_1.providers_attempted == ["ats_scrapers"]
     assert run_2.providers_attempted == []
-    assert run_1.failures == [{"provider": "broken_source", "source": "x", "error": "boom"}]
+    assert run_1.failures == [{"provider": "ats_scrapers", "source": "x", "error": "boom"}]
     assert run_2.failures == []
 
 
@@ -771,15 +771,19 @@ async def test_completed_with_errors_retains_successful_nonzero_rollups(
     db_session: AsyncSession,
     make_collection_run: Callable[..., CollectionRun],
 ) -> None:
-    """The exact Phase 2 fixture scenario: one healthy source persists
-    jobs, one broken source fails — the run-level rollups must remain
-    accurate for the successful source while `failures` records the
-    failed one. No `CHECK` blocks this combination."""
+    """The exact Phase 2 fixture scenario: one provider (`fixture_provider`)
+    executes two sources — one persists jobs successfully, the other
+    (`broken_source`) fails — the run-level rollups must remain accurate
+    for the successful source while `failures` records the failed one.
+    Because both sources belong to the same provider, `providers_attempted`
+    lists that provider exactly once, not once per source: provider and
+    source are distinct identifier spaces, and this table only tracks the
+    former. No `CHECK` blocks this combination."""
     run = make_collection_run(
         started_at=_STARTED_AT,
         status="completed_with_errors",
         completed_at=_LATER,
-        providers_attempted=["healthy_source", "broken_source"],
+        providers_attempted=["fixture_provider"],
         jobs_discovered=5,
         jobs_inserted=3,
         jobs_updated=2,
@@ -795,7 +799,10 @@ async def test_completed_with_errors_retains_successful_nonzero_rollups(
     await db_session.commit()  # must not raise
     await db_session.refresh(run)
 
+    assert run.providers_attempted == ["fixture_provider"]
     assert run.jobs_discovered == 5
     assert run.jobs_inserted == 3
     assert run.jobs_updated == 2
-    assert len(run.failures) == 1
+    assert run.failures == [
+        {"provider": "fixture_provider", "source": "broken_source", "error": "timeout"}
+    ]

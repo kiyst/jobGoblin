@@ -1045,7 +1045,7 @@ approval before migration `0013` was written:
 
 ### `collection_runs`
 **Implemented** (`backend/app/db/models/collection_run.py`; migration `0014`,
-`down_revision = "0013"`). Scheduler execution record (§38), one row per saved-search
+`down_revision = "0013"`). Scheduler execution record, one row per saved-search
 execution — the parent aggregate over the new `collection_run_provider_attempts` table
 below.
 

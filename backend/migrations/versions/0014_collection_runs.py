@@ -5,7 +5,7 @@ Revises: 0013
 Create Date: 2026-08-28
 
 Twelfth Phase 1 domain table (docs/DATA_MODEL.md's `collection_runs`
-section, §38). Class H per docs/LLM_WORKFLOW.md: this is
+section). Class H per docs/LLM_WORKFLOW.md: this is
 the scheduler execution record — "scheduler" is a named Class-H trigger —
 with a three-column lifecycle `CHECK` (status/started_at/completed_at)
 mirroring `collection_run_provider_attempts`' own already-documented

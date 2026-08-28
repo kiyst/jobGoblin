@@ -24,7 +24,7 @@ _TERMINAL_STATUSES = ("completed", "completed_with_errors", "failed")
 
 class CollectionRun(Base):
     """Scheduler execution record, one row per saved-search execution
-    (docs/DATA_MODEL.md's `collection_runs` section, §38).
+    (docs/DATA_MODEL.md's `collection_runs` section).
     The parent aggregate over the future `collection_run_provider_attempts`
     table, which holds the authoritative per-`(provider, source)` detail —
     this table's own counters/`failures` are denormalized run-level
