@@ -207,9 +207,9 @@ rebase/force-push/branch-deletion. `jobs` not started.
     reject a valid job or manufacture a fake company); `remote_type`/`salary_period`
     nullable text with `CHECK`-restricted enums (`'unknown'` sentinel deliberately not
     implemented — `NULL` means unknown); `compensation_explicit` nullable boolean, no
-    default; 24 nullable free-text columns sharing one `@validates` handler (trim,
+    default; 25 nullable free-text columns sharing one `@validates` handler (trim,
     blank-to-`None`) and a NULL-safe trim/non-empty `CHECK` pair each (generated via a
-    small `_trim_not_empty_checks` helper — 48 CHECKs, not hand-duplicated); non-negative
+    small `_trim_not_empty_checks` helper — 50 CHECKs, not hand-duplicated); non-negative
     + min<=max `CHECK`s on the three numeric pairs; `saved_search_locations`-style
     coordinate range/pairing `CHECK`s; `certifications` (`MutableList`-wrapped
     `ARRAY(Text)`) and `field_provenance` (`MutableDict`-wrapped `JSONB`, top-level-object
@@ -225,7 +225,7 @@ rebase/force-push/branch-deletion. `jobs` not started.
   - `backend/tests/conftest.py` — `make_job` (requires `first_seen_at`/`last_seen_at`
     explicitly, no default), `real_committed_job`.
   - `backend/tests/test_jobs.py` (new) — 198 tests, heavily parametrized per instruction
-    rather than repetitive bodies: all 24 nullable-text columns (default/blank-to-none/
+    rather than repetitive bodies: all 25 nullable-text columns (default/blank-to-none/
     trim/direct-SQL empty/direct-SQL wrapped); `remote_type`/`salary_period` valid+NULL
     accepted, invalid rejected (including `'unknown'` explicitly rejected); non-negative
     and min<=max checks across all three numeric pairs; coordinate range/pairing
@@ -265,4 +265,40 @@ rebase/force-push/branch-deletion. `jobs` not started.
 
 ### Work review
 
-*Pending — awaiting Codex.*
+- Date/reviewer: 2026-08-28, Codex. Implementation diff reviewed:
+  `80c0425..819c682` on `phase-1/jobs`; branch clean and synchronized with origin before
+  the review's documentation-only corrections.
+- Independent verification:
+  - Manually compared all model and migration columns, nullability, types, server
+    defaults, 50 nullable-text CHECKs, enum/range/ordering/coordinate/JSON checks,
+    `company_id` FK/index, and downgrade behavior. Model and migration match.
+  - Inspected all 198 tests, including separate-session mutable collection proofs and
+    real-commit `ON DELETE RESTRICT` failure/recovery/cleanup behavior.
+  - `python scripts/check_repo.py`: exit 0, zero findings.
+  - `ruff format --check .`, `ruff check .`: passed (44 files).
+  - `mypy app tests scripts`: passed (33 source files).
+  - `pytest tests/test_jobs.py -q`: 198 passed.
+  - `pytest -q --basetemp=.pytest_cache/codex_jobs_review`: 513 passed.
+  - `alembic check` against `jobgoblin_test` at `0010 (head)`: no new upgrade
+    operations detected; only the known informational warning for the pre-existing
+    `companies.normalized_name` computed column appeared.
+- Findings:
+  1. **Low, mechanical documentation only — phase status and counts were stale.**
+     `docs/ROADMAP.md` still ended the `companies` status with "No other Phase 1 table is
+     implemented yet," omitting the now-implemented `jobs`/`0010` slice. The `Work done`
+     summary also said 24 nullable-text columns/48 generated CHECKs, while the actual
+     synchronized tuple contains 25 columns/50 CHECKs. Under
+     `docs/LLM_WORKFLOW.md`'s standing mechanical-documentation rule, the reviewer
+     updated the roadmap status and corrected only those three numeric references.
+- Missing/inconclusive checks: the reviewer did not repeat destructive migration
+  downgrade/fresh-rebuild operations; Claude recorded existing-head, round-trip, fresh
+  `base -> head`, live-schema inspection, and development-database isolation as passing.
+  The reviewer independently confirmed the test database is at `0010` and model/schema
+  autogeneration reports no drift.
+- Verdict: approved after mechanical documentation corrections; no executable finding.
+- Exact requested corrections: none. The `jobs` slice is accepted. Do not begin
+  `job_occurrences`, ingestion, providers, normalization, reconciliation, add CI, or
+  merge/modify `main` until the user explicitly authorizes the next action.
+- STOP — reviewer changed only the mechanical documentation described above and this
+  `Work review`; no implementation, migration, test, dependency, or product behavior
+  was changed.

@@ -186,7 +186,14 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   even via a direct SQL insert that never mentions it), the `duplicate_of_company_id`
   self-referential FK's `ON DELETE SET NULL` behavior and its direct-self-reference
   `CHECK`, and NULL-safe normalization `CHECK`s on `homepage_url`/`career_page_url`/
-  `industry` (see `docs/DATA_MODEL.md`). No other Phase 1 table is implemented yet;
+  `industry` (see `docs/DATA_MODEL.md`). The `jobs` slice is also complete and verified
+  (Class H): model (`backend/app/db/models/job.py`), migration `0010` (`down_revision =
+  "0009"`), and database tests cover its nullable `company_id` FK with `ON DELETE
+  RESTRICT`, explicit ordered observation timestamps, resolved-value constraints,
+  coordinate and numeric invariants, mutable certifications/provenance collections, and
+  the absence of any job-level identity `UNIQUE` constraint (identity keys belong to the
+  future `job_occurrences` slice; see `docs/DATA_MODEL.md`). No later Phase 1 table is
+  implemented yet;
   the rest of Phase 1's exit gate (§[PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md))
   remains outstanding.
 - **Phases 2-14: not started.** Begin each phase only after completing its preflight in
