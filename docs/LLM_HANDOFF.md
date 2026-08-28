@@ -271,3 +271,11 @@ Iteration 2. Nothing below was rewritten — only renumbered.*
   correction passes are accepted. Do not add CI, begin `companies`, or merge/modify
   `main` until the user explicitly authorizes the next action.
 - STOP — reviewer changed only this `Work review`; no implementation files were changed.
+
+**Merge record (appended, not a rewrite of the entry above):** Approved at review
+commit `fc12091`. Per user authorization, `tooling/repository-validation` was
+fast-forward merged into `main` (no merge commit; `main` was a strict ancestor) and
+pushed. `main`/`origin/main` are both now at `fc12091`. Verified: `main` has zero
+content diff against the feature branch; `python scripts/check_repo.py` from `backend/`
+exits 0 with zero findings; working tree clean. No squash/rebase/force-push/branch-
+deletion. `companies` not started.
