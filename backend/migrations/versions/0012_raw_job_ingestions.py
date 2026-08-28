@@ -8,8 +8,10 @@ Tenth Phase 1 domain table (docs/DATA_MODEL.md's `raw_job_ingestions`
 section; ADR 0005/0007). Class H per docs/LLM_WORKFLOW.md: this table
 preserves audit evidence across a destructive lifecycle event (a
 referenced `JobOccurrence` may be deleted, `ON DELETE SET NULL`-ing this
-table's own `job_occurrence_id`). Phase 4+ ingestion code is the first
-writer; this slice only migrates the schema.
+table's own `job_occurrence_id`). Phase 2's offline fixture pipeline is the
+first writer/user of this persistence and deterministic-identity path;
+Phase 4 introduces the first live ATS provider to reuse it. This slice
+only migrates the schema.
 
 Product rules resolved by explicit approval before this migration was
 written (not inferred silently):

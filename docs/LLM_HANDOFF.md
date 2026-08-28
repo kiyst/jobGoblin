@@ -97,99 +97,9 @@ that detail.
 ## Iteration 1
 
 *Rotated in from "Iteration 2" per the two-iteration rule: the prior Iteration 1 (the
-`job_occurrences` initial implementation pass and Codex's changes-requested review at
-`5ad85bd`) was removed rather than kept alongside a third entry — every finding it
-raised was addressed in this entry's correction pass, which Codex then approved and the
-user merged. Nothing below was rewritten — only renumbered.*
-
-### Work done
-
-- Date/agent: 2026-08-28, Claude Code (Sonnet 5). Authorized slice: bounded correction
-  pass addressing the five findings at review commit `5ad85bd`, on the same
-  `phase-1/job-occurrences` branch. Base: `5ad85bd`. No later table, ingestion,
-  provider, normalization, reconciliation, CI, or `main` changes.
-- Outcome: all five findings addressed; 22 new regression tests (150 total, up from
-  128); fresh-context adversarial self-review run against the correction diff itself,
-  which surfaced and closed one additional low test-coverage gap.
-  1. **`normalize_url()` whitespace handling (High).** Now trims only symmetric outer
-     wrapper whitespace before parsing (`value.strip(_TRIM_CHARS)`), then rejects
-     (`None`) the whole input if any covered whitespace (`\t\n\r `) remains anywhere
-     inside — instead of letting `urlsplit()` silently delete an embedded `\t`/`\n`/`\r`
-     while leaving an embedded space untouched. Removed the prior post-assembly
-     `.strip()` workaround (now redundant/unreachable). Percent-encoded whitespace
-     (`%20`) is unaffected.
-  2. **DNS root-dot host equivalence (Medium).** `_canonicalize_host()` now strips
-     exactly one trailing dot from the post-IDNA ASCII form, so `example.com.` and its
-     UTS #46-mapped equivalents (U+3002, U+FF0E) canonicalize identically to
-     `example.com`. A doubled/empty label (`example.com..`, `.example.com`) still
-     returns `None` — `idna.encode()` already treats these as errors.
-  3. **ASCII slug-format `CHECK` on `provider`/`source` (Medium).** Added
-     `provider_slug_format`/`source_slug_format` CHECKs (`^[a-z0-9][a-z0-9._-]*$`) to
-     both the model and migration `0011`, alongside the existing trim/lower/non-empty
-     CHECKs. Makes the Python `str.lower()`-vs-PostgreSQL-`lower()` divergence on
-     non-ASCII input structurally impossible rather than an accepted limitation.
-     `normalize_url()`'s per-`(provider, source)` allow-list lookup is now
-     canonicalized (trim+lower) before the dict lookup.
-  4. **Valid-state test factory (Medium).** `make_job_occurrence`/
-     `real_committed_job_occurrence` (`backend/tests/conftest.py`) now compute
-     `source_url_normalized = normalize_url(source_url, provider=provider,
-     source=source)` by default. The model's own non-derivation test now constructs
-     `JobOccurrence` directly, bypassing the factory. The null/null fallback-key test
-     now uses three distinct, genuinely malformed raw URLs, not the same valid default
-     URL three times.
-  5. **Branch integration.** Merged `origin/main` into `phase-1/job-occurrences` with
-     a real merge commit (`git merge --no-ff`) so `3d47cd6` (the adversarial-self-
-     review workflow doc change) is now an ancestor. No conflicts.
-- Files changed: `backend/app/normalization/url.py`, `backend/app/db/models/
-  job_occurrence.py`, `backend/migrations/versions/0011_job_occurrences.py`,
-  `backend/tests/conftest.py`, `backend/tests/test_job_occurrences.py`,
-  `docs/DATA_MODEL.md` ("Rev 16 corrections").
-- Commands run and exact results: `check_repo.py` exit 0 (before/after the merge);
-  `ruff format --check .`/`ruff check .` passed (48 files); `mypy app tests scripts`
-  success (36 files); `pytest tests/test_job_occurrences.py -q` 150 passed (up from
-  128); full suite 663 passed (up from 641); migration `downgrade 0010`/`upgrade head`
-  round-trip, fresh `base -> head` (re-run after the merge), `alembic check` clean;
-  development DB unchanged at `0006`.
-- STOP — awaiting Codex re-review. Do not begin any later table, ingestion, providers,
-  normalization, reconciliation, add CI, or modify `main`.
-
-### Work review
-
-- Date/reviewer: 2026-08-28, Codex. Diff reviewed: correction commit `112c6d8`,
-  integration merge `d79ddec`, and handoff commit `5ea43ca`, against the requested
-  corrections recorded at `5ad85bd`.
-- Verdict: **approved**. Findings: none.
-- Verified independently:
-  - Inspected the implementation, migration/model parity, factory changes, tests,
-    documentation, and branch ancestry. `3d47cd6` is now an ancestor of the feature
-    branch; `main`/`origin/main` remain untouched at `3d47cd6`.
-  - Manual adversarial probes confirmed embedded space/TAB/LF/CR rejection, accepted
-    outer wrapper whitespace, percent-encoded whitespace preservation, ASCII and
-    UTS #46 root-dot equivalence, and doubled/bare-dot rejection.
-  - Repository checker, `ruff format --check`, `ruff check`, and
-    `mypy app tests scripts` passed.
-  - `tests/test_job_occurrences.py`: **150 passed**. Full suite: **663 passed**.
-  - `alembic check` against `jobgoblin_test`: no new upgrade operations; test schema
-    is at `0011 (head)`. The reviewer did not repeat Claude's destructive migration
-    downgrade/fresh-rebuild sequence.
-- The five bounded findings from `5ad85bd` are resolved. The `job_occurrences` slice
-  is accepted. Do not merge it to `main`, begin another table, or advance into
-  ingestion/providers/matching/reconciliation until the user explicitly authorizes
-  the next action.
-- STOP — reviewer changed only this `Work review`; no implementation files changed.
-
-**Merge record (appended, not a rewrite of the entry above):** Approved at review
-commit `59e4742`. Per user authorization, `phase-1/job-occurrences` was merged into
-`main` with a normal merge commit (`81031af`; `--no-ff`, no squash/rebase/force-push)
-and pushed. `main`/`origin/main` are both now at `81031af`. Verified: `main` has zero
-content diff against the feature branch; migration `0011` (`down_revision = "0010"`)
-is present in `main`; `python backend/scripts/check_repo.py` (via the project's own
-virtualenv interpreter) exits 0 with zero findings; working tree clean. No later
-Phase 1 table started or proposed.
-
----
-
-## Iteration 2
+`job_occurrences` correction pass, its approval, and merge record) was removed rather
+than kept alongside a third entry, since it was already merged and is no longer
+pending. Nothing below was rewritten — only renumbered.*
 
 ### Work done
 
@@ -350,3 +260,47 @@ Phase 1 table started or proposed.
      changes. Update concise `Work done`, commit/push the same branch, and stop.
   3. Do not begin `identity_conflicts` or any other slice, and do not modify `main`.
 - STOP — reviewer changed only this `Work review`; no implementation files changed.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-08-28, Claude Code (Sonnet 5). Authorized slice: the one bounded
+  documentation correction from the review at `53a2cad`, on the same
+  `phase-1/raw-job-ingestions` branch. Base: `53a2cad`. Comment/documentation changes
+  only — no schema, migration operations/revision metadata, test, or product-behavior
+  changes.
+- Outcome: all six stale "Phase 4+ ingestion code is the first writer" claims replaced
+  with consistent wording: Phase 2's offline fixture pipeline is the first writer/user
+  of the raw-ingestion and deterministic-identity persistence path; Phase 4 introduces
+  the first live ATS provider that reuses that same path. A seventh, unrelated "Phase
+  4+" mention (`docs/DATA_MODEL.md`'s field-provenance-merging passage, about
+  `ingestion/persistence.py`'s cross-source merge logic) was left untouched — it is a
+  distinct, correctly-scoped claim (no multi-source merge scenario exists before a
+  second real provider in Phase 4), not part of the six the review identified.
+- Files changed:
+  - `backend/app/db/models/job_occurrence.py` — class docstring.
+  - `backend/app/db/models/raw_job_ingestion.py` — class docstring.
+  - `backend/migrations/versions/0011_job_occurrences.py` — module docstring.
+  - `backend/migrations/versions/0012_raw_job_ingestions.py` — module docstring.
+  - `docs/DATA_MODEL.md` — the `job_occurrences` and `raw_job_ingestions` introduction
+    passages.
+- Commands run and exact results (lightweight, per the review's own scoping — no
+  backend/Alembic reruns for comment-only changes):
+  - `git diff --check` → clean.
+  - `python scripts/check_repo.py` (from `backend/`) → exit 0, zero findings.
+  - `ruff format`, `ruff check` against the four touched Python files → all
+    unchanged/passed.
+- Deviations/known limitations: none. Confirmed via `grep` that no other stale
+  "Phase 4+ ingestion code is the first writer"/"Phase 4+ ingestion code, out of scope"
+  occurrences remain anywhere in the tracked tree, other than Codex's own quoted
+  finding text in this file's Iteration 1 `Work review` above (a historical quotation
+  of the defect, not live documentation, correctly left as-is).
+- STOP — awaiting Codex re-review. Do not begin `identity_conflicts` or any other
+  slice, and do not modify `main`.
+
+### Work review
+
+*Pending — awaiting Codex.*

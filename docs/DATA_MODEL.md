@@ -663,8 +663,10 @@ deterministic identity-resolution scheme is built on — its three partial uniqu
 indexes below **are** the scoped identity signals ADR 0004 defines. This table
 declares no additional identity-matching logic of its own; the actual
 match-precedence application logic (querying by these indexes in order, deciding
-new-vs-existing-occurrence, writing `identity_conflicts` rows) is Phase 4+ ingestion
-code, out of scope for this schema-only slice.
+new-vs-existing-occurrence, writing `identity_conflicts` rows) is Phase 2+ ingestion
+code — Phase 2's offline fixture pipeline is the first writer/user of this persistence
+and deterministic-identity path; Phase 4 introduces the first live ATS provider to
+reuse it. Out of scope for this schema-only slice.
 
 | column | type | notes |
 |---|---|---|
@@ -815,8 +817,10 @@ unique within `(provider, source)` without any tenant qualifier.
 `down_revision = "0011"`). Preserved pre-normalization payload (§17), **one row per
 individual discovered posting** — not per provider request/attempt (see
 [ADR 0005](DECISIONS/0005-raw-ingestion-vs-provider-attempts.md) and the new
-`collection_run_provider_attempts` table below for request-level telemetry). Phase 4+
-ingestion code is the first writer; this Phase 1 slice only migrates the schema.
+`collection_run_provider_attempts` table below for request-level telemetry). Phase 2's
+offline fixture pipeline is the first writer/user of this persistence and
+deterministic-identity path; Phase 4 introduces the first live ATS provider to reuse
+it. This Phase 1 slice only migrates the schema.
 
 | column | type | notes |
 |---|---|---|

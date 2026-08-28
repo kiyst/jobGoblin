@@ -43,8 +43,10 @@ def _trim_not_empty_checks(column: str) -> tuple[CheckConstraint, CheckConstrain
 class RawJobIngestion(Base):
     """Preserved pre-normalization payload, one row per individual discovered
     posting fetch — not per provider request/attempt (docs/DATA_MODEL.md's
-    `raw_job_ingestions` section; ADR 0005). Phase 4+ ingestion code is the
-    first writer; this Phase 1 slice only migrates the schema.
+    `raw_job_ingestions` section; ADR 0005). Phase 2's offline fixture
+    pipeline is the first writer/user of this persistence and deterministic-
+    identity path; Phase 4 introduces the first live ATS provider to reuse
+    it. This Phase 1 slice only migrates the schema.
 
     `provider`/`source` are the same canonical identifiers as
     `job_occurrences`: lowercased/trimmed by the ORM, `CHECK`-restricted to
