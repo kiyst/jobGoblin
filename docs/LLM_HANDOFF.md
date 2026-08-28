@@ -366,3 +366,13 @@ Nothing below was rewritten — only renumbered.*
   to `main`, begin `collection_run_provider_attempts`/another slice, or otherwise
   advance without explicit user authorization.
 - STOP — reviewer changed only this `Work review`; no implementation files changed.
+
+**Merge record (appended, not a rewrite of the entry above):** Approved at review
+commit `fe51e03`. Per user authorization, `phase-1/collection-runs` was merged into
+`main` with a normal merge commit (`5e8395b`; `--no-ff`, no squash/rebase/force-push)
+and pushed. `main`/`origin/main` are both now at `5e8395b`. Verified: `main` has zero
+content diff against the feature branch; migration `0014` (`down_revision = "0013"`)
+is present and is the sole Alembic head; `python backend/scripts/check_repo.py` (via
+the project's own virtualenv interpreter) exits 0 with zero findings; working tree
+clean. No later Phase 1 table (`collection_run_provider_attempts`, `user_jobs`, or
+otherwise) started or proposed.
