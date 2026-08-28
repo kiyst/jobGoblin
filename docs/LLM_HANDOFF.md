@@ -246,4 +246,65 @@ squash/rebase/force-push/branch-deletion. `companies` not started.
 
 ### Work review
 
-*Pending — awaiting Codex.*
+- Date/reviewer: 2026-08-27, Codex. Diff reviewed: `a47a8f1..3290b31` on
+  `tooling/repository-validation`; branch clean and synchronized with origin before
+  this review entry.
+- Independent verification:
+  - Inspected the full checker, all 22 tests, README/workflow integration, and handoff
+    rotation. The balanced-parenthesis UNIQUE/INDEX parser correctly handles nested
+    `lower(trim(...))` expressions and catches the saved-location regression.
+  - `python scripts/check_repo.py`: exit 0, zero findings.
+  - `ruff format --check .`, `ruff check .`: passed (36 files).
+  - `mypy app tests scripts`: passed (27 source files).
+  - `pytest -q` with a reviewer-writable temporary root: 228 passed.
+  - Direct counterexamples confirmed the findings below: a documented `0010` revision
+    and an orphaned revision parent both currently return no finding.
+- Findings:
+  1. **Medium — duplicate-summary validation still fails open if its target table is
+     missing or no signatures can be parsed.** `backend/scripts/check_repo.py:242-292`
+     returns an empty result when the named heading/table disappears, its Markdown
+     shape changes, or UNIQUE/INDEX extraction silently produces zero signatures;
+     `run_checks()` at `backend/scripts/check_repo.py:458-480` treats that as success.
+     Consequently the real-repository integration test can still pass trivially under
+     the same no-op failure mode described in this pass's own Work done. Make the
+     DATA_MODEL check require exactly one target section with data rows and at least
+     one parsed UNIQUE/INDEX signature, reporting a finding otherwise. Add regression
+     tests for a missing section and an unparseable/no-signature section.
+  2. **Medium — revision-reference detection stops after migration `0009`.**
+     `backend/scripts/check_repo.py:345` uses ``r"`(000\d)`"``, so a current or future
+     citation such as migration `0010` is never inspected. A direct call with `0010`
+     in both the text and revision map returned no finding only because the regex did
+     not match. Support the project's four-digit, leading-zero revision convention
+     (for example `0\d{3}` in the existing backtick context) and add known/nonexistent
+     `0010`-or-later tests without turning ordinary years or ports into revisions.
+  3. **Medium — migration-chain validation does not prove parent existence or graph
+     connectivity.** `backend/scripts/check_repo.py:396-435` checks head/base counts
+     and shared `down_revision` values, but never verifies that every non-null parent
+     exists or that walking from the sole head visits every revision. The synthetic
+     chain `0001 -> NULL`, `0002 -> 9999`, `0003 -> 0002` with head `0003` returns no
+     findings. Add missing-parent and full-connectivity validation (including tests for
+     an orphan/disconnected component; reject tuple/merge parents because this project
+     requires one unbranched chain). Convert Alembic graph-loading failures into a
+     normal sorted finding instead of an uncontrolled traceback where practical.
+  4. **Low — CLI finding paths are checkout-dependent absolute paths.** Production
+     checks construct findings with `str(path)` and `str(MIGRATIONS_DIR)` throughout
+     `backend/scripts/check_repo.py`, so identical defects produce different output on
+     different machines despite the checker being described as deterministic. Render
+     repository files relative to `REPO_ROOT` (for example `docs/DATA_MODEL.md` and
+     `backend/migrations`) while leaving synthetic external paths usable in unit tests.
+- Missing/inconclusive checks: Docker/database state is irrelevant to this offline
+  tooling slice. The initial targeted reviewer run hit sandbox-owned pytest temp-folder
+  permissions; rerunning the complete suite with an explicitly writable temp root
+  passed 228/228, confirming this was environmental rather than a repository failure.
+- Verdict: changes requested.
+- Exact bounded correction:
+  1. Address only findings 1-4 in the checker and its tests. Update README/workflow text
+     only if behavior or invocation wording needs correction; do not expand categories.
+  2. Add focused tests proving fail-closed constraints-table discovery/extraction,
+     `0010`-or-later revision handling, orphan/connectivity rejection, and stable
+     repository-relative CLI paths.
+  3. Rerun the checker from `backend` and an unrelated CWD, Ruff format/check, mypy over
+     `app tests scripts`, targeted checker tests, and the full suite. Record exact
+     outcomes concisely, commit/push the same tooling branch, and stop.
+  4. Do not add CI, begin `companies`, modify migrations, or alter product behavior.
+- STOP — reviewer changed only this `Work review`; no implementation files were changed.
