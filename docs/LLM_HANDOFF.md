@@ -454,3 +454,12 @@ below was rewritten — only renumbered.*
   ingestion/providers/matching/reconciliation until the user explicitly authorizes
   the next action.
 - STOP — reviewer changed only this `Work review`; no implementation files changed.
+
+**Merge record (appended, not a rewrite of the entry above):** Approved at review
+commit `59e4742`. Per user authorization, `phase-1/job-occurrences` was merged into
+`main` with a normal merge commit (`81031af`; `--no-ff`, no squash/rebase/force-push)
+and pushed. `main`/`origin/main` are both now at `81031af`. Verified: `main` has zero
+content diff against the feature branch; migration `0011` (`down_revision = "0010"`)
+is present in `main`; `python backend/scripts/check_repo.py` (via the project's own
+virtualenv interpreter) exits 0 with zero findings; working tree clean. No later
+Phase 1 table started or proposed.
