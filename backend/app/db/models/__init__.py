@@ -1,6 +1,7 @@
 from app.db.models.candidate_profile import CandidateProfile
 from app.db.models.candidate_skill import CandidateSkill
 from app.db.models.company import Company
+from app.db.models.identity_conflict import IdentityConflict
 from app.db.models.job import Job
 from app.db.models.job_occurrence import JobOccurrence
 from app.db.models.raw_job_ingestion import RawJobIngestion
@@ -13,6 +14,7 @@ __all__ = [
     "CandidateProfile",
     "CandidateSkill",
     "Company",
+    "IdentityConflict",
     "Job",
     "JobOccurrence",
     "RawJobIngestion",

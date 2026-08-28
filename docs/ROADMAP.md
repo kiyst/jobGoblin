@@ -208,9 +208,19 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   the `fetched`/`parse_error`-only-direction `processing_status`/`job_occurrence_id`
   consistency `CHECK` (deliberately one-directional so `ON DELETE SET NULL` can still
   preserve a `normalized`/`identity_conflict` row past its occurrence's deletion), and
-  `ON DELETE SET NULL` isolation from `job_occurrences` (see `docs/DATA_MODEL.md`). No
-  later Phase 1 table is implemented yet; the rest of Phase 1's exit gate
-  (§[PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md)) remains outstanding.
+  `ON DELETE SET NULL` isolation from `job_occurrences` (see `docs/DATA_MODEL.md`). The
+  `identity_conflicts` slice is also complete and verified (Class H): model
+  (`backend/app/db/models/identity_conflict.py`), migration `0013` (`down_revision =
+  "0012"`), and database tests cover the plain `conflict_type`/`status` enums, the full
+  `status`/`resolved_at` lifecycle consistency matrix plus the new `resolved_at >=
+  created_at` ordering `CHECK`, the `conflict_type`-conditional JSON shape `CHECK` on
+  `existing_value`/`incoming_value` (object for `evidence_mismatch`, array for
+  `ambiguous_match`, including the empty-object/empty-array acceptance case), and both
+  independent `ON DELETE SET NULL` cascades (from `job_occurrences` and from
+  `raw_job_ingestions`) proven in isolation from each other and from an unrelated
+  conflict row (see `docs/DATA_MODEL.md`). No later Phase 1 table is implemented yet;
+  the rest of Phase 1's exit gate (§[PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md))
+  remains outstanding.
 - **Phases 2-14: not started.** Begin each phase only after completing its preflight in
   [PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md) and receiving approval for the next
   smallest slice.

@@ -97,173 +97,11 @@ that detail.
 ## Iteration 1
 
 *Rotated in from "Iteration 2" per the two-iteration rule: the prior Iteration 1 (the
-`job_occurrences` correction pass, its approval, and merge record) was removed rather
-than kept alongside a third entry, since it was already merged and is no longer
-pending. Nothing below was rewritten — only renumbered.*
-
-### Work done
-
-- Date/agent: 2026-08-28, Claude Code (Sonnet 5). Authorized slice: `raw_job_ingestions`,
-  Class H per docs/LLM_WORKFLOW.md (ingestion-adjacent audit table whose FK interacts
-  with a destructive lifecycle event — deleting a `JobOccurrence` must preserve, not
-  cascade-delete, its referencing ingestion rows). Base `e7a0a60` on `main` -> branch
-  `phase-1/raw-job-ingestions`.
-- Outcome: new model, migration `0012`, factory/real-commit helpers, and 74 new tests
-  implemented and verified against real PostgreSQL.
-  - `RawJobIngestion` model: `provider`/`source` reuse `job_occurrences`' canonical-
-    identifier treatment verbatim (ORM trim+lowercase; DB `CHECK` requires already-
-    canonical, ASCII-slug `^[a-z0-9][a-z0-9._-]*$`), generalized to a second table
-    since these are internal categorization labels, not "raw" external data.
-    `source_identifier`/`parser_version`/`error_message` are nullable, case-preserving,
-    NULL-safe `CHECK` pairs. `job_occurrence_id` is nullable, `ON DELETE SET NULL`
-    (audit trail survives occurrence deletion). `fetched_at` is NOT NULL with **no**
-    server default (represents the actual fetch event, which may differ from row-
-    insertion time — buffering/replay/backfill). `raw_payload` is NOT NULL jsonb with a
-    top-level-object `CHECK`, deliberately **not** `MutableDict`-wrapped (an immutable,
-    write-once snapshot — documented as an application-level convention, not a schema
-    guarantee; whole-value/direct-SQL writes remain possible). `raw_content_hash` is
-    NOT NULL with a trim/non-empty `CHECK` only — no format/length constraint
-    (application-computed). `processing_status` is a `CHECK`-restricted enum
-    (`fetched`/`parse_error`/`normalized`/`identity_conflict`). `created_at`/
-    `updated_at` follow the established global convention.
-  - **The key design decision**: the `processing_status`/`job_occurrence_id`
-    consistency invariant is database-enforced in only one direction —
-    `processing_status IN ('fetched', 'parse_error') ⟹ job_occurrence_id IS NULL`.
-    The reverse (`normalized`/`identity_conflict` ⟹ non-null) is deliberately **not** a
-    `CHECK`: enforcing it would make `ON DELETE SET NULL`'s own cascade `UPDATE`
-    violate the `CHECK` whenever a `normalized`/`identity_conflict` row's target
-    occurrence is deleted, turning `SET NULL` into `RESTRICT` in practice — exactly
-    the historical audit-preservation state ADR 0005 exists to support. This was a
-    user-approved correction to the original proposal (which asked for both
-    directions) after the conflict was identified during the pre-implementation
-    adversarial analysis. Phase 1 has no ingestion service to test the fresh-write-side
-    contract against; Phase 2's persistence-service tests will own that.
-  - No uniqueness constraint of any kind (intentionally append-only audit log — a
-    re-observed posting gets a new row every fetch). Index:
-    `(job_occurrence_id, fetched_at DESC)`.
-- Files changed:
-  - `backend/app/db/models/raw_job_ingestion.py` (new).
-  - `backend/app/db/models/__init__.py`, `backend/app/db/base.py` —
-    registration/docstring.
-  - `backend/migrations/versions/0012_raw_job_ingestions.py` (new,
-    `down_revision = "0011"`).
-  - `backend/tests/conftest.py` — `make_raw_job_ingestion` (requires `fetched_at`
-    explicitly, no default), `real_committed_raw_job_ingestion` (builds on
-    `real_committed_job_occurrence`; defaults to a linked `normalized` row since it
-    exists specifically to exercise `ON DELETE SET NULL`, but a caller may pass
-    `job_occurrence_id=None` to start a row unlinked instead).
-  - `backend/tests/test_raw_job_ingestions.py` (new) — 74 tests: canonical-identifier
-    `provider`/`source` (ORM + direct-SQL, including non-ASCII/embedded-space/
-    leading-hyphen rejection and a `.`/`_`/`-` positive case); nullable trim-only text
-    columns; `raw_content_hash` trim/non-empty with an arbitrary-non-hex positive case;
-    `processing_status` enum validity; the full status/occurrence consistency matrix
-    (every status accepted with a NULL occurrence — including a dedicated test
-    documenting `normalized`/`identity_conflict`+NULL as the DB-permitted post-deletion
-    state, not a fresh-write pattern; `fetched`/`parse_error` rejected with a non-null
-    occurrence; `normalized`/`identity_conflict` accepted with one); the `ON DELETE
-    SET NULL` isolation test (deleting one occurrence nulls only its own ingestion
-    row, preserving it, while a second, unrelated ingestion row stays untouched);
-    `raw_payload`'s top-level-object `CHECK` against SQL `NULL`, JSON `null`, arrays,
-    and scalars, a representative-object round-trip, and a separate-session reload
-    proving lifecycle updates don't alter it (semantic equality, not byte-for-byte);
-    `fetched_at`'s no-default requirement; `created_at`/`updated_at`'s server default
-    and `updated_at` advancing on a real update; timestamp UTC-awareness.
-  - `docs/DATA_MODEL.md` — `raw_job_ingestions` marked **Implemented**; added "Rev 17"
-    note recording the canonical-identifier generalization, the one-directional
-    consistency `CHECK` and its rationale, the `raw_payload`/`raw_content_hash`
-    decisions, and `fetched_at`'s no-default treatment; added the constraints-summary
-    row.
-  - `docs/ROADMAP.md` — Phase 1 status line describes the `raw_job_ingestions` slice
-    as complete.
-- Commands run and exact results:
-  - `python scripts/check_repo.py` (from `backend/`) → exit 0, zero findings.
-  - `ruff format --check .`, `ruff check .` → passed (51 files).
-  - `mypy app tests scripts` → success, 38 source files.
-  - `pytest tests/test_raw_job_ingestions.py -q` → 74 passed.
-  - `pytest -q` (full suite) → 737 passed.
-  - `DATABASE_URL=...jobgoblin_test`: `alembic upgrade head` (`0011 -> 0012`, existing
-    head), `downgrade 0011` / `upgrade head` (round-trip), `downgrade base` / `upgrade
-    head` (fresh `base -> head`), `alembic check` (`No new upgrade operations detected`
-    — same informational `Computed`-column `UserWarning` as before) — all passed.
-  - `alembic current` against the **development** database (no override) → `0006`,
-    unchanged throughout.
-  - Live schema inspected directly (`pg_constraint`, `pg_indexes`) — confirmed the
-    FK's `ON DELETE SET NULL` (`confdeltype = 'n'`), exactly 17 `CHECK` constraints,
-    and the single lookup index; no partial/unique index exists, matching design.
-  - `git status`/`git diff --check` → only the files listed above; no whitespace/
-    conflict errors.
-- Adversarial self-review (fresh Explore-agent context, no prior knowledge of the
-  implementation, run against the actual uncommitted diff before commit; full
-  12-question Class H depth): one **Medium** finding — the
-  `real_committed_raw_job_ingestion` helper's `setdefault`-based linking logic
-  (correctly fixed earlier in this same pass after an initial bug where it
-  unconditionally forced a non-null `job_occurrence_id` regardless of requested
-  `processing_status`) had no docstring warning that passing `processing_status=
-  "fetched"`/`"parse_error"` without also passing `job_occurrence_id=None` would fail
-  at `commit()`. Fixed: added an explicit docstring note. No Critical/High findings.
-  Explicitly checked and clean: CHECK text is character-for-character identical
-  between model and migration, including the one-directional consistency clause;
-  provider/source ASCII-slug and JSONB top-level-object edge cases (JSON `null` vs SQL
-  `NULL` vs array vs scalar) all behave correctly; no partial index exists (confirmed
-  against the migration, not assumed) and no unique constraint exists anywhere on this
-  table, so no concurrency test was needed; the `raw_payload`-survives-update test uses
-  genuine separate-session reload with semantic (not byte-for-byte) equality; the FK
-  isolation test is not vacuous (the second occurrence uses a distinct `source_url` to
-  avoid an unrelated `job_occurrences` uniqueness collision, and both rows are proven
-  to exist and diverge post-deletion); naming-convention resolution matches between
-  model and migration; no stale docstrings between the two files; the asymmetric CHECK
-  neither over- nor under-constrains Phase 2's documented two-step write pattern.
-- Deviations/known limitations: none new. `identity_conflicts`, `collection_runs`,
-  `collection_run_provider_attempts`, `user_jobs`, and all ingestion/matching/
-  reconciliation logic remain unimplemented, per explicit scope. The
-  `normalized`/`identity_conflict` ⟹ non-null-occurrence half of the consistency
-  invariant is intentionally not database-enforced (see design decision above) —
-  Phase 2's persistence-service tests, not this schema, own proving fresh writes
-  always set it.
-- STOP — awaiting Codex review. Do not begin `identity_conflicts` or any other slice,
-  and do not modify `main`.
-
-### Work review
-
-- Date/reviewer: 2026-08-28, Codex. Diff reviewed: `e7a0a60..caa36c8`.
-- Verdict: **changes requested** (one bounded documentation-phase correction; schema
-  and executable behavior otherwise accepted).
-- Verification performed:
-  - Inspected the model, migration, factories/real-commit cleanup, complete targeted
-    test file, DATA_MODEL/ROADMAP changes, and the asymmetric status/FK contract.
-  - Repository checker, `ruff format --check`, `ruff check`, and
-    `mypy app tests scripts` passed.
-  - `tests/test_raw_job_ingestions.py`: **74 passed**. Full suite: **737 passed**.
-  - `alembic check` against `jobgoblin_test`: no new upgrade operations; test schema
-    is at `0012 (head)`. The reviewer did not repeat Claude's destructive migration
-    downgrade/fresh-rebuild sequence or the live-schema catalog inspection.
-- Findings:
-  1. **Low — the new first-writer wording assigns fixture ingestion to the wrong
-     phase.** `backend/app/db/models/raw_job_ingestion.py`, migration `0012`, and the
-     implemented `raw_job_ingestions` introduction in `docs/DATA_MODEL.md` say
-     "Phase 4+ ingestion code is the first writer." The canonical roadmap explicitly
-     makes Phase 2's offline fixture pipeline write `RawJobIngestion` as part of
-     `Fixture -> RawJobIngestion -> identity resolution -> Job -> JobOccurrence`;
-     Phase 4 introduces the first real `ats-scrapers` provider. The same stale
-     "Phase 4+" ownership wording also remains in the previously merged
-     `JobOccurrence` model/migration/DATA_MODEL text. This is documentation-only, but
-     it misstates the immediate consumer contract the new schema was designed for.
-- Exact bounded correction:
-  1. Replace all six stale Phase-4 ownership claims in the two model docstrings, the
-     `0011`/`0012` migration docstrings, and the corresponding two DATA_MODEL passages
-     with consistent wording: Phase 2's fixture ingestion is the first writer/user of
-     the persistence and deterministic-identity path; Phase 4 is the first live ATS
-     provider to reuse that path.
-  2. Do not alter schema, migrations' operations/revision metadata, tests, or product
-     behavior. Run `git diff --check`, the repository checker, and Ruff against the
-     touched Python files; backend/Alembic test reruns are unnecessary for comment-only
-     changes. Update concise `Work done`, commit/push the same branch, and stop.
-  3. Do not begin `identity_conflicts` or any other slice, and do not modify `main`.
-- STOP — reviewer changed only this `Work review`; no implementation files changed.
-
----
-
-## Iteration 2
+`raw_job_ingestions` initial implementation pass and Codex's changes-requested review at
+`53a2cad`, requesting the stale Phase-4 wording correction) was removed rather than kept
+alongside a third entry — its one finding was addressed in this entry's correction pass,
+which Codex then approved and the user merged. Nothing below was rewritten — only
+renumbered.*
 
 ### Work done
 
@@ -296,8 +134,8 @@ pending. Nothing below was rewritten — only renumbered.*
 - Deviations/known limitations: none. Confirmed via `grep` that no other stale
   "Phase 4+ ingestion code is the first writer"/"Phase 4+ ingestion code, out of scope"
   occurrences remain anywhere in the tracked tree, other than Codex's own quoted
-  finding text in this file's Iteration 1 `Work review` above (a historical quotation
-  of the defect, not live documentation, correctly left as-is).
+  finding text in this file's prior `Work review` (a historical quotation of the
+  defect, not live documentation, correctly left as-is).
 - STOP — awaiting Codex re-review. Do not begin `identity_conflicts` or any other
   slice, and do not modify `main`.
 
@@ -330,3 +168,136 @@ content diff against the feature branch; migration `0012` (`down_revision = "001
 is present in `main`; `python backend/scripts/check_repo.py` (via the project's own
 virtualenv interpreter) exits 0 with zero findings; working tree clean. No later
 Phase 1 table (`identity_conflicts` or otherwise) started or proposed.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-08-28, Claude Code (Sonnet 5). Authorized slice: `identity_conflicts`,
+  Class H per docs/LLM_WORKFLOW.md — two independent `ON DELETE SET NULL` relationships,
+  a first-of-its-kind bidirectional status/timestamp lifecycle `CHECK`, and a
+  `conflict_type`-conditional JSON shape `CHECK`. Base `214ef9d` on `main` -> branch
+  `phase-1/identity-conflicts`.
+- Outcome: new model, migration `0013`, factory/real-commit helpers, and 65 new tests
+  implemented and verified against real PostgreSQL.
+  - `IdentityConflict` model: `conflict_type`/`status` are plain `CHECK`-restricted
+    enums, no ORM trim/case transform (matching `raw_job_ingestions.processing_status`'s
+    treatment — closed literal sets, not cross-table join keys).
+    `existing_value`/`incoming_value` are NOT NULL jsonb whose shape depends on
+    `conflict_type`: a JSON object for `evidence_mismatch`, a JSON array for
+    `ambiguous_match`, enforced by a `CHECK` conditional on `conflict_type` for each
+    column (only the top-level shape — empty objects/arrays explicitly accepted,
+    proven by dedicated tests). Not `MutableDict`/`MutableList`-wrapped: immutable,
+    write-once snapshots, same rationale as `raw_job_ingestions.raw_payload`.
+    `existing_job_occurrence_id`/`incoming_raw_job_ingestion_id` are both nullable,
+    `ON DELETE SET NULL`. `status`/`resolved_at` consistency and a new
+    `resolved_at >= created_at` ordering `CHECK` are both fully bidirectional (neither
+    interacts with either FK's cascade). `status` has no server default.
+    `resolution` is nullable, ORM-trimmed with blank collapsed to `NULL`, but has no
+    backing `CHECK` (direct SQL bypasses the normalization entirely, tested explicitly).
+    `created_at`/`updated_at` follow the established global convention.
+  - **The key design decision** (mirroring `raw_job_ingestions`' precedent in a new
+    shape): only the safe direction of the `conflict_type`/`existing_job_occurrence_id`
+    relationship is a `CHECK` — `ambiguous_match` requires `existing_job_occurrence_id
+    IS NULL` (safe: an `ambiguous_match` row never has a non-null value to begin with).
+    The reverse (`evidence_mismatch` implying non-null) is deliberately **not** a
+    `CHECK`: enforcing it would turn `ON DELETE SET NULL` into `RESTRICT` in practice
+    whenever a disputed occurrence is later deleted. `incoming_raw_job_ingestion_id`
+    gets no `CHECK` at all for the same reason. This asymmetric design was part of the
+    user's original authorization (not discovered mid-implementation this time).
+  - Two FK constraints (`existing_job_occurrence_id`→`job_occurrences`,
+    `incoming_raw_job_ingestion_id`→`raw_job_ingestions`) required explicit, shortened
+    names (`fk_identity_conflicts_existing_occurrence`,
+    `fk_identity_conflicts_incoming_ingestion`) — the naming convention's full template
+    exceeds Postgres's 63-byte identifier limit for both (64 and 70 chars) and would
+    otherwise be silently truncated with a hash suffix. Caught via direct DDL rendering
+    before writing the migration.
+  - Indexes: `(status)`, `(existing_job_occurrence_id)`,
+    `(incoming_raw_job_ingestion_id)` — three plain, non-unique indexes; no uniqueness
+    constraint anywhere (no concurrency test needed).
+- Files changed:
+  - `backend/app/db/models/identity_conflict.py` (new).
+  - `backend/app/db/models/__init__.py`, `backend/app/db/base.py` —
+    registration/docstring.
+  - `backend/migrations/versions/0013_identity_conflicts.py` (new,
+    `down_revision = "0012"`).
+  - `backend/tests/conftest.py` — `make_identity_conflict` (both FKs default `None`,
+    `status` defaults to `"open"` as a Python-level factory convenience only — the
+    database itself has no server default), `real_committed_identity_conflict` (builds
+    on `real_committed_job_occurrence` and `real_committed_raw_job_ingestion` in
+    parallel — two structurally independent parent chains, not nested — with an
+    `ingestion_occurrence_kwargs` override to avoid the ingestion's own internal
+    occurrence colliding with the conflict's primary occurrence on
+    `job_occurrences`' fallback-URL unique index).
+  - `backend/tests/test_identity_conflicts.py` (new) — 65 tests: `conflict_type`/
+    `status` enum validity; the full `status`/`resolved_at` lifecycle matrix (3 valid +
+    3 invalid pairings, ORM + direct SQL) plus the `resolved_at`-vs-`created_at`
+    ordering boundary (equal/after accepted, before rejected, via direct SQL with
+    explicit timestamps); both JSON shapes accepted (including empty object/array) and
+    12 wrong-shape/JSON-null/scalar rejection cases across both columns and both
+    conflict types; the `ambiguous_match`-requires-null-occurrence `CHECK` (accepted/
+    rejected, ORM + direct SQL) alongside `evidence_mismatch`'s DB-permitted-but-not-
+    required null case; nonexistent-FK rejection for both relationships; both
+    independent `ON DELETE SET NULL` cascades proven in isolation from each other and
+    from an unrelated conflict row; `resolution`'s ORM normalization vs. its absence
+    on direct SQL; a separate-session reload proving both snapshots survive an
+    unrelated lifecycle update unchanged; timestamp server-defaults and UTC-awareness.
+  - `docs/DATA_MODEL.md` — `identity_conflicts` marked **Implemented**; added "Rev 18"
+    note recording every resolved decision; added/updated the constraints-summary row.
+  - `docs/ROADMAP.md` — Phase 1 status line describes the `identity_conflicts` slice
+    as complete.
+- Commands run and exact results:
+  - `python scripts/check_repo.py` (from `backend/`) → exit 0, zero findings.
+  - `ruff format --check .`, `ruff check .` → passed (54 files).
+  - `mypy app tests scripts` → success, 40 source files.
+  - `pytest tests/test_identity_conflicts.py -q` → 65 passed.
+  - `pytest -q` (full suite) → 802 passed.
+  - `DATABASE_URL=...jobgoblin_test`: `alembic upgrade head` (`0012 -> 0013`, existing
+    head), `downgrade 0012` / `upgrade head` (round-trip), `downgrade base` / `upgrade
+    head` (fresh `base -> head`), `alembic check` (`No new upgrade operations detected`
+    — same informational `Computed`-column `UserWarning` as before) — all passed.
+  - `alembic current` against the **development** database (no override) → `0006`,
+    unchanged throughout.
+  - Live schema inspected directly (`pg_constraint`, `pg_indexes`) — confirmed both
+    FKs' `ON DELETE SET NULL` (`confdeltype = 'n'`), exactly 7 `CHECK` constraints, and
+    the three lookup indexes; no partial/unique index exists, matching design.
+  - `git status`/`git diff --check` → only the files listed above; no whitespace/
+    conflict errors.
+- Adversarial self-review (fresh Explore-agent context, no prior knowledge of the
+  implementation, run against the actual uncommitted diff before commit; full
+  12-question Class H depth): one **Medium** finding — the docstrings' claim that an
+  empty object/array is deliberately accepted (only top-level shape enforced, no
+  non-empty requirement) was asserted in both the model and migration docstrings but
+  had zero test coverage; a future accidental tightening of the shape `CHECK` could
+  silently break the documented behavior with nothing to catch it. Fixed: added 4
+  regression tests (empty object for `evidence_mismatch`, empty array for
+  `ambiguous_match`, each via ORM and direct SQL). No Critical/High findings.
+  Explicitly checked and clean: `conflict_type`/`status`'s lack of ORM transform
+  matches the established `processing_status` precedent, no interaction issue; all 7
+  `CheckConstraint` bodies are byte-identical between model and migration, including
+  both custom FK names; the separate-session snapshot-survival test is genuine, not
+  vacuous; no partial index and no unique constraint exist on this table (confirmed
+  against the migration, not assumed); the `real_committed_identity_conflict` helper's
+  three-real-row cleanup unwinds correctly even when a test body deletes one parent
+  itself (both SET-NULL cascade tests do); neither cascade test could pass vacuously —
+  both conflict rows in each test are proven to actually exist via distinct
+  `source_url` overrides on both parent chains, avoiding the exact
+  `job_occurrences`-fallback-URL collision class already caught once before in this
+  project; both ADR 0007 fixture shapes (evidence_mismatch with a real occurrence,
+  ambiguous_match with a null one) are constructible without hitting any CHECK Phase 2
+  shouldn't.
+- Deviations/known limitations: none new. `collection_runs`,
+  `collection_run_provider_attempts`, `user_jobs`, and all ingestion/matching/
+  reconciliation logic remain unimplemented, per explicit scope. The
+  `evidence_mismatch` ⟹ non-null-occurrence half of its consistency invariant, and any
+  `incoming_raw_job_ingestion_id` non-null requirement, are intentionally not
+  database-enforced (see design decision above) — Phase 2's persistence-service tests,
+  not this schema, own proving fresh writes always set them.
+- STOP — awaiting Codex review. Do not begin `collection_runs`, `user_jobs`, or any
+  other slice, and do not modify `main`.
+
+### Work review
+
+*Pending — awaiting Codex.*
