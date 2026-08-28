@@ -287,4 +287,43 @@ Nothing below was rewritten — only renumbered.*
 
 ### Work review
 
-*Pending — awaiting Codex.*
+- Date/reviewer: 2026-08-27, Codex. Correction diff reviewed:
+  `d9185fb..5bd70ec` on `tooling/repository-validation`; branch clean and synchronized
+  with origin before this review entry.
+- Independent verification:
+  - Inspected every correction and new test. Findings 1, 2, and 4 are resolved; the
+    missing-parent, reachability, and merge-parent logic requested in finding 3 is also
+    correct.
+  - `python scripts/check_repo.py`: exit 0, zero findings.
+  - `ruff format --check .`, `ruff check .`: passed (36 files).
+  - `mypy app tests scripts`: passed (27 source files).
+  - `pytest -q` with a reviewer-writable temporary root: 239 passed.
+  - Directly injected a `CommandError` into the initial revision walk and confirmed it
+    still escapes uncaught before the new graph-integrity handler runs.
+- Findings:
+  1. **Medium — Alembic graph-load errors can still bypass the normal-finding handler.**
+     `backend/scripts/check_repo.py:557-575` catches `CommandError` while
+     `check_migration_chain_integrity()` calls `get_heads()`/`walk_revisions()`, but
+     `run_checks()` first calls `_revision_map(script)` at
+     `backend/scripts/check_repo.py:597`; `_revision_map()` performs its own
+     `walk_revisions()` at `backend/scripts/check_repo.py:420-426` outside that handler.
+     A malformed/missing-parent graph can therefore raise during revision-map creation
+     and terminate with a traceback before `check_migration_chain_integrity()` is ever
+     reached. A direct injected `CommandError("broken graph")` reproduced the uncaught
+     path. Load/walk the graph once under one handler (or catch the earlier traversal),
+     return a repository-relative normal `Finding`, and avoid continuing revision-
+     citation checks when no valid revision map exists.
+- Missing/inconclusive checks: none. The checker is database-free; the full existing
+  suite passed against the configured environment.
+- Verdict: changes requested (one narrow executable correction).
+- Exact bounded correction:
+  1. Make the first Alembic graph traversal in the production `run_checks()` path
+     convert `CommandError` into the same sorted `backend/migrations:1: ...` finding;
+     do not traverse the graph once outside and again inside separate error handling.
+  2. Add a test at the `run_checks()`/orchestration boundary—not only the pure helper—
+     that injects a graph-load `CommandError`, asserts no exception escapes, and asserts
+     one normal repository-relative finding/nonzero CLI outcome.
+  3. Rerun checker from two CWDs, Ruff, mypy, targeted checker tests, and the full suite;
+     update the concise handoff entry, commit/push the same branch, and stop.
+  4. Do not add CI, begin `companies`, modify migrations, or alter product behavior.
+- STOP — reviewer changed only this `Work review`; no implementation files were changed.
