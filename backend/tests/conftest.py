@@ -13,6 +13,7 @@ from app.config import Settings, get_settings
 from app.db.models import (
     CandidateProfile,
     CandidateSkill,
+    CollectionRun,
     Company,
     IdentityConflict,
     Job,
@@ -917,6 +918,107 @@ async def real_committed_user_profile_and_skill(
                     existing_skill = await cleanup_session.get(CandidateSkill, skill_id)
                     if existing_skill is not None:
                         await cleanup_session.delete(existing_skill)
+                        await cleanup_session.commit()
+
+
+@pytest.fixture
+def make_collection_run() -> Callable[..., CollectionRun]:
+    """Factory for a valid `CollectionRun` — tests only deviate from this
+    intentionally. `saved_search_id` defaults to `None` (this table's
+    only FK is optional, matching `make_raw_job_ingestion`'s own
+    no-required-parent factory shape). `started_at` has no default (no
+    server default either — see model docstring): every call site must
+    supply it explicitly. `status` defaults to `"running"` as a
+    Python-level factory convenience only — the database itself has no
+    server default. Every other field is omitted from the constructed
+    row entirely unless explicitly passed, so the database's own server
+    defaults apply — this factory does not shadow them with Python-side
+    defaults.
+    """
+
+    def _make(
+        *,
+        started_at: datetime,
+        saved_search_id: uuid.UUID | None = None,
+        completed_at: datetime | None = None,
+        status: str = "running",
+        providers_attempted: list[str] | None = None,
+        providers_enforced_locally: dict[str, object] | None = None,
+        jobs_discovered: int | None = None,
+        jobs_inserted: int | None = None,
+        jobs_updated: int | None = None,
+        failures: list[object] | None = None,
+        duration_ms: int | None = None,
+    ) -> CollectionRun:
+        kwargs: dict[str, object] = {
+            "saved_search_id": saved_search_id,
+            "started_at": started_at,
+            "completed_at": completed_at,
+            "status": status,
+        }
+        if providers_attempted is not None:
+            kwargs["providers_attempted"] = providers_attempted
+        if providers_enforced_locally is not None:
+            kwargs["providers_enforced_locally"] = providers_enforced_locally
+        if jobs_discovered is not None:
+            kwargs["jobs_discovered"] = jobs_discovered
+        if jobs_inserted is not None:
+            kwargs["jobs_inserted"] = jobs_inserted
+        if jobs_updated is not None:
+            kwargs["jobs_updated"] = jobs_updated
+        if failures is not None:
+            kwargs["failures"] = failures
+        if duration_ms is not None:
+            kwargs["duration_ms"] = duration_ms
+        return CollectionRun(**kwargs)
+
+    return _make
+
+
+@asynccontextmanager
+async def real_committed_collection_run(
+    db_engine: AsyncEngine,
+    email: str,
+    *,
+    started_at: datetime,
+    saved_search_kwargs: dict[str, object] | None = None,
+    **collection_run_kwargs: object,
+) -> AsyncIterator[tuple[AsyncSession, uuid.UUID, uuid.UUID, uuid.UUID]]:
+    """Builds on `real_committed_user_and_saved_search`: additionally
+    creates a real, separately-committed `CollectionRun` referencing it,
+    with its own best-effort cleanup (run, then — via the wrapped helper
+    — saved search, then user) so a partially cascaded state is skipped
+    rather than treated as an error, same rationale as every other
+    `real_committed_*` helper above. `email` has no default (matching
+    the wrapped helper's own signature) — callers must supply a distinct
+    one per test to avoid colliding on `users`' unique email index.
+    """
+    collection_run_kwargs.setdefault("status", "running")
+
+    async with real_committed_user_and_saved_search(
+        db_engine, email, **(saved_search_kwargs or {})
+    ) as (session, user_id, saved_search_id):
+        run = CollectionRun(
+            saved_search_id=saved_search_id,
+            started_at=started_at,
+            **collection_run_kwargs,
+        )
+        session.add(run)
+        run_id: uuid.UUID | None = None
+        try:
+            await session.commit()
+            await session.refresh(run)
+            run_id = run.id
+
+            yield session, user_id, saved_search_id, run_id
+        finally:
+            if run_id is not None:
+                with suppress(Exception):
+                    await session.rollback()
+                async with AsyncSession(bind=db_engine) as cleanup_session:
+                    existing_run = await cleanup_session.get(CollectionRun, run_id)
+                    if existing_run is not None:
+                        await cleanup_session.delete(existing_run)
                         await cleanup_session.commit()
 
 

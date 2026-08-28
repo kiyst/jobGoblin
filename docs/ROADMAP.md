@@ -218,7 +218,20 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   `ambiguous_match`, including the empty-object/empty-array acceptance case), and both
   independent `ON DELETE SET NULL` cascades (from `job_occurrences` and from
   `raw_job_ingestions`) proven in isolation from each other and from an unrelated
-  conflict row (see `docs/DATA_MODEL.md`). No later Phase 1 table is implemented yet;
+  conflict row (see `docs/DATA_MODEL.md`). The `collection_runs` slice is also complete
+  and verified (Class H): model (`backend/app/db/models/collection_run.py`), migration
+  `0014` (`down_revision = "0013"`), and database tests cover the bidirectional
+  `status`/`completed_at` lifecycle consistency matrix, the `completed_at >= started_at`
+  ordering `CHECK`, the no-server-default `started_at`/`status` contract (raw-SQL
+  omission proven rejected), independent per-row defaults for the three job counters,
+  both JSONB columns, and the provider array, in-place `MutableList` append persistence
+  after a separate-session reload for both `providers_attempted` and `failures`,
+  whole-value-assignment persistence for `providers_enforced_locally`, the top-level
+  JSON object/array shape `CHECK`s (SQL NULL, JSON null, and wrong-shape values all
+  rejected), a planning-time failure existing without any `providers_attempted` entry,
+  `completed_with_errors` retaining accurate non-zero rollups alongside recorded
+  failures, and `ON DELETE SET NULL` isolation from `saved_searches` against an
+  unrelated run (see `docs/DATA_MODEL.md`). No later Phase 1 table is implemented yet;
   the rest of Phase 1's exit gate (§[PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md))
   remains outstanding.
 - **Phases 2-14: not started.** Begin each phase only after completing its preflight in
