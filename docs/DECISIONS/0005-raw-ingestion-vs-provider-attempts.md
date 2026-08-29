@@ -55,7 +55,8 @@ which is the entire point of retaining raw data per master spec §17.
   `(collection_run, provider, source)`. Describes the request itself: `started_at`/
   `completed_at`, `status`, `retry_count`, `rate_limited`, `error_category`, sanitized
   `error_message`, `incomplete_results`, and per-slice job counts. A request that
-  succeeds but finds zero jobs is `status = 'ok'`, `jobs_discovered = 0` — not an error.
+  succeeds but finds zero jobs is `status = 'completed'`, `jobs_discovered = 0` — not an
+  error.
   A request that fails before any payload is fetched produces an attempt row with an
   error and **zero** associated `RawJobIngestion` rows, since there was no payload to
   preserve.

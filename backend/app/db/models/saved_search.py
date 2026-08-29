@@ -54,6 +54,16 @@ class SavedSearch(Base):
     (e.g. which keys `enabled_sources` may contain) is validated by Phase
     2's `QueryPlanner` against `ProviderRegistry`/`ProviderCapabilities`, not
     by a Phase 1 database constraint — see docs/ARCHITECTURE.md §6.5–6.6.
+
+    Both columns pass `none_as_null=True` to `JSONB(...)`: without it,
+    SQLAlchemy's default `JSON`-family behavior serializes an explicitly
+    assigned Python `None` as the JSON literal `null` rather than SQL `NULL`
+    — which would then fail this column's own object-or-`NULL` `CHECK`
+    above, since a JSON `null` is neither SQL `NULL` nor a JSON object.
+    `none_as_null=True` makes the ORM treat an explicit Python `None` the
+    same as never having set the column at all: a genuine SQL `NULL` either
+    way. This is a pure ORM-binding setting — it changes no PostgreSQL DDL,
+    column type, or constraint, so it carries no migration.
     """
 
     __tablename__ = "saved_searches"
@@ -104,11 +114,11 @@ class SavedSearch(Base):
     preferred_salary: Mapped[int | None] = mapped_column(Integer, nullable=True)
     recency_limit_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
     enabled_sources: Mapped[dict[str, object] | None] = mapped_column(
-        MutableDict.as_mutable(JSONB()), nullable=True
+        MutableDict.as_mutable(JSONB(none_as_null=True)), nullable=True
     )
     polling_schedule: Mapped[str] = mapped_column(Text, nullable=False)
     scoring_weights: Mapped[dict[str, object] | None] = mapped_column(
-        MutableDict.as_mutable(JSONB()), nullable=True
+        MutableDict.as_mutable(JSONB(none_as_null=True)), nullable=True
     )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=true())
     created_at: Mapped[datetime] = mapped_column(

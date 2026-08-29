@@ -131,7 +131,7 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   PostgreSQL is healthy; Alembic upgrade -> downgrade -> upgrade passes; Ruff, mypy, and
   pytest pass; and live liveness/readiness behavior has been verified with the database
   both available and unavailable.
-- **Phase 1: in progress (2026-08-24).** `users` slice complete and verified: model
+- **Phase 1: in progress (updated 2026-08-28).** `users` slice complete and verified: model
   (`backend/app/db/models/user.py`), migrations `0002` (table, reviewed/hand-edited, not
   autogenerate-as-is) and `0003` (forward corrective migration, reversible, fixing the
   email-normalization `CHECK` constraints' whitespace handling — see
@@ -199,9 +199,11 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   is also complete and verified (Class H): model
   (`backend/app/db/models/job_occurrence.py`), the new
   `backend/app/normalization/url.py::normalize_url()` pure identity canonicalizer,
-  migration `0011` (`down_revision = "0010"`), and database tests cover the three
-  ADR-0004 partial unique indexes (including the exact NULL-tenant loophole ADR 0004
-  fixes, proven both sequentially and under real concurrent inserts), canonical
+  migration `0011` (`down_revision = "0010"`), and database tests cover
+  `job_occurrences`' three partial/functional unique indexes — two of which are ADR-0004's
+  own NULL-tenant fix (proven both sequentially and under real concurrent inserts); the
+  third is an independent fallback natural key (`source_job_id IS NULL`), unaffected by
+  the NULL-tenant bug ADR 0004 addresses — canonical
   `provider`/`source` identifiers, `ON DELETE CASCADE` isolation from `jobs`, and the
   explicit-observation-time invariants (see `docs/DATA_MODEL.md`). The
   `raw_job_ingestions` slice is also complete and verified (Class H): model

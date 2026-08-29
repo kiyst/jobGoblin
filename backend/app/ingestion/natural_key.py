@@ -1,0 +1,153 @@
+import hashlib
+from dataclasses import dataclass
+from enum import Enum
+
+# Must stay byte-for-byte in sync with `JobOccurrence`'s own ORM validators
+# (`app/db/models/job_occurrence.py::_normalize_canonical_identifier`/
+# `_normalize_nullable_text`) — this module canonicalizes *before* the ORM
+# ever sees the value (to pick a lock key and query the database), so a
+# divergence here would mean two logically-identical rows take different
+# advisory locks or query different values than what's actually stored.
+_COVERED_WHITESPACE = " \t\n\r"
+
+
+def canonicalize_identifier(value: str) -> str:
+    """`provider`/`source` canonicalization: trim + lowercase — must match
+    `JobOccurrence._normalize_canonical_identifier` exactly."""
+    return value.strip(_COVERED_WHITESPACE).lower()
+
+
+def canonicalize_nullable_text(value: str | None) -> str | None:
+    """`source_tenant_id`/`source_job_id` canonicalization: trim only, case
+    preserved, blank collapses to `None` — must match
+    `JobOccurrence._normalize_nullable_text` exactly."""
+    if value is None:
+        return None
+    trimmed = value.strip(_COVERED_WHITESPACE)
+    return trimmed or None
+
+
+class NaturalKeyDomain(Enum):
+    """One domain per partial unique index on `job_occurrences` (ADR 0004).
+    Values are fixed, single-byte tags baked into the canonical
+    representation below — never renumber an existing member; add new
+    members with new values only, since existing advisory-lock keys must
+    stay stable across a deploy."""
+
+    TENANT = 1
+    NO_TENANT = 2
+    URL = 3
+
+
+_DOMAIN_BYTES: dict[NaturalKeyDomain, bytes] = {
+    domain: bytes([domain.value]) for domain in NaturalKeyDomain
+}
+
+# Bump only if the encoding scheme itself changes shape (e.g. a new
+# component, a different length-prefix width) — never to fix a value bug,
+# which would silently change every existing lock key without warning.
+_ENCODING_VERSION = 1
+_VERSION_BYTE = bytes([_ENCODING_VERSION])
+
+
+@dataclass(frozen=True, slots=True)
+class NaturalKey:
+    """One of the three scoped identity signals ADR 0004 defines, already
+    canonicalized (see `resolve_natural_key` below) — never construct this
+    directly from raw, un-canonicalized input."""
+
+    domain: NaturalKeyDomain
+    provider: str
+    source: str
+    tenant_id: str | None = None
+    job_id: str | None = None
+    url_normalized: str | None = None
+
+    def _components(self) -> tuple[str, ...]:
+        if self.domain is NaturalKeyDomain.TENANT:
+            assert self.tenant_id is not None and self.job_id is not None
+            return (self.provider, self.source, self.tenant_id, self.job_id)
+        if self.domain is NaturalKeyDomain.NO_TENANT:
+            assert self.job_id is not None
+            return (self.provider, self.source, self.job_id)
+        assert self.url_normalized is not None
+        return (self.provider, self.source, self.url_normalized)
+
+    def canonical_bytes(self) -> bytes:
+        """Versioned, domain-tagged, length-prefixed encoding — never a bare
+        colon-joined string. Length-prefixing each component (4-byte
+        big-endian byte count, then the UTF-8 bytes themselves) makes
+        component *boundaries* unambiguous: `("AB", "C")` and `("A", "BC")`
+        encode to different byte sequences even though a naive
+        concatenation (`"AB" + "C"` vs `"A" + "BC"` = `"ABC"` either way)
+        would collide. The domain byte additionally guarantees the three
+        natural-key forms can never collide with each other even given
+        identical component values, and the version byte lets this scheme
+        change shape later without silently colliding with keys computed
+        under an earlier version.
+        """
+        encoded = bytearray(_VERSION_BYTE + _DOMAIN_BYTES[self.domain])
+        for component in self._components():
+            component_bytes = component.encode("utf-8")
+            encoded += len(component_bytes).to_bytes(4, "big")
+            encoded += component_bytes
+        return bytes(encoded)
+
+    def advisory_lock_key(self) -> int:
+        """A stable signed 64-bit integer suitable for
+        `pg_advisory_xact_lock(bigint)`. Derived from SHA-256 (not Python's
+        salted, process-randomized `hash()`, and not PostgreSQL's own
+        32-bit `hashtext()`, whose narrower range collides far more often)
+        — the first 8 digest bytes, reinterpreted as a signed two's-
+        complement 64-bit value since `bigint` is signed."""
+        digest = hashlib.sha256(self.canonical_bytes()).digest()
+        unsigned = int.from_bytes(digest[:8], "big", signed=False)
+        return unsigned - (1 << 64) if unsigned >= (1 << 63) else unsigned
+
+
+def resolve_natural_key(
+    provider: str,
+    source: str,
+    *,
+    source_tenant_id: str | None,
+    source_job_id: str | None,
+    source_url_normalized: str | None,
+) -> NaturalKey | None:
+    """Selects and canonicalizes whichever of the three natural-key forms
+    applies, in ADR 0004's own precedence order. Returns `None` only when
+    none of the three can be established — `source_job_id` is absent *and*
+    no normalized fallback URL is available either; the caller
+    (`ingestion/identity.py`) raises `UnresolvableIdentityError` for that
+    case."""
+    provider_c = canonicalize_identifier(provider)
+    source_c = canonicalize_identifier(source)
+    tenant_c = canonicalize_nullable_text(source_tenant_id)
+    job_id_c = canonicalize_nullable_text(source_job_id)
+
+    # `url_normalized` is carried on every returned `NaturalKey` regardless of
+    # which domain actually wins, purely so `ingestion/persistence.py` can
+    # populate `JobOccurrence.source_url_normalized` without calling
+    # `normalize_url()` a second time — `_components()` only *uses* it (for
+    # locking/lookup) when `domain is URL`.
+    if job_id_c is not None and tenant_c is not None:
+        return NaturalKey(
+            NaturalKeyDomain.TENANT,
+            provider_c,
+            source_c,
+            tenant_id=tenant_c,
+            job_id=job_id_c,
+            url_normalized=source_url_normalized,
+        )
+    if job_id_c is not None:
+        return NaturalKey(
+            NaturalKeyDomain.NO_TENANT,
+            provider_c,
+            source_c,
+            job_id=job_id_c,
+            url_normalized=source_url_normalized,
+        )
+    if source_url_normalized is not None:
+        return NaturalKey(
+            NaturalKeyDomain.URL, provider_c, source_c, url_normalized=source_url_normalized
+        )
+    return None
