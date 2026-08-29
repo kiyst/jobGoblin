@@ -11,6 +11,7 @@ from app.db.models.saved_search import SavedSearch
 from app.db.models.saved_search_location import SavedSearchLocation
 from app.db.models.saved_search_title import SavedSearchTitle
 from app.db.models.user import User
+from app.db.models.user_job import UserJob
 
 __all__ = [
     "CandidateProfile",
@@ -26,4 +27,5 @@ __all__ = [
     "SavedSearchLocation",
     "SavedSearchTitle",
     "User",
+    "UserJob",
 ]

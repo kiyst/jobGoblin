@@ -25,7 +25,10 @@ scaffolding, env config, `/health` endpoint. Docs (this set) exist. No domain lo
 ## Phase 1 — Domain Model
 `CandidateProfile`, `SavedSearch` (+ titles/locations, + `enabled_sources`), `Company`,
 `Job`, `JobOccurrence`, `RawJobIngestion`, `IdentityConflict`, `CollectionRun`,
-`CollectionRunProviderAttempt`, `UserJob` migrated and tested via factories. Both
+`CollectionRunProviderAttempt`, `UserJob`, `JobNote` migrated and tested via factories
+(the last two per ADR 0003/DATA_MODEL.md/ARCHITECTURE.md §13, already part of Phase 1's
+scope; `job_notes`' own CRUD service, routes, and workspace behavior remain Phase 10
+work — see that phase below). Both
 `IdentityConflict` and `CollectionRunProviderAttempt` are migrated here (not later)
 because Phase 2's fixture proof needs both tables to exist — to write
 `evidence_mismatch`/`ambiguous_match` rows and per-source partial-failure/attempt rows
@@ -244,8 +247,22 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   source)` constraint (proven to allow one provider's two distinct sources to coexist
   under the same run — the exact Phase 2 fixture-proof shape from ARCHITECTURE.md §11),
   and `ON DELETE CASCADE` isolation from `collection_runs` against an unrelated run's
-  own attempt row (see `docs/DATA_MODEL.md`). No later Phase 1 table (`user_jobs`,
-  `job_notes`) is implemented yet; the rest of Phase 1's exit gate
+  own attempt row (see `docs/DATA_MODEL.md`). The `user_jobs` slice is also complete
+  and verified (Class H): model (`backend/app/db/models/user_job.py`), migration
+  `0016` (`down_revision = "0015"`), the first `services/` module
+  (`backend/app/services/user_jobs.py::set_status()`, per ADR 0006 — the only function
+  permitted to write `status`/`applied_at`/`status_changed_at` together), and database
+  tests cover the nine-value `status` enum, the bidirectional `status`/`applied_at`
+  consistency `CHECK` across all nine values (both directions, ORM + direct SQL),
+  `UNIQUE (user_id, job_id)`, independent `ON DELETE CASCADE` isolation from both
+  `users` and `jobs` against an unrelated row, the three independent boolean flags,
+  and `status_changed_at` as a distinct business timestamp that `updated_at` never
+  substitutes for. Service-layer tests cover `set_status()`'s first-transition/
+  preservation/backwards-clearing/no-op behavior, its flush-not-commit contract, its
+  `ValueError` rejection of an invalid status or a naive timestamp without partial
+  mutation, and that the database `CHECK` still rejects a status/`applied_at` pair
+  written by directly bypassing `set_status()` (see `docs/DATA_MODEL.md`). No later
+  Phase 1 table (`job_notes`) is implemented yet; the rest of Phase 1's exit gate
   (§[PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md)) remains outstanding.
 - **Phases 2-14: not started.** Begin each phase only after completing its preflight in
   [PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md) and receiving approval for the next

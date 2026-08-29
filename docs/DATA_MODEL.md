@@ -1237,8 +1237,10 @@ section already specified:
   new here.
 
 ### `user_jobs`
-User state, deliberately isolated from source data (§36). **Rewritten in Rev 2** — see
-[ADR 0006](DECISIONS/0006-userjob-workflow-invariants.md) for the full reasoning.
+**Implemented** (`backend/app/db/models/user_job.py`; migration `0016`,
+`down_revision = "0015"`). User state, deliberately isolated from source data (§36).
+**Rewritten in Rev 2** — see [ADR 0006](DECISIONS/0006-userjob-workflow-invariants.md)
+for the full reasoning.
 
 Rev 1 stored `applied` (boolean), `applied_at` (nullable timestamp), and `status` (a
 9-value enum including `archived`/`withdrawn`/`rejected`) as three independently
@@ -1250,14 +1252,16 @@ consistent by construction:
 | column | type | notes |
 |---|---|---|
 | id | UUID PK | |
-| user_id | UUID FK → users, `ON DELETE CASCADE` | |
-| job_id | UUID FK → jobs, `ON DELETE CASCADE` | |
-| saved | boolean | default false — independent lightweight flag, unrelated to workflow status |
-| hidden | boolean | default false — independent lightweight "don't show me this" filter; can be toggled freely without implying any workflow judgment |
-| archived | boolean | default false — **new in Rev 2, replaces the old `archived` status value**. A terminal "declutter" flag layered on top of whatever `status`/`applied_at` already held, so archiving never destroys the history of what actually happened (an archived "interested, never applied" row and an archived "offer received" row remain distinguishable) |
+| user_id | UUID NOT NULL FK → users, `ON DELETE CASCADE` | not this schema's first CASCADE from `users` — `candidate_profiles.user_id`/`saved_searches.user_id` already use it — nor its first CASCADE generally (`job_occurrences.job_id`, `collection_run_provider_attempts.collection_run_id`, the `saved_search_*` child tables, `candidate_skills.candidate_profile_id` all already do); only the specific pairing (cascading from both a user AND a job on the same table) is new |
+| job_id | UUID NOT NULL FK → jobs, `ON DELETE CASCADE` | |
+| saved | boolean | NOT NULL, `server_default false` — independent lightweight flag, unrelated to workflow status |
+| hidden | boolean | NOT NULL, `server_default false` — independent lightweight "don't show me this" filter; can be toggled freely without implying any workflow judgment |
+| archived | boolean | NOT NULL, `server_default false` — **new in Rev 2, replaces the old `archived` status value**. A terminal "declutter" flag layered on top of whatever `status`/`applied_at` already held, so archiving never destroys the history of what actually happened (an archived "interested, never applied" row and an archived "offer received" row remain distinguishable) |
 | applied_at | timestamptz | nullable — **the single source of truth for "has the user applied."** There is no separate `applied` boolean; application code and the UI derive it as `applied_at IS NOT NULL` |
-| status | text | enum, see below — **`rejected`/`withdrawn` are now explicit about who acted**: `rejected_by_employer`, `withdrawn_by_user`. Added `not_interested` for a user dismissal that never involved applying |
-| status_changed_at | timestamptz | |
+| status | text | NOT NULL, no server default — enum, see below — **`rejected`/`withdrawn` are now explicit about who acted**: `rejected_by_employer`, `withdrawn_by_user`. Added `not_interested` for a user dismissal that never involved applying |
+| status_changed_at | timestamptz | NOT NULL, **no server default** — a business timestamp, not a row-lifecycle one: explicitly supplied at row creation and updated only by `set_status()` when `status` actually changes. Deliberately **not** an ORM `onupdate` column like `updated_at` below — `updated_at` advances on any write to the row (e.g. toggling `saved`), `status_changed_at` must not (Rev 21) |
+| created_at | timestamptz | NOT NULL, `server_default now()` — added in Rev 21; not previously specified in this table's own design note |
+| updated_at | timestamptz | NOT NULL, `server_default now()`, ORM `onupdate=func.now()` — added in Rev 21 |
 
 **Status enum (Rev 2):** `interested`, `not_interested`, `applied`,
 `recruiter_contacted`, `screening`, `interviewing`, `offer`, `rejected_by_employer`,
@@ -1283,24 +1287,62 @@ CHECK (
 **How the application layer enforces the pairing, on top of the DB-level `CHECK`:**
 exactly one service function (`services/user_jobs.py::set_status()`, per
 [ARCHITECTURE.md §5](ARCHITECTURE.md#5-dependency-boundaries)) is permitted to write
-`status`/`applied_at` together, and it is the only code path that decides whether
-`applied_at` gets set (first transition into a post-application status — never
-overwritten by later status changes within that branch, so the original application date
-survives `recruiter_contacted → interviewing → offer`) or cleared (only when a caller
-explicitly corrects a mistake by moving status back to `interested`/`not_interested`,
-which clears `applied_at` in the same write). No other code path updates these two
-columns — not `ingestion/`, not `providers/` (already forbidden, §5), and not ad-hoc
-column updates from `api/`. This is a soft (code-structure) enforcement layered on top of
-the hard DB `CHECK`; the `CHECK` is what actually prevents an inconsistent row from ever
-being persisted, even if the single-writer discipline is violated by a future bug.
-Backwards transitions (e.g. correcting `interviewing` back to `interested`) are
+`status`/`applied_at`/`status_changed_at` together, and it is the only code path that
+decides whether `applied_at` gets set (first transition into a post-application
+status — never overwritten by later status changes within that branch, so the original
+application date survives `recruiter_contacted → interviewing → offer`) or cleared
+(only when a caller explicitly corrects a mistake by moving status back to
+`interested`/`not_interested`, which clears `applied_at` in the same write). No other
+code path updates these columns — not `ingestion/`, not `providers/` (already
+forbidden, §5), and not ad-hoc column updates from `api/`. This is a soft
+(code-structure) enforcement layered on top of the hard DB `CHECK`; the `CHECK` is what
+actually prevents an inconsistent row from ever being persisted, even if the
+single-writer discipline is violated by a future bug (a direct-write bypass test proves
+this). Backwards transitions (e.g. correcting `interviewing` back to `interested`) are
 permitted — this is a personal tracker, not a workflow engine with hard-blocked
 transitions — but always go through the same function so the paired columns can't drift.
 
-Unique constraint: `(user_id, job_id)`. Nothing in `ingestion/` or `providers/` is ever
-permitted to write this table — enforced by code review / the dependency rule in
+`set_status()`'s exact contract (Rev 21):
+`async def set_status(session: AsyncSession, user_job: UserJob, new_status: str, *,
+changed_at: datetime) -> None`. Rejects an invalid `new_status` or a naive (timezone-
+unaware) `changed_at` with `ValueError`, before mutating anything. A call where
+`new_status == user_job.status` is a no-op — `applied_at`/`status_changed_at` are left
+untouched. Flushes through the supplied `session` so the database `CHECK`s are
+evaluated immediately, but never commits or rolls back — the caller owns the
+transaction.
+
+Unique constraint: `(user_id, job_id)`. Index: `(job_id)` — PostgreSQL does not
+automatically index a referencing foreign-key column; `(user_id, job_id)` is already
+covered by the `UNIQUE` constraint's own index (leading column `user_id`), but `job_id`
+has no index of its own without this one, so it is added explicitly (Rev 21). Nothing
+in `ingestion/` or `providers/` is ever permitted to write this table — enforced by
+code review / the dependency rule in
 [ARCHITECTURE.md §5](ARCHITECTURE.md#5-dependency-boundaries), not by a database
 trigger, since the app is the only writer.
+
+**Rev 21 changes** (fifteenth Phase 1 implementation slice, `user_jobs` — Class H per
+docs/LLM_WORKFLOW.md): this table's design had several decisions resolved by explicit
+approval before migration `0016` was written, beyond what this section already
+specified:
+- **`created_at`/`updated_at` added**, per the established global convention — not
+  previously specified in this table's own design note, the same tension
+  `collection_runs`/`collection_run_provider_attempts` each hit before.
+- **`status_changed_at` is NOT NULL with no server default**, explicitly supplied at
+  row creation and updated only by `set_status()` — deliberately not an ORM `onupdate`
+  column, since it must track only actual `status` changes, not every write to the row.
+- **`services/` is this codebase's first service-layer package**, and
+  `set_status()` (contract above) is its first function — implemented in this same
+  Phase 1 slice, per ARCHITECTURE.md §13's own requirement that the pairing behavior be
+  tested, not merely deferred to Phase 10. `saved`/`hidden`/`archived` toggle
+  functions, API routes, derived workspace fields, and `job_notes` CRUD remain Phase 10
+  work.
+- **`INDEX (job_id)` added** — PostgreSQL does not index a referencing FK column
+  automatically, and `job_id` needed one of its own (the `UNIQUE` index only serves
+  lookups beginning with `user_id`).
+- **The "`UserJob` survives re-ingestion" acceptance requirement is deferred to Phase
+  2** (ARCHITECTURE.md §11/§13) — no ingestion persistence writer exists in Phase 1 to
+  re-ingest anything; this slice proves only the schema/constraints/CASCADE isolation
+  and `set_status()`'s own behavior in isolation.
 
 ### `job_notes`
 | column | type | notes |
@@ -1345,7 +1387,8 @@ reviewed against this list directly:
 | `collection_run_provider_attempts` | `CHECK` on `status` enum, `(status, completed_at)` consistency, `completed_at >= started_at`, non-negative `jobs_discovered`/`jobs_inserted`/`jobs_updated`/`retry_count`, `provider`/`source` canonical-identifier (lowercase/trim/ASCII-slug), `error_category` enum-or-null, `error_message` NULL-safe trim/non-empty | **new in Rev 20** — reject an invalid `status`/`error_category`, an inconsistent status/`completed_at` pairing, a `completed_at` before `started_at`, a negative counter, a non-canonical `provider`/`source`, or a non-normalized/empty `error_message`; no `CHECK` ties `error_category`/`error_message`/`incomplete_results` to `status` — see the table's own section above (Rev 20) |
 | `collection_run_provider_attempts` | `INDEX (provider, source, started_at DESC)`, `INDEX (collection_run_id)` | Phase 12's volume-trend query and "all attempts for this run" |
 | `user_jobs` | `UNIQUE (user_id, job_id)` | one state row per user per job |
-| `user_jobs` | `CHECK` on `(status, applied_at)` | see ADR 0006 — the core invariant fix |
+| `user_jobs` | `CHECK` on `status` enum (9 values), `(status, applied_at)` consistency | **new in Rev 21** — see ADR 0006 — reject an invalid `status` or an inconsistent status/`applied_at` pairing; see the table's own section above |
+| `user_jobs` | `INDEX (job_id)` | **new in Rev 21** — PostgreSQL does not auto-index a referencing FK column; `(user_id, job_id)` is covered by the `UNIQUE` index's leading column, `job_id` was not |
 
 Foreign-key `ON DELETE` behavior (all noted inline above; summarized here for review):
 
