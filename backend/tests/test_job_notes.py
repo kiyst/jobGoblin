@@ -303,6 +303,30 @@ async def test_body_trimmed_case_preserved_on_orm_path(
     assert note.body == "Mixed-Case Note"
 
 
+async def test_body_internal_whitespace_preserved_on_orm_path(
+    db_session: AsyncSession,
+    make_user: Callable[..., User],
+    make_job: Callable[..., Job],
+    make_user_job: Callable[..., UserJob],
+    make_job_note: Callable[..., JobNote],
+) -> None:
+    """The ORM validator only strips the outer, covered-whitespace-set
+    boundary (`str.strip`) — it must never touch internal whitespace of any
+    kind, which is meaningful content in a multiline user note. Wraps a
+    body containing internal repeated spaces, a tab, an LF, and a CRLF
+    sequence in outer covered whitespace, and asserts only the outer
+    whitespace is removed while the internal content and case survive
+    byte-for-byte."""
+    user_job_id = await _insert_user_job(db_session, make_user, make_job, make_user_job)
+    inner = "Mixed-Case  Note\twith\ninternal\r\nwhitespace"
+    note = make_job_note(user_job_id=user_job_id, body=f"  \t\n{inner}\r\n \t ")
+    db_session.add(note)
+    await db_session.commit()
+    await db_session.refresh(note)
+
+    assert note.body == inner
+
+
 async def test_body_whitespace_only_rejected_on_orm_path(
     db_session: AsyncSession,
     make_user: Callable[..., User],
@@ -381,13 +405,18 @@ async def test_timestamps_are_utc_aware(
     assert note.updated_at.tzinfo is not None
 
 
-async def test_defaults_are_independent_across_multiple_rows(
+async def test_new_rows_have_independent_ids_and_body_values(
     db_session: AsyncSession,
     make_user: Callable[..., User],
     make_job: Callable[..., Job],
     make_user_job: Callable[..., UserJob],
     make_job_note: Callable[..., JobNote],
 ) -> None:
+    """Two rows committed together get distinct, application-generated
+    `id`s and retain their own distinct `body` values — this does not
+    exercise `created_at`/`updated_at` at all; see `test_timestamps_are_
+    utc_aware` and `test_direct_sql_created_and_updated_at_default_to_now`
+    for the timestamp-specific coverage."""
     user_job_id = await _insert_user_job(db_session, make_user, make_job, make_user_job)
     first = make_job_note(user_job_id=user_job_id, body="First note.")
     second = make_job_note(user_job_id=user_job_id, body="Second note.")

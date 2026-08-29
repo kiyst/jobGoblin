@@ -97,119 +97,9 @@ that detail.
 ## Iteration 1
 
 *Rotated in from "Iteration 2" per the two-iteration rule: the prior Iteration 1 (the
-`user_jobs` initial implementation pass and its "changes requested" review) was
-removed rather than kept alongside a third entry, since the correction pass below
-superseded it and the whole slice is now merged. Nothing below was rewritten — only
-renumbered.*
-
-### Work done
-
-- Date/agent: 2026-08-28, Claude Code (Sonnet 5). Authorized slice: the three bounded
-  corrections from the review at `15d0212`, on the same `phase-1/user-jobs` branch.
-  Base: `15d0212`. Test/service-code/documentation-wording correction only — no
-  migration/schema change.
-- Outcome:
-  1. **`set_status()`'s timezone-aware check fixed.** `backend/app/services/
-     user_jobs.py` previously checked only `changed_at.tzinfo is None`. Per Python's
-     own datetime contract, a datetime is aware only when `tzinfo` is not `None`
-     **and** `tzinfo.utcoffset(self)` is not `None` — a `tzinfo` subclass whose
-     `utcoffset()` returns `None` passed the old guard while still being effectively
-     naive. Changed the check to `changed_at.tzinfo is None or changed_at.utcoffset()
-     is None`, evaluated before any mutation (unchanged ordering — still ahead of the
-     status-validity/no-op/mutation logic). Added
-     `test_changed_at_with_none_utcoffset_rejected_without_mutation`, using a small
-     `_UtcOffsetNoneTzinfo(tzinfo)` test double whose `utcoffset()` returns `None`,
-     proving `ValueError` and zero mutation of `status`/`applied_at`/
-     `status_changed_at`.
-  2. **Direct-SQL acceptance now covers all nine statuses.** Added
-     `test_direct_sql_pre_application_status_with_null_applied_at_accepted`
-     (parametrized over both pre-application statuses, `applied_at` omitted/`NULL`)
-     and `test_direct_sql_post_application_status_with_non_null_applied_at_accepted`
-     (parametrized over all seven post-application statuses, `applied_at = now()`).
-     The approved nine-status matrix is now genuinely covered by both ORM and direct
-     SQL for the accepted half, matching what `docs/ROADMAP.md` and the prior
-     iteration's `Work done` already claimed — that prior entry was left unedited, per
-     this ledger's append-only convention.
-  3. **Flag-independence test now proves each flag independently.** Replaced
-     `test_saved_hidden_archived_independent_of_status_and_each_other` (which set all
-     three flags `True` in one row, proving only one combined state) with
-     `test_flag_independent_of_status_and_other_flags_on_orm_path`, parametrized over
-     `saved`/`hidden`/`archived`: each case sets exactly one flag `True` (the other two
-     left at their default `False`) alongside a post-application status
-     (`offer`/`applied_at` set), commits, reloads, and asserts all three flags match
-     the expected per-flag combination — not merely that some combination is accepted.
-     The new test's docstring accurately describes what it proves; the prior
-     docstring's "unsaved" vs. `saved=True` mismatch no longer exists, since that test
-     was replaced rather than reworded.
-- Files changed:
-  - `backend/app/services/user_jobs.py` — timezone-aware check fix (item 1) plus an
-    expanded docstring explaining the `tzinfo`/`utcoffset()` distinction.
-  - `backend/tests/test_user_jobs_service.py` — new `_UtcOffsetNoneTzinfo` test
-    double and `test_changed_at_with_none_utcoffset_rejected_without_mutation` (item
-    1).
-  - `backend/tests/test_user_jobs.py` — two new parametrized direct-SQL acceptance
-    tests (item 2, 9 parametrized cases total); replaced the single combined-flags
-    test with a parametrized per-flag test (item 3, 3 parametrized cases).
-- Commands run and exact results (no Alembic round-trips — no migration/schema
-  change, per the review's own scoping):
-  - `pytest tests/test_user_jobs.py tests/test_user_jobs_service.py -q` → 67 passed
-    (up from 55 — 9 new direct-SQL acceptance cases + 1 new tzinfo regression test +
-    2 net-new flag-independence cases replacing the 1 prior combined test).
-  - `pytest -q` (full suite) → 1047 passed (up from 1035).
-  - `ruff format --check .`, `ruff check .` → passed (66 files).
-  - `mypy app tests scripts` → success, 49 source files.
-  - `python scripts/check_repo.py` (from `backend/`) → exit 0, zero findings.
-  - `git status`/`git diff --check` → only the files listed above; no whitespace/
-    conflict errors.
-- Deviations/known limitations: none. All three findings were a service-code
-  correctness gap and two test-coverage gaps; no schema, migration, or documented
-  product-behavior claim changed beyond what the fixes themselves make true.
-- STOP — awaiting Codex re-review. Do not begin `job_notes`, another slice, or modify
-  `main`.
-
-### Work review
-
-- Date/reviewer: 2026-08-28, Codex. Diff reviewed: `15d0212..b992f6e`
-  (`phase-1/user-jobs`). Verdict: **approved**. Findings: none.
-- Independently verified:
-  - `set_status()` now applies Python's complete awareness test (`tzinfo is not None`
-    and `utcoffset() is not None`) before mutation, and the new regression test proves
-    the previously accepted `tzinfo`/NULL-offset case raises `ValueError` without
-    changing any of the three governed fields.
-  - Raw SQL now accepts every one of the nine valid status/`applied_at` pairings: the
-    two pre-application statuses with NULL and all seven post-application statuses
-    with a timestamp. Together with the existing rejected-pair tests, the documented
-    ORM/direct-SQL matrix is complete.
-  - The flag test now independently persists and reloads each of `saved`, `hidden`,
-    and `archived` as the sole true flag alongside a valid post-application status;
-    its prose matches the exercised state.
-  - Targeted suites: **67 passed**. Full suite: **1047 passed** using a dedicated
-    writable pytest base-temp directory (the prior review's eight setup errors were
-    therefore confirmed to be only host-temp permissions). Repository checker,
-    `git diff --check`, Ruff format/check, and mypy (**49 source files**) all pass.
-    The correction changes only the service, bounded tests, and handoff ledger; model,
-    migration, schema, and product documentation are unchanged.
-- Non-blocking historical clarification: this iteration's `Work done` says the
-  timezone guard remains ahead of “status-validity/no-op/mutation logic.” The actual
-  and correct order is invalid-status validation first, timezone validation second,
-  then no-op/mutation. Both validations still precede every mutation, so this wording
-  has no behavioral or approval impact and the append-only entry is left untouched.
-- The `user_jobs` slice and correction pass are accepted. Do not merge to or modify
-  `main`, begin `job_notes`, or advance to another slice without explicit user
-  authorization.
-
-**Merge record (appended, not a rewrite of the entry above):** Approved at review
-commit `71f8861`. Per user authorization, `phase-1/user-jobs` was merged into `main`
-with a normal merge commit (`3021ecb`; `--no-ff`, no squash/rebase/force-push) and
-pushed. `main`/`origin/main` are both now at `3021ecb`. Verified: `main` has zero
-content diff against the feature branch; migration `0016` (`down_revision = "0015"`)
-is present and is the sole Alembic head; `python backend/scripts/check_repo.py` (via
-the project's own virtualenv interpreter) exits 0 with zero findings; working tree
-clean. `job_notes` not started or proposed.
-
----
-
-## Iteration 2
+`user_jobs` correction pass, its approval, and merge record) was removed rather than
+kept alongside a third entry, since it was already merged and is no longer pending.
+Nothing below was rewritten — only renumbered.*
 
 ### Work done
 
@@ -369,3 +259,62 @@ clean. `job_notes` not started or proposed.
   Phase 2, Phase 10, or `main` change is authorized. Rerun proportionate static,
   targeted, and full-suite verification once PostgreSQL is reachable, then stop for
   re-review.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-08-28, Claude Code (Sonnet 5). Authorized slice: the two bounded
+  corrections from the review at `0499d75`, on the same `phase-1/job-notes` branch.
+  Base: `0499d75`. Test-only correction — no model, migration, schema, product
+  document, Phase 2, or Phase 10 change.
+- Outcome:
+  1. **Internal-whitespace-preservation regression added.** New
+     `test_body_internal_whitespace_preserved_on_orm_path` wraps a body containing
+     internal repeated spaces, a tab, an LF, and a CRLF sequence in outer covered
+     whitespace, and asserts only the outer four-character set is stripped while the
+     internal content and case survive byte-for-byte — the prior
+     `test_body_trimmed_case_preserved_on_orm_path` only exercised outer ordinary
+     spaces and case, never internal whitespace of any kind.
+  2. **Timestamp-independence overclaim corrected.** Renamed
+     `test_defaults_are_independent_across_multiple_rows` to
+     `test_new_rows_have_independent_ids_and_body_values`, with a docstring stating
+     plainly that it does not exercise `created_at`/`updated_at` at all (it never did
+     — only `body` values and application-generated `id`s). This `Work done` entry
+     describes timestamp coverage only as: server defaults present
+     (`test_direct_sql_created_and_updated_at_default_to_now`), UTC-awareness
+     (`test_timestamps_are_utc_aware`), and `updated_at` advancing on a real commit
+     (`test_updated_at_advances_on_real_committed_update`) — not "independence." The
+     prior iteration's `Work done` entry is left unedited, per this ledger's
+     append-only convention.
+  - PostgreSQL was not running at the start of this pass (confirmed via a direct
+    connection attempt: `ConnectionRefusedError`, matching the reviewer's own
+    finding) — Docker Desktop was not running. Started Docker Desktop, waited for
+    its daemon, then started the existing `jobgoblin-postgres-1` container (already
+    present, previously exited) and waited for its healthcheck before running any
+    test. Re-verified connectivity before running anything, per instruction not to
+    claim tests passed without a real, confirmed-reachable database.
+- Files changed:
+  - `backend/tests/test_job_notes.py` — one new test (item 1); one test renamed
+    with a corrected docstring, no assertions removed (item 2).
+- Commands run and exact results:
+  - `pytest tests/test_job_notes.py -v` → 18 passed (up from 17 — exactly the one
+    new test; nothing else added or removed).
+  - `pytest -q` (full suite) → 1065 passed (up from 1064).
+  - `ruff format --check .`, `ruff check .` → passed (69 files).
+  - `mypy app tests scripts` → success, 51 source files.
+  - `python scripts/check_repo.py` (from `backend/`) → exit 0, zero findings.
+  - `git status`/`git diff --check` → only `backend/tests/test_job_notes.py`; no
+    whitespace/conflict errors.
+  - No Alembic round-trip run — no migration/schema change, per the review's own
+    scoping.
+- Deviations/known limitations: none. Both findings were test-authoring/coverage-
+  claim corrections only; no model, migration, schema, or product-document change.
+- STOP — awaiting Codex re-review. Do not begin Phase 2, modify or merge `main`, or
+  add Phase 10 behavior.
+
+### Work review
+
+*Pending — awaiting Codex.*
