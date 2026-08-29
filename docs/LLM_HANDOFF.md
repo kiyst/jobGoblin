@@ -338,3 +338,15 @@ Nothing below was rewritten — only renumbered.*
   cross-table Phase 1 exit criterion. Do not merge to or modify `main`, begin Phase 2,
   or add Phase 10 behavior without explicit user authorization. After an authorized
   merge, perform a separate Phase 1 exit-gate audit before proposing Phase 2 work.
+
+**Merge record (appended, not a rewrite of the entry above):** Approved at review
+commit `2314ba7`. Per user authorization, `phase-1/job-notes` was pushed (bringing
+`origin` up to date through the approval commit) and then merged into `main` with a
+normal merge commit (`ce3691c`; `--no-ff`, no squash/rebase/force-push) and pushed.
+`main`/`origin/main` are both now at `ce3691c`. Verified: `main` has zero content diff
+against the feature branch; migration `0017` (`down_revision = "0016"`) is present and
+is the sole Alembic head; `python backend/scripts/check_repo.py` (via the project's
+own virtualenv interpreter) exits 0 with zero findings; working tree clean. This
+completes all fifteen Phase 1 domain tables (ADR 0003). Phase 2 and Phase 10 remain
+not started; per the review's own note, the next separately authorized task is a
+read-only Phase 1 exit-gate audit, not Phase 2 work.
