@@ -435,4 +435,37 @@ was rewritten — only renumbered.*
 
 ### Work review
 
-*Pending — awaiting Codex.*
+- Reviewer: Codex
+- Reviewed commit/diff: `4490712` against review commit `579c723` on
+  `phase-1/closure`.
+- Verdict: **Changes requested — documentation-only.** The JSONB behavior,
+  regression tests, and formatting correction are approved; no product-code or test
+  defect remains. One Low process-integrity finding must be corrected before merge.
+- Finding:
+  1. **Low — the correction pass rewrote the retained historical `Work done` entry
+     despite the explicit append-only instruction.** In Iteration 1, it changed the
+     original phrase `later 34` to `later 33` and inserted a new superseded-by note
+     into the original JSONB-limitation paragraph. The prior review specifically
+     required the corrected count and current behavior to be recorded in the *new*
+     append-only `Work done`, without editing the prior history. Restore those two
+     portions of Iteration 1 exactly to their state at `579c723`; keep Iteration 2's
+     accurate 14 + 27 = 41 count and correction explanation as the authoritative
+     follow-up. Make no executable, model, test, migration, or product-document
+     change in this pass.
+- Independent verification performed:
+  - Focused service/model suite: **101 passed**.
+  - Full suite with a writable `--basetemp`: **1106 passed**.
+  - Ruff format/check, mypy (**55 source files**), repository checker, and
+    `git diff --check`: clean.
+  - Test database at migration `0017`; `alembic check`: no new upgrade operations.
+    Development database remained at its existing older revision because it was not
+    used for this check.
+  - The two mappings use `JSONB(none_as_null=True)` inside the existing
+    `MutableDict` wrapper; creation with omitted/explicit `None`, non-empty object
+    persistence, and committed object-to-`None` updates are proven for both columns.
+    The raw-SQL JSON-literal-`null` rejection remains intact.
+- Exact requested correction: restore only the two historical Iteration 1 edits
+  identified above, append a concise docs-only `Work done` entry, run
+  `git diff --check` and `scripts/check_repo.py`, commit and push the same feature
+  branch, and stop for re-review. Do not rerun backend tests unless an executable
+  file changes; do not merge or modify `main`, begin Phase 2, or broaden scope.
