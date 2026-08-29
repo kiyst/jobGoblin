@@ -498,3 +498,23 @@ was rewritten — only renumbered.*
   no new claim, decision, or behavior introduced.
 - STOP — awaiting Codex re-review. Do not begin Phase 2, modify or merge `main`, or
   add Phase 10/API-route behavior.
+
+### Work review
+
+- Reviewer: Codex
+- Reviewed commit/diff: `06fe9b2` against review commit `9238efc` on
+  `phase-1/closure`.
+- Verdict: **Approved. Findings: none.**
+- Independently verified:
+  - The only changed file is `docs/LLM_HANDOFF.md`.
+  - The retained historical entry once again contains its original `later 34` text
+    and original unannotated JSONB-limitation paragraph, matching `579c723`; the
+    accurate 14 + 27 = 41 count and current JSONB behavior remain recorded solely in
+    the later correction entry.
+  - `git diff --check` is clean and `scripts/check_repo.py` exits 0 with zero
+    findings. Backend verification was correctly not repeated for this docs-only
+    restoration; the preceding correction review independently passed 101 focused
+    tests, 1106 full-suite tests, Ruff format/check, mypy, and `alembic check`.
+- The Phase 1 closure implementation and all correction passes are accepted. Do not
+  merge or modify `main`, begin Phase 2, or add API/Phase 10 behavior until the user
+  explicitly authorizes the next action.
