@@ -5,6 +5,7 @@ from app.db.models.collection_run_provider_attempt import CollectionRunProviderA
 from app.db.models.company import Company
 from app.db.models.identity_conflict import IdentityConflict
 from app.db.models.job import Job
+from app.db.models.job_note import JobNote
 from app.db.models.job_occurrence import JobOccurrence
 from app.db.models.raw_job_ingestion import RawJobIngestion
 from app.db.models.saved_search import SavedSearch
@@ -21,6 +22,7 @@ __all__ = [
     "Company",
     "IdentityConflict",
     "Job",
+    "JobNote",
     "JobOccurrence",
     "RawJobIngestion",
     "SavedSearch",

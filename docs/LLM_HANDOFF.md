@@ -97,192 +97,10 @@ that detail.
 ## Iteration 1
 
 *Rotated in from "Iteration 2" per the two-iteration rule: the prior Iteration 1 (the
-`collection_run_provider_attempts` correction pass, its approval, and merge record) was
-removed rather than kept alongside a third entry, since it was already merged and is no
-longer pending. Nothing below was rewritten — only renumbered.*
-
-### Work done
-
-- Date/agent: 2026-08-28, Claude Code (Sonnet 5). Authorized slice: `user_jobs`, Class
-  H per docs/LLM_WORKFLOW.md — user-state preservation, destructive-lifecycle
-  consequences (rows disappear if either the user or the job is deleted), and this
-  codebase's first service-layer invariant writer. Base `8a9f4d3` on `main` -> branch
-  `phase-1/user-jobs`.
-- Outcome: new model, migration `0016`, the first `services/` module, factory/real-
-  commit helper, and 55 new tests (schema + service-layer, two files) implemented and
-  verified against real PostgreSQL, per the user's binding decisions:
-  1. `created_at`/`updated_at` added per the established global convention — not
-     previously specified in this table's own design note (the same tension
-     `collection_runs`/`collection_run_provider_attempts` each hit before).
-  2. `status_changed_at` is NOT NULL, no server default, explicitly supplied at row
-     creation, updated only by `set_status()` when `status` actually changes —
-     deliberately not an ORM `onupdate` column like `updated_at` (proven by a real-
-     commit test: toggling `saved` advances `updated_at` but leaves
-     `status_changed_at` untouched).
-  3. Phase 1 implements only `services/user_jobs.py::set_status()` —
-     `saved`/`hidden`/`archived` toggles, routes, views, derived fields, and general
-     workspace behavior remain Phase 10 work.
-  4. `set_status()`'s exact approved contract implemented and tested: rejects an
-     invalid `new_status` or a naive `changed_at` with `ValueError` before mutating
-     anything; a same-status call is a no-op; first transition into a post-
-     application status sets `applied_at`; later post-application transitions
-     preserve it; a transition back to `interested`/`not_interested` clears it; every
-     actual change sets `status_changed_at`; flushes through the caller's session but
-     never commits/rolls back.
-  5. The nine-value `status` `CHECK`, bidirectional `status`/`applied_at` consistency
-     `CHECK` (ADR 0006), three independent boolean flags, and `UNIQUE (user_id,
-     job_id)` implemented exactly as proposed.
-  6. `INDEX (job_id)` added — PostgreSQL does not auto-index a referencing FK column,
-     and `job_id` needed one of its own; no separate `user_id` index, since the
-     `UNIQUE` constraint's own index already begins with it.
-  7. Corrected the prior proposal's factual claim that this would be the first
-     CASCADE from `users` — `candidate_profiles.user_id`/`saved_searches.user_id`
-     already use it; only the specific pairing (cascading from both a user AND a job
-     on the same table) is new here.
-  8. `job_notes` remains excluded from this slice, but documented (model/migration
-     docstrings, `docs/DATA_MODEL.md`) as the next and final Phase 1 schema slice,
-     not deferred entirely to Phase 10.
-  9. `docs/ROADMAP.md`'s Phase 1 summary corrected to include `job_notes`, consistent
-     with ADR 0003/DATA_MODEL.md/ARCHITECTURE.md §13 (previously omitted from that
-     one-paragraph list only).
-  10. `docs/ARCHITECTURE.md` §13's "`UserJob` survives re-ingestion" acceptance
-      requirement moved to §11 (Phase 2's own fixture/persistence acceptance proof)
-      with an explicit note on why — no ingestion persistence writer exists in Phase 1
-      to re-ingest anything; no speculative ingestion/upsert service was implemented
-      to work around this.
-- Files changed:
-  - `backend/app/db/models/user_job.py` (new).
-  - `backend/app/services/__init__.py`, `backend/app/services/user_jobs.py` (new —
-    first `services/` package and first service-layer function in this codebase).
-  - `backend/app/db/models/__init__.py`, `backend/app/db/base.py` —
-    registration/docstring.
-  - `backend/migrations/versions/0016_user_jobs.py` (new, `down_revision = "0015"`).
-  - `backend/tests/conftest.py` — `make_user_job`, `real_committed_user_job` (creates
-    an independent `User` and `Job` — not a parent/child pair — plus a `UserJob`
-    referencing both).
-  - `backend/tests/test_user_jobs.py` (new, 39 tests) — baseline/defaults; `user_id`/
-    `job_id` FK (nonexistent rejected, omission rejected via direct SQL, `ON DELETE
-    CASCADE` from both parents each proven isolated against an unrelated row);
-    `UNIQUE (user_id, job_id)` duplicate rejection (ORM + direct SQL); the full
-    9-status × applied_at-pairing matrix (both directions, ORM + direct SQL);
-    `status_changed_at` omission rejected; `created_at`/`updated_at` defaults/UTC-
-    awareness and the `status_changed_at`-vs-`updated_at` decoupling test;
-    `saved`/`hidden`/`archived` defaults and independence from `status`/each other.
-  - `backend/tests/test_user_jobs_service.py` (new, 16 tests) — `set_status()`'s
-    first-transition/preservation/backwards-clearing/no-op behavior; `ValueError` on
-    an invalid status or a naive timestamp, each proven not to mutate the model;
-    flush-without-commit proven via a genuinely separate session not seeing the
-    change until an explicit commit (and a rollback proven to discard it); the
-    database `CHECK` proven to reject a status/`applied_at` pair written by directly
-    bypassing `set_status()`.
-  - `docs/DATA_MODEL.md` — `user_jobs` marked **Implemented**; added "Rev 21" note
-    recording every resolved decision; updated the constraints-summary rows and the
-    `set_status()` contract description.
-  - `docs/ROADMAP.md` — Phase 1 summary list and status paragraph both updated (items
-    9 and the `user_jobs`-complete description above).
-  - `docs/ARCHITECTURE.md` — §13's re-ingestion requirement moved/deferred to §11
-    (item 10 above).
-- Commands run and exact results:
-  - `pytest tests/test_user_jobs.py tests/test_user_jobs_service.py -q` → 55 passed.
-  - `pytest -q` (full suite) → 1035 passed (up from 980), re-confirmed again after the
-    fresh migration rebuild below.
-  - `ruff format --check .`, `ruff check .` → passed (66 files).
-  - `mypy app tests scripts` → success, 49 source files.
-  - `DATABASE_URL=...jobgoblin_test`: `downgrade 0015` / `upgrade head` (round-trip),
-    `downgrade base` / `upgrade head` (fresh `base -> head`), `alembic check` (`No new
-    upgrade operations detected` — same informational `Computed`-column `UserWarning`
-    as before) — all passed.
-  - `alembic current` against the **development** database (no override) → `0006`,
-    unchanged throughout.
-  - Live schema inspected directly (`pg_constraint`, `pg_indexes`,
-    `information_schema.columns`) after the fresh rebuild — confirmed 6 constraints,
-    both FKs' `ON DELETE CASCADE` (`confdeltype = 'c'`), the `UNIQUE` index leading
-    with `user_id`, the separate `job_id` index, and every column default, matching
-    the model exactly.
-  - `python scripts/check_repo.py` (from `backend/`) → exit 0, zero findings.
-  - `git status`/`git diff --check` → only the files listed above; no whitespace/
-    conflict errors.
-- Adversarial self-review (fresh Explore-agent context, no prior knowledge of the
-  implementation, run against the actual uncommitted diff before commit; full
-  12-question Class H depth): **no substantiated bugs**. Explicitly checked and
-  clean: model/migration parity for the 9-value enum and both pre/post-application
-  tuples (byte-identical between model and migration); traced all four `set_status()`
-  transition branches and confirmed no call sequence can desynchronize `status`/
-  `applied_at`; confirmed the no-op path only fires on exact case-sensitive string
-  equality, matching the CHECK's own case-sensitive `IN`; confirmed the CHECK (not
-  `set_status()`) is what rejects a direct-write bypass; confirmed `saved`/`hidden`/
-  `archived` independence tested in combination with a post-application status, not
-  just the default; confirmed the `UNIQUE` index leads with `user_id` (no redundant
-  separate index needed) and `job_id`'s index is a genuine separate btree, not FK-
-  auto-indexing; confirmed no test overclaims concurrency; confirmed no cross-test
-  state leakage; confirmed both CASCADE tests prove isolation against a second,
-  untouched row; confirmed `status_changed_at` truly never advances on a non-status
-  write (no `event.listens_for` exists anywhere in the codebase that could interfere);
-  confirmed every CASCADE-precedent and cross-reference claim against the actual
-  model files — no repeat of the earlier `collection_run_provider_attempts` false
-  "first CASCADE" mistake or the `collection_runs` "§38" dangling-citation mistake.
-  Two Low, non-blocking coverage-gap notes, accepted without a fix (both outside the
-  approved test matrix): no test proves a second, unrelated `UserJob` referencing the
-  *same* `Job` survives a different user's deletion (logically guaranteed by FK
-  direction, just untested); the direct-SQL "valid combination accepted" path is only
-  exercised for the default `interested`/no-`applied_at` row, not parametrized across
-  all 9 statuses the way the ORM-path acceptance test is (the CHECK-rejection tests
-  already cover all 9 both ways).
-- Deviations/known limitations: none beyond the two accepted Low notes above.
-  `job_notes` remains unimplemented, per explicit scope (it is Phase 1's own next and
-  final schema slice, not this one).
-- STOP — awaiting Codex review. Do not begin `job_notes`, another slice, or modify
-  `main`.
-
-### Work review
-
-- Date/reviewer: 2026-08-28, Codex. Diff reviewed: `8a9f4d3..e072539`
-  (`phase-1/user-jobs`). Verdict: **changes requested**.
-- Findings, highest severity first:
-  1. **Medium — `set_status()` does not fully enforce its timezone-aware timestamp
-     contract.** `backend/app/services/user_jobs.py` checks only
-     `changed_at.tzinfo is None`. Under Python's datetime contract, a datetime is
-     aware only when `tzinfo` is non-NULL **and** `utcoffset()` is non-NULL. A custom
-     `tzinfo` whose `utcoffset()` returns `None` passes the current guard; I reproduced
-     the function mutating the row and reaching `flush()` with that value. Exact
-     correction: reject when `changed_at.tzinfo is None or changed_at.utcoffset() is
-     None`, before any mutation, and add a service regression test using such a
-     `tzinfo` implementation that proves `ValueError` and zero mutation.
-  2. **Low — the approved direct-SQL acceptance half of the nine-status matrix is
-     missing, while durable documentation says it exists.** The ORM acceptance tests
-     cover all two pre-application and seven post-application statuses, and direct SQL
-     covers all invalid pairings, but direct-SQL valid acceptance is exercised only for
-     the default `interested`/NULL row. This was mandatory item 1 in the approved
-     proposal, yet `docs/ROADMAP.md` and this iteration's `Work done` claim the full
-     matrix is covered by both ORM and direct SQL. Exact correction: add parameterized
-     direct-SQL acceptance coverage for all nine correctly paired statuses (NULL for
-     the two pre-application values, non-NULL for the seven post-application values).
-     Keep the claims only after those tests exist; do not rewrite the prior `Work done`
-     entry—record the correction in the next one.
-  3. **Low — the approved flag-independence test does not prove each flag
-     independently.** `test_saved_hidden_archived_independent_of_status_and_each_other`
-     sets all three flags to `True` in one row, so it proves that one combined state is
-     accepted, not that each flag can vary independently of the other two as the
-     approved extended matrix requested. Its docstring also describes an “unsaved” row
-     while the fixture passes `saved=True`. Exact correction: parameterize the three
-     flags (one `True`, the other two `False`) and assert the persisted/reloaded values;
-     retain a post-application status so independence from workflow status remains
-     covered, and correct the misleading prose.
-- Independently verified: targeted `user_jobs` suites pass (55/55); repository checker,
-  Ruff format/check, and mypy pass. A full-suite run reached 1027 passes with 8 setup
-  errors confined to pytest's inaccessible host temp directory
-  (`AppData/Local/Temp/pytest-of-Kiwi`), not product/test assertions. Model/migration
-  parity, migration `0016` ancestry, FK/CHECK/index definitions, service transition
-  branches, CASCADE cleanup/isolation, and the Phase 1/Phase 10 documentation boundary
-  were also inspected; no further findings.
-- Scope for the correction pass: service validation, the bounded tests above, truthful
-  documentation wording where needed, and a new concise `Work done` entry only. No
-  migration/schema change is needed; do not start `job_notes`, merge to or modify
-  `main`, or advance to another slice.
-
----
-
-## Iteration 2
+`user_jobs` initial implementation pass and its "changes requested" review) was
+removed rather than kept alongside a third entry, since the correction pass below
+superseded it and the whole slice is now merged. Nothing below was rewritten — only
+renumbered.*
 
 ### Work done
 
@@ -388,3 +206,127 @@ content diff against the feature branch; migration `0016` (`down_revision = "001
 is present and is the sole Alembic head; `python backend/scripts/check_repo.py` (via
 the project's own virtualenv interpreter) exits 0 with zero findings; working tree
 clean. `job_notes` not started or proposed.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-08-28, Claude Code (Sonnet 5). Authorized slice: `job_notes`,
+  Class H per docs/LLM_WORKFLOW.md — user-state preservation, the same reason
+  `user_jobs` is Class H. Phase 1's **final** schema table. Base `93a4ee5` on `main`
+  -> branch `phase-1/job-notes`.
+- Outcome: new model, migration `0017`, factory/real-commit helper, and 17 new tests
+  implemented and verified against real PostgreSQL, per the user's binding decisions:
+  1. **No `job_notes.user_id` column added.** Ownership is reached and enforced
+     entirely through the required `user_job_id` -> `user_jobs.id` foreign key,
+     matching `saved_search_titles.saved_search_id`/`candidate_skills.
+     candidate_profile_id`'s own precedent (neither carries a redundant `user_id`
+     either). `docs/ARCHITECTURE.md` §1.4 corrected to distinguish directly
+     user-owned tables from child tables whose ownership is enforced through a
+     required parent FK, rather than adding a redundant column.
+  2. `body`: TEXT NOT NULL, ORM-trimmed (established four-character whitespace set,
+     case/internal whitespace preserved), matching database `CHECK` pair requiring
+     an already-trimmed, non-empty value — empty/whitespace-only notes rejected
+     outright, unlike `identity_conflicts.resolution`'s optional-narrative
+     blank-collapses-to-`NULL` treatment (a `job_notes` row's only reason to exist
+     is to hold `body`).
+  3. `INDEX (user_job_id, created_at DESC)` added, no `UNIQUE` constraint — multiple
+     notes per `user_job_id` accepted (proven via an explicit `count()` test, not
+     merely that a commit didn't raise).
+  4. `created_at`/`updated_at` kept exactly as already specified (standard global
+     convention; no table-doc-omission tension here, unlike every table since
+     `collection_runs`).
+  5. All three CASCADE-isolation paths proven: deleting a `User` or a `Job` cascades
+     two levels deep through `user_jobs` to `job_notes`; deleting a `UserJob`
+     directly also cascades. Each proven isolated against a second, independent
+     chain (including the intermediate `UserJob` row itself confirmed deleted for
+     the two-level cases).
+  6. Documented the "current consumer" resolution: this table's Phase 1 consumers
+     are its own factory, the accepted schema exit gate, and the PostgreSQL
+     constraint/cascade tests; Phase 10 remains the first production CRUD writer,
+     not the first consumer of the schema itself. No service or API code added —
+     unlike `user_jobs`, ARCHITECTURE.md §13 names no Phase 1 service function for
+     this table.
+  - Adversarial self-review (below) found and fixed one real, repeated documentation
+    defect: an initial "this schema's first two-level CASCADE chain" claim (written
+    into the model, migration, `DATA_MODEL.md`, `ROADMAP.md`, and one test
+    docstring) was false — `saved_search_titles`/`saved_search_locations` (via
+    `saved_searches.user_id`) and `candidate_skills` (via `candidate_profiles.
+    user_id`) already form two-level CASCADE chains from `users`, predating this
+    slice. Corrected in all five places to state what is actually new: `user_jobs`
+    has two parent FKs, so `job_notes` is reachable by a two-level cascade from
+    either `users` or `jobs`, not just one.
+- Files changed:
+  - `backend/app/db/models/job_note.py` (new).
+  - `backend/app/db/models/__init__.py`, `backend/app/db/base.py` —
+    registration/docstring (the docstring now describes all fifteen Phase 1 models
+    as complete, not "every other Phase 1 table will follow").
+  - `backend/migrations/versions/0017_job_notes.py` (new, `down_revision = "0016"`).
+  - `backend/tests/conftest.py` — `make_job_note`, `real_committed_job_note` (builds
+    on the pre-existing `real_committed_user_job` helper).
+  - `backend/tests/test_job_notes.py` (new, 17 tests) — baseline/defaults;
+    `user_job_id` FK (nonexistent rejected, omission rejected via direct SQL);
+    three CASCADE-isolation tests (via `User`, via `Job`, via `UserJob` directly),
+    each proving both the intermediate row (where applicable) and the target note
+    are gone, and an unrelated chain's own note survives; `body` NOT NULL/trim/
+    non-empty (ORM + direct SQL, including the direct-SQL backstop for an
+    untrimmed value bypassing the ORM entirely); `created_at`/`updated_at`
+    defaults/independence/UTC-awareness/advancing-on-commit; multiple notes per
+    `user_job_id` accepted (explicit count assertion).
+  - `docs/DATA_MODEL.md` — `job_notes` marked **Implemented**; added "Rev 22" note
+    recording every resolved decision; added the constraints-summary rows (this
+    table previously had none at all).
+  - `docs/ROADMAP.md` — Phase 1 status paragraph extended to describe the
+    `job_notes` slice as complete — noting all fifteen Phase 1 domain tables (ADR
+    0003) are now migrated, with the rest of Phase 1's exit gate still to be
+    independently verified.
+  - `docs/ARCHITECTURE.md` — §1.4 corrected (item 1 above).
+- Commands run and exact results:
+  - `pytest tests/test_job_notes.py -q` → 17 passed.
+  - `pytest -q` (full suite) → 1064 passed (up from 1047), re-confirmed again after
+    the fresh migration rebuild below.
+  - `ruff format --check .`, `ruff check .` → passed (69 files).
+  - `mypy app tests scripts` → success, 51 source files.
+  - `DATABASE_URL=...jobgoblin_test`: `downgrade 0016` / `upgrade head` (round-trip),
+    `downgrade base` / `upgrade head` (fresh `base -> head`, all fifteen Phase 1
+    tables), `alembic check` (`No new upgrade operations detected` — same
+    informational `Computed`-column `UserWarning` as before) — all passed.
+  - `alembic current` against the **development** database (no override) → `0006`,
+    unchanged throughout.
+  - Live schema inspected directly (`pg_constraint`, `pg_indexes`,
+    `information_schema.columns`) after the fresh rebuild — confirmed 4
+    constraints, the FK's `ON DELETE CASCADE` (`confdeltype = 'c'`), the composite
+    index with `created_at DESC`, no `UNIQUE` constraint, and every column default,
+    matching the model exactly.
+  - `python scripts/check_repo.py` (from `backend/`) → exit 0, zero findings.
+  - `git status`/`git diff --check` → only the files listed above; no whitespace/
+    conflict errors.
+- Adversarial self-review (fresh Explore-agent context, no prior knowledge of the
+  implementation, run against the actual uncommitted diff before commit; full
+  12-question Class H depth): **one substantiated Medium finding, fixed** — the
+  false "first two-level CASCADE chain" claim described above, found by checking
+  every CASCADE-precedent/superlative claim against the actual model files (this
+  codebase's own documented history of "first X" mistakes). Explicitly checked and
+  clean otherwise: model/migration `CHECK` expressions byte-identical; the ORM trim
+  validator cannot itself bypass the CHECK (a whitespace-only input trims to `""`,
+  still rejected at commit); the direct-SQL tests prove the database `CHECK` is the
+  real backstop independent of the ORM; the composite index's column order/DESC
+  direction confirmed via live introspection, and confirmed no `UNIQUE` constraint
+  exists anywhere on this table; all three CASCADE tests proven to isolate against
+  a fully independent second chain, with the intermediate `UserJob` also confirmed
+  deleted for the two-level cases; the multiple-notes test proven via an explicit
+  `count()`, not just a non-raising commit; no test overclaims concurrency; no
+  cross-test state leakage; no `services/`/`api/` dependency-boundary violation
+  anywhere in the new test/conftest code; the schema supports Phase 10's eventual
+  list/create/edit/delete-by-recency consumer without any further migration.
+- Deviations/known limitations: none beyond the one fixed finding above. No
+  service-layer code, API routes, or Phase 10 behavior added, per explicit scope.
+  Phase 2 not started, referenced, or scoped.
+- STOP — awaiting Codex review. Do not begin Phase 2, modify or merge `main`, or add
+  Phase 10 behavior.
+
+### Work review
+
+*Pending — awaiting Codex.*

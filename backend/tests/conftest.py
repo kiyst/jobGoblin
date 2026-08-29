@@ -18,6 +18,7 @@ from app.db.models import (
     Company,
     IdentityConflict,
     Job,
+    JobNote,
     JobOccurrence,
     RawJobIngestion,
     SavedSearch,
@@ -588,6 +589,64 @@ async def real_committed_user_job(
                 if existing_user is not None:
                     await cleanup_session.delete(existing_user)
                     await cleanup_session.commit()
+
+
+@pytest.fixture
+def make_job_note() -> Callable[..., JobNote]:
+    """Factory for a valid `JobNote` — tests only deviate from this
+    intentionally. Takes the owning `user_job_id` explicitly rather than
+    creating a `UserJob` itself, matching `make_candidate_profile`'s
+    pattern. `body` defaults to a short, valid placeholder string."""
+
+    def _make(*, user_job_id: uuid.UUID, body: str = "Applied through referral.") -> JobNote:
+        return JobNote(user_job_id=user_job_id, body=body)
+
+    return _make
+
+
+@asynccontextmanager
+async def real_committed_job_note(
+    db_engine: AsyncEngine,
+    email: str,
+    *,
+    status_changed_at: datetime,
+    body: str = "Applied through referral.",
+    user_job_kwargs: dict[str, object] | None = None,
+) -> AsyncIterator[tuple[AsyncSession, uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID]]:
+    """Builds on `real_committed_user_job`: additionally creates a real,
+    separately-committed `JobNote` referencing it, with its own best-effort
+    cleanup (note, then — via the wrapped helper — user job, job, then
+    user). `user_job_kwargs` disambiguates the wrapped `UserJob`'s own
+    optional kwargs from this helper's own `body`, matching
+    `real_committed_collection_run_provider_attempt`'s `collection_run_
+    kwargs` disambiguation pattern.
+    """
+    async with real_committed_user_job(
+        db_engine,
+        email,
+        status_changed_at=status_changed_at,
+        status="interested",
+        job_kwargs=None,
+        **(user_job_kwargs or {}),
+    ) as (session, user_id, job_id, user_job_id):
+        note = JobNote(user_job_id=user_job_id, body=body)
+        session.add(note)
+        note_id: uuid.UUID | None = None
+        try:
+            await session.commit()
+            await session.refresh(note)
+            note_id = note.id
+
+            yield session, user_id, job_id, user_job_id, note_id
+        finally:
+            if note_id is not None:
+                with suppress(Exception):
+                    await session.rollback()
+                async with AsyncSession(bind=db_engine) as cleanup_session:
+                    existing_note = await cleanup_session.get(JobNote, note_id)
+                    if existing_note is not None:
+                        await cleanup_session.delete(existing_note)
+                        await cleanup_session.commit()
 
 
 @pytest.fixture

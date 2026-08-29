@@ -261,9 +261,23 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   preservation/backwards-clearing/no-op behavior, its flush-not-commit contract, its
   `ValueError` rejection of an invalid status or a naive timestamp without partial
   mutation, and that the database `CHECK` still rejects a status/`applied_at` pair
-  written by directly bypassing `set_status()` (see `docs/DATA_MODEL.md`). No later
-  Phase 1 table (`job_notes`) is implemented yet; the rest of Phase 1's exit gate
-  (§[PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md)) remains outstanding.
+  written by directly bypassing `set_status()` (see `docs/DATA_MODEL.md`). The
+  `job_notes` slice is also complete and verified (Class H) — Phase 1's **final**
+  schema table: model (`backend/app/db/models/job_note.py`), migration `0017`
+  (`down_revision = "0016"`), and database tests cover the required, trim-only,
+  non-empty `body` `CHECK`, `ON DELETE CASCADE` isolation proven through three
+  distinct deletion paths (`User`, `Job`, and `UserJob` directly — the same two-
+  level-cascade shape already used by `saved_search_titles`/`saved_search_locations`
+  and `candidate_skills`, now reachable through `user_jobs`' two parent FKs from
+  either `users` or `jobs`), and multiple notes per `user_job_id` being accepted (no
+  `UNIQUE` constraint). No new
+  `services/` code was added — ARCHITECTURE.md §13 names no Phase 1 service function
+  for this table, unlike `user_jobs`' `set_status()`; this table's Phase 1 consumers
+  are its own factory and the database tests themselves, with Phase 10 remaining its
+  first production CRUD writer (see `docs/DATA_MODEL.md`). All fifteen Phase 1
+  domain tables (ADR 0003) are now migrated; the rest of Phase 1's exit gate
+  (§[PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md)) remains to be independently
+  verified before declaring the phase complete.
 - **Phases 2-14: not started.** Begin each phase only after completing its preflight in
   [PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md) and receiving approval for the next
   smallest slice.
