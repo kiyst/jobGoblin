@@ -521,4 +521,75 @@ not started and are not authorized by this merge.
 
 ### Work review
 
-*Pending — awaiting Codex.*
+- Date/reviewer: 2026-08-29, Codex. Diff reviewed: `903ad0d..e725fd2` on
+  `phase-2/natural-key-ingestion-spine`. Verdict: **changes requested**.
+- Independent verification completed against real PostgreSQL: the five new targeted
+  test files pass (**33 passed**); the full suite passes (**1139 passed**); Ruff format
+  and lint pass; mypy passes; `scripts/check_repo.py` exits 0; test DB is at sole head
+  `0017`; `alembic check` reports no drift. These results establish that the current
+  tests and schema are green, but do not close the contract defects below.
+- Findings, highest severity first:
+  1. **High — re-observation violates the Phase 2 idempotency/conflict contract.**
+     `backend/app/ingestion/persistence.py:100-115` overwrites `posted_at`, `apply_url`,
+     both canonical-URL fields, `requisition_id_raw`, and the parent `Job`'s title,
+     location, compensation text, and canonical URL. The Phase 2 exit gate requires a
+     fixture replay to *only* advance observational fields
+     (`PHASE_RISK_CHECKLIST.md:136-142`), while ADR 0007 requires a Tier-1 canonical-URL
+     mismatch to leave disputed fields untouched and enter conflict quarantine. The
+     current behavior can silently erase known values with incoming `NULL`, replace
+     canonical evidence, and bypass the deferred provenance/merge policy. The new
+     `test_reobservation_normalizes_text_fields_identically_to_first_insert` positively
+     codifies this incorrect overwrite behavior. In this bounded slice, make the found
+     branch observational-only (`last_seen_at`, `is_active`; applicant fields only if
+     the schema later supplies them). Do not mutate descriptive/canonical fields. Add
+     regressions proving changed and missing incoming non-observational values remain
+     frozen. For a Tier-1 match where both normalized canonical URLs are non-null and
+     differ, fail closed with a distinct, non-`parse_error` deferred-conflict exception
+     before mutation; do not implement conflict-row persistence without a separately
+     approved scope.
+  2. **High — a malformed URL can leak secrets/PII into persisted error telemetry.**
+     `identity.py:39-42` embeds the raw `source_url` in
+     `UnresolvableIdentityError`; `pipeline.py:46-60` stores that exception text in
+     `raw_job_ingestions.error_message`. Source URLs commonly contain tokens, query
+     strings, or user-identifying data, and the approved observability contract says
+     field values must not be exposed. Persist a fixed, sanitized error message/code
+     that identifies only the failure class; retain the original evidence solely in
+     `raw_payload`. Add a secret-bearing malformed-URL regression proving the secret is
+     absent from stored error text and logs.
+  3. **Medium — failed-run telemetry loses already-committed progress.**
+     `pipeline.py:210-231` marks the run/attempt failed but never writes the counters
+     accumulated before the exception. Because each earlier posting commits
+     independently, a failure after one successful posting leaves durable Job/raw rows
+     while both telemetry rows falsely report zero. The approved proposal explicitly
+     required "whatever counts had accumulated so far." Initialize counters before
+     fallible provider/posting work, persist the exact run and per-source counters in
+     the best-effort failure transaction, and add a fail-on-the-second-posting test.
+  4. **Medium — provider result failures and identity are silently misreported.**
+     `pipeline.py:137-207` validates only the set of source names. It does not require
+     `result.provider == provider.name` or each job's provider to match, and ignores
+     `DiscoveryResult.errors`, `SourceRunStats.completed=False`,
+     `incomplete_results`, and `possibly_incomplete`; such a result is recorded as a
+     fully completed attempt/run. Full partial-failure persistence is excluded from
+     this slice, so fail closed before posting writes when any unsupported partial/error
+     state is returned, and validate provider identity. Add adversarial tests for a
+     mismatched result/job provider and each unsupported partial/error signal. Do not
+     implement the later multi-source partial-success policy in this correction pass.
+  5. **Medium — the approved safe observability layer is absent.** The proposal required
+     `logging.getLogger(__name__)`, payload-free INFO start/end events, a WARNING per
+     parse error containing only the raw-ingestion id, and an ERROR at the outer failure
+     boundary. No ingestion logger or log call exists. Implement those bounded events
+     and use `caplog` to prove both event presence and absence of payload/field values.
+     Avoid logging exception messages or traceback locals at this boundary.
+  6. **Low — `RawJobIngestion.fetched_at` is populated with the wrong clock.**
+     `pipeline.py:145-147` passes the Job/Occurrence business `observed_at`, even though
+     the model defines `fetched_at` as the posting's actual fetch event and
+     `DiscoveredJob` already supplies `discovered_at`. This collapses timestamps the
+     proposal explicitly separated and makes backfill audit ordering inaccurate. Use
+     `job.discovered_at` for the raw row, keep `observed_at` exclusively for
+     Job/Occurrence observation fields, and test deliberately different timestamps.
+- Exact correction scope: address only the six findings above; no migration is expected.
+  Replace the regression that expects descriptive-field overwrite, add the specified
+  adversarial cases, rerun the Class-H verification matrix and fresh-context self-review,
+  append a new `Work done`, and stop for re-review. Do not begin conflict persistence,
+  QueryPlanner, tiers 2-4, multi-source partial-success handling, live providers, or
+  merge/modify `main`.
