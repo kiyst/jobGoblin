@@ -19,6 +19,15 @@ class UpsertOutcome:
     inserted: bool
 
 
+class DeferredIdentityConflictError(RuntimeError):
+    """A natural-key match has conflicting corroborating evidence.
+
+    A later slice will persist the full ADR-0007 quarantine transition.
+    Until then, this distinct exception fails closed without overwriting
+    either side's evidence or misclassifying the payload as a parse error.
+    """
+
+
 def _normalize_canonical_url(job: DiscoveredJob) -> str | None:
     if job.canonical_url is None:
         return None
@@ -75,14 +84,12 @@ async def upsert_job_occurrence(
     occurrence is never reassigned to a different `Job`, and its
     association is never lost.
 
-    Both branches mutate plain ORM attributes (never a Core-style
-    `update()` statement) specifically so `JobOccurrence`/`Job`'s own
-    `@validates` normalization (trim/blank-collapse for nullable text,
-    trim+lower for canonical identifiers) applies identically whether a row
-    is being created or re-observed — a Core `update()` bypasses `@validates`
-    entirely, which would let an un-normalized value land on re-observation
-    even though the identical value would have been normalized on first
-    insert.
+    The found branch updates observational state only. Descriptive,
+    canonical, and source-provided fields remain frozen until the later
+    provenance/merge and conflict-quarantine slices can reconcile them.
+    When both stored and incoming normalized canonical URLs exist and
+    disagree, the function fails closed before any mutation with
+    `DeferredIdentityConflictError`.
 
     `observed_at` — the caller-supplied business timestamp, never a
     server-side `now()` — only ever moves `last_seen_at` (on both the
@@ -98,21 +105,22 @@ async def upsert_job_occurrence(
     occurrence = (await session.execute(_select_existing(natural_key))).scalar_one_or_none()
 
     if occurrence is not None:
+        incoming_canonical_url = _normalize_canonical_url(job)
+        if (
+            occurrence.canonical_url_normalized is not None
+            and incoming_canonical_url is not None
+            and occurrence.canonical_url_normalized != incoming_canonical_url
+        ):
+            raise DeferredIdentityConflictError(
+                "canonical URL evidence mismatch requires deferred conflict quarantine"
+            )
+
         occurrence.last_seen_at = max(occurrence.last_seen_at, observed_at)
         occurrence.is_active = True
-        occurrence.posted_at = job.posted_at
-        occurrence.apply_url = job.apply_url
-        occurrence.canonical_url = job.canonical_url
-        occurrence.canonical_url_normalized = _normalize_canonical_url(job)
-        occurrence.requisition_id_raw = job.requisition_id_raw
 
         job_row = await session.get(Job, occurrence.job_id)
         assert job_row is not None
         job_row.last_seen_at = max(job_row.last_seen_at, observed_at)
-        job_row.title = job.title
-        job_row.location_raw = job.location
-        job_row.compensation_text = job.compensation_text
-        job_row.canonical_url = job.canonical_url
 
         await session.flush()
         return UpsertOutcome(job_id=occurrence.job_id, occurrence_id=occurrence.id, inserted=False)
