@@ -346,4 +346,51 @@ read-only Phase 1 exit-gate audit, not Phase 2 work.
 
 ### Work review
 
-*Pending — awaiting Codex.*
+- Reviewer: Codex
+- Reviewed commit/diff: `9af46ea` against `66f3d29` on
+  `phase-1/closure`.
+- Verdict: **Changes requested.** The ownership-scoped service shape, transaction
+  ownership, validation ordering, documentation corrections, and focused tests are
+  sound, but the closure slice still exposes one broken supported update path and
+  does not currently pass the repository's formatting gate.
+- Findings, highest severity first:
+  1. **Medium — the `SavedSearch` service advertises two nullable fields as
+     updatable but cannot clear either one.** `enabled_sources` and
+     `scoring_weights` are both in `_UPDATABLE_FIELDS`, the approved contract says
+     nullable fields can be explicitly set to `None`, and `None` is the documented
+     no-override state. Nevertheless, `update(..., enabled_sources=None)` or
+     `update(..., scoring_weights=None)` serializes JSON `null`, violates the
+     table's object-or-SQL-NULL `CHECK`, and raises `IntegrityError`. Deferring this
+     because no route exists yet leaves the new permanent service boundary internally
+     inconsistent. Configure both mapped JSONB columns to persist Python `None` as
+     SQL `NULL` (prefer `JSONB(none_as_null=True)` inside the existing
+     `MutableDict.as_mutable(...)` mapping; this changes ORM binding semantics, not
+     PostgreSQL DDL), remove the service's workaround/known-limitation wording, and
+     prove both columns through the service: omitted/`None` creation stores genuine
+     SQL `NULL`, representative dictionaries persist, and an existing dictionary can
+     be updated to `None`, committed, and reloaded as SQL `NULL`. Preserve the
+     existing direct-SQL rejection of the JSON literal `null`, and run `alembic
+     check` to prove the mapping correction creates no schema drift.
+  2. **Low — the claimed formatting verification is not reproducible.**
+     `python -m ruff format --check app tests scripts` reports that
+     `app/services/saved_searches.py` would be reformatted (the `select(...).where(...)`
+     expression in `get_for_user`). Apply Ruff formatting and rerun the format check.
+  3. **Low — this `Work done` entry contradicts its own verified test count.** It
+     says "30 tests total, later 34" while the two files contain 14 + 19 = 33 tests
+     and the command record correctly says 30 then 33. In the correction pass's new
+     append-only `Work done`, state the corrected counts and do not repeat the claim
+     that every nullable update path is covered until the JSONB cases above pass.
+- Independent verification performed:
+  - Focused service tests: **33 passed**.
+  - Full suite with an explicit writable `--basetemp`: **1098 passed**. (A first
+    local run's eight setup errors were solely an inaccessible host temp directory;
+    the same suite passed when given a writable temp root.)
+  - `scripts/check_repo.py`: exit 0; `ruff check`: clean; `mypy`: clean;
+    `git diff --check`: clean.
+  - `ruff format --check`: **failed**, one file would be reformatted as described
+    above.
+- Exact requested correction scope: the two SavedSearch JSONB mappings and related
+  service text/logic, focused service regressions, Ruff-only formatting, and a new
+  concise handoff `Work done` entry. Do not add a migration unless `alembic check`
+  demonstrates one is genuinely required; do not change the raw-SQL JSON-literal
+  policy, broaden service/API scope, begin Phase 2, or modify/merge `main`.
