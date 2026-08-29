@@ -24,6 +24,7 @@ from app.db.models import (
     SavedSearchLocation,
     SavedSearchTitle,
     User,
+    UserJob,
 )
 from app.db.session import check_database_connection
 from app.main import app
@@ -466,6 +467,126 @@ async def real_committed_job(
                 existing_job = await cleanup_session.get(Job, job_id)
                 if existing_job is not None:
                     await cleanup_session.delete(existing_job)
+                    await cleanup_session.commit()
+
+
+@pytest.fixture
+def make_user_job() -> Callable[..., UserJob]:
+    """Factory for a valid `UserJob` — tests only deviate from this
+    intentionally. Takes the owning `user_id`/`job_id` explicitly rather
+    than creating a `User`/`Job` itself, matching `make_candidate_profile`'s
+    pattern. `status_changed_at` has no default (no server default on the
+    column either — it is a business timestamp, see the model docstring):
+    every call site must supply it explicitly, matching `make_job`'s
+    treatment of `first_seen_at`/`last_seen_at`. `status` defaults to
+    `"interested"` (a Python-level factory convenience only — the database
+    itself has no server default), pairing naturally with `applied_at`
+    defaulting to `None`."""
+
+    def _make(
+        *,
+        user_id: uuid.UUID,
+        job_id: uuid.UUID,
+        status_changed_at: datetime,
+        status: str = "interested",
+        applied_at: datetime | None = None,
+        saved: bool | None = None,
+        hidden: bool | None = None,
+        archived: bool | None = None,
+    ) -> UserJob:
+        kwargs: dict[str, object] = {
+            "user_id": user_id,
+            "job_id": job_id,
+            "status": status,
+            "status_changed_at": status_changed_at,
+            "applied_at": applied_at,
+        }
+        if saved is not None:
+            kwargs["saved"] = saved
+        if hidden is not None:
+            kwargs["hidden"] = hidden
+        if archived is not None:
+            kwargs["archived"] = archived
+        return UserJob(**kwargs)
+
+    return _make
+
+
+@asynccontextmanager
+async def real_committed_user_job(
+    db_engine: AsyncEngine,
+    email: str,
+    *,
+    status_changed_at: datetime,
+    status: str = "interested",
+    job_kwargs: dict[str, object] | None = None,
+    **user_job_kwargs: object,
+) -> AsyncIterator[tuple[AsyncSession, uuid.UUID, uuid.UUID, uuid.UUID]]:
+    """Creates a `User` and a `Job` (independent of each other — unlike
+    `real_committed_user_and_profile`'s parent/child pair) and a `UserJob`
+    referencing both, via real, separately-committed transactions on
+    `db_engine`, for tests that need genuinely durable commits (e.g. to
+    exercise either `ON DELETE CASCADE` or observe `updated_at` actually
+    advance). `job_kwargs` disambiguates the `Job`'s own optional kwargs
+    from this helper's own `**user_job_kwargs`, matching
+    `real_committed_collection_run_provider_attempt`'s `collection_run_
+    kwargs` disambiguation pattern.
+    """
+    resolved_job_kwargs: dict[str, object] = job_kwargs or {}
+    session = AsyncSession(bind=db_engine)
+    user_id: uuid.UUID | None = None
+    job_id: uuid.UUID | None = None
+    user_job_id: uuid.UUID | None = None
+    try:
+        user = User(email=email)
+        session.add(user)
+        await session.commit()
+        await session.refresh(user)
+        user_id = user.id
+
+        job = Job(
+            first_seen_at=status_changed_at,
+            last_seen_at=status_changed_at,
+            **resolved_job_kwargs,
+        )
+        session.add(job)
+        await session.commit()
+        await session.refresh(job)
+        job_id = job.id
+
+        user_job = UserJob(
+            user_id=user_id,
+            job_id=job_id,
+            status=status,
+            status_changed_at=status_changed_at,
+            **user_job_kwargs,
+        )
+        session.add(user_job)
+        await session.commit()
+        await session.refresh(user_job)
+        user_job_id = user_job.id
+
+        yield session, user_id, job_id, user_job_id
+    finally:
+        with suppress(Exception):
+            await session.rollback()
+        await session.close()
+
+        async with AsyncSession(bind=db_engine) as cleanup_session:
+            if user_job_id is not None:
+                existing_user_job = await cleanup_session.get(UserJob, user_job_id)
+                if existing_user_job is not None:
+                    await cleanup_session.delete(existing_user_job)
+                    await cleanup_session.commit()
+            if job_id is not None:
+                existing_job = await cleanup_session.get(Job, job_id)
+                if existing_job is not None:
+                    await cleanup_session.delete(existing_job)
+                    await cleanup_session.commit()
+            if user_id is not None:
+                existing_user = await cleanup_session.get(User, user_id)
+                if existing_user is not None:
+                    await cleanup_session.delete(existing_user)
                     await cleanup_session.commit()
 
 
