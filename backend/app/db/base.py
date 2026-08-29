@@ -28,10 +28,10 @@ class Base(DeclarativeBase):
     `IdentityConflict` (`app/db/models/identity_conflict.py`),
     `CollectionRun` (`app/db/models/collection_run.py`),
     `CollectionRunProviderAttempt`
-    (`app/db/models/collection_run_provider_attempt.py`), and `UserJob`
-    (`app/db/models/user_job.py`) are the Phase 1 models registered
-    against this base so far; every other Phase 1 table will follow the
-    same pattern. This is also Alembic's
+    (`app/db/models/collection_run_provider_attempt.py`), `UserJob`
+    (`app/db/models/user_job.py`), and `JobNote` (`app/db/models/job_note.py`)
+    are all of Phase 1's models, registered against this base — `job_notes`
+    is Phase 1's final schema table (docs/ROADMAP.md). This is also Alembic's
     `target_metadata` (see
     `migrations/env.py`, which imports `app.db.models` so autogenerate has
     something to diff against).
