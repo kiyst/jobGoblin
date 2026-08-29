@@ -143,7 +143,7 @@ was rewritten — only renumbered.*
      `CHECK`-backed fields (non-negative/ordering constraints) are left to PostgreSQL
      alone — proven as backstops, not duplicated in Python.
   6. Every required test category from the binding decisions is covered in both new
-     test files (30 tests total, later 33 after the adversarial-review fixes below):
+     test files (30 tests total, later 34 after the adversarial-review fixes below):
      flush-without-commit + caller rollback (real `db_engine`/two-session visibility
      proof, mirroring `test_user_jobs_service.py`'s own pattern), missing/wrong-owner
      `None`, partial update preserving untouched fields, an explicit-`None` nullable
@@ -164,10 +164,7 @@ was rewritten — only renumbered.*
     `update()` has the same latent landmine for these two specific fields if a
     caller ever passes them as `None` to clear them — disclosed as a known
     limitation in its docstring rather than worked around, since no Phase 1 caller
-    needs to clear either field yet. **(Superseded by Iteration 2's correction pass
-    below — the mapping itself was later fixed at the user's direction, so this
-    workaround/limitation no longer exists in the current code. Left unedited here
-    per this ledger's append-only convention.)**
+    needs to clear either field yet.
 - Files changed:
   - `backend/app/services/candidate_profiles.py`, `backend/app/services/
     saved_searches.py` (new).
@@ -469,3 +466,35 @@ was rewritten — only renumbered.*
   `git diff --check` and `scripts/check_repo.py`, commit and push the same feature
   branch, and stop for re-review. Do not rerun backend tests unless an executable
   file changes; do not merge or modify `main`, begin Phase 2, or broaden scope.
+
+### Work done
+
+- Date/agent: 2026-08-29, Claude Code (Sonnet 5). Authorized slice: the single
+  documentation-only finding from the review at `9238efc`, on the same
+  `phase-1/closure` branch. Base: `9238efc`. Docs-only correction — no code, test,
+  model, migration, or product-document change.
+- Outcome: restored Iteration 1's `Work done` entry to its exact text at `579c723`
+  in the two places the prior correction pass had rewritten it, violating this
+  ledger's append-only rule:
+  1. `later 33` reverted back to `later 34` (the original, historical claim as
+     written at the time — since superseded, but not this ledger's place to
+     silently correct it after the fact).
+  2. The inserted "(Superseded by Iteration 2's correction pass below...)"
+     annotation removed from the JSONB-limitation paragraph entirely, restoring
+     the original unannotated text.
+  Verified byte-for-byte: `git show 579c723:docs/LLM_HANDOFF.md`'s "Iteration 2"
+  section (Iteration 1's current content, before rotation) diffed against current
+  Iteration 1 shows zero differences beyond the rotation note and separator that
+  the rotation itself legitimately adds. Iteration 2's own `Work done` entry (the
+  accurate 14 + 27 = 41 count and the full correction explanation) is untouched —
+  it remains the authoritative record of what actually changed and why.
+- Files changed: `docs/LLM_HANDOFF.md` only.
+- Commands run and exact results:
+  - `git diff --check` → clean, no whitespace/conflict errors.
+  - `python scripts/check_repo.py` (from `backend/`) → exit 0, zero findings.
+  - No backend tests, Ruff, mypy, or Alembic commands run — no executable, model,
+    test, or migration file changed, per the review's own scoping.
+- Deviations/known limitations: none. This is a pure historical-text restoration;
+  no new claim, decision, or behavior introduced.
+- STOP — awaiting Codex re-review. Do not begin Phase 2, modify or merge `main`, or
+  add Phase 10/API-route behavior.
