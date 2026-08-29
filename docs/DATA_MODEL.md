@@ -812,6 +812,14 @@ entirely (rather than trying to make NULL "count" as a value), which is also the
 semantically correct key for those sources — their own posting ID is already globally
 unique within `(provider, source)` without any tenant qualifier.
 
+**Phase 2 clarification (narrow, no schema change):** the fallback index itself has the
+same NULL-not-distinct limitation when its own key column, `source_url_normalized`, is
+also `NULL` (a payload with neither `source_job_id` nor a URL that normalizes into a
+usable value) — nothing enforces uniqueness for that row shape. Application code
+(`ingestion/identity.py`, Phase 2) never persists such a row at all: it is recorded as
+`raw_job_ingestions.processing_status = 'parse_error'` instead (ARCHITECTURE.md §8, ADR
+0004). This is an application-level rule, not an additional database constraint.
+
 ### `raw_job_ingestions`
 **Implemented** (`backend/app/db/models/raw_job_ingestion.py`; migration `0012`,
 `down_revision = "0011"`). Preserved pre-normalization payload (§17), **one row per

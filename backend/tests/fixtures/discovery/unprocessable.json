@@ -1,0 +1,21 @@
+{
+  "provider": "fixture_provider",
+  "source": "fixture_ats",
+  "source_tenant_id": null,
+  "source_job_id": null,
+  "requisition_id_raw": null,
+  "title": "Unknown Role",
+  "company": "Delta Unknown",
+  "location": null,
+  "source_url": "/careers/postings/456",
+  "apply_url": null,
+  "canonical_url": null,
+  "description": null,
+  "compensation_text": null,
+  "posted_at": null,
+  "discovered_at": "2026-01-04T00:00:00+00:00",
+  "raw": {
+    "title": "Unknown Role",
+    "url": "/careers/postings/456"
+  }
+}
