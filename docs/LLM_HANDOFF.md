@@ -97,101 +97,9 @@ that detail.
 ## Iteration 1
 
 *Rotated in from "Iteration 2" per the two-iteration rule: the prior Iteration 1 (the
-`job_notes` initial-implementation pass and its "changes requested" review at `0499d75`)
-was removed rather than kept alongside a third entry, since its two findings were
-addressed by the correction pass below and the whole slice is now merged. Nothing below
+`job_notes` correction pass, its approval, and merge record) was removed rather than kept
+alongside a third entry, since it is fully merged and no longer pending. Nothing below
 was rewritten — only renumbered.*
-
-### Work done
-
-- Date/agent: 2026-08-28, Claude Code (Sonnet 5). Authorized slice: the two bounded
-  corrections from the review at `0499d75`, on the same `phase-1/job-notes` branch.
-  Base: `0499d75`. Test-only correction — no model, migration, schema, product
-  document, Phase 2, or Phase 10 change.
-- Outcome:
-  1. **Internal-whitespace-preservation regression added.** New
-     `test_body_internal_whitespace_preserved_on_orm_path` wraps a body containing
-     internal repeated spaces, a tab, an LF, and a CRLF sequence in outer covered
-     whitespace, and asserts only the outer four-character set is stripped while the
-     internal content and case survive byte-for-byte — the prior
-     `test_body_trimmed_case_preserved_on_orm_path` only exercised outer ordinary
-     spaces and case, never internal whitespace of any kind.
-  2. **Timestamp-independence overclaim corrected.** Renamed
-     `test_defaults_are_independent_across_multiple_rows` to
-     `test_new_rows_have_independent_ids_and_body_values`, with a docstring stating
-     plainly that it does not exercise `created_at`/`updated_at` at all (it never did
-     — only `body` values and application-generated `id`s). This `Work done` entry
-     describes timestamp coverage only as: server defaults present
-     (`test_direct_sql_created_and_updated_at_default_to_now`), UTC-awareness
-     (`test_timestamps_are_utc_aware`), and `updated_at` advancing on a real commit
-     (`test_updated_at_advances_on_real_committed_update`) — not "independence." The
-     prior iteration's `Work done` entry is left unedited, per this ledger's
-     append-only convention.
-  - PostgreSQL was not running at the start of this pass (confirmed via a direct
-    connection attempt: `ConnectionRefusedError`, matching the reviewer's own
-    finding) — Docker Desktop was not running. Started Docker Desktop, waited for
-    its daemon, then started the existing `jobgoblin-postgres-1` container (already
-    present, previously exited) and waited for its healthcheck before running any
-    test. Re-verified connectivity before running anything, per instruction not to
-    claim tests passed without a real, confirmed-reachable database.
-- Files changed:
-  - `backend/tests/test_job_notes.py` — one new test (item 1); one test renamed
-    with a corrected docstring, no assertions removed (item 2).
-- Commands run and exact results:
-  - `pytest tests/test_job_notes.py -v` → 18 passed (up from 17 — exactly the one
-    new test; nothing else added or removed).
-  - `pytest -q` (full suite) → 1065 passed (up from 1064).
-  - `ruff format --check .`, `ruff check .` → passed (69 files).
-  - `mypy app tests scripts` → success, 51 source files.
-  - `python scripts/check_repo.py` (from `backend/`) → exit 0, zero findings.
-  - `git status`/`git diff --check` → only `backend/tests/test_job_notes.py`; no
-    whitespace/conflict errors.
-  - No Alembic round-trip run — no migration/schema change, per the review's own
-    scoping.
-- Deviations/known limitations: none. Both findings were test-authoring/coverage-
-  claim corrections only; no model, migration, schema, or product-document change.
-- STOP — awaiting Codex re-review. Do not begin Phase 2, modify or merge `main`, or
-  add Phase 10 behavior.
-
-### Work review
-
-- Date/reviewer: 2026-08-28, Codex. Diff reviewed: `0499d75..722122f`
-  (`phase-1/job-notes`). Verdict: **approved**. Findings: none.
-- Independently verified:
-  - The new ORM commit/reload regression contains internal repeated spaces, tab, LF,
-    and CR/LF plus outer covered whitespace; the assertion proves outer trim-only
-    behavior while preserving internal content and case exactly.
-  - The former "defaults independence" test is accurately renamed and documented as
-    proving distinct application-generated IDs and body values only. Timestamp claims
-    are now limited to what the separate tests establish: server defaults present,
-    timezone awareness, and `updated_at` advancing after a committed edit.
-  - Targeted suite: **18 passed**. Full suite: **1065 passed** using a dedicated
-    writable pytest base-temp directory. Repository checker, `git diff --check`, Ruff
-    format/check, and mypy (**51 source files**) all pass.
-  - The correction changes only `backend/tests/test_job_notes.py` plus this append-only
-    handoff rotation/entry; model, migration, schema, and product documentation remain
-    unchanged.
-- The `job_notes` implementation and correction pass are accepted. This completes
-  review of Phase 1's final schema-table slice, but does not by itself certify every
-  cross-table Phase 1 exit criterion. Do not merge to or modify `main`, begin Phase 2,
-  or add Phase 10 behavior without explicit user authorization. After an authorized
-  merge, perform a separate Phase 1 exit-gate audit before proposing Phase 2 work.
-
-**Merge record (appended, not a rewrite of the entry above):** Approved at review
-commit `2314ba7`. Per user authorization, `phase-1/job-notes` was pushed (bringing
-`origin` up to date through the approval commit) and then merged into `main` with a
-normal merge commit (`ce3691c`; `--no-ff`, no squash/rebase/force-push) and pushed.
-`main`/`origin/main` are both now at `ce3691c`. Verified: `main` has zero content diff
-against the feature branch; migration `0017` (`down_revision = "0016"`) is present and
-is the sole Alembic head; `python backend/scripts/check_repo.py` (via the project's
-own virtualenv interpreter) exits 0 with zero findings; working tree clean. This
-completes all fifteen Phase 1 domain tables (ADR 0003). Phase 2 and Phase 10 remain
-not started; per the review's own note, the next separately authorized task is a
-read-only Phase 1 exit-gate audit, not Phase 2 work.
-
----
-
-## Iteration 2
 
 ### Work done
 
@@ -235,7 +143,7 @@ read-only Phase 1 exit-gate audit, not Phase 2 work.
      `CHECK`-backed fields (non-negative/ordering constraints) are left to PostgreSQL
      alone — proven as backstops, not duplicated in Python.
   6. Every required test category from the binding decisions is covered in both new
-     test files (30 tests total, later 34 after the adversarial-review fixes below):
+     test files (30 tests total, later 33 after the adversarial-review fixes below):
      flush-without-commit + caller rollback (real `db_engine`/two-session visibility
      proof, mirroring `test_user_jobs_service.py`'s own pattern), missing/wrong-owner
      `None`, partial update preserving untouched fields, an explicit-`None` nullable
@@ -256,7 +164,10 @@ read-only Phase 1 exit-gate audit, not Phase 2 work.
     `update()` has the same latent landmine for these two specific fields if a
     caller ever passes them as `None` to clear them — disclosed as a known
     limitation in its docstring rather than worked around, since no Phase 1 caller
-    needs to clear either field yet.
+    needs to clear either field yet. **(Superseded by Iteration 2's correction pass
+    below — the mapping itself was later fixed at the user's direction, so this
+    workaround/limitation no longer exists in the current code. Left unedited here
+    per this ledger's append-only convention.)**
 - Files changed:
   - `backend/app/services/candidate_profiles.py`, `backend/app/services/
     saved_searches.py` (new).
@@ -394,3 +305,134 @@ read-only Phase 1 exit-gate audit, not Phase 2 work.
   concise handoff `Work done` entry. Do not add a migration unless `alembic check`
   demonstrates one is genuinely required; do not change the raw-SQL JSON-literal
   policy, broaden service/API scope, begin Phase 2, or modify/merge `main`.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-08-29, Claude Code (Sonnet 5). Authorized slice: the three bounded
+  corrections from the review at `579c723`, on the same `phase-1/closure` branch.
+  Base: `579c723`. Corrects the one Medium and two Low findings above; no migration,
+  API route, deletion/list operation, or scope broadening.
+- Outcome:
+  1. **JSONB `None`-vs-`null` mapping fixed at the source.**
+     `backend/app/db/models/saved_search.py`: both `enabled_sources`/
+     `scoring_weights` columns now use `JSONB(none_as_null=True)` inside their
+     existing `MutableDict.as_mutable(...)` wrapper — a pure ORM-binding setting,
+     no DDL/column-type change. `alembic check` confirms zero schema drift; no
+     migration added. `saved_searches.create()`'s prior workaround (conditionally
+     omitting these two kwargs from the constructor when `None`) is removed — both
+     are now ordinary parameters like every other nullable field. Both functions'
+     docstrings updated to state the current, accurate behavior; the old "known
+     limitation" wording is gone (the limitation no longer exists).
+  2. **Focused regressions added** (`backend/tests/test_saved_searches_service.py`),
+     parametrized over both columns: omitted-or-explicit-`None` creation stores a
+     genuine SQL `NULL` (verified two ways — the ORM attribute reads `None` **and**
+     a raw `SELECT jsonb_typeof(...)` returns SQL `NULL`, not the string `'null'`,
+     which is the only way to actually distinguish the two at the database level);
+     a representative non-empty dict persists and reloads through the service for
+     both columns; an existing dict is updated to `None` through the service,
+     committed, and reloaded (via both a fresh `jsonb_typeof` query and a fresh
+     `get_for_user()` call) as SQL `NULL`. The pre-existing direct-SQL rejection of
+     a stored JSON `null` literal (`test_enabled_sources_rejects_a_json_null_literal`,
+     `backend/tests/test_saved_searches.py`) is untouched — it bypasses the ORM
+     entirely, so it is unaffected by this ORM-binding-only fix and still correctly
+     proves the database itself rejects a JSON `null` literal via direct SQL.
+  3. **Ruff formatting applied** (`app/services/saved_searches.py` and the new test
+     file's `get_for_user`/`_insert_user`/`_jsonb_typeof` line-wraps); **corrected
+     test-count claim**: this entry states 14 (`candidate_profiles_service.py`,
+     unchanged) + 27 (`saved_searches_service.py`, up from 19 — four new
+     parametrized functions × two columns each = eight new collected cases) = 41
+     collected tests for the two service files, not the prior entry's "34."
+  - One `MissingGreenlet` bug caught and fixed while authoring the new update-clear
+    regression, before any external review: the test called `db_session.commit()`
+    (to prove the clear survives a real commit) and then read `created.id`
+    afterward — `commit()` expires every attribute of every object in the session,
+    and reading an expired attribute synchronously raises `MissingGreenlet` under
+    asyncpg's async dialect. Fixed by capturing `search_id = created.id`
+    immediately after `create()` returns, before any later commit — the same
+    established pattern used throughout this codebase's other real-commit tests.
+  - Two mypy errors caught and fixed while authoring the new tests: (a)
+    `_jsonb_typeof`'s `result.scalar_one()` returned `Any` from a function declared
+    `-> str | None` — fixed by assigning to an explicitly-typed local variable
+    first; (b) `saved_searches.create(..., **{column: value})` with a real (not
+    `None`) dict value failed mypy's argument-type check, since `column` is a
+    runtime string, not a literal, and `create()`'s many keyword-only parameters
+    have different types — mypy cannot verify a uniformly-typed `**dict` unpacking
+    against a heterogeneous signature. Fixed by branching explicitly
+    (`if column == "enabled_sources": ... else: ...`) and calling `create()` with a
+    literal keyword in each branch, in the two places (the representative-dict
+    test, and the clear-test's setup) that pass an actual dict value; the places
+    that only ever pass `None` (compatible with every optional parameter's type)
+    keep the more concise `**{column: None}` form, since mypy does not flag those.
+- Files changed:
+  - `backend/app/db/models/saved_search.py` — `none_as_null=True` on both JSONB
+    columns; docstring updated to explain the setting and why it's needed.
+  - `backend/app/services/saved_searches.py` — removed the `create()` workaround;
+    updated `create()`/`update()` docstrings; Ruff-formatted.
+  - `backend/tests/test_saved_searches_service.py` — four new parametrized test
+    functions (eight collected cases); Ruff-formatted; mypy fixes described above.
+- Commands run and exact results:
+  - `ruff format --check app tests scripts` → 2 files would reformat; `ruff format
+    app tests scripts` applied; re-run → **55 files already formatted**, clean.
+  - `ruff check .` → all checks passed.
+  - `mypy .` → success, 73 source files (after the two fixes above; failed with 9
+    errors before them).
+  - `pytest tests/test_candidate_profiles_service.py tests/test_saved_searches_service.py tests/test_saved_searches.py -v`
+    → **101 passed** (41 collected from the two service files + 60 from the
+    untouched model-level `test_saved_searches.py`, confirming the preserved
+    direct-SQL JSON-null-literal rejection test and every other model-level JSONB
+    test still pass unchanged).
+  - `pytest -q` (full suite, explicit writable `--basetemp`) → **1106 passed** (up
+    from 1098 — exactly the eight new collected cases).
+  - `alembic check` (against `jobgoblin_test`) → `No new upgrade operations
+    detected` (same pre-existing, unrelated `companies.normalized_name` `Computed`-
+    column `UserWarning` as always) — confirms the mapping fix needs no migration.
+  - `alembic heads` → `0017 (head)`, unchanged.
+  - `alembic current` against the **development** database (no override, fresh
+    shell) → `0006`, unchanged throughout.
+  - `python scripts/check_repo.py` (from `backend/`) → exit 0, zero findings.
+  - `git status --short` / `git diff --check` → only the three files listed above;
+    no whitespace/conflict errors.
+- Adversarial self-review (fresh Explore-agent context, no prior knowledge of this
+  correction pass, run against the actual uncommitted diff; full Class H depth,
+  including a live empirical probe against real Postgres): **one substantiated
+  finding, one stale/unsubstantiated finding, both addressed**:
+  1. Medium (now resolved by this entry's existence) — at review time, this
+     `Work done` entry had not yet been written, even though Codex's own prior
+     review explicitly required one as part of the correction's scope. Resolved:
+     this entry is that deliverable.
+  2. Low, not substantiated — the review agent claimed
+     `test_update_can_clear_an_existing_dict_to_genuine_sql_null`'s setup still used
+     the concise `**{column: value}` dict-unpacking form, inconsistently with the
+     representative-dict test's `if`/`else` branching. Direct re-verification
+     (`grep -n "if column ==" backend/tests/test_saved_searches_service.py`) shows
+     both real-dict-value `create()` call sites already use identical `if`/`else`
+     branching — no inconsistency exists; the review agent's claim does not match
+     the actual file. No change made; noted here rather than silently accepted or
+     silently ignored.
+  - Also explicitly checked and found clean (empirical probe, not just reading
+    code): kept a stale Python reference to a `MutableDict`-wrapped dict, cleared
+    the column to `None` via `update()`, committed, then mutated the stale
+    reference in place and committed again — the column stayed genuine SQL `NULL`
+    throughout; `none_as_null=True` does not interact badly with `MutableDict`'s
+    own change-tracking. ORM path, direct-SQL path, and the (correctly nonexistent,
+    no `server_default`) database-default path all agree on both columns.
+    `docs/DATA_MODEL.md`/`docs/ARCHITECTURE.md` never documented the old bug or
+    workaround, so nothing there was stale. The only surviving mentions of the old
+    "known limitation" wording are inside Iteration 1's own already-merged-into-
+    history `Work done`/`Work review` text above, which this ledger's append-only
+    convention forbids rewriting — correctly left alone, annotated with a
+    one-line superseded-by note rather than edited.
+- Deviations/known limitations: none beyond the two items already disclosed in
+  Iteration 1 that are unrelated to this fix (the 404-vs-403 `get_for_user` design
+  note). No migrations, API routes, deletion/list operations, or Phase 2 behavior
+  added. `main` untouched.
+- STOP — awaiting Codex re-review. Do not begin Phase 2, modify or merge `main`, or
+  add Phase 10/API-route behavior.
+
+### Work review
+
+*Pending — awaiting Codex.*

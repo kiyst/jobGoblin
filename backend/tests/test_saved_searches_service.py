@@ -2,13 +2,15 @@ import uuid
 from collections.abc import Callable
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.db.models import SavedSearch, User
 from app.services import saved_searches
 from tests.conftest import real_committed_user
+
+JSONB_FIELDS = ["enabled_sources", "scoring_weights"]
 
 
 async def _insert_user(
@@ -19,6 +21,21 @@ async def _insert_user(
     await db_session.commit()
     await db_session.refresh(user)
     return user.id
+
+
+async def _jsonb_typeof(db_session: AsyncSession, search_id: uuid.UUID, column: str) -> str | None:
+    """Queries PostgreSQL's own `jsonb_typeof(...)` directly, bypassing the
+    ORM's Python-level `None` deserialization entirely — the only way to
+    distinguish a genuine SQL `NULL` (`jsonb_typeof` itself returns SQL
+    `NULL`, i.e. `None` here) from a stored JSON `null` literal
+    (`jsonb_typeof` returns the string `'null'`)."""
+    result = await db_session.execute(
+        text(f"SELECT jsonb_typeof({column}) FROM saved_searches WHERE id = :search_id").bindparams(
+            search_id=search_id
+        )
+    )
+    value: str | None = result.scalar_one()
+    return value
 
 
 # --------------------------------------------------------------------------
@@ -65,6 +82,84 @@ async def test_create_omits_is_active_so_the_server_default_applies(
     await db_session.commit()
     await db_session.refresh(created)
     assert created.is_active is True
+
+
+@pytest.mark.parametrize("column", JSONB_FIELDS)
+async def test_create_omitted_jsonb_field_stores_genuine_sql_null(
+    db_session: AsyncSession, make_user: Callable[..., User], column: str
+) -> None:
+    """Regression for the fixed `None`-vs-JSON-`null` bug: creating without
+    `enabled_sources`/`scoring_weights` at all must store a real SQL `NULL`
+    — not the JSON literal `null`, which would fail this column's own
+    `jsonb_typeof(...) = 'object'` `CHECK`."""
+    user_id = await _insert_user(db_session, make_user, f"ss-jsonb-omitted-{column}@example.com")
+
+    created = await saved_searches.create(
+        db_session, user_id, name="Backend roles", remote_rules="any", polling_schedule="manual"
+    )
+
+    assert getattr(created, column) is None
+    assert await _jsonb_typeof(db_session, created.id, column) is None
+
+
+@pytest.mark.parametrize("column", JSONB_FIELDS)
+async def test_create_explicit_none_jsonb_field_stores_genuine_sql_null(
+    db_session: AsyncSession, make_user: Callable[..., User], column: str
+) -> None:
+    """Passing `None` explicitly for `enabled_sources`/`scoring_weights` must
+    behave identically to omitting it — both store a real SQL `NULL`."""
+    user_id = await _insert_user(
+        db_session, make_user, f"ss-jsonb-explicit-none-{column}@example.com"
+    )
+
+    created = await saved_searches.create(
+        db_session,
+        user_id,
+        name="Backend roles",
+        remote_rules="any",
+        polling_schedule="manual",
+        **{column: None},
+    )
+
+    assert getattr(created, column) is None
+    assert await _jsonb_typeof(db_session, created.id, column) is None
+
+
+@pytest.mark.parametrize("column", JSONB_FIELDS)
+async def test_create_persists_and_reloads_a_representative_dict(
+    db_session: AsyncSession, make_user: Callable[..., User], column: str
+) -> None:
+    """A representative non-empty dict for `enabled_sources`/
+    `scoring_weights` persists and reloads through the service, and is a
+    genuine JSON object at the database level (not merely non-`None` in
+    Python)."""
+    user_id = await _insert_user(db_session, make_user, f"ss-jsonb-dict-{column}@example.com")
+    value: dict[str, object] = {"greenhouse": True, "weight": 1}
+
+    if column == "enabled_sources":
+        created = await saved_searches.create(
+            db_session,
+            user_id,
+            name="Backend roles",
+            remote_rules="any",
+            polling_schedule="manual",
+            enabled_sources=value,
+        )
+    else:
+        created = await saved_searches.create(
+            db_session,
+            user_id,
+            name="Backend roles",
+            remote_rules="any",
+            polling_schedule="manual",
+            scoring_weights=value,
+        )
+    assert getattr(created, column) == value
+    assert await _jsonb_typeof(db_session, created.id, column) == "object"
+
+    fetched = await saved_searches.get_for_user(db_session, user_id, created.id)
+    assert fetched is not None
+    assert getattr(fetched, column) == value
 
 
 async def test_create_multiple_searches_for_same_user_accepted(
@@ -182,6 +277,50 @@ async def test_update_can_set_a_nullable_field_explicitly_to_none(
 
     assert updated is not None
     assert updated.salary_floor is None
+
+
+@pytest.mark.parametrize("column", JSONB_FIELDS)
+async def test_update_can_clear_an_existing_dict_to_genuine_sql_null(
+    db_session: AsyncSession, make_user: Callable[..., User], column: str
+) -> None:
+    """Regression for the fixed `None`-vs-JSON-`null` bug: an existing
+    `enabled_sources`/`scoring_weights` dict can be cleared to `None`
+    through `update()`, committed, and reloaded as a genuine SQL `NULL` —
+    not the JSON literal `null`, which would have raised `IntegrityError`
+    before the `JSONB(none_as_null=True)` mapping fix."""
+    user_id = await _insert_user(db_session, make_user, f"ss-jsonb-clear-{column}@example.com")
+    initial_value: dict[str, object] = {"greenhouse": True}
+    if column == "enabled_sources":
+        created = await saved_searches.create(
+            db_session,
+            user_id,
+            name="Backend roles",
+            remote_rules="any",
+            polling_schedule="manual",
+            enabled_sources=initial_value,
+        )
+    else:
+        created = await saved_searches.create(
+            db_session,
+            user_id,
+            name="Backend roles",
+            remote_rules="any",
+            polling_schedule="manual",
+            scoring_weights=initial_value,
+        )
+    search_id = created.id  # captured before any later commit expires `created`
+    assert await _jsonb_typeof(db_session, search_id, column) == "object"
+
+    updated = await saved_searches.update(db_session, user_id, search_id, **{column: None})
+    assert updated is not None
+    assert getattr(updated, column) is None
+
+    await db_session.commit()
+
+    assert await _jsonb_typeof(db_session, search_id, column) is None
+    reloaded = await saved_searches.get_for_user(db_session, user_id, search_id)
+    assert reloaded is not None
+    assert getattr(reloaded, column) is None
 
 
 async def test_update_can_set_is_active_false(

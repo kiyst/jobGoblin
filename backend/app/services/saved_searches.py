@@ -74,15 +74,11 @@ async def create(
     apply (see `app/db/models/saved_search.py`). It becomes settable once the
     row exists, through `update()`.
 
-    `enabled_sources`/`scoring_weights` are likewise omitted from the ORM
-    constructor call when left as `None`, never passed through as an explicit
-    `None` value: SQLAlchemy's `JSONB` type (without `none_as_null=True`,
-    which this column does not set) serializes an explicitly-assigned Python
-    `None` as the JSON literal `null`, not SQL `NULL` — which then fails
-    `enabled_sources`/`scoring_weights`'s own `jsonb_typeof(...) = 'object'`
-    `CHECK` (a JSON `null` is neither SQL `NULL` nor a JSON object). Omitting
-    the attribute entirely leaves it genuinely unset, which the database
-    correctly stores as SQL `NULL`.
+    `enabled_sources`/`scoring_weights` are ordinary parameters like every
+    other nullable field: the mapped columns use `JSONB(none_as_null=True)`
+    (see `app/db/models/saved_search.py`), so passing `None` here stores a
+    genuine SQL `NULL`, not the JSON literal `null` — there is no longer any
+    need to omit them from the constructor call to get that result.
 
     Flushes (so `CHECK` constraints are evaluated immediately) but never
     commits or rolls back — the caller owns the transaction. A user may own
@@ -113,11 +109,9 @@ async def create(
         salary_floor=salary_floor,
         preferred_salary=preferred_salary,
         recency_limit_hours=recency_limit_hours,
+        enabled_sources=enabled_sources,
+        scoring_weights=scoring_weights,
     )
-    if enabled_sources is not None:
-        search.enabled_sources = enabled_sources
-    if scoring_weights is not None:
-        search.scoring_weights = scoring_weights
     session.add(search)
     await session.flush()
     return search
@@ -134,9 +128,7 @@ async def get_for_user(
     alone and will need to accept "404 either way" or add its own separate
     ownership check if it wants to differ."""
     result = await session.execute(
-        select(SavedSearch).where(
-            SavedSearch.id == saved_search_id, SavedSearch.user_id == user_id
-        )
+        select(SavedSearch).where(SavedSearch.id == saved_search_id, SavedSearch.user_id == user_id)
     )
     return result.scalar_one_or_none()
 
@@ -162,15 +154,11 @@ async def update(
     indistinguishable. Non-enum `CHECK`-backed fields are intentionally not
     re-validated here — the database constraint remains the sole backstop.
 
-    Known limitation: passing `enabled_sources=None`/`scoring_weights=None`
-    here to explicitly clear an existing value will raise `IntegrityError`
-    rather than clear it, for the same `JSONB`-serializes-`None`-as-JSON-
-    `null` reason documented on `create()` above — `setattr(search, key,
-    None)` on an already-persistent row hits the identical `CHECK` as an
-    explicit `None` at construction time, and this function does not work
-    around it (no Phase 1 caller needs to clear either field yet — no
-    routes exist). Every other field, including every other nullable one,
-    clears to a genuine `NULL` correctly via `None`.
+    Every nullable field, including `enabled_sources`/`scoring_weights`,
+    clears to a genuine SQL `NULL` via `None` — the mapped columns use
+    `JSONB(none_as_null=True)` (see `app/db/models/saved_search.py`), so
+    `setattr(search, key, None)` here behaves the same as it does for every
+    other nullable column.
 
     Flushes but never commits or rolls back — the caller owns the
     transaction.
