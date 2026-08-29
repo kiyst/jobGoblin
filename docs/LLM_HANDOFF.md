@@ -351,4 +351,31 @@ longer pending. Nothing below was rewritten — only renumbered.*
 
 ### Work review
 
-*Pending — awaiting Codex.*
+- Date/reviewer: 2026-08-28, Codex. Diff reviewed: `15d0212..b992f6e`
+  (`phase-1/user-jobs`). Verdict: **approved**. Findings: none.
+- Independently verified:
+  - `set_status()` now applies Python's complete awareness test (`tzinfo is not None`
+    and `utcoffset() is not None`) before mutation, and the new regression test proves
+    the previously accepted `tzinfo`/NULL-offset case raises `ValueError` without
+    changing any of the three governed fields.
+  - Raw SQL now accepts every one of the nine valid status/`applied_at` pairings: the
+    two pre-application statuses with NULL and all seven post-application statuses
+    with a timestamp. Together with the existing rejected-pair tests, the documented
+    ORM/direct-SQL matrix is complete.
+  - The flag test now independently persists and reloads each of `saved`, `hidden`,
+    and `archived` as the sole true flag alongside a valid post-application status;
+    its prose matches the exercised state.
+  - Targeted suites: **67 passed**. Full suite: **1047 passed** using a dedicated
+    writable pytest base-temp directory (the prior review's eight setup errors were
+    therefore confirmed to be only host-temp permissions). Repository checker,
+    `git diff --check`, Ruff format/check, and mypy (**49 source files**) all pass.
+    The correction changes only the service, bounded tests, and handoff ledger; model,
+    migration, schema, and product documentation are unchanged.
+- Non-blocking historical clarification: this iteration's `Work done` says the
+  timezone guard remains ahead of “status-validity/no-op/mutation logic.” The actual
+  and correct order is invalid-status validation first, timezone validation second,
+  then no-op/mutation. Both validations still precede every mutation, so this wording
+  has no behavioral or approval impact and the append-only entry is left untouched.
+- The `user_jobs` slice and correction pass are accepted. Do not merge to or modify
+  `main`, begin `job_notes`, or advance to another slice without explicit user
+  authorization.
