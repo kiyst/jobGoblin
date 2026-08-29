@@ -379,3 +379,12 @@ longer pending. Nothing below was rewritten — only renumbered.*
 - The `user_jobs` slice and correction pass are accepted. Do not merge to or modify
   `main`, begin `job_notes`, or advance to another slice without explicit user
   authorization.
+
+**Merge record (appended, not a rewrite of the entry above):** Approved at review
+commit `71f8861`. Per user authorization, `phase-1/user-jobs` was merged into `main`
+with a normal merge commit (`3021ecb`; `--no-ff`, no squash/rebase/force-push) and
+pushed. `main`/`origin/main` are both now at `3021ecb`. Verified: `main` has zero
+content diff against the feature branch; migration `0016` (`down_revision = "0015"`)
+is present and is the sole Alembic head; `python backend/scripts/check_repo.py` (via
+the project's own virtualenv interpreter) exits 0 with zero findings; working tree
+clean. `job_notes` not started or proposed.
