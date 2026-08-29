@@ -341,8 +341,9 @@ deterministic identity resolution out of `dedupe/detector.py` into
 `ingestion/identity.py` (it runs *during* ingestion, before a `Job` row exists, so it
 belongs with ingestion orchestration, not with the post-persistence fuzzy-matching code
 in `dedupe/`); added `normalization/url.py` for canonical URL normalization; `dedupe/`
-now only contains the Tier 2 probabilistic pieces; added `tests/db/` for constraint and
-migration tests (§13).
+now only contains the Tier 2 probabilistic pieces; constraint and migration tests live
+flat under `backend/tests/`, alongside every other test module (§13) — there is no
+separate `tests/db/` subdirectory.
 
 ---
 
@@ -957,12 +958,17 @@ LinkedIn).
 - inserting two rows with identical `(provider, source, source_job_id)` and
   `source_tenant_id = NULL` is **rejected** by `job_occurrences_natural_key_no_tenant`;
 - inserting two rows with the same `source_job_id` but two different non-null
-  `source_tenant_id` values is **allowed** (they're different employers' postings);
-- re-ingesting a payload whose natural key already exists **resolves to the existing
-  occurrence** (an `UPDATE`, or an `INSERT ... ON CONFLICT (...) DO UPDATE` targeting
-  whichever of the two partial indexes applies) rather than raising a constraint
-  violation the application has to catch — idempotency is a designed code path, not an
-  incidentally-caught exception.
+  `source_tenant_id` values is **allowed** (they're different employers' postings).
+
+**Deferred to Phase 2** (no ingestion/upsert writer exists in Phase 1 — same reasoning
+as the `UserJob`-reingestion deferral in [§13](#13-phase-1-acceptance-criteria-strengthened-rev-2)):
+re-ingesting a payload whose natural key already exists **resolves to the existing
+occurrence** (an `UPDATE`, or an `INSERT ... ON CONFLICT (...) DO UPDATE` targeting
+whichever of the two partial indexes applies) rather than raising a constraint
+violation the application has to catch — idempotency is a designed code path, not an
+incidentally-caught exception. Phase 1 proves only that a duplicate insert is rejected
+(the two cases above); it does not yet prove that a re-ingestion resolves one, since
+nothing in Phase 1 writes `job_occurrences` outside its own factories/tests.
 
 ### Collision and ambiguity handling (Rev 3 — replaces infeasible Rev 2 behavior)
 
@@ -1285,12 +1291,15 @@ This is the acceptance test for Phase 1+2 combined — see §13.
   index anywhere treats a raw requisition ID as independently unique.
 - **No circular foreign keys.** `raw_job_ingestions.job_occurrence_id` is the only FK
   between that pair of tables; `job_occurrences` has no pointer back (§9).
-- **Identity-conflict tests exist**: the three cases in [§8](#8-deterministic-identity-resolution)'s
-  "Required Phase 1 database tests" (NULL-tenant collision rejected, same
-  `source_job_id` under two tenants allowed, re-ingestion resolves the existing row) all
-  pass against a real Postgres, plus the `evidence_mismatch`/`ambiguous_match` fixture
-  cases from [§11](#11-fixture-driven-end-to-end-ingestion-proof-phase-2-target) prove no
-  second occurrence is ever created against an existing natural key.
+- **Identity-conflict tests exist**: the two Phase 1 cases in
+  [§8](#8-deterministic-identity-resolution)'s "Required Phase 1 database tests"
+  (NULL-tenant collision rejected, same `source_job_id` under two tenants allowed) all
+  pass against a real Postgres. The third case §8 describes — re-ingestion resolving the
+  existing row — is explicitly **deferred to Phase 2** (§8's own text), since no
+  ingestion/upsert writer exists yet; it is proven, along with the
+  `evidence_mismatch`/`ambiguous_match` fixture cases, by
+  [§11](#11-fixture-driven-end-to-end-ingestion-proof-phase-2-target)'s Phase 2 fixture
+  proof instead.
 - **`identity_conflicts` lifecycle tests exist** (§9's "Required Phase 1 database tests"):
   invalid `status`/`conflict_type` values rejected, `open` ⟺ `resolved_at IS NULL`
   enforced both directions, `existing_value`/`incoming_value` `NOT NULL` enforced.
@@ -1304,10 +1313,10 @@ This is the acceptance test for Phase 1+2 combined — see §13.
 - **Both migration directions are tested**: `alembic upgrade head` and `alembic
   downgrade base` both run cleanly against a fresh database in CI/local test runs, round
   trip included (upgrade → downgrade → upgrade again).
-- **Database constraint tests exist** (`tests/db/`, run against a real Postgres, not
-  mocked): each documented unique/check constraint has at least one test proving the
-  database itself rejects a violating insert/update (not just that application code
-  happens to avoid producing one).
+- **Database constraint tests exist** (flat under `backend/tests/`, run against a real
+  Postgres, not mocked): each documented unique/check constraint has at least one test
+  proving the database itself rejects a violating insert/update (not just that
+  application code happens to avoid producing one).
 - **`UserJob` invariant tests exist**: the `status`/`applied_at` `CHECK` constraint
   (ADR 0006) is proven to reject an inconsistent row at the database level, and the
   single service-layer status-transition function is tested for the pairing behavior it's
@@ -1325,6 +1334,8 @@ This is the acceptance test for Phase 1+2 combined — see §13.
 - **No provider or external-library implementation exists yet.** `ats-scrapers` and
   `python-jobspy` are not installed or imported anywhere in Phase 1 — Phase 1 proves the
   schema and persistence layer only, against fixtures/factories.
-- **No live-network tests run in the default `pytest` invocation.** Anything that would
-  reach a real external service lives under `tests/integration/` and is excluded from the
-  default test command (§47).
+- **No live-network tests run in the default `pytest` invocation.** No such test exists
+  yet — nothing in Phase 1 makes network calls. When a later phase adds one, it must live
+  in its own clearly-separated location (not mixed into the flat `backend/tests/` modules
+  this phase uses) and be excluded from the default test command (§47), the same
+  opt-in-only rule already applied everywhere else in this document.
