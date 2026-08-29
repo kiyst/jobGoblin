@@ -317,4 +317,24 @@ Nothing below was rewritten — only renumbered.*
 
 ### Work review
 
-*Pending — awaiting Codex.*
+- Date/reviewer: 2026-08-28, Codex. Diff reviewed: `0499d75..722122f`
+  (`phase-1/job-notes`). Verdict: **approved**. Findings: none.
+- Independently verified:
+  - The new ORM commit/reload regression contains internal repeated spaces, tab, LF,
+    and CR/LF plus outer covered whitespace; the assertion proves outer trim-only
+    behavior while preserving internal content and case exactly.
+  - The former “defaults independence” test is accurately renamed and documented as
+    proving distinct application-generated IDs and body values only. Timestamp claims
+    are now limited to what the separate tests establish: server defaults present,
+    timezone awareness, and `updated_at` advancing after a committed edit.
+  - Targeted suite: **18 passed**. Full suite: **1065 passed** using a dedicated
+    writable pytest base-temp directory. Repository checker, `git diff --check`, Ruff
+    format/check, and mypy (**51 source files**) all pass.
+  - The correction changes only `backend/tests/test_job_notes.py` plus this append-only
+    handoff rotation/entry; model, migration, schema, and product documentation remain
+    unchanged.
+- The `job_notes` implementation and correction pass are accepted. This completes
+  review of Phase 1's final schema-table slice, but does not by itself certify every
+  cross-table Phase 1 exit criterion. Do not merge to or modify `main`, begin Phase 2,
+  or add Phase 10 behavior without explicit user authorization. After an authorized
+  merge, perform a separate Phase 1 exit-gate audit before proposing Phase 2 work.
