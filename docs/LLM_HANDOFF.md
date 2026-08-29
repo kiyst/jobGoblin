@@ -366,7 +366,8 @@ that detail.
 
 - Date/agent: 2026-08-29, Codex acting as authorized implementer. Class H correction
   pass for the six findings in review commit `fde5fa6`. Branch:
-  `phase-2/natural-key-ingestion-spine`; base `fde5fa6`.
+  `phase-2/natural-key-ingestion-spine`; base `fde5fa6` -> correction commit
+  `7f01a9f`.
 - Outcome:
   1. Re-observation is now observational-only (`last_seen_at` and `is_active`);
      descriptive/source/canonical fields remain frozen. A non-null canonical-URL
@@ -411,6 +412,9 @@ that detail.
 - Known bounded limitations: canonical conflicts remain durable raw rows at `fetched`
   with failed run telemetry until the separately approved conflict-quarantine writer;
   partial provider results fail closed until their dedicated persistence slice.
+- Rollback/handoff boundary: `7f01a9f` contains all executable corrections and tests;
+  reverting that commit restores the reviewed `e725fd2` implementation without any
+  schema downgrade or data migration. Review commit `fde5fa6` is documentation-only.
 - STOP — awaiting independent review. Do not implement conflict persistence,
   QueryPlanner, tiers 2-4, multi-source partial-success behavior, live providers, or
   modify/merge `main`.
