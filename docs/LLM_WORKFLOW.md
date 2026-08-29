@@ -102,6 +102,23 @@ the actual diff without editing first and answers:
 9. Are FK deletion tests isolated?
 10. Do the model, migration, live schema, tests, and documentation agree?
 11. Did roadmap status, constraint summaries, revision references, or counts go stale?
+    - Any test whose name or docstring claims a field is "independent," "unaffected," or
+      "never touched" must name the exact field(s) it asserts on, and the test body must
+      actually assert on every field named — a claim naming a field the assertions never
+      read is itself a finding.
+    - Any documentation or docstring claim naming a specific precedent or superlative
+      ("first," "only," "no other table") must cite the exact search that was rerun to
+      verify it (e.g. "confirmed via grep of `app/db/models/*.py` for `ondelete=
+      \"CASCADE\"` + `users`, no other match") — a superlative claim with no cited,
+      rerun search is itself a finding, independent of whether the claim happens to be
+      true. A generic automated linter for this specific defect class was considered and
+      is deliberately not adopted: unlike the timestamp-claim check above (a fixed,
+      mechanically checkable pattern), verifying an arbitrary superlative requires
+      knowing what structural pattern each individual claim refers to, and a
+      keyword-triggered checker risks false positives against indirect/aliased access
+      patterns it can't see (e.g. a CASCADE reached through a view, a helper, or a
+      renamed import) — exactly the brittle-natural-language-linting failure mode this
+      project avoids. This checklist item is the deliberate substitute.
 12. Does the design support the next phase's consumer, not merely the current table?
 
 Produce severity-ranked findings with file/line evidence first, before making any edit.

@@ -995,6 +995,49 @@ async def real_committed_identity_conflict(
 
 
 @asynccontextmanager
+async def real_committed_user(
+    db_engine: AsyncEngine, email: str
+) -> AsyncIterator[tuple[AsyncSession, uuid.UUID]]:
+    """Creates a single `User` via a real, separately-committed transaction on
+    `db_engine` (not the savepoint-isolated `db_session`), for tests that need
+    a genuinely durable parent row before creating a child row themselves —
+    e.g. through a service function under test — rather than through a
+    factory. Unlike `real_committed_user_and_profile` below, this creates no
+    child row itself.
+
+    Cleanup only ever deletes the `User`: every child table reachable from it
+    in this schema uses `ON DELETE CASCADE` from `users` — confirmed via
+    `grep -n ForeignKey.*users.id app/db/models/*.py`: `candidate_profile.py`,
+    `saved_search.py`, and `user_job.py` are the only three matches, all
+    `ondelete="CASCADE"` — so any row a test creates during its own body
+    (through whatever service/session it uses) is removed automatically
+    alongside it — there is no separate child id to
+    track here.
+    """
+    session = AsyncSession(bind=db_engine)
+    user_id: uuid.UUID | None = None
+    try:
+        user = User(email=email)
+        session.add(user)
+        await session.commit()
+        await session.refresh(user)
+        user_id = user.id
+
+        yield session, user_id
+    finally:
+        with suppress(Exception):
+            await session.rollback()
+        await session.close()
+
+        async with AsyncSession(bind=db_engine) as cleanup_session:
+            if user_id is not None:
+                existing_user = await cleanup_session.get(User, user_id)
+                if existing_user is not None:
+                    await cleanup_session.delete(existing_user)
+                    await cleanup_session.commit()
+
+
+@asynccontextmanager
 async def real_committed_user_and_profile(
     db_engine: AsyncEngine, email: str, **profile_kwargs: object
 ) -> AsyncIterator[tuple[AsyncSession, uuid.UUID, uuid.UUID]]:

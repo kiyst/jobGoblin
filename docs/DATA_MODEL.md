@@ -1448,6 +1448,7 @@ Foreign-key `ON DELETE` behavior (all noted inline above; summarized here for re
 | `saved_searches.user_id → users` | CASCADE | |
 | `saved_search_titles/locations.saved_search_id → saved_searches` | CASCADE | |
 | `jobs.company_id → companies` | **RESTRICT** (nullable column) | `company_id` is nullable (Rev 14 — `DiscoveredJob.company` is nullable in ARCHITECTURE.md), but company merges/deletes must be an explicit reconciliation step, never accidental, whenever it is set |
+| `companies.duplicate_of_company_id → companies` | SET NULL (nullable, self-referential) | company merges/deletes must be an explicit reconciliation step, never an accidental cascade-delete of the row it was merged into |
 | `job_occurrences.job_id → jobs` | CASCADE | occurrence is meaningless without its job |
 | `raw_job_ingestions.job_occurrence_id → job_occurrences` | **SET NULL** | preserve the raw audit trail even if the occurrence is later removed (ADR 0005) |
 | `identity_conflicts.existing_job_occurrence_id → job_occurrences` | SET NULL (nullable column) | conflict record survives even if the disputed occurrence is later removed; also naturally NULL for `ambiguous_match` (new in Rev 3) |
