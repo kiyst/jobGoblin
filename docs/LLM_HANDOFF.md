@@ -518,3 +518,16 @@ was rewritten — only renumbered.*
 - The Phase 1 closure implementation and all correction passes are accepted. Do not
   merge or modify `main`, begin Phase 2, or add API/Phase 10 behavior until the user
   explicitly authorizes the next action.
+
+**Merge record (appended, not a rewrite of the entry above):** Approved at review
+commit `1570822`. Per user authorization, `phase-1/closure` was pushed (bringing
+`origin` up to date through the approval commit) and then merged into `main` with a
+normal merge commit (`bfdd56d`; `--no-ff`, no squash/rebase/force-push) and pushed.
+`main`/`origin/main` are both now at `bfdd56d`. Verified: `main` has zero content diff
+against the feature branch (`git diff main phase-1/closure --stat` empty); migration
+`0017` remains the sole Alembic head; `python backend/scripts/check_repo.py` (via the
+project's own virtualenv interpreter) exits 0 with zero findings; `git diff --check`
+clean; working tree clean. This merges the `candidate_profiles`/`saved_searches`
+service-layer slice, its JSONB `none_as_null` correction, and the associated
+documentation corrections into `main`. Phase 2 and Phase 10/API-route behavior remain
+not started and are not authorized by this merge.
