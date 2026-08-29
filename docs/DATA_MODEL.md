@@ -1345,13 +1345,60 @@ specified:
   and `set_status()`'s own behavior in isolation.
 
 ### `job_notes`
+**Implemented** (`backend/app/db/models/job_note.py`; migration `0017`,
+`down_revision = "0016"`). Phase 1's **final** schema table (ARCHITECTURE.md §13;
+ROADMAP.md). Class H per docs/LLM_WORKFLOW.md — user-state preservation, the same
+reason `user_jobs` is Class H; this slice introduces no new service-layer code and no
+new `CASCADE` pattern, so the classification is driven by that trigger alone, not by
+novelty.
+
 | column | type | notes |
 |---|---|---|
 | id | UUID PK | |
-| user_job_id | UUID FK → user_jobs, `ON DELETE CASCADE` | |
-| body | text | |
-| created_at | timestamptz | |
-| updated_at | timestamptz | **added in Rev 3 (item 8a)** — Rev 2 omitted this despite the global `created_at`/`updated_at` convention stated above; notes are user-editable free text, so "when was this last edited" is meaningful, not an oversight worth exempting |
+| user_job_id | UUID NOT NULL, FK → user_jobs, `ON DELETE CASCADE` | a note has no meaning without the tracking row it annotates. No direct `user_id` column — ownership is reached and enforced entirely through this required FK, matching `saved_search_titles.saved_search_id`/`candidate_skills.candidate_profile_id`'s own precedent (Rev 22; see ARCHITECTURE.md §1.4's correction). Because `user_jobs` itself cascades from both `users.id` and `jobs.id`, deleting a `User` or a `Job` cascades two levels deep, through `user_jobs`, to this table — the same two-level-CASCADE shape already used by `saved_search_titles`/`saved_search_locations` (via `saved_searches.user_id`) and `candidate_skills` (via `candidate_profiles.user_id`), not a new pattern; what is new is that `user_jobs` has two parent FKs, so `job_notes` is reachable by a two-level cascade from either `users` or `jobs` |
+| body | text, NOT NULL | `CHECK`-enforced already-trimmed (established four-character whitespace set) and non-empty; ORM-trimmed, case preserved. Unlike `identity_conflicts.resolution` (optional narrative on an otherwise-complete row), a `job_notes` row's only reason to exist is to hold `body` — an empty or whitespace-only note is rejected outright, not collapsed to `NULL` (Rev 22) |
+| created_at | timestamptz, NOT NULL, `server_default now()` | |
+| updated_at | timestamptz, NOT NULL, `server_default now()`, ORM `onupdate=func.now()` | **added in Rev 3 (item 8a)** — Rev 2 omitted this despite the global `created_at`/`updated_at` convention stated above; notes are user-editable free text, so "when was this last edited" is meaningful, not an oversight worth exempting |
+
+No `UNIQUE` constraint: multiple notes may legitimately exist for the same
+`user_job_id` — a running list of timestamped notes, not one edit-in-place field.
+
+**Index:** `(user_job_id, created_at DESC)` (Rev 22) — Phase 10's "all notes for this
+job, most recent first" lookup; PostgreSQL does not automatically index a referencing
+foreign-key column, so `user_job_id` has no index of its own without this one.
+
+**Service-layer boundary and Phase 1 "current consumer" (Rev 22):** `services/`
+remains the only layer ever permitted to write this table (ARCHITECTURE.md §5); no
+CRUD service, API route, or workspace behavior is implemented in this slice, matching
+ROADMAP.md's own "`job_notes`' own CRUD service, routes, and workspace behavior remain
+Phase 10 work." Unlike `user_jobs`, no Phase 1 service function is mandated for this
+table (ARCHITECTURE.md §13 names `set_status()` explicitly for `user_jobs`; nothing
+equivalent is named for `job_notes` anywhere). This is not left without a consumer,
+resolving the apparent tension with PHASE_RISK_CHECKLIST.md's "new tables... require a
+current consumer": this table's Phase 1 consumers are its own factory, the accepted
+Phase 1 schema exit gate, and the PostgreSQL constraint/cascade tests below — Phase 10
+is this table's first *production* CRUD writer, not the first consumer of the schema
+itself.
+
+**Rev 22 changes** (fifteenth and final Phase 1 implementation slice, `job_notes` —
+Class H per docs/LLM_WORKFLOW.md): this table's design had several decisions resolved
+by explicit approval before migration `0017` was written, beyond what this section
+already specified:
+- **No `job_notes.user_id` column added.** ARCHITECTURE.md §1.4 previously listed
+  `job_notes` among tables that "carry a `user_id` foreign key from day one"; that
+  enumeration is corrected (§1.4) to distinguish directly user-owned tables from
+  child tables whose ownership is enforced through a required parent FK, rather than
+  adding a redundant column here — the same reasoning already applied to
+  `saved_search_titles`/`candidate_skills`, neither of which is in that enumeration.
+- **`body` is required** (NOT NULL, trim-only ORM validator, matching `CHECK` pair),
+  not optional-with-blank-collapsed-to-`NULL` like `identity_conflicts.resolution` —
+  a `job_notes` row exists only to hold `body`, so an empty one has no purpose.
+- **`INDEX (user_job_id, created_at DESC)` added** — not previously specified in this
+  table's own design note.
+- **No `UNIQUE` constraint** — multiple notes per `user_job_id` are the intended
+  shape, not an oversight.
+- **Two-level `CASCADE` isolation tested explicitly**: deletion through `User`,
+  `Job`, and `UserJob` directly, each proven isolated against an unrelated note.
 
 ---
 
@@ -1389,6 +1436,8 @@ reviewed against this list directly:
 | `user_jobs` | `UNIQUE (user_id, job_id)` | one state row per user per job |
 | `user_jobs` | `CHECK` on `status` enum (9 values), `(status, applied_at)` consistency | **new in Rev 21** — see ADR 0006 — reject an invalid `status` or an inconsistent status/`applied_at` pairing; see the table's own section above |
 | `user_jobs` | `INDEX (job_id)` | **new in Rev 21** — PostgreSQL does not auto-index a referencing FK column; `(user_id, job_id)` is covered by the `UNIQUE` index's leading column, `job_id` was not |
+| `job_notes` | `CHECK` requiring `body` already trimmed and non-empty | **new in Rev 22** — reject an untrimmed or blank-after-trim note; see the table's own section above |
+| `job_notes` | `INDEX (user_job_id, created_at DESC)` | **new in Rev 22** — Phase 10's "all notes for this job, most recent first" lookup; no `UNIQUE` constraint of any kind on this table |
 
 Foreign-key `ON DELETE` behavior (all noted inline above; summarized here for review):
 

@@ -111,11 +111,22 @@ an occurrence" is a derived query, not a stored pointer. Full detail:
 ### 1.4 Single-user vs. multi-user
 
 The spec says "initially one user" but "should not prevent later multi-user hosting."
-Concretely: every user-scoped table (`candidate_profiles`, `saved_searches`, `user_jobs`,
-`job_notes`) carries a `user_id` foreign key from day one, and a `users` table exists from
-Phase 1, even though Phase 1 will only ever populate one row via a seed script (no auth
-system yet). This costs nothing now and avoids a schema migration later to retrofit
-`user_id` onto tables and backfill existing rows.
+Concretely: every directly user-owned table (`candidate_profiles`, `saved_searches`,
+`user_jobs`) carries its own `user_id` foreign key from day one, and a `users` table
+exists from Phase 1, even though Phase 1 will only ever populate one row via a seed
+script (no auth system yet). This costs nothing now and avoids a schema migration
+later to retrofit `user_id` onto tables and backfill existing rows.
+
+**Child tables of a user-owned table do not additionally carry their own `user_id`.**
+`job_notes` is user-scoped, but only through its required `user_job_id` ->
+`user_jobs.id` foreign key — the same pattern already used by
+`saved_search_titles.saved_search_id` and `candidate_skills.candidate_profile_id`,
+neither of which carries a redundant `user_id` either. Adding one to `job_notes`
+would create a second path to the same fact with nothing to keep the two in sync
+(no existing `CHECK` in this schema spans two hops through a join), so ownership is
+reached and enforced entirely through the required parent FK instead. (Corrected:
+an earlier revision of this section listed `job_notes` among the tables carrying
+their own `user_id` column; it does not.)
 
 ### 1.5 Confirmed: architecture-reference repos can still carry active risk
 
