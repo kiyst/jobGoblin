@@ -354,6 +354,30 @@ async def test_post_application_status_with_non_null_applied_at_accepted_on_orm_
 
 
 @pytest.mark.parametrize("status", _PRE_APPLICATION_STATUSES)
+async def test_direct_sql_pre_application_status_with_null_applied_at_accepted(
+    db_session: AsyncSession,
+    make_user: Callable[..., User],
+    make_job: Callable[..., Job],
+    status: str,
+) -> None:
+    user_id, job_id = await _insert_user_and_job(db_session, make_user, make_job)
+    await _assert_direct_sql_insert_accepted(db_session, user_id, job_id, {"status": f"'{status}'"})
+
+
+@pytest.mark.parametrize("status", _POST_APPLICATION_STATUSES)
+async def test_direct_sql_post_application_status_with_non_null_applied_at_accepted(
+    db_session: AsyncSession,
+    make_user: Callable[..., User],
+    make_job: Callable[..., Job],
+    status: str,
+) -> None:
+    user_id, job_id = await _insert_user_and_job(db_session, make_user, make_job)
+    await _assert_direct_sql_insert_accepted(
+        db_session, user_id, job_id, {"status": f"'{status}'", "applied_at": "now()"}
+    )
+
+
+@pytest.mark.parametrize("status", _PRE_APPLICATION_STATUSES)
 async def test_pre_application_status_with_non_null_applied_at_rejected_on_orm_path(
     db_session: AsyncSession,
     make_user: Callable[..., User],
@@ -586,15 +610,19 @@ async def test_direct_sql_saved_hidden_archived_default_to_false(
     assert row.archived is False
 
 
-async def test_saved_hidden_archived_independent_of_status_and_each_other(
+@pytest.mark.parametrize("flag", ["saved", "hidden", "archived"])
+async def test_flag_independent_of_status_and_other_flags_on_orm_path(
     db_session: AsyncSession,
     make_user: Callable[..., User],
     make_job: Callable[..., Job],
     make_user_job: Callable[..., UserJob],
+    flag: str,
 ) -> None:
     """No `CHECK` relates `saved`/`hidden`/`archived` to `status` or to
-    each other — an `archived`, `hidden`, unsaved, post-application row is
-    just as valid as a fresh, unsaved, unhidden, unarchived one."""
+    each other — each flag can be independently `True` while the other two
+    remain `False`, alongside a post-application status, and the persisted/
+    reloaded row reflects exactly that combination, not merely that *some*
+    combination of all three is accepted."""
     user_id, job_id = await _insert_user_and_job(db_session, make_user, make_job)
     user_job = make_user_job(
         user_id=user_id,
@@ -602,9 +630,11 @@ async def test_saved_hidden_archived_independent_of_status_and_each_other(
         status="offer",
         status_changed_at=_CHANGED_AT,
         applied_at=_CHANGED_AT,
-        saved=True,
-        hidden=True,
-        archived=True,
+        **{flag: True},
     )
     db_session.add(user_job)
-    await db_session.commit()  # must not raise
+    await db_session.commit()
+    await db_session.refresh(user_job)
+
+    for other_flag in ("saved", "hidden", "archived"):
+        assert getattr(user_job, other_flag) is (other_flag == flag)

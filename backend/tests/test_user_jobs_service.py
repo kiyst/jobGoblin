@@ -1,6 +1,6 @@
 import uuid
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, tzinfo
 
 import pytest
 from sqlalchemy.exc import IntegrityError
@@ -15,6 +15,26 @@ _LATER = datetime(2026, 1, 2, tzinfo=UTC)
 _LATEST = datetime(2026, 1, 3, tzinfo=UTC)
 _EVEN_LATER = datetime(2026, 1, 4, tzinfo=UTC)
 _NAIVE = datetime(2026, 1, 5)  # no tzinfo, deliberately
+
+
+class _UtcOffsetNoneTzinfo(tzinfo):
+    """A `tzinfo` whose `utcoffset()` returns `None`. Per Python's own
+    datetime contract, a datetime is aware only when `tzinfo` is not `None`
+    **and** `tzinfo.utcoffset(self)` is not `None` — this `tzinfo` leaves
+    `.tzinfo` non-`None` while the datetime is still effectively naive, the
+    exact gap a bare `changed_at.tzinfo is None` check would miss."""
+
+    def utcoffset(self, dt: datetime | None) -> None:
+        return None
+
+    def tzname(self, dt: datetime | None) -> None:
+        return None
+
+    def dst(self, dt: datetime | None) -> None:
+        return None
+
+
+_BROKEN_TZ_CHANGED_AT = datetime(2026, 1, 6, tzinfo=_UtcOffsetNoneTzinfo())
 
 
 async def _insert_user_and_job(
@@ -195,6 +215,28 @@ async def test_naive_changed_at_rejected_without_mutation(
 
     with pytest.raises(ValueError, match="timezone-aware"):
         await set_status(db_session, user_job, "applied", changed_at=_NAIVE)
+
+    assert user_job.status == original_status
+    assert user_job.applied_at == original_applied_at
+    assert user_job.status_changed_at == original_status_changed_at
+
+
+async def test_changed_at_with_none_utcoffset_rejected_without_mutation(
+    db_session: AsyncSession,
+    make_user: Callable[..., User],
+    make_job: Callable[..., Job],
+    make_user_job: Callable[..., UserJob],
+) -> None:
+    """A `tzinfo` whose `utcoffset()` returns `None` leaves `.tzinfo`
+    non-`None` — a bare `changed_at.tzinfo is None` check would wrongly
+    accept it. `set_status()` must check `utcoffset()` too."""
+    user_job = await _insert_user_job(db_session, make_user, make_job, make_user_job)
+    original_status = user_job.status
+    original_applied_at = user_job.applied_at
+    original_status_changed_at = user_job.status_changed_at
+
+    with pytest.raises(ValueError, match="timezone-aware"):
+        await set_status(db_session, user_job, "applied", changed_at=_BROKEN_TZ_CHANGED_AT)
 
     assert user_job.status == original_status
     assert user_job.applied_at == original_applied_at

@@ -97,111 +97,9 @@ that detail.
 ## Iteration 1
 
 *Rotated in from "Iteration 2" per the two-iteration rule: the prior Iteration 1 (the
-`collection_run_provider_attempts` initial implementation pass and its "changes
-requested" review) was removed rather than kept alongside a third entry, since the
-correction pass below superseded it and the whole slice is now merged. Nothing below
-was rewritten — only renumbered.*
-
-### Work done
-
-- Date/agent: 2026-08-28, Claude Code (Sonnet 5). Authorized slice: the four bounded
-  corrections from the review at `5b6aee0`, on the same
-  `phase-1/collection-run-provider-attempts` branch. Base: `5b6aee0`.
-  Test/comment/documentation-only change — no model mapping, schema behavior,
-  migration operations/revision metadata, or constraint/index definitions changed.
-- Outcome:
-  1. **Timestamp test matrix completed.** Added
-     `test_direct_sql_completed_at_equal_started_at_accepted` and
-     `test_direct_sql_completed_at_after_started_at_accepted`, complementing the
-     existing raw-SQL rejection of an earlier timestamp — the approved matrix (equal/
-     later accepted, earlier rejected, both ORM and direct SQL) is now actually
-     complete rather than only ORM-covered for the accepted cases.
-  2. **`rate_limited=True` now exercised.** Added
-     `test_rate_limited_true_persists_after_reload_and_is_independent_of_status` — an
-     ORM persistence/reload case with `rate_limited=True`, `status="partial"`, and
-     `incomplete_results=False` in the same row, proving all three vary independently
-     at the database level (no new `CHECK` added, per the review's explicit
-     instruction).
-  3. **Three FK-index comments corrected.** `backend/app/db/models/
-     collection_run_provider_attempt.py`, `backend/migrations/versions/
-     0015_collection_run_provider_attempts.py`, and `docs/DATA_MODEL.md` all
-     previously implied the explicit `(collection_run_id)` index was "in addition to
-     whatever index the FK itself implies" — PostgreSQL does not automatically index a
-     referencing FK column, so that phrasing was backwards. Corrected all three to
-     state plainly that PostgreSQL does not auto-index it, and that this index exists
-     to support "all attempts for this run" lookups (and efficient parent-side FK-
-     maintenance lookups on `collection_runs` deletes). The index definition itself is
-     unchanged.
-  4. **Timestamp-independence overclaim corrected.** The prior iteration's `Work done`
-     entry (now Iteration 1 above, unedited per this ledger's append-only convention)
-     described the test file's `created_at`/`updated_at` coverage as including
-     "independence" — no test proves two-row `created_at`/`updated_at` independence;
-     the tests actually prove server defaults, UTC-awareness, and `updated_at`
-     advancing on a real commit. Corrected here rather than editing the prior entry,
-     per the review's explicit instruction not to add a redundant test solely to
-     preserve that wording.
-- Files changed:
-  - `backend/tests/test_collection_run_provider_attempts.py` — 3 new tests (items
-    1–2 above).
-  - `backend/app/db/models/collection_run_provider_attempt.py`,
-    `backend/migrations/versions/0015_collection_run_provider_attempts.py`,
-    `docs/DATA_MODEL.md` — FK-index comment corrections (item 3 above;
-    comment/documentation only, no behavior change).
-- Commands run and exact results (no Alembic round-trips, per the review's own
-  scoping for this test/comment-only correction):
-  - `python scripts/check_repo.py` (from `backend/`) → exit 0, zero findings.
-  - `git diff --check` → clean, no whitespace/conflict errors.
-  - `ruff format --check .`, `ruff check .` → passed (60 files).
-  - `mypy app tests scripts` → success, 44 source files.
-  - `pytest tests/test_collection_run_provider_attempts.py -q` → 101 passed (up from
-    98 — exactly the 3 new tests, nothing else added or removed).
-  - `pytest -q` (full suite) → 980 passed (up from 977).
-- Deviations/known limitations: none. No model, migration, schema, or product-behavior
-  change — all four findings were test-coverage and documentation-accuracy issues
-  only.
-- STOP — awaiting Codex re-review. Do not begin `user_jobs`, `job_notes`, or any other
-  slice, and do not modify `main`.
-
-### Work review
-
-- Date/reviewer: 2026-08-28, Codex. Diff reviewed: `5b6aee0..f174b35`.
-- Verdict: **approved**. Findings: none.
-- Verified independently:
-  - Raw SQL now proves both accepted ordering boundaries (`completed_at == started_at`
-    and `completed_at > started_at`), complementing the existing rejected-before-start
-    case and completing the approved ORM/direct-SQL matrix.
-  - A committed and refreshed valid row now proves `rate_limited=True` persists while
-    `status='partial'` and `incomplete_results=False`; no CHECK or schema behavior was
-    added.
-  - The model comment, migration module docstring, and `DATA_MODEL.md` now correctly
-    state that PostgreSQL does not automatically index a referencing FK column. The
-    index definition, migration operations/revision metadata, model mapping, and all
-    constraint definitions are unchanged.
-  - The current handoff accurately limits the timestamp coverage claim rather than
-    adding a redundant two-row test.
-  - `git diff --check` is clean; repository checker exits 0; Ruff format/check and mypy
-    pass (**44 source files**); targeted suite **101 passed**. Claude's post-correction
-    full-suite result is **980 passed**; the reviewer did not repeat the full suite for
-    this test/comment-only correction after independently running **977 tests** on the
-    original implementation review.
-- The `collection_run_provider_attempts` implementation and correction pass are
-  accepted. Do not merge to `main`, begin `user_jobs`/`job_notes`/another slice, or
-  otherwise advance without explicit user authorization.
-- STOP — reviewer changed only this `Work review`; no implementation files changed.
-
-**Merge record (appended, not a rewrite of the entry above):** Approved at review
-commit `6a0b907`. Per user authorization, `phase-1/collection-run-provider-attempts`
-was merged into `main` with a normal merge commit (`936c8ad`; `--no-ff`, no
-squash/rebase/force-push) and pushed. `main`/`origin/main` are both now at `936c8ad`.
-Verified: `main` has zero content diff against the feature branch; migration `0015`
-(`down_revision = "0014"`) is present and is the sole Alembic head; `python
-backend/scripts/check_repo.py` (via the project's own virtualenv interpreter) exits 0
-with zero findings; working tree clean. No later Phase 1 table (`user_jobs`,
-`job_notes`) started or proposed.
-
----
-
-## Iteration 2
+`collection_run_provider_attempts` correction pass, its approval, and merge record) was
+removed rather than kept alongside a third entry, since it was already merged and is no
+longer pending. Nothing below was rewritten — only renumbered.*
 
 ### Work done
 
@@ -381,3 +279,76 @@ with zero findings; working tree clean. No later Phase 1 table (`user_jobs`,
   documentation wording where needed, and a new concise `Work done` entry only. No
   migration/schema change is needed; do not start `job_notes`, merge to or modify
   `main`, or advance to another slice.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-08-28, Claude Code (Sonnet 5). Authorized slice: the three bounded
+  corrections from the review at `15d0212`, on the same `phase-1/user-jobs` branch.
+  Base: `15d0212`. Test/service-code/documentation-wording correction only — no
+  migration/schema change.
+- Outcome:
+  1. **`set_status()`'s timezone-aware check fixed.** `backend/app/services/
+     user_jobs.py` previously checked only `changed_at.tzinfo is None`. Per Python's
+     own datetime contract, a datetime is aware only when `tzinfo` is not `None`
+     **and** `tzinfo.utcoffset(self)` is not `None` — a `tzinfo` subclass whose
+     `utcoffset()` returns `None` passed the old guard while still being effectively
+     naive. Changed the check to `changed_at.tzinfo is None or changed_at.utcoffset()
+     is None`, evaluated before any mutation (unchanged ordering — still ahead of the
+     status-validity/no-op/mutation logic). Added
+     `test_changed_at_with_none_utcoffset_rejected_without_mutation`, using a small
+     `_UtcOffsetNoneTzinfo(tzinfo)` test double whose `utcoffset()` returns `None`,
+     proving `ValueError` and zero mutation of `status`/`applied_at`/
+     `status_changed_at`.
+  2. **Direct-SQL acceptance now covers all nine statuses.** Added
+     `test_direct_sql_pre_application_status_with_null_applied_at_accepted`
+     (parametrized over both pre-application statuses, `applied_at` omitted/`NULL`)
+     and `test_direct_sql_post_application_status_with_non_null_applied_at_accepted`
+     (parametrized over all seven post-application statuses, `applied_at = now()`).
+     The approved nine-status matrix is now genuinely covered by both ORM and direct
+     SQL for the accepted half, matching what `docs/ROADMAP.md` and the prior
+     iteration's `Work done` already claimed — that prior entry was left unedited, per
+     this ledger's append-only convention.
+  3. **Flag-independence test now proves each flag independently.** Replaced
+     `test_saved_hidden_archived_independent_of_status_and_each_other` (which set all
+     three flags `True` in one row, proving only one combined state) with
+     `test_flag_independent_of_status_and_other_flags_on_orm_path`, parametrized over
+     `saved`/`hidden`/`archived`: each case sets exactly one flag `True` (the other two
+     left at their default `False`) alongside a post-application status
+     (`offer`/`applied_at` set), commits, reloads, and asserts all three flags match
+     the expected per-flag combination — not merely that some combination is accepted.
+     The new test's docstring accurately describes what it proves; the prior
+     docstring's "unsaved" vs. `saved=True` mismatch no longer exists, since that test
+     was replaced rather than reworded.
+- Files changed:
+  - `backend/app/services/user_jobs.py` — timezone-aware check fix (item 1) plus an
+    expanded docstring explaining the `tzinfo`/`utcoffset()` distinction.
+  - `backend/tests/test_user_jobs_service.py` — new `_UtcOffsetNoneTzinfo` test
+    double and `test_changed_at_with_none_utcoffset_rejected_without_mutation` (item
+    1).
+  - `backend/tests/test_user_jobs.py` — two new parametrized direct-SQL acceptance
+    tests (item 2, 9 parametrized cases total); replaced the single combined-flags
+    test with a parametrized per-flag test (item 3, 3 parametrized cases).
+- Commands run and exact results (no Alembic round-trips — no migration/schema
+  change, per the review's own scoping):
+  - `pytest tests/test_user_jobs.py tests/test_user_jobs_service.py -q` → 67 passed
+    (up from 55 — 9 new direct-SQL acceptance cases + 1 new tzinfo regression test +
+    2 net-new flag-independence cases replacing the 1 prior combined test).
+  - `pytest -q` (full suite) → 1047 passed (up from 1035).
+  - `ruff format --check .`, `ruff check .` → passed (66 files).
+  - `mypy app tests scripts` → success, 49 source files.
+  - `python scripts/check_repo.py` (from `backend/`) → exit 0, zero findings.
+  - `git status`/`git diff --check` → only the files listed above; no whitespace/
+    conflict errors.
+- Deviations/known limitations: none. All three findings were a service-code
+  correctness gap and two test-coverage gaps; no schema, migration, or documented
+  product-behavior claim changed beyond what the fixes themselves make true.
+- STOP — awaiting Codex re-review. Do not begin `job_notes`, another slice, or modify
+  `main`.
+
+### Work review
+
+*Pending — awaiting Codex.*

@@ -14,8 +14,12 @@ async def set_status(
     commits or rolls back — the caller owns the transaction.
 
     Raises `ValueError` (without mutating `user_job`) for an unrecognized
-    `new_status` or a naive (timezone-unaware) `changed_at` — both are
-    caller bugs, not data conditions the database should have to reject.
+    `new_status` or a timezone-unaware `changed_at` — both are caller bugs,
+    not data conditions the database should have to reject. Per Python's
+    own datetime contract, a datetime is aware only when `tzinfo` is not
+    `None` **and** `tzinfo.utcoffset(self)` is not `None` — a `tzinfo`
+    subclass whose `utcoffset()` returns `None` still leaves `.tzinfo`
+    non-`None`, so checking `.tzinfo is None` alone is not sufficient.
 
     Same-status calls are a no-op: `applied_at` and `status_changed_at` are
     left untouched. Otherwise: transitioning into a post-application status
@@ -27,7 +31,7 @@ async def set_status(
     """
     if new_status not in STATUSES:
         raise ValueError(f"invalid status: {new_status!r}")
-    if changed_at.tzinfo is None:
+    if changed_at.tzinfo is None or changed_at.utcoffset() is None:
         raise ValueError("changed_at must be timezone-aware, got a naive datetime")
 
     if new_status == user_job.status:
