@@ -329,4 +329,43 @@ clean. `job_notes` not started or proposed.
 
 ### Work review
 
-*Pending — awaiting Codex.*
+- Date/reviewer: 2026-08-28, Codex. Diff reviewed: `93a4ee5..1287b5e`
+  (`phase-1/job-notes`). Verdict: **changes requested**.
+- Findings, highest severity first:
+  1. **Low — the approved internal-whitespace-preservation behavior is asserted in the
+     handoff but not tested.** `test_body_trimmed_case_preserved_on_orm_path` proves
+     outer ordinary spaces are removed and letter case survives, but its body contains
+     no internal repeated whitespace, tab, LF, or CR. The binding decision explicitly
+     says internal whitespace is preserved, which matters for multiline user notes.
+     Exact correction: add one ORM persistence/reload regression containing outer
+     covered whitespace plus internal repeated spaces, tab, LF, and CR/LF, and assert
+     that only the outer four-character set is removed while the internal content and
+     case remain byte-for-byte unchanged. Do not change the validator or schema unless
+     that test exposes a mismatch.
+  2. **Low — the timestamp-default “independence” coverage is overclaimed again.**
+     `test_defaults_are_independent_across_multiple_rows` asserts only the two explicit
+     body values and application-generated UUIDs; it never reads either row's
+     `created_at` or `updated_at`. The `Work done` file summary nevertheless groups it
+     under timestamp “defaults/independence.” Exact correction: rename/reframe that
+     test to state what it actually proves (independent application-generated IDs and
+     row values), or fold those assertions into the multiple-notes test; in the new
+     `Work done`, describe timestamp coverage only as server defaults present,
+     UTC-awareness, and `updated_at` advancing on commit. Do not edit the prior
+     append-only entry solely to repair its historical wording.
+- Independently inspected and found correct: model/migration parity; migration `0017`
+  ancestry; required trim/non-empty database backstop; absence of a redundant
+  `user_id` and `UNIQUE`; `(user_job_id, created_at DESC)` index definition; direct,
+  user-level, and job-level CASCADE test structure and cleanup isolation; model
+  registration; Phase 1/Phase 10 boundary; the corrected two-level-CASCADE precedent;
+  and all related durable documentation. Repository checker, `git diff --check`, Ruff
+  format/check, and mypy (**51 source files**) pass.
+- Reviewer test limitation: PostgreSQL was not running/reachable during this review,
+  so the attempted targeted run ended only in `ConnectionRefusedError` setup failures;
+  no product assertion executed and this is not an additional finding. Claude's
+  recorded pre-push evidence remains 17 targeted and 1064 full-suite tests passing,
+  twice including after a fresh `base -> head` rebuild.
+- Scope for the correction pass: the two bounded test/claim corrections above and a
+  concise new `Work done` entry only. No model, migration, schema, product-document,
+  Phase 2, Phase 10, or `main` change is authorized. Rerun proportionate static,
+  targeted, and full-suite verification once PostgreSQL is reachable, then stop for
+  re-review.
