@@ -408,4 +408,53 @@ tooling slice all remain not started and are not authorized by this merge.
 
 ### Work review
 
-_Pending._
+- Date/agent: 2026-08-30, Codex. Diff reviewed:
+  `adb6e62..6000658` on `tooling/workflow-v3-routine-verifier`.
+- Independent verification: repository checker exit 0; Ruff format/check
+  clean; mypy clean across **76 source files**; focused verifier/safety suite
+  **91 passed**; working tree clean after review cleanup. A genuine external
+  `python scripts/verify.py --level routine --focus tests/test_verify.py`
+  run did **not** pass: its first four steps passed, then `git diff --check`
+  failed with exit 129 because the subprocess did not apply this repository's
+  required command-local `safe.directory`; all database/pytest steps were
+  correctly reported `NOT RUN`.
+- Findings:
+  1. **Medium — the canonical verifier is not usable by the Codex reviewer
+     environment it is explicitly intended to unify with Claude/local/CI.**
+     `git_diff_check_command()` returns bare `git diff --check`; this checkout
+     requires `-c safe.directory=C:/Users/Throw/Desktop/gitProjects/jobGoblin`
+     for Git commands under the reviewer SID, so the advertised identical
+     external invocation fails before pytest. Build the Git command with the
+     script-derived, absolute `REPO_ROOT` as command-local
+     `git -c safe.directory=<REPO_ROOT> diff --check` (never mutate global Git
+     configuration), unit-test the exact argv, and rerun the genuine verifier
+     from both repository root and `backend/` in the reviewer-compatible
+     environment.
+  2. **Medium — temporary-directory cleanup fails open and is absent from the
+     result summary.** `safe_rmtree()` uses `ignore_errors=True`; `main()`
+     prints/returns a successful summary before cleanup in `finally`. A
+     permission failure can therefore leave `.verify-tmp/run-*` behind while
+     the canonical verifier reports all checks passed, reproducing the exact
+     stale-directory problem this slice is meant to eliminate. Require a
+     strict child (`resolved != root` as well as `is_relative_to(root)`), do
+     not ignore deletion errors, execute cleanup on every path, and include a
+     `temporary-directory cleanup` PASS/FAIL result before printing the final
+     summary/choosing the exit code. Add tests for refusing the root itself,
+     surfaced deletion failure/nonzero outcome, cleanup after an earlier
+     verification failure, and successful concurrent-run isolation.
+  3. **Low — the known Phase-1 status correction is incomplete and the new
+     handoff overclaims it.** `README.md` says Phase 1 is complete, but
+     `docs/ROADMAP.md:134` still begins “Phase 1: in progress,” and its closing
+     Phase-1 paragraph still says the exit gate remains to be verified before
+     declaring completion. Phase 1's closure was already merged. Correct both
+     stale ROADMAP statements to the Git-verified completed state; keep the
+     already-correct three-slice Phase-2 update. Record the correction in a
+     new `Work done` entry rather than rewriting historical ledger text.
+- **Verdict: changes requested.** The safety extraction, command structure,
+  direct repository-check step, focus validation, non-recursive tests,
+  database preflight/redaction, unique run directories, Workflow-v3 durable
+  rules, Phase-2 status, and routine-verifier result model are otherwise
+  accepted. Make only the three bounded corrections above, run the genuine
+  verifier end to end plus focused/static checks, append concise `Work done`,
+  commit and push, then stop for re-review. Do not add CI/schema/high-risk
+  levels or resume product work.
