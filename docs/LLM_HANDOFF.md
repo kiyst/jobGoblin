@@ -393,4 +393,29 @@ that detail.
   APIs, scheduling, or any other slice until the user explicitly authorizes
   the next action.
 
+**Merge record (appended, not a rewrite of the entry above):** Approved at review
+commit `f2472f2` (no findings). Per user authorization,
+`phase-2/evidence-mismatch-conflict-persistence` was merged into `main` with a
+normal merge commit (`227184e`; `--no-ff`, no squash/rebase/force-push) and
+pushed. `main`/`origin/main` are both now at `227184e`. Verified: feature
+branch was clean at `f2472f2` and `main`/`origin/main` were still at `10aa747`
+immediately before the merge; `main` has zero content diff against the feature
+branch (`git diff main phase-2/evidence-mismatch-conflict-persistence --stat`
+empty); migration `0017` remains the sole Alembic head; `python
+backend/scripts/check_repo.py` exits 0 with zero findings; `git diff --check`
+clean; development database reconfirmed at `0006` with its original five-table
+shape; working tree clean.
+
+**Rollback boundary:** reverting `227184e` (a single merge commit) restores
+`main` to `10aa747` exactly — no schema/migration exists in this slice to
+downgrade, and no data migration accompanies it. This merges Phase 2's second
+vertical slice only (Tier-1 `evidence_mismatch` conflict persistence:
+`persist_posting()`'s raw/natural-key-validated quarantine transaction, the
+private rollback-test seam, the nondeterministic concurrency proof, the
+three-run counter matrix, and the sanitized `ingestion_identity_conflict`
+telemetry) — it does **not** complete Phase 2. `ambiguous_match`, identity
+tiers 2–4, `QueryPlanner`, `ProviderRegistry`, multi-source partial-success
+handling, live providers, Phase 3 normalization, API routes, and scheduling all
+remain not started and are not authorized by this merge.
+
 ---
