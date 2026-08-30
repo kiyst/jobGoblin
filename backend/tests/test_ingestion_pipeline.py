@@ -22,7 +22,7 @@ from app.db.models import (
 from app.ingestion import persistence, pipeline
 from app.ingestion.clock import FixedClock
 from app.ingestion.identity import resolve_identity
-from app.ingestion.natural_key import NaturalKey
+from app.ingestion.natural_key import NaturalKey, NaturalKeyDomain
 from app.ingestion.persistence import (
     InvalidRawIngestionAssociationError,
     UpsertKind,
@@ -146,6 +146,18 @@ async def _conflict_count(engine: AsyncEngine) -> int:
     async with AsyncSession(bind=engine) as session:
         return (
             await session.execute(select(func.count()).select_from(IdentityConflict))
+        ).scalar_one()
+
+
+async def _collection_run_count(engine: AsyncEngine) -> int:
+    async with AsyncSession(bind=engine) as session:
+        return (await session.execute(select(func.count()).select_from(CollectionRun))).scalar_one()
+
+
+async def _attempt_count(engine: AsyncEngine) -> int:
+    async with AsyncSession(bind=engine) as session:
+        return (
+            await session.execute(select(func.count()).select_from(CollectionRunProviderAttempt))
         ).scalar_one()
 
 
@@ -1158,6 +1170,25 @@ async def test_pipeline_fails_closed_for_unsupported_provider_result_states(
         )
 
 
+def _user_job_snapshot(user_job: UserJob) -> dict[str, object]:
+    """Every persisted column except `id` (the identity itself, compared
+    separately by `session.get()` on the same id) — used to prove a
+    `UserJob` is *fully* unchanged, not merely on the one or two columns a
+    narrower check happened to look at."""
+    return {
+        "user_id": user_job.user_id,
+        "job_id": user_job.job_id,
+        "saved": user_job.saved,
+        "hidden": user_job.hidden,
+        "archived": user_job.archived,
+        "applied_at": user_job.applied_at,
+        "status": user_job.status,
+        "status_changed_at": user_job.status_changed_at,
+        "created_at": user_job.created_at,
+        "updated_at": user_job.updated_at,
+    }
+
+
 async def test_three_run_conflict_matrix(
     db_engine: AsyncEngine,
     make_user: Callable[..., User],
@@ -1167,8 +1198,10 @@ async def test_three_run_conflict_matrix(
     Run 1 creates the occurrence cleanly; Run 2 disputes its canonical URL
     (quarantine) alongside an unrelated valid posting; Run 3 disputes it
     again via a distinct new `RawJobIngestion` (a second, independent
-    conflict, never a duplicate of Run 2's). A `UserJob` created after Run
-    1 is proven untouched by both Run 2 and Run 3."""
+    conflict, never a duplicate of Run 2's). Cumulative `CollectionRun`/
+    attempt row totals, every run's and its one attempt's exact status and
+    counters, every persisted `UserJob` column, and quarantined raw rows'
+    `error_message` are all checked after each run."""
     t1 = datetime(2026, 9, 10, tzinfo=UTC)
     t2 = t1 + timedelta(hours=1)
     t3 = t2 + timedelta(hours=1)
@@ -1196,6 +1229,8 @@ async def test_three_run_conflict_matrix(
         assert await _job_count(db_engine) == 1
         assert await _occurrence_count(db_engine) == 1
         assert await _conflict_count(db_engine) == 0
+        assert await _collection_run_count(db_engine) == 1
+        assert await _attempt_count(db_engine) == 1
 
         occurrence_1 = await _occurrence_by_job_id(db_engine, "REQ-1001")
         job_ids.append(occurrence_1.job_id)
@@ -1208,7 +1243,24 @@ async def test_three_run_conflict_matrix(
             assert run1.jobs_inserted == 1
             assert run1.jobs_updated == 0
 
-        # UserJob created between runs, proven untouched by Run 2 and Run 3
+            attempts_1 = (
+                (
+                    await session.execute(
+                        select(CollectionRunProviderAttempt).where(
+                            CollectionRunProviderAttempt.collection_run_id == run1_id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert len(attempts_1) == 1
+            assert attempts_1[0].status == "completed"
+            assert attempts_1[0].jobs_discovered == 1
+            assert attempts_1[0].jobs_inserted == 1
+            assert attempts_1[0].jobs_updated == 0
+
+        # UserJob created between runs, proven fully unchanged after Run 2 and Run 3
         user = make_user(email="conflict-matrix@example.com")
         async with AsyncSession(bind=db_engine) as session:
             session.add(user)
@@ -1229,7 +1281,7 @@ async def test_three_run_conflict_matrix(
             await session.commit()
             await session.refresh(user_job)
             user_job_id = user_job.id
-            user_job_snapshot = {"status": user_job.status, "updated_at": user_job.updated_at}
+            user_job_snapshot = _user_job_snapshot(user_job)
 
         # ------------------------------------------------------------------
         # Run 2 — conflicting posting + an unrelated new valid posting
@@ -1253,6 +1305,8 @@ async def test_three_run_conflict_matrix(
         assert await _job_count(db_engine) == 2
         assert await _occurrence_count(db_engine) == 2
         assert await _conflict_count(db_engine) == 1
+        assert await _collection_run_count(db_engine) == 2
+        assert await _attempt_count(db_engine) == 2
 
         occurrence_no_tenant = await _occurrence_by_job_id(db_engine, "987654321")
         job_ids.append(occurrence_no_tenant.job_id)
@@ -1277,6 +1331,8 @@ async def test_three_run_conflict_matrix(
                 .all()
             )
             assert len(attempts_2) == 1
+            assert attempts_2[0].status == "completed"
+            assert attempts_2[0].jobs_discovered == 2
             assert attempts_2[0].jobs_inserted == 1
             assert attempts_2[0].jobs_updated == 1
 
@@ -1287,7 +1343,21 @@ async def test_three_run_conflict_matrix(
 
             reloaded_user_job = await session.get(UserJob, user_job_id)
             assert reloaded_user_job is not None
-            assert reloaded_user_job.updated_at == user_job_snapshot["updated_at"]
+            assert _user_job_snapshot(reloaded_user_job) == user_job_snapshot
+
+            quarantined_after_run2 = (
+                (
+                    await session.execute(
+                        select(RawJobIngestion).where(
+                            RawJobIngestion.processing_status == "identity_conflict"
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert len(quarantined_after_run2) == 1
+            assert quarantined_after_run2[0].error_message is None
 
         # ------------------------------------------------------------------
         # Run 3 — the same conflicting posting again, via a new ingestion
@@ -1305,6 +1375,8 @@ async def test_three_run_conflict_matrix(
         assert await _job_count(db_engine) == 2  # unchanged
         assert await _occurrence_count(db_engine) == 2  # unchanged
         assert await _conflict_count(db_engine) == 2  # a second, distinct conflict
+        assert await _collection_run_count(db_engine) == 3
+        assert await _attempt_count(db_engine) == 3
 
         async with AsyncSession(bind=db_engine) as session:
             run3 = await session.get(CollectionRun, run3_id)
@@ -1314,6 +1386,23 @@ async def test_three_run_conflict_matrix(
             assert run3.jobs_inserted == 0
             assert run3.jobs_updated == 1
 
+            attempts_3 = (
+                (
+                    await session.execute(
+                        select(CollectionRunProviderAttempt).where(
+                            CollectionRunProviderAttempt.collection_run_id == run3_id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert len(attempts_3) == 1
+            assert attempts_3[0].status == "completed"
+            assert attempts_3[0].jobs_discovered == 1
+            assert attempts_3[0].jobs_inserted == 0
+            assert attempts_3[0].jobs_updated == 1
+
             occurrence_1_after_run3 = await session.get(JobOccurrence, occurrence_1.id)
             assert occurrence_1_after_run3 is not None
             assert occurrence_1_after_run3.last_seen_at == t3
@@ -1321,7 +1410,7 @@ async def test_three_run_conflict_matrix(
 
             reloaded_user_job_after_run3 = await session.get(UserJob, user_job_id)
             assert reloaded_user_job_after_run3 is not None
-            assert reloaded_user_job_after_run3.updated_at == user_job_snapshot["updated_at"]
+            assert _user_job_snapshot(reloaded_user_job_after_run3) == user_job_snapshot
 
             raw_rows = (await session.execute(select(RawJobIngestion))).scalars().all()
             raw_ingestion_ids.extend(row.id for row in raw_rows)
@@ -1331,6 +1420,11 @@ async def test_three_run_conflict_matrix(
                 "normalized",
                 "normalized",
             ]
+            quarantined_raw_rows = [
+                row for row in raw_rows if row.processing_status == "identity_conflict"
+            ]
+            assert len(quarantined_raw_rows) == 2
+            assert all(row.error_message is None for row in quarantined_raw_rows)
     finally:
         await _cleanup(
             db_engine,
@@ -1618,6 +1712,72 @@ async def test_persist_posting_rejects_unrelated_raw_row_with_mismatched_fetched
             assert raw_a.job_occurrence_id is None
             current_job_ids = set((await session.execute(select(Job.id))).scalars().all())
             assert current_job_ids == preexisting_job_ids
+    finally:
+        await _cleanup(
+            db_engine,
+            user_ids=[],
+            job_ids=job_ids,
+            collection_run_ids=[],
+            raw_ingestion_ids=raw_ids,
+        )
+
+
+async def test_persist_posting_rejects_natural_key_that_does_not_match_the_job(
+    db_engine: AsyncEngine,
+) -> None:
+    """A genuinely valid raw/job pair (matching hash, `fetched_at`,
+    provider/source, and `source_identifier`) combined with a `natural_key`
+    resolved for a *different* tenant must still be rejected. None of the
+    raw-association checks alone can catch this: `RawJobIngestion` has no
+    `source_tenant_id` column, so a forged tenant on an otherwise-identical
+    natural key agrees with every check that compares `natural_key` against
+    `raw`. Only re-resolving `job`'s own identity and requiring exact
+    equality with the supplied `natural_key` catches it."""
+    job = _load_fixture("clean_tenant_scoped")
+    genuine_natural_key = resolve_identity(job)
+    forged_natural_key = NaturalKey(
+        domain=NaturalKeyDomain.TENANT,
+        provider=genuine_natural_key.provider,
+        source=genuine_natural_key.source,
+        tenant_id="evil-corp",
+        job_id=genuine_natural_key.job_id,
+        url_normalized=genuine_natural_key.url_normalized,
+    )
+    assert forged_natural_key != genuine_natural_key
+    t1 = datetime(2026, 9, 26, tzinfo=UTC)
+
+    raw_ids: list[uuid.UUID] = []
+    job_ids: list[uuid.UUID] = []
+    async with AsyncSession(bind=db_engine) as session:
+        preexisting_job_ids = set((await session.execute(select(Job.id))).scalars().all())
+    try:
+        raw_id = await pipeline._write_fetched_row(db_engine, job, job.discovered_at)
+        raw_ids.append(raw_id)
+
+        with pytest.raises(InvalidRawIngestionAssociationError, match="natural_key"):
+            await persist_posting(db_engine, forged_natural_key, job, t1, raw_id)
+
+        async with AsyncSession(bind=db_engine) as session:
+            raw_row = await session.get(RawJobIngestion, raw_id)
+            assert raw_row is not None
+            assert raw_row.processing_status == "fetched"
+            assert raw_row.job_occurrence_id is None
+
+            current_job_ids = set((await session.execute(select(Job.id))).scalars().all())
+            assert current_job_ids == preexisting_job_ids  # no Job/Occurrence created
+
+            conflicts_for_raw = (
+                (
+                    await session.execute(
+                        select(IdentityConflict).where(
+                            IdentityConflict.incoming_raw_job_ingestion_id == raw_id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert conflicts_for_raw == []
     finally:
         await _cleanup(
             db_engine,

@@ -33,9 +33,12 @@ should "create a new `Job` for the incoming occurrence" and flag it via
   *existing* `job_occurrences` row, but its normalized canonical URL conflicts with the
   value already recorded for that occurrence. Since the occurrence already exists, the
   fix is **quarantine, not creation**: leave the disputed field(s) untouched on the
-  existing row, still update purely observational fields (`last_seen_at`,
-  `applicant_count`, `applicant_count_text`, `is_active`) since the posting genuinely was
-  observed again, and record the disagreement for review.
+  existing row, still update purely observational fields (`last_seen_at`, `is_active`,
+  and the parent `Job.last_seen_at`) since the posting genuinely was observed again, and
+  record the disagreement for review. `applicant_count`/`applicant_count_text` are not
+  updated by this observational step in Phase 2 — `DiscoveredJob` does not currently
+  represent either field, so there is nothing to observe yet; a later source that
+  populates them will extend this same observational-update step, not change its shape.
 - **`ambiguous_match`** — Tiers 2–4. A matching tier finds **more than one** distinct
   candidate `Job` to attach to. Unlike the Tier 1 case, this *is* a genuinely new
   occurrence (no row shares its natural key yet), so creating a new, standalone `Job` for
@@ -105,9 +108,14 @@ writes to it** — Phase 1 only migrates the schema.
 4. It compares the incoming payload's normalized canonical URL against the existing
    row's `canonical_url_normalized`. They disagree (both non-null, and different).
 5. **Within one transaction**, `ingestion/persistence.py`:
-   a. Updates the existing `job_occurrences` row's observational fields only
-      (`last_seen_at = now()`, `applicant_count`, `applicant_count_text`, `is_active =
-      true`) — **does not** touch `canonical_url`/`canonical_url_normalized`.
+   a. Updates the existing `job_occurrences` row's observational fields only —
+      `last_seen_at = max(existing, observed_at)` (the caller-supplied, injected business
+      timestamp — never a server-side `now()`) and `is_active = true` — and the parent
+      `Job`'s own `last_seen_at = max(existing, observed_at)` the same way. **Does not**
+      touch `canonical_url`/`canonical_url_normalized` on the occurrence, or any other
+      descriptive/source field on either row. `applicant_count`/`applicant_count_text`
+      are not updated here in Phase 2: `DiscoveredJob` does not currently carry either
+      field, so this step has nothing to observe for them yet.
    b. Inserts an `identity_conflicts` row: `existing_job_occurrence_id` = the existing
       occurrence's id, `incoming_raw_job_ingestion_id` = this raw ingestion's id,
       `conflict_type = 'evidence_mismatch'`, `existing_value = {"canonical_url_normalized":
@@ -150,15 +158,22 @@ verbatim, with these decisions resolved during implementation:
 - **`created_at`/`updated_at`**: rely on the table's existing `server_default now()`; no
   explicit timestamp is set by application code at conflict-creation time.
 - **Raw-ingestion association**: `persist_posting()` never trusts a caller-supplied
-  `raw_id` to actually correspond to `job`. Before any mutation, it locks the row
-  (`SELECT ... FOR UPDATE`) and validates existence, `processing_status = 'fetched'`,
-  `job_occurrence_id IS NULL`, provider/source, `source_identifier`, `raw_content_hash`,
-  and `fetched_at` — the last two specifically because `source_identifier` alone is `NULL`
-  for every URL-fallback-domain posting from a given provider/source, not just the correct
-  one, and so cannot alone distinguish an unrelated fetched row from the genuine match.
-  This also structurally enforces "one conflict per distinct new ingestion": a raw row
-  already turned `identity_conflict`/`normalized` fails the `processing_status` check
-  before it could ever produce a second conflict row.
+  `raw_id`/`natural_key` pair to actually correspond to `job`. Before any mutation, it
+  locks the raw row (`SELECT ... FOR UPDATE`) and validates existence,
+  `processing_status = 'fetched'`, `job_occurrence_id IS NULL`, provider/source,
+  `source_identifier`, `raw_content_hash`, and `fetched_at` — the last two specifically
+  because `source_identifier` alone is `NULL` for every URL-fallback-domain posting from a
+  given provider/source, not just the correct one, and so cannot alone distinguish an
+  unrelated fetched row from the genuine match. It then also re-resolves `job`'s own
+  identity (`resolve_identity(job)`) and requires exact equality with the supplied
+  `natural_key` — none of the checks against `raw` above ever compare `natural_key` to
+  `job` directly, so a forged `natural_key` sharing `provider`/`source`/
+  `source_identifier` with a genuinely matching raw/job pair, but disagreeing on
+  `source_tenant_id` or the normalized URL (neither of which `RawJobIngestion` itself
+  stores), would otherwise pass undetected. This also structurally enforces "one
+  conflict per distinct new ingestion": a raw row already turned
+  `identity_conflict`/`normalized` fails the `processing_status` check before it could
+  ever produce a second conflict row.
 
 ## Consequences
 - The natural-key unique index is never at risk of violation by conflict handling —

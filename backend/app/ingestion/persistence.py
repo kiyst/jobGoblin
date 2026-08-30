@@ -11,6 +11,7 @@ from app.db.models.job import Job
 from app.db.models.job_occurrence import JobOccurrence
 from app.db.models.raw_job_ingestion import RawJobIngestion
 from app.ingestion.hashing import canonical_json_hash
+from app.ingestion.identity import UnresolvableIdentityError, resolve_identity
 from app.ingestion.natural_key import NaturalKey, NaturalKeyDomain
 from app.normalization.url import normalize_url
 from app.schemas.discovered_job import DiscoveredJob
@@ -37,21 +38,39 @@ class UpsertOutcome:
 
 
 class InvalidRawIngestionAssociationError(RuntimeError):
-    """`raw_id` does not genuinely correspond to the `job`/`natural_key`
+    """`raw_id`/`natural_key` do not genuinely correspond to the `job`
     being persisted. Raised by `persist_posting` before any mutation —
     existence, `processing_status`, linkage, provider/source,
-    `source_identifier`, `raw_content_hash`, and `fetched_at` are all
-    checked under a `SELECT ... FOR UPDATE` lock first.
+    `source_identifier`, `raw_content_hash`, `fetched_at`, and (finally)
+    exact agreement between `natural_key` and `job`'s own re-resolved
+    identity are all checked under a `SELECT ... FOR UPDATE` lock first.
 
-    The last two checks (`raw_content_hash`/`fetched_at`) exist because
+    The `raw_content_hash`/`fetched_at` checks exist because
     `source_identifier` alone is ambiguous in the URL-fallback domain: a
     posting with no `source_job_id` has `source_identifier IS NULL` on
     *every* such row from the same provider/source, not just the correct
     one, since `NULL == NULL` cannot distinguish them. `raw_content_hash`
     ties the raw row to *this exact posting's content*; `fetched_at`
     (written from `job.discovered_at` by Transaction A_i) is a second,
-    independent corroborating signal. A caller that always pairs `job`/
-    `raw_id` correctly (as `ingestion/pipeline.py`'s own
+    independent corroborating signal.
+
+    The final `natural_key`-vs-`job` check exists because none of the
+    checks above ever compares `natural_key` to `job` directly — only to
+    `raw`. A caller-supplied `natural_key` that happens to share
+    `provider`/`source`/`source_identifier` with a genuinely matching
+    raw/job pair, but disagrees on `source_tenant_id` or the normalized
+    URL (neither of which `RawJobIngestion` itself stores), would
+    otherwise pass every check above while still describing a *different*
+    posting than `job` actually is — letting the found branch
+    mutate/quarantine the wrong occurrence, or the insert branch acquire
+    an advisory lock for one key while inserting an occurrence whose
+    provider/source-derived fields describe another. Re-resolving
+    `job`'s own identity via `resolve_identity(job)` and requiring exact
+    equality with the supplied `natural_key` closes this gap.
+
+    A caller that always derives `natural_key` from `job` itself via
+    `resolve_identity()` and always pairs `job`/`raw_id` correctly (as
+    `ingestion/pipeline.py`'s own
     `zip(result.jobs, raw_ingestion_ids, strict=True)` does) never hits
     this — it exists as defense-in-depth against a hypothetical future
     caller bug, not evidence of a known one.
@@ -210,8 +229,17 @@ def _validate_raw_association(
 ) -> None:
     """Every check below runs before any occurrence/conflict/raw mutation —
     see `InvalidRawIngestionAssociationError`'s own docstring for why the
-    last two checks are load-bearing, not redundant, in the URL-fallback
-    domain."""
+    hash/`fetched_at` checks are load-bearing, not redundant, in the
+    URL-fallback domain, and why the final `natural_key` re-resolution check
+    is load-bearing too: `raw` has no `source_tenant_id`/normalized-URL
+    column of its own to compare `natural_key` against, so a caller-supplied
+    `natural_key` that shares `provider`/`source`/`source_identifier` with a
+    genuinely matching raw/job pair — but disagrees on tenant or normalized
+    URL — would otherwise pass every check above undetected, letting the
+    found branch mutate/quarantine the *wrong* occurrence, or the insert
+    branch acquire an advisory lock for one key while inserting an
+    occurrence whose actual provider/source-derived fields describe another.
+    """
     if raw.processing_status != "fetched":
         raise InvalidRawIngestionAssociationError("raw_id is not in the fetched state")
     if raw.job_occurrence_id is not None:
@@ -224,6 +252,16 @@ def _validate_raw_association(
         raise InvalidRawIngestionAssociationError("raw_id content hash does not match posting")
     if raw.fetched_at != job.discovered_at:
         raise InvalidRawIngestionAssociationError("raw_id fetched_at does not match posting")
+    try:
+        expected_natural_key = resolve_identity(job)
+    except UnresolvableIdentityError as exc:
+        raise InvalidRawIngestionAssociationError(
+            "natural_key does not match the posting's own resolved identity"
+        ) from exc
+    if expected_natural_key != natural_key:
+        raise InvalidRawIngestionAssociationError(
+            "natural_key does not match the posting's own resolved identity"
+        )
 
 
 async def _after_quarantine_flush() -> None:
