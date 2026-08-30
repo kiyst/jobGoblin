@@ -1,0 +1,24 @@
+{
+  "provider": "fixture_provider",
+  "source": "fixture_ats",
+  "source_tenant_id": "acme-corp",
+  "source_job_id": "REQ-1001",
+  "requisition_id_raw": "REQ-1001",
+  "title": "Senior Backend Engineer",
+  "company": "Acme Corp",
+  "location": "Remote - US",
+  "source_url": "https://acme.example.com/jobs/REQ-1001",
+  "apply_url": "https://acme.example.com/jobs/REQ-1001/apply",
+  "canonical_url": "https://acme.example.com/careers/req-1001-relocated",
+  "description": "Build and operate backend services.",
+  "compensation_text": "$150,000 - $190,000",
+  "posted_at": "2026-01-01T00:00:00+00:00",
+  "discovered_at": "2026-01-05T00:00:00+00:00",
+  "raw": {
+    "id": "REQ-1001",
+    "title": "Senior Backend Engineer",
+    "tenant": "acme-corp",
+    "compensation": "$150,000 - $190,000",
+    "canonical_url": "https://acme.example.com/careers/req-1001-relocated"
+  }
+}

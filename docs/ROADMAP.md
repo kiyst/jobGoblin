@@ -280,6 +280,31 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   domain tables (ADR 0003) are now migrated; the rest of Phase 1's exit gate
   (§[PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md)) remains to be independently
   verified before declaring the phase complete.
-- **Phases 2-14: not started.** Begin each phase only after completing its preflight in
+- **Phase 2: in progress (updated 2026-08-30).** One bounded, Class H vertical slice
+  merged into `main` so far: the **natural-key ingestion spine** (offline,
+  fixture-driven, no live provider) — `DiscoveredJob`/`DiscoveryResult`/`ProviderError`/
+  `SourceRunStats` schemas, `DiscoveryProvider` protocol, `FixtureProvider`,
+  `ingestion/clock.py`, `ingestion/hashing.py::canonical_json_hash()`,
+  `ingestion/natural_key.py`'s versioned/domain-tagged/SHA-256 advisory-lock encoding,
+  `ingestion/identity.py::resolve_identity()`, and `ingestion/pipeline.py::run()`'s
+  per-`CollectionRun` orchestration (Transaction A_i/B_i/C_i pattern, durable run-init,
+  per-source counter rollups, sanitized failure telemetry) — proves Fixture →
+  `RawJobIngestion` → identity resolution → `Job` → `JobOccurrence` end-to-end across
+  all three natural-key domains plus the genuinely unkeyable (`parse_error`) case.
+  A second slice, **Tier-1 `evidence_mismatch` conflict persistence**
+  ([DECISIONS/0007](DECISIONS/0007-identity-conflict-quarantine.md)), is implemented
+  and under review on its own feature branch (`phase-2/evidence-mismatch-conflict-
+  persistence`) — **not yet merged into `main`**:
+  `ingestion/persistence.py::persist_posting()` replaces the spine's original
+  fail-closed `DeferredIdentityConflictError` placeholder with real quarantine: a
+  canonical-URL evidence mismatch on an existing natural key now updates observational
+  fields only, inserts one `identity_conflicts` row per distinct new `RawJobIngestion`,
+  and reroutes that raw row to `processing_status='identity_conflict'`, all validated
+  against a `SELECT ... FOR UPDATE`-locked `raw_id` and a re-resolved `natural_key`
+  (existence, status, linkage, provider/source, `source_identifier`,
+  `raw_content_hash`, `fetched_at`, and exact natural-key agreement with `job`) before
+  any mutation. Still deferred: identity tiers 2–4, `ambiguous_match`, `QueryPlanner`,
+  `ProviderRegistry`, multi-source partial-success handling, live providers.
+- **Phases 3-14: not started.** Begin each phase only after completing its preflight in
   [PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md) and receiving approval for the next
   smallest slice.
