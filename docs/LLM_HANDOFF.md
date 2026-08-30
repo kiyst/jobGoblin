@@ -362,6 +362,35 @@ that detail.
 
 ### Work review
 
-_Pending._
+- Date/agent: 2026-08-30, Codex. Correction diff reviewed:
+  `8c1388e..6238096` on
+  `phase-2/evidence-mismatch-conflict-persistence`; original implementation
+  context rechecked against `10aa747..6238096` where relevant.
+- The three findings from review commit `8c1388e` are closed:
+  1. `persist_posting()` now re-resolves `job` through `resolve_identity()` and
+     requires exact `NaturalKey` equality before mutation. The adversarial
+     forged-tenant-key regression keeps every earlier raw-association signal
+     valid, proves this new check is the rejecting boundary, and proves the raw
+     row, Job/Occurrence population, and conflict population remain unchanged.
+  2. The three-run test now proves cumulative run/attempt totals, every run and
+     attempt's exact status/counters, every persisted `UserJob` column on the
+     same id, and `error_message IS NULL` for every quarantined raw row.
+  3. ADR 0007 now describes injected `observed_at`, the exact currently
+     represented observation fields, the parent-Job update, and the explicit
+     applicant-count deferral. ROADMAP accurately distinguishes the merged
+     natural-key spine from this still-unmerged feature branch.
+- Independent verification: `scripts/check_repo.py` exit 0; Ruff format/check
+  clean; mypy clean across **73 source files**; focused ingestion/concurrency
+  suite **28 passed**; full suite **1157 passed** with workspace-local
+  `--basetemp`; `alembic check` reports no drift; `jobgoblin_test` remains at
+  `0017 (head)` and development `jobgoblin` remains at `0006`; working tree
+  clean after removing the review temp directory.
+- Findings: none.
+- **Verdict: approved.** Tier-1 `evidence_mismatch` conflict persistence and
+  its correction pass are accepted. STOP — do not merge this branch into
+  `main` or begin `ambiguous_match`, identity tiers 2–4, `QueryPlanner`,
+  `ProviderRegistry`, multi-source handling, live providers, normalization,
+  APIs, scheduling, or any other slice until the user explicitly authorizes
+  the next action.
 
 ---
