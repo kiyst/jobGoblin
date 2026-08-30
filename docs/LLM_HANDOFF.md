@@ -344,4 +344,30 @@ that detail.
 
 ### Work review
 
-_Pending._
+- Date/agent: 2026-08-30, Codex. Correction diff reviewed:
+  `6eadd00..370af23` on
+  `phase-2/tier2-tier3-identity-attachment`.
+- The remaining finding from review commit `6eadd00` is closed:
+  `_existing_occurrence_identity_query()` now probes only bare `id`/`job_id`
+  columns and therefore cannot seed SQLAlchemy's ORM identity map. After the
+  parent `Job` lock, `_existing_occurrence_query().with_for_update()` performs
+  the entity's first session load and compares its fresh database `id` and
+  `job_id` against the scalar probe before any mutation. Shared conditions
+  keep the two query shapes aligned.
+- The new two-transaction regression pauses after the scalar probe, commits a
+  real reassociation to a second parent, and proves
+  `CandidateResolutionUnstableError`, unchanged observational state on both
+  Jobs and the occurrence, and a fetched/unlinked raw row. Its timeout,
+  `finally` release, and cleanup cover the prior test-hygiene requirements.
+- Independent proportionate verification: repository checker exit 0; Ruff
+  format/check clean; mypy clean across **73 source files**; focused suite
+  **54 passed**; `alembic check` against `jobgoblin_test` reports no drift;
+  `git diff --check` clean; working tree clean. The correction is localized,
+  so the independently reported full-suite **1176 passed** result was not
+  redundantly repeated in this re-review.
+- Findings: none.
+- **Verdict: approved.** The Tier-2/Tier-3 cross-occurrence identity-
+  attachment slice and all correction passes are accepted. STOP — do not
+  merge this branch into `main`, begin `ambiguous_match`/Tier 4 or another
+  product slice, or start workflow-automation tooling until the user
+  explicitly authorizes the next action.
