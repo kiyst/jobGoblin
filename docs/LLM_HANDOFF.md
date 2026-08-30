@@ -98,215 +98,6 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-08-30, Claude Code (Sonnet 5). Authorized slice: Workflow v3
-  automation/tooling program, **first bounded slice — routine-verifier
-  foundation** — Class H (safety-relevant database-target logic; otherwise
-  Class R tooling). Base `main`@`adb6e62` -> branch
-  `tooling/workflow-v3-routine-verifier`. Implements exactly the approved
-  proposal's first slice with the 11 binding clarifications; no CI, markers,
-  `--level schema`/`--level high-risk`, status generator, metrics, or handoff
-  automation.
-- Outcome, per the binding clarifications:
-  1. **`backend/scripts/db_safety.py`** — `assert_is_disposable_test_database`,
-     its `_redact` helper (renamed `redact_database_url`, same body), and
-     `DEFAULT_TEST_DATABASE_URL` moved out of `tests/conftest.py` verbatim
-     (behavior/exception type/redaction/conservative name-only comparison all
-     unchanged — proven by `test_users.py`'s 9 existing assertions passing
-     unmodified against the new import path). New `resolve_test_database_url()`
-     factors out the `test_database_url or DEFAULT_TEST_DATABASE_URL` fallback
-     so `conftest.py`'s `db_engine` fixture and `verify.py` share one
-     expression, never two copies. Deliberately not under `app/db/` — tooling
-     only, never packaged (`pyproject.toml` ships only `app/`).
-  2. **`backend/scripts/verify.py --level routine`** — runs, in order: Ruff
-     format check, Ruff lint, mypy, `check_repo.py` (its own subprocess step,
-     `-m scripts.check_repo`, never assumed covered merely by
-     `test_check_repo.py`'s in-process function tests), `git diff --check`, a
-     pure URL-parsing disposable-test-database validation (dev DB need not be
-     reachable), a real test-database reachability preflight (must succeed
-     before pytest runs), optional focused pytest when `--focus` is given, then
-     the full suite. Every step reports PASS/FAIL/NOT RUN with a duration;
-     first failure blocks all later steps as NOT RUN rather than silently
-     omitting them. Every tool invocation is `[sys.executable, "-m", ...]`
-     (`git diff --check` is the one necessary exception) — identical on
-     Windows and Linux, confirmed by real runs from both `backend/` and the
-     repository root.
-  3. **`.verify-tmp/<unique-per-run>/`** — `create_run_dir()` uses
-     `tempfile.mkdtemp` under a gitignored `.verify-tmp/` root; `safe_rmtree()`
-     resolves both paths and refuses to delete anything not actually located
-     under that root (proven against a `.verify-tmp-evil` lookalike-prefix
-     attempt, not just a naive string check) before removing only that
-     invocation's own directory in `finally`.
-  4. **`--focus`** accepts file paths and `path::node_id` targets; each is
-     validated (no leading `-`; the pre-`::` portion must resolve to a real
-     file under `backend/tests`) before being passed to pytest as argv list
-     elements, never a shell string. Focused and full-suite results are
-     reported as separate steps; routine verification always runs the full
-     suite regardless of `--focus`.
-  5. **No recursive pytest invocation**: `test_verify.py`'s 65 tests inject a
-     fake subprocess runner and/or a fake connectivity check everywhere;
-     `verify.main()` is never called from any test (confirmed by grep). The
-     genuine end-to-end `python scripts/verify.py --level routine` command was
-     run for real, repeatedly, outside pytest — see Commands below.
-  6. **Pytest result parsing**: `parse_pytest_summary()` scans backward for
-     pytest 8.3.4's real summary line, handling both the framed and `-q`
-     unframed shapes and the optional parenthesized `(H:MM:SS)` suffix pytest
-     appends on longer runs. **Found and fixed during verification**: the
-     first version didn't anticipate that suffix, so a genuine full-suite run
-     ("1235 passed in 101.82s (0:01:41)") reported PASS but "counts
-     unavailable" — never a wrong or invented count, but not the intended
-     accurate report either. Fixed and reconfirmed against a real run.
-  7. **`docs/LLM_WORKFLOW.md`** now durably contains: a `Definition of Ready`
-     section; three named review verdicts (Approved / Approved with binding
-     clarifications / Redesign required); a concise-amendments-not-full-
-     rewrites rule; a two-round Class H revision limit with a joint-decision-
-     table fallback; a required-invariants-vs-recommended-mechanisms
-     distinction; a `Verification matrix` note pointing at `verify.py` as the
-     canonical way to run its "Python without schema" row once a level exists.
-     `docs/PHASE_RISK_CHECKLIST.md` was deliberately **not** touched — it
-     already contains a generic pointer to `LLM_WORKFLOW.md` for exactly this
-     content, so no additional pointer was needed.
-  8. **Corrected known-stale status now**: `README.md` no longer claims
-     "Phase 1 in progress, users-only"; `docs/ROADMAP.md` no longer claims
-     "two Phase 2 slices merged" / Tier-2/Tier-3 "not yet merged" — both now
-     state the Git-verified truth (three Phase 2 vertical slices merged
-     through `main`@`adb6e62`, confirmed via `git log --oneline --merges main`
-     before writing either correction). No status generator was built.
-     `README.md`'s Verification section now leads with
-     `python scripts/verify.py --level routine`; the prior manual chain
-     remains as an explicitly-labeled troubleshooting/reference fallback, now
-     also including `git diff --check` (missing from the original chain) so
-     it doesn't silently under-represent what the canonical command runs.
-  9. **Roadmap ordering correction recorded, not implemented**: routine
-     verifier (this slice) -> schema level -> minimal CI (routine/schema only)
-     -> high-risk level + incremental marker adoption -> canonical-status/
-     handoff validators -> mechanically-derived metrics. CI is explicitly not
-     gated behind complete marker adoption or high-risk orchestration.
-- Files changed: `backend/scripts/verify.py` (new), `backend/scripts/db_safety.py`
-  (new), `backend/tests/test_verify.py` (new, 65 tests), `backend/tests/conftest.py`,
-  `backend/tests/test_users.py`, `backend/app/config.py` (one-line comment fix,
-  found by adversarial review — see below), `.gitignore`, `README.md`,
-  `docs/LLM_WORKFLOW.md`, `docs/ROADMAP.md`, this handoff. `docs/PHASE_RISK_CHECKLIST.md`
-  deliberately not touched. No migration; no CI YAML; no product code changed.
-- Commands run and exact results:
-  - `ruff format .` / `ruff check .` -> clean on all changed/new files.
-  - `mypy app tests scripts` -> clean, 76 source files (was 73).
-  - `python -m pytest tests/test_verify.py -q` -> **65 passed** (unit tests
-    only; never launches a real subprocess or calls `main()`).
-  - `python -m pytest tests/test_users.py -q` -> **26 passed**, unchanged,
-    proving the `db_safety.py` extraction is behavior-preserving.
-  - Full suite with a workspace-local `--basetemp` -> **1241 passed** (was
-    1176 on `main`; +65 new unit tests).
-  - `python -m scripts.check_repo` -> exit 0, zero findings.
-  - `git diff --check` -> clean (benign LF/CRLF notices only).
-  - **Genuine external `python scripts/verify.py --level routine`** (never
-    from inside pytest), run repeatedly across fixes: final run -> all 8
-    steps PASS, `1241 passed`, `108.33s` total; also run successfully from
-    the repository root (not just `backend/`) with identical behavior; also
-    run with `--focus tests/test_ingestion_hashing.py` -> focused (5 passed)
-    and full-suite steps both reported separately, both PASS.
-  - Adversarial external runs (real invocations, not just unit tests):
-    `TEST_DATABASE_URL` malformed -> `disposable test-database URL
-    validation` FAILs cleanly with `ArgumentError` (see finding below), no
-    crash, no credential leak, pytest steps NOT RUN; `TEST_DATABASE_URL`
-    equal to the dev database -> same step FAILs with the guard's own safe
-    message, pytest steps NOT RUN; `TEST_DATABASE_URL` safely-named but
-    unroutable (port 1) -> URL validation PASSes, reachability preflight
-    FAILs with `unreachable: ConnectionRefusedError` (type name only), full
-    suite correctly NOT RUN rather than silently skipped/passing; `--focus`
-    given a `-`-prefixed or path-outside-`backend/tests` target -> rejected
-    before any step runs, exit 2.
-  - Development database (`alembic current`, default `DATABASE_URL`) ->
-    `0006`, unchanged; no migration touched.
-  - `.verify-tmp/` confirmed empty (only the gitignored root itself remains)
-    after every genuine run, including the deliberately-failing adversarial
-    ones.
-- Adversarial self-review: dispatched a fresh subagent (no prior context on
-  this diff) to independently check all 11 binding requirements plus general
-  correctness against the actual repository. It found and I fixed **two Low
-  findings**, both documentation drift this slice's own refactor introduced:
-  `app/config.py`'s comment on `test_database_url` still named
-  `tests/conftest.py` as `DEFAULT_TEST_DATABASE_URL`'s home (now
-  `scripts/db_safety.py`); `README.md`'s "Dedicated test database" section
-  still named `tests/conftest.py::assert_is_disposable_test_database` as the
-  guard's defining location (now `scripts/db_safety.py`, re-imported by
-  `conftest.py`). Both fixed; full verification matrix rerun clean afterward.
-  Separately, I found and fixed the pytest-summary-parser gap under item 6
-  above by running the genuine full suite and noticing "counts unavailable"
-  where a count was expected — the pinned-shape assumption was incomplete,
-  not the parsing logic's fail-closed behavior, which worked exactly as
-  designed (reported unavailable, never invented zero). No other findings
-  from either pass.
-- Deviations/known limitations: `redact_database_url`'s em-dash character in
-  `assert_is_disposable_test_database`'s message can render as a mangled
-  glyph on a non-UTF-8 Windows console codepage when printed — a pre-existing
-  cosmetic property of the message string itself (moved verbatim, not
-  introduced by this slice), not a data-correctness issue. `--level schema`/
-  `--level high-risk`, CI, markers, the status generator, handoff-structure
-  validation, and process metrics remain explicitly out of scope, per the
-  recorded roadmap ordering. `main` untouched throughout.
-- STOP — awaiting Codex review. Do not add CI, resume Phase 2 product work,
-  begin `--level schema`/`high-risk`, markers, the status generator, metrics,
-  or handoff automation, or merge `main`.
-
-### Work review
-
-- Date/agent: 2026-08-30, Codex. Diff reviewed:
-  `adb6e62..6000658` on `tooling/workflow-v3-routine-verifier`.
-- Independent verification: repository checker exit 0; Ruff format/check
-  clean; mypy clean across **76 source files**; focused verifier/safety suite
-  **91 passed**; working tree clean after review cleanup. A genuine external
-  `python scripts/verify.py --level routine --focus tests/test_verify.py`
-  run did **not** pass: its first four steps passed, then `git diff --check`
-  failed with exit 129 because the subprocess did not apply this repository's
-  required command-local `safe.directory`; all database/pytest steps were
-  correctly reported `NOT RUN`.
-- Findings:
-  1. **Medium — the canonical verifier is not usable by the Codex reviewer
-     environment it is explicitly intended to unify with Claude/local/CI.**
-     `git_diff_check_command()` returns bare `git diff --check`; this checkout
-     requires `-c safe.directory=C:/Users/Throw/Desktop/gitProjects/jobGoblin`
-     for Git commands under the reviewer SID, so the advertised identical
-     external invocation fails before pytest. Build the Git command with the
-     script-derived, absolute `REPO_ROOT` as command-local
-     `git -c safe.directory=<REPO_ROOT> diff --check` (never mutate global Git
-     configuration), unit-test the exact argv, and rerun the genuine verifier
-     from both repository root and `backend/` in the reviewer-compatible
-     environment.
-  2. **Medium — temporary-directory cleanup fails open and is absent from the
-     result summary.** `safe_rmtree()` uses `ignore_errors=True`; `main()`
-     prints/returns a successful summary before cleanup in `finally`. A
-     permission failure can therefore leave `.verify-tmp/run-*` behind while
-     the canonical verifier reports all checks passed, reproducing the exact
-     stale-directory problem this slice is meant to eliminate. Require a
-     strict child (`resolved != root` as well as `is_relative_to(root)`), do
-     not ignore deletion errors, execute cleanup on every path, and include a
-     `temporary-directory cleanup` PASS/FAIL result before printing the final
-     summary/choosing the exit code. Add tests for refusing the root itself,
-     surfaced deletion failure/nonzero outcome, cleanup after an earlier
-     verification failure, and successful concurrent-run isolation.
-  3. **Low — the known Phase-1 status correction is incomplete and the new
-     handoff overclaims it.** `README.md` says Phase 1 is complete, but
-     `docs/ROADMAP.md:134` still begins “Phase 1: in progress,” and its closing
-     Phase-1 paragraph still says the exit gate remains to be verified before
-     declaring completion. Phase 1's closure was already merged. Correct both
-     stale ROADMAP statements to the Git-verified completed state; keep the
-     already-correct three-slice Phase-2 update. Record the correction in a
-     new `Work done` entry rather than rewriting historical ledger text.
-- **Verdict: changes requested.** The safety extraction, command structure,
-  direct repository-check step, focus validation, non-recursive tests,
-  database preflight/redaction, unique run directories, Workflow-v3 durable
-  rules, Phase-2 status, and routine-verifier result model are otherwise
-  accepted. Make only the three bounded corrections above, run the genuine
-  verifier end to end plus focused/static checks, append concise `Work done`,
-  commit and push, then stop for re-review. Do not add CI/schema/high-risk
-  levels or resume product work.
-
----
-
-## Iteration 2
-
-### Work done
-
 - Date/agent: 2026-08-30, Claude Code (Sonnet 5). Class H correction pass on
   `tooling/workflow-v3-routine-verifier` for the three bounded findings in
   review commit `103fbaa` (`6000658..103fbaa`). Base `6000658`. Addresses
@@ -461,3 +252,176 @@ process rules in `docs/LLM_WORKFLOW.md`) — it does **not** add CI, pytest mark
 `--level schema`/`--level high-risk`, a canonical-status generator, handoff-
 structure automation, process/performance metrics, or any Phase 2 product change,
 all of which remain not started and are not authorized by this merge.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-08-30, Claude Code (Sonnet 5). Authorized slice: bounded
+  read-only Greenhouse live ATS canary (Phase 4 prework) — Class H (external
+  network access, per `LLM_WORKFLOW.md`'s risk table). Approved with 15
+  binding clarifications, presented and approved in conversation (no
+  separate proposal document — this entry is the durable record). Base
+  `main`@`de2b15a` -> branch `phase-4/greenhouse-canary`.
+- Outcome, per the binding clarifications:
+  1. "No database writes" (not "no writes anywhere") — the script never
+     imports `app.db.session` or opens a connection; repository writes are
+     limited to the script, offline tests, one sanitized fixture, and this
+     handoff.
+  2. The unsanitized response body lives only in a local variable inside
+     `fetch_greenhouse_jobs_raw`/`validate_and_parse_response` — every
+     `print()` and every raised message uses only `FetchMetadata` (status,
+     content-type, byte count, elapsed time, board token) or
+     `type(exc).__name__`, never the body.
+  3. The committed fixture (`greenhouse_live_canary.json`) is built via
+     `FIXTURE_ALLOWED_JOB_FIELDS`, an explicit allowlist — `content=true` is
+     never sent, so no HTML description exists to redact in the first
+     place. The fixture is labeled `"_fixture_kind": "sanitized_derived_sample"`
+     with an explicit "NOT a byte- or structure-preserved raw payload" note.
+  4. `DiscoveredJob.provider="ats_scrapers"`/`source="greenhouse"` — the
+     project's established identity labels — used unconditionally even
+     though this canary calls Greenhouse directly, never through
+     `ats-scrapers`.
+  5. `GREENHOUSE_API_ORIGIN` is a fixed module constant; `validate_board_token`
+     enforces a conservative ASCII slug (`^[A-Za-z0-9_-]{1,100}$`) before any
+     URL construction. `--company` is a required, explicit CLI argument —
+     `map_job_to_discovered_job` never reads the payload's own `company_name`
+     field, proven against the real fixture (which genuinely contains
+     `company_name="GitLab"`) by asserting a deliberately different supplied
+     name wins.
+  6. Exactly one `httpx` GET per invocation, `follow_redirects=False`, no
+     retries, no pagination, no second request. `MAX_RESPONSE_BYTES=5_000_000`
+     and `REQUEST_TIMEOUT_SECONDS=10.0` are self-imposed caps. Fails closed on
+     non-2xx, oversized body, missing/wrong content-type, invalid JSON, and a
+     missing/null/non-list/empty `jobs` field.
+  7. Every `CanaryFetchError` message interpolates only `FetchMetadata` or an
+     exception type name — never `response.body`.
+  8. `select_representative_job` filters to jobs with a usable `id`, sorts by
+     `str(id)` ascending, returns the first — proven order-independent by
+     feeding the same job list forward, reversed, and arbitrarily shuffled
+     and asserting identical selection.
+  9. `discovered_at` is captured once via `datetime.now(UTC)` in `run_canary`,
+     before the fetch, and threaded through explicitly. `posted_at` maps only
+     from `first_published` (a field whose name is itself an explicit
+     publish-time claim); `updated_at` is never read for this purpose at
+     all, proven even when `first_published` is deleted from a copy of the
+     real job dict while `updated_at` remains present.
+  10. `source_url`/`canonical_url` both come from `absolute_url`; `apply_url`
+      stays `None` unconditionally — no code path ever copies `absolute_url`
+      into it (the public Job Board API exposes no distinct apply link).
+  11. `test_canary_greenhouse_mapping.py` never calls `fetch_greenhouse_jobs_raw`
+      or `run_canary`/`main` — confirmed by grep, not just by docstring claim.
+      `scripts/verify.py` contains zero references to `canary_greenhouse`
+      anywhere, confirmed by grep and by a genuine external
+      `python scripts/verify.py --level routine --focus
+      tests/test_canary_greenhouse_mapping.py` run (below) completing with no
+      network step at all.
+  12. All eight required cases are covered (see Commands below for the exact
+      test count) plus additional offline coverage of `validate_and_parse_response`'s
+      six fail-closed conditions, `validate_board_token`, and the fixture
+      allowlist itself.
+  13. The module docstring's Greenhouse-terms caveat restates
+      `docs/SOURCE_CONNECTORS.md`'s existing, unresolved caveat verbatim in
+      substance — no new legal or rate-limit claim is made; the self-imposed
+      timeout/byte-cap are explicitly attributed to this script's own
+      caution, not to any Greenhouse-published limit.
+  14. Documented below (this entry) rather than copying raw response content
+      into it.
+  15. No `DiscoveryProvider`, no pipeline integration, no `QueryPlanner`/
+      `ProviderRegistry`, no database writes, no scheduling, no Phase 3
+      normalization anywhere in this diff — confirmed by grep across the new
+      files for each of those names.
+- Live invocation record (the one authorized request):
+  - Board token: `gitlab`; company: `GitLab` (supplied explicitly).
+  - Request: `GET https://boards-api.greenhouse.io/v1/boards/gitlab/jobs` —
+    documented at <https://developers.greenhouse.io/job-board.html>, accessed
+    2026-08-30.
+  - Result: `status=200 content_type=application/json byte_count=154979
+    elapsed_seconds=0.469`; `jobs_count=220`.
+  - Selected job (deterministic, minimum stringified `id`):
+    `source_job_id="8396674002"`.
+- Observed field mapping / findings (updates the proposal's own "to confirm"
+  table with real evidence):
+  - `company_name` **is** present in the real payload ("GitLab") — the
+    proposal's assumption that company would need external supply either
+    way is confirmed, and per binding clarification 5 it is deliberately
+    ignored regardless of availability.
+  - `requisition_id` **is** present and genuinely distinct from `id`
+    ("5899" vs `8396674002`) — resolves the proposal's "to confirm" item;
+    mapped to `requisition_id_raw`.
+  - `first_published` **is** present and distinct from `updated_at`
+    (`2026-03-06T14:25:31-05:00` vs `2026-08-29T16:08:37-04:00` for the
+    selected job) — mapped to `posted_at`; `updated_at` never used.
+  - `apply_url`: no distinct field anywhere in the payload — stays `None`.
+  - No `content`/description field appears anywhere in the default (no
+    `content=true`) response — the redaction question is sidestepped by
+    construction, not by post-hoc filtering.
+  - Pagination: the single response's top level is only `{"jobs": [...],
+    "meta": {...}}` — no cursor/page fields observed; all 220 jobs returned
+    in one response, consistent with the proposal's "to confirm" note.
+  - Minor upstream data-quality observation: the selected job's `title` has
+    trailing whitespace ("Manager, Solutions Architects - San Francisco ")
+    in the real API response — not a mapping defect, left as-is (the
+    project's own convention is to preserve raw values; normalization is
+    Phase 3's concern, out of scope here).
+- Blockers to routing a real payload through the existing pipeline
+  (test-database ingestion) — **narrower than "Phase 4"**: `pipeline.run()`
+  already accepts any object satisfying the three-method `DiscoveryProvider`
+  Protocol with a directly-constructed `SourceQuery`, exactly as every
+  `FixtureProvider`-based test already does. `QueryPlanner`/`ProviderRegistry`
+  orchestrate *multiple* providers/sources — not required for one hardcoded
+  provider. Phase 3 normalizers are not on the ingestion path at all — Phase
+  2 persists raw + resolves identity only. The only missing piece is a
+  **minimal `DiscoveryProvider` adapter** wrapping this canary's own
+  fetch/select/map functions — deliberately not built in this slice.
+- Files changed: `backend/scripts/canary_greenhouse.py` (new);
+  `backend/tests/fixtures/discovery/greenhouse_live_canary.json` (new,
+  sanitized derived sample, produced by the one live invocation above);
+  `backend/tests/test_canary_greenhouse_mapping.py` (new, 45 tests); this
+  handoff. No product code changed; no `app/` changes; no migration; no CI.
+- Commands run and exact results:
+  - `ruff format .` / `ruff check .` -> clean.
+  - `mypy app tests scripts` -> clean, 78 source files.
+  - `python -m pytest tests/test_canary_greenhouse_mapping.py -q` ->
+    **45 passed** — offline only, confirmed via grep that no test calls the
+    network-touching function.
+  - Full suite with a workspace-local `--basetemp` -> **1294 passed** (was
+    1249).
+  - `python -m scripts.check_repo` -> exit 0, zero findings.
+  - `git diff --check` -> clean.
+  - **Genuine external `python scripts/verify.py --level routine --focus
+    tests/test_canary_greenhouse_mapping.py`** -> all **10 steps PASS**
+    (Ruff format/check, mypy, `check_repo.py`, `git diff --check`, database
+    URL safety, real test-database reachability, focused pytest **45
+    passed**, full suite **1294 passed**, temporary-directory cleanup) in
+    `113.56s`; confirms `scripts/verify.py` never touches Greenhouse.
+  - `.verify-tmp/` confirmed to contain no run directory afterward.
+  - Development database untouched throughout — this script never opens a
+    connection to it.
+- Adversarial self-review: dispatched a fresh subagent (no prior context on
+  this diff) to independently check all 15 binding requirements plus general
+  correctness/privacy against the actual repository, including reading the
+  committed fixture's real values (not just field names) for anything
+  sensitive. It found **zero High/Medium findings** against the 15 binding
+  requirements — all satisfied with direct file/line citations and passing
+  tests. It found **one Low-Medium finding**: this module's docstring cited
+  "the approved proposal in `docs/LLM_HANDOFF.md`", but that file's
+  two-iteration rotation rule means no such document persists there — the
+  proposal was presented and approved in conversation, never committed
+  separately. Fixed: the docstring now correctly points to this `Work done`
+  entry itself as the durable approval record, and reruns of ruff/mypy/the
+  focused test file all stayed clean afterward. No other issues found.
+- Deviations/known limitations: the follow-up minimal `DiscoveryProvider`
+  adapter, pipeline integration, `QueryPlanner`/`ProviderRegistry`, database
+  writes, scheduling, and Phase 3 normalization all remain explicitly out of
+  scope and unimplemented, per binding clarification 15. `main` untouched
+  throughout.
+- STOP — awaiting Codex review. Do not implement the follow-up adapter,
+  pipeline integration, QueryPlanner/ProviderRegistry, scheduling, Phase 3
+  normalization, or any database writes, or merge `main`.
+
+### Work review
+
+_Pending._
