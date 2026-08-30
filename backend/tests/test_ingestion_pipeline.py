@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import uuid
@@ -24,6 +25,8 @@ from app.ingestion.clock import FixedClock
 from app.ingestion.identity import resolve_identity
 from app.ingestion.natural_key import NaturalKey, NaturalKeyDomain
 from app.ingestion.persistence import (
+    AmbiguousIdentityMatchError,
+    CandidateResolutionUnstableError,
     InvalidRawIngestionAssociationError,
     UpsertKind,
     UpsertOutcome,
@@ -159,6 +162,55 @@ async def _attempt_count(engine: AsyncEngine) -> int:
         return (
             await session.execute(select(func.count()).select_from(CollectionRunProviderAttempt))
         ).scalar_one()
+
+
+async def _create_job_and_occurrence_directly(
+    engine: AsyncEngine,
+    job: DiscoveredJob,
+    *,
+    observed_at: datetime,
+    canonical_url_normalized: str | None = None,
+) -> uuid.UUID:
+    """Directly inserts a `Job`/`JobOccurrence` pair, bypassing
+    `upsert_job_occurrence`/`persist_posting` entirely. Used only to
+    construct a pre-existing anomalous state (e.g. two independently
+    created Jobs that already share a canonical URL or tenant+requisition)
+    that this slice's own code path could never itself produce — its own
+    advisory locks serialize every attach attempt for a given signal —
+    for the multiple-candidate adversarial tests. Returns the new Job's
+    id."""
+    async with AsyncSession(bind=engine) as session, session.begin():
+        new_job = Job(
+            title=job.title,
+            location_raw=job.location,
+            compensation_text=job.compensation_text,
+            canonical_url=job.canonical_url,
+            first_seen_at=observed_at,
+            last_seen_at=observed_at,
+        )
+        session.add(new_job)
+        await session.flush()
+        job_id = new_job.id
+
+        occurrence = JobOccurrence(
+            job_id=job_id,
+            provider=job.provider,
+            source=job.source,
+            source_tenant_id=job.source_tenant_id,
+            source_job_id=job.source_job_id,
+            requisition_id_raw=job.requisition_id_raw,
+            source_url=job.source_url,
+            source_url_normalized=None,
+            apply_url=job.apply_url,
+            canonical_url=job.canonical_url,
+            canonical_url_normalized=canonical_url_normalized,
+            first_seen_at=observed_at,
+            last_seen_at=observed_at,
+            posted_at=job.posted_at,
+        )
+        session.add(occurrence)
+        await session.flush()
+    return job_id
 
 
 async def test_two_run_natural_key_spine(
@@ -915,12 +967,19 @@ async def test_per_source_attempt_counters_are_not_the_run_wide_aggregate(
 ) -> None:
     t1 = datetime(2026, 8, 1, tzinfo=UTC)
     base = _load_fixture("clean_tenant_scoped")
+    # Distinct canonical_url per job (base's own is otherwise shared
+    # unchanged by model_copy) — required since Tier 2 now exists: three
+    # postings sharing one canonical URL would have two of them ATTACH to
+    # the first's Job instead of each getting its own, which is exactly
+    # what this test must *not* exercise (it's purely about per-source
+    # counter isolation).
     job_a = base.model_copy(
         update={
             "provider": "two_source_provider",
             "source": "source_a",
             "source_job_id": "A-1",
             "source_tenant_id": "tenant-a",
+            "canonical_url": "https://acme.example.com/jobs/two-source-a-1",
         }
     )
     job_b1 = base.model_copy(
@@ -929,6 +988,7 @@ async def test_per_source_attempt_counters_are_not_the_run_wide_aggregate(
             "source": "source_b",
             "source_job_id": "B-1",
             "source_tenant_id": "tenant-b",
+            "canonical_url": "https://acme.example.com/jobs/two-source-b-1",
         }
     )
     job_b2 = base.model_copy(
@@ -937,6 +997,7 @@ async def test_per_source_attempt_counters_are_not_the_run_wide_aggregate(
             "source": "source_b",
             "source_job_id": "B-2",
             "source_tenant_id": "tenant-b",
+            "canonical_url": "https://acme.example.com/jobs/two-source-b-2",
         }
     )
 
@@ -1943,6 +2004,873 @@ async def test_conflict_telemetry_is_sanitized_but_evidence_preserves_normalized
         assert warning_messages[0].startswith("ingestion_identity_conflict raw_ingestion_id=")
         assert "identity_conflict_id=" in warning_messages[0]
         assert "job_occurrence_id=" in warning_messages[0]
+    finally:
+        await _cleanup(
+            db_engine,
+            user_ids=[],
+            job_ids=job_ids,
+            collection_run_ids=collection_run_ids,
+            raw_ingestion_ids=raw_ids,
+        )
+
+
+async def test_tier2_canonical_url_attaches_to_existing_job(db_engine: AsyncEngine) -> None:
+    """Two postings with different natural keys (TENANT domain, then
+    NO_TENANT domain) but the same normalized canonical URL: the second
+    attaches to the first's Job (Tier 2) rather than creating a
+    duplicate. The secondary fixture's own `utm_source` tracking
+    parameter proves `normalize_url()`'s stripping is what makes the two
+    canonical URLs equal, not merely identical raw strings."""
+    t1 = datetime(2026, 3, 10, tzinfo=UTC)
+    t2 = t1 + timedelta(hours=1)
+    query = SourceQuery(sources=["fixture_ats"])
+
+    job_ids: list[uuid.UUID] = []
+    collection_run_ids: list[uuid.UUID] = []
+    raw_ids: list[uuid.UUID] = []
+    try:
+        run1_id = await pipeline.run(
+            db_engine,
+            FixtureProvider([_load_fixture("canonical_url_match_primary")], called_at=t1),
+            query,
+            observed_at=t1,
+            clock=FixedClock(t1),
+        )
+        collection_run_ids.append(run1_id)
+        occurrence_primary = await _occurrence_by_job_id(db_engine, "WID-500")
+        job_ids.append(occurrence_primary.job_id)
+
+        run2_id = await pipeline.run(
+            db_engine,
+            FixtureProvider([_load_fixture("canonical_url_match_secondary")], called_at=t2),
+            query,
+            observed_at=t2,
+            clock=FixedClock(t2),
+        )
+        collection_run_ids.append(run2_id)
+
+        assert await _job_count(db_engine) == 1
+        assert await _occurrence_count(db_engine) == 2
+
+        occurrence_secondary = await _occurrence_by_job_id(db_engine, "987650001")
+        assert occurrence_secondary.job_id == occurrence_primary.job_id
+
+        async with AsyncSession(bind=db_engine) as session:
+            run2 = await session.get(CollectionRun, run2_id)
+            assert run2 is not None
+            assert run2.status == "completed"
+            assert run2.jobs_discovered == 1
+            assert run2.jobs_inserted == 0
+            assert run2.jobs_updated == 1  # ATTACHED buckets as updated, never inserted
+
+            attempts_2 = (
+                (
+                    await session.execute(
+                        select(CollectionRunProviderAttempt).where(
+                            CollectionRunProviderAttempt.collection_run_id == run2_id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert len(attempts_2) == 1
+            assert attempts_2[0].status == "completed"
+            assert attempts_2[0].jobs_inserted == 0
+            assert attempts_2[0].jobs_updated == 1
+
+            job_row = await session.get(Job, occurrence_primary.job_id)
+            assert job_row is not None
+            assert job_row.last_seen_at == t2  # advanced by the attach
+            assert job_row.first_seen_at == t1  # unchanged — the Job already existed
+
+            raw_rows = (await session.execute(select(RawJobIngestion))).scalars().all()
+            raw_ids.extend(row.id for row in raw_rows)
+            assert all(row.processing_status == "normalized" for row in raw_rows)
+    finally:
+        await _cleanup(
+            db_engine,
+            user_ids=[],
+            job_ids=job_ids,
+            collection_run_ids=collection_run_ids,
+            raw_ingestion_ids=raw_ids,
+        )
+
+
+async def test_tier3_tenant_requisition_attaches_to_existing_job(db_engine: AsyncEngine) -> None:
+    """Two postings with different natural keys, no canonical URL, but the
+    same `(provider, source, source_tenant_id, requisition_id_raw)`: the
+    second attaches via Tier 3 to the first's Job, using the existing
+    `ix_job_occurrences_tenant_requisition_lookup` index."""
+    t1 = datetime(2026, 3, 11, tzinfo=UTC)
+    t2 = t1 + timedelta(hours=1)
+    query = SourceQuery(sources=["fixture_ats"])
+
+    job_ids: list[uuid.UUID] = []
+    collection_run_ids: list[uuid.UUID] = []
+    raw_ids: list[uuid.UUID] = []
+    try:
+        run1_id = await pipeline.run(
+            db_engine,
+            FixtureProvider([_load_fixture("tenant_requisition_match_primary")], called_at=t1),
+            query,
+            observed_at=t1,
+            clock=FixedClock(t1),
+        )
+        collection_run_ids.append(run1_id)
+        occurrence_primary = await _occurrence_by_job_id(db_engine, "REQ-777")
+        job_ids.append(occurrence_primary.job_id)
+
+        run2_id = await pipeline.run(
+            db_engine,
+            FixtureProvider([_load_fixture("tenant_requisition_match_secondary")], called_at=t2),
+            query,
+            observed_at=t2,
+            clock=FixedClock(t2),
+        )
+        collection_run_ids.append(run2_id)
+
+        assert await _job_count(db_engine) == 1
+        assert await _occurrence_count(db_engine) == 2
+
+        occurrence_secondary = await _occurrence_by_job_id(db_engine, "REQ-778-REPOST")
+        assert occurrence_secondary.job_id == occurrence_primary.job_id
+
+        async with AsyncSession(bind=db_engine) as session:
+            run2 = await session.get(CollectionRun, run2_id)
+            assert run2 is not None
+            assert run2.status == "completed"
+            assert run2.jobs_inserted == 0
+            assert run2.jobs_updated == 1
+
+            job_row = await session.get(Job, occurrence_primary.job_id)
+            assert job_row is not None
+            assert job_row.last_seen_at == t2
+
+            raw_rows = (await session.execute(select(RawJobIngestion))).scalars().all()
+            raw_ids.extend(row.id for row in raw_rows)
+    finally:
+        await _cleanup(
+            db_engine,
+            user_ids=[],
+            job_ids=job_ids,
+            collection_run_ids=collection_run_ids,
+            raw_ingestion_ids=raw_ids,
+        )
+
+
+async def test_tier3_scoping_rejects_different_tenant_same_requisition(
+    db_engine: AsyncEngine,
+) -> None:
+    """Same `requisition_id_raw`, different `source_tenant_id`: must
+    create two separate Jobs, never attach — proves Tier 3's tenant
+    scoping, mirroring the existing Tier-1 two-tenants precedent."""
+    t1 = datetime(2026, 3, 12, tzinfo=UTC)
+    t2 = t1 + timedelta(hours=1)
+    query = SourceQuery(sources=["fixture_ats"])
+
+    different_tenant_job = _load_fixture("tenant_requisition_match_secondary").model_copy(
+        update={
+            "source_tenant_id": "different-tenant-co",
+            "source_job_id": "REQ-999-DIFFERENT-TENANT",
+        }
+    )
+
+    job_ids: list[uuid.UUID] = []
+    collection_run_ids: list[uuid.UUID] = []
+    raw_ids: list[uuid.UUID] = []
+    try:
+        run1_id = await pipeline.run(
+            db_engine,
+            FixtureProvider([_load_fixture("tenant_requisition_match_primary")], called_at=t1),
+            query,
+            observed_at=t1,
+            clock=FixedClock(t1),
+        )
+        collection_run_ids.append(run1_id)
+        occurrence_primary = await _occurrence_by_job_id(db_engine, "REQ-777")
+        job_ids.append(occurrence_primary.job_id)
+
+        run2_id = await pipeline.run(
+            db_engine,
+            FixtureProvider([different_tenant_job], called_at=t2),
+            query,
+            observed_at=t2,
+            clock=FixedClock(t2),
+        )
+        collection_run_ids.append(run2_id)
+
+        assert await _job_count(db_engine) == 2
+        assert await _occurrence_count(db_engine) == 2
+
+        occurrence_different_tenant = await _occurrence_by_job_id(
+            db_engine, "REQ-999-DIFFERENT-TENANT"
+        )
+        assert occurrence_different_tenant.job_id != occurrence_primary.job_id
+        job_ids.append(occurrence_different_tenant.job_id)
+
+        async with AsyncSession(bind=db_engine) as session:
+            run2 = await session.get(CollectionRun, run2_id)
+            assert run2 is not None
+            assert run2.jobs_inserted == 1
+            assert run2.jobs_updated == 0
+
+            raw_rows = (await session.execute(select(RawJobIngestion))).scalars().all()
+            raw_ids.extend(row.id for row in raw_rows)
+    finally:
+        await _cleanup(
+            db_engine,
+            user_ids=[],
+            job_ids=job_ids,
+            collection_run_ids=collection_run_ids,
+            raw_ingestion_ids=raw_ids,
+        )
+
+
+async def test_usable_canonical_url_miss_does_not_fall_back_to_tier3(
+    db_engine: AsyncEngine,
+) -> None:
+    """A posting with a *usable* canonical URL that matches nothing at
+    Tier 2 must create a new Job via Tier 5, even when its tenant+
+    requisition would have matched an existing Job at Tier 3 — a usable
+    canonical URL's miss is not license to fall back to a weaker signal
+    for the same posting (ARCHITECTURE.md §8's conservative precedence).
+    This is the precedence regression the review specifically required."""
+    t1 = datetime(2026, 3, 13, tzinfo=UTC)
+    t2 = t1 + timedelta(hours=1)
+    query = SourceQuery(sources=["fixture_ats"])
+
+    would_match_tier3_but_has_url = _load_fixture("tenant_requisition_match_secondary").model_copy(
+        update={
+            "source_job_id": "REQ-779-HAS-URL",
+            "canonical_url": "https://acme-holdings.example.com/jobs/req-779-has-url",
+        }
+    )
+
+    job_ids: list[uuid.UUID] = []
+    collection_run_ids: list[uuid.UUID] = []
+    raw_ids: list[uuid.UUID] = []
+    try:
+        run1_id = await pipeline.run(
+            db_engine,
+            FixtureProvider([_load_fixture("tenant_requisition_match_primary")], called_at=t1),
+            query,
+            observed_at=t1,
+            clock=FixedClock(t1),
+        )
+        collection_run_ids.append(run1_id)
+        occurrence_primary = await _occurrence_by_job_id(db_engine, "REQ-777")
+        job_ids.append(occurrence_primary.job_id)
+
+        run2_id = await pipeline.run(
+            db_engine,
+            FixtureProvider([would_match_tier3_but_has_url], called_at=t2),
+            query,
+            observed_at=t2,
+            clock=FixedClock(t2),
+        )
+        collection_run_ids.append(run2_id)
+
+        assert await _job_count(db_engine) == 2  # NOT attached via Tier 3
+
+        occurrence_new = await _occurrence_by_job_id(db_engine, "REQ-779-HAS-URL")
+        assert occurrence_new.job_id != occurrence_primary.job_id
+        job_ids.append(occurrence_new.job_id)
+
+        async with AsyncSession(bind=db_engine) as session:
+            run2 = await session.get(CollectionRun, run2_id)
+            assert run2 is not None
+            assert run2.jobs_inserted == 1
+            assert run2.jobs_updated == 0
+
+            job_primary_after = await session.get(Job, occurrence_primary.job_id)
+            assert job_primary_after is not None
+            assert job_primary_after.last_seen_at == t1  # untouched by run 2
+
+            raw_rows = (await session.execute(select(RawJobIngestion))).scalars().all()
+            raw_ids.extend(row.id for row in raw_rows)
+    finally:
+        await _cleanup(
+            db_engine,
+            user_ids=[],
+            job_ids=job_ids,
+            collection_run_ids=collection_run_ids,
+            raw_ingestion_ids=raw_ids,
+        )
+
+
+async def test_tier2_multiple_candidates_fails_closed(db_engine: AsyncEngine) -> None:
+    """Two independently pre-existing Jobs that already share a canonical
+    URL (a pre-existing anomaly this slice's own code cannot itself
+    produce, since its own advisory lock serializes every attach attempt
+    for a given URL) — a third posting sharing that URL under a new
+    natural key must raise `AmbiguousIdentityMatchError` before any
+    mutation, never guessing which one to attach to."""
+    t0 = datetime(2026, 3, 14, tzinfo=UTC)
+    t1 = t0 + timedelta(hours=1)
+    shared_url = "https://ambiguous.example.com/jobs/shared"
+
+    base = _load_fixture("canonical_url_match_primary")
+    job_x = base.model_copy(
+        update={
+            "source_tenant_id": "tenant-x",
+            "source_job_id": "AMB-X",
+            "canonical_url": shared_url,
+        }
+    )
+    job_y = base.model_copy(
+        update={
+            "source_tenant_id": "tenant-y",
+            "source_job_id": "AMB-Y",
+            "canonical_url": shared_url,
+        }
+    )
+    job_z = base.model_copy(
+        update={
+            "source_tenant_id": "tenant-z",
+            "source_job_id": "AMB-Z",
+            "canonical_url": shared_url,
+        }
+    )
+
+    job_ids: list[uuid.UUID] = []
+    raw_ids: list[uuid.UUID] = []
+    try:
+        job_ids.append(
+            await _create_job_and_occurrence_directly(
+                db_engine, job_x, observed_at=t0, canonical_url_normalized=shared_url
+            )
+        )
+        job_ids.append(
+            await _create_job_and_occurrence_directly(
+                db_engine, job_y, observed_at=t0, canonical_url_normalized=shared_url
+            )
+        )
+
+        natural_key_z = resolve_identity(job_z)
+        raw_id_z = await pipeline._write_fetched_row(db_engine, job_z, job_z.discovered_at)
+        raw_ids.append(raw_id_z)
+
+        with pytest.raises(AmbiguousIdentityMatchError):
+            await persist_posting(db_engine, natural_key_z, job_z, t1, raw_id_z)
+
+        async with AsyncSession(bind=db_engine) as session:
+            assert (
+                await session.execute(select(func.count()).select_from(Job))
+            ).scalar_one() == 2  # no third Job created
+
+            raw_z = await session.get(RawJobIngestion, raw_id_z)
+            assert raw_z is not None
+            assert raw_z.processing_status == "fetched"
+            assert raw_z.job_occurrence_id is None
+    finally:
+        await _cleanup(
+            db_engine,
+            user_ids=[],
+            job_ids=job_ids,
+            collection_run_ids=[],
+            raw_ingestion_ids=raw_ids,
+        )
+
+
+async def test_tier3_multiple_candidates_fails_closed(db_engine: AsyncEngine) -> None:
+    """The Tier-3 analog of the above: two independently pre-existing Jobs
+    already sharing a `(provider, source, source_tenant_id,
+    requisition_id_raw)` combination — a third, no-canonical-URL posting
+    with a new natural key sharing that combination must raise
+    `AmbiguousIdentityMatchError` before any mutation."""
+    t0 = datetime(2026, 3, 15, tzinfo=UTC)
+    t1 = t0 + timedelta(hours=1)
+
+    base = _load_fixture("tenant_requisition_match_primary")
+    job_x = base.model_copy(update={"source_job_id": "TREQ-X"})
+    job_y = base.model_copy(update={"source_job_id": "TREQ-Y"})
+    job_z = base.model_copy(update={"source_job_id": "TREQ-Z"})
+
+    job_ids: list[uuid.UUID] = []
+    raw_ids: list[uuid.UUID] = []
+    try:
+        job_ids.append(await _create_job_and_occurrence_directly(db_engine, job_x, observed_at=t0))
+        job_ids.append(await _create_job_and_occurrence_directly(db_engine, job_y, observed_at=t0))
+
+        natural_key_z = resolve_identity(job_z)
+        raw_id_z = await pipeline._write_fetched_row(db_engine, job_z, job_z.discovered_at)
+        raw_ids.append(raw_id_z)
+
+        with pytest.raises(AmbiguousIdentityMatchError):
+            await persist_posting(db_engine, natural_key_z, job_z, t1, raw_id_z)
+
+        async with AsyncSession(bind=db_engine) as session:
+            assert (await session.execute(select(func.count()).select_from(Job))).scalar_one() == 2
+
+            raw_z = await session.get(RawJobIngestion, raw_id_z)
+            assert raw_z is not None
+            assert raw_z.processing_status == "fetched"
+            assert raw_z.job_occurrence_id is None
+    finally:
+        await _cleanup(
+            db_engine,
+            user_ids=[],
+            job_ids=job_ids,
+            collection_run_ids=[],
+            raw_ingestion_ids=raw_ids,
+        )
+
+
+async def test_candidate_changes_after_lock_is_detected_not_retried(
+    db_engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """If the post-lock recheck resolves to a *different* single Job than
+    the one just locked, `persist_posting` must fail closed with
+    `CandidateResolutionUnstableError` — never retry with the new
+    candidate (that would mean acquiring a second Job's lock while still
+    holding the first's, an inconsistent lock order)."""
+    t0 = datetime(2026, 3, 16, tzinfo=UTC)
+    t1 = t0 + timedelta(hours=1)
+    job = _load_fixture("canonical_url_match_primary").model_copy(
+        update={"source_job_id": "SWITCH-TEST"}
+    )
+    existing_variant = job.model_copy(update={"source_job_id": "SWITCH-EXISTING"})
+
+    existing_job_id = await _create_job_and_occurrence_directly(
+        db_engine, existing_variant, observed_at=t0, canonical_url_normalized=job.canonical_url
+    )
+    other_job_id = uuid.uuid4()  # never fetched — the mismatch check rejects before any lookup
+
+    call_count = 0
+
+    async def _fake_discover(session: AsyncSession, filter_clause: object) -> list[uuid.UUID]:
+        nonlocal call_count
+        call_count += 1
+        return [existing_job_id] if call_count == 1 else [other_job_id]
+
+    monkeypatch.setattr(persistence, "_discover_candidates", _fake_discover)
+
+    natural_key = resolve_identity(job)
+    raw_id = await pipeline._write_fetched_row(db_engine, job, job.discovered_at)
+
+    job_ids = [existing_job_id]
+    raw_ids = [raw_id]
+    try:
+        with pytest.raises(CandidateResolutionUnstableError):
+            await persist_posting(db_engine, natural_key, job, t1, raw_id)
+
+        assert call_count == 2  # discovered once, rechecked once — never retried
+
+        async with AsyncSession(bind=db_engine) as session:
+            job_row = await session.get(Job, existing_job_id)
+            assert job_row is not None
+            assert job_row.last_seen_at == t0  # unchanged
+
+            occurrence_count = (
+                await session.execute(
+                    select(func.count())
+                    .select_from(JobOccurrence)
+                    .where(JobOccurrence.job_id == existing_job_id)
+                )
+            ).scalar_one()
+            assert occurrence_count == 1  # no second occurrence created
+
+            raw_row = await session.get(RawJobIngestion, raw_id)
+            assert raw_row is not None
+            assert raw_row.processing_status == "fetched"
+            assert raw_row.job_occurrence_id is None
+    finally:
+        await _cleanup(
+            db_engine,
+            user_ids=[],
+            job_ids=job_ids,
+            collection_run_ids=[],
+            raw_ingestion_ids=raw_ids,
+        )
+
+
+async def test_candidate_becomes_ambiguous_after_lock_is_detected_not_retried(
+    db_engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """If the post-lock recheck resolves to *more than one* Job, fail
+    closed with `AmbiguousIdentityMatchError` — proving this branch is
+    reachable even when the ambiguity only appears after the lock, not
+    merely at initial discovery."""
+    t0 = datetime(2026, 3, 17, tzinfo=UTC)
+    t1 = t0 + timedelta(hours=1)
+    job = _load_fixture("canonical_url_match_primary").model_copy(
+        update={"source_job_id": "AMBIGUOUS-RECHECK"}
+    )
+    existing_variant = job.model_copy(update={"source_job_id": "AMBIGUOUS-RECHECK-EXISTING"})
+
+    existing_job_id = await _create_job_and_occurrence_directly(
+        db_engine, existing_variant, observed_at=t0, canonical_url_normalized=job.canonical_url
+    )
+    other_job_id = uuid.uuid4()
+
+    call_count = 0
+
+    async def _fake_discover(session: AsyncSession, filter_clause: object) -> list[uuid.UUID]:
+        nonlocal call_count
+        call_count += 1
+        return [existing_job_id] if call_count == 1 else [existing_job_id, other_job_id]
+
+    monkeypatch.setattr(persistence, "_discover_candidates", _fake_discover)
+
+    natural_key = resolve_identity(job)
+    raw_id = await pipeline._write_fetched_row(db_engine, job, job.discovered_at)
+
+    job_ids = [existing_job_id]
+    raw_ids = [raw_id]
+    try:
+        with pytest.raises(AmbiguousIdentityMatchError):
+            await persist_posting(db_engine, natural_key, job, t1, raw_id)
+
+        assert call_count == 2
+
+        async with AsyncSession(bind=db_engine) as session:
+            job_row = await session.get(Job, existing_job_id)
+            assert job_row is not None
+            assert job_row.last_seen_at == t0
+
+            raw_row = await session.get(RawJobIngestion, raw_id)
+            assert raw_row is not None
+            assert raw_row.processing_status == "fetched"
+    finally:
+        await _cleanup(
+            db_engine,
+            user_ids=[],
+            job_ids=job_ids,
+            collection_run_ids=[],
+            raw_ingestion_ids=raw_ids,
+        )
+
+
+async def test_candidate_deleted_between_discovery_and_lock_uses_real_transactions(
+    db_engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Genuine two-transaction race, not a monkeypatched query result:
+    transaction A completes initial candidate discovery and pauses (via
+    the `_before_candidate_lock` test seam); transaction B deletes and
+    commits the candidate Job; transaction A resumes and attempts the Job
+    lock. Must raise `CandidateResolutionUnstableError` with complete
+    rollback, never mutate a stale candidate."""
+    t0 = datetime(2026, 3, 18, tzinfo=UTC)
+    t1 = t0 + timedelta(hours=1)
+    job_existing = _load_fixture("canonical_url_match_primary").model_copy(
+        update={"source_job_id": "DELETE-RACE-EXISTING"}
+    )
+    job_attaching = _load_fixture("canonical_url_match_primary").model_copy(
+        update={"source_tenant_id": None, "source_job_id": "DELETE-RACE-ATTACH"}
+    )
+
+    existing_job_id = await _create_job_and_occurrence_directly(
+        db_engine,
+        job_existing,
+        observed_at=t0,
+        canonical_url_normalized=job_existing.canonical_url,
+    )
+
+    paused = asyncio.Event()
+    resume = asyncio.Event()
+
+    async def _pause_before_lock() -> None:
+        paused.set()
+        await resume.wait()
+
+    monkeypatch.setattr(persistence, "_before_candidate_lock", _pause_before_lock)
+
+    natural_key = resolve_identity(job_attaching)
+    raw_id = await pipeline._write_fetched_row(
+        db_engine, job_attaching, job_attaching.discovered_at
+    )
+
+    async def _attempt_attach() -> Exception | UpsertOutcome:
+        try:
+            return await persist_posting(db_engine, natural_key, job_attaching, t1, raw_id)
+        except Exception as exc:  # noqa: BLE001 - captured for assertion below, not swallowed
+            return exc
+
+    async def _delete_candidate() -> None:
+        await paused.wait()
+        async with AsyncSession(bind=db_engine) as session:
+            job_row = await session.get(Job, existing_job_id)
+            assert job_row is not None
+            await session.delete(job_row)
+            await session.commit()
+        resume.set()
+
+    job_ids: list[uuid.UUID] = []
+    raw_ids = [raw_id]
+    try:
+        result, _ = await asyncio.gather(_attempt_attach(), _delete_candidate())
+
+        assert isinstance(result, CandidateResolutionUnstableError)
+
+        async with AsyncSession(bind=db_engine) as session:
+            assert (await session.get(Job, existing_job_id)) is None  # genuinely deleted by task B
+
+            occurrence_count = (
+                await session.execute(
+                    select(func.count())
+                    .select_from(JobOccurrence)
+                    .where(JobOccurrence.source_job_id == "DELETE-RACE-ATTACH")
+                )
+            ).scalar_one()
+            assert occurrence_count == 0  # the attach never completed
+
+            raw_row = await session.get(RawJobIngestion, raw_id)
+            assert raw_row is not None
+            assert raw_row.processing_status == "fetched"
+            assert raw_row.job_occurrence_id is None
+    finally:
+        await _cleanup(
+            db_engine,
+            user_ids=[],
+            job_ids=job_ids,
+            collection_run_ids=[],
+            raw_ingestion_ids=raw_ids,
+        )
+
+
+async def test_attach_rollback_discards_all_three_effects_and_marks_run_failed(
+    db_engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failure injected via the private `persistence._after_attach_flush`
+    seam — after the existing Job's `last_seen_at` update, the new
+    `JobOccurrence` insert, and the raw row's terminal update have all
+    been flushed inside `persist_posting`'s own transaction, but before
+    that transaction commits — must roll back all three effects
+    together. Run through `pipeline.run()` so run/attempt-failure
+    counters can be checked too, mirroring the evidence-mismatch slice's
+    own rollback-test pattern."""
+    t1 = datetime(2026, 3, 19, tzinfo=UTC)
+    t2 = t1 + timedelta(hours=2)
+    query = SourceQuery(sources=["fixture_ats"])
+
+    primary = _load_fixture("canonical_url_match_primary")
+    secondary = _load_fixture("canonical_url_match_secondary").model_copy(
+        update={"discovered_at": t2}
+    )
+    unrelated = _load_fixture("tenant_requisition_match_primary").model_copy(
+        update={"source_job_id": "ATTACH-ROLLBACK-UNRELATED", "discovered_at": t2}
+    )
+
+    job_ids: list[uuid.UUID] = []
+    run_ids: list[uuid.UUID] = []
+    raw_ids: list[uuid.UUID] = []
+    async with AsyncSession(bind=db_engine) as session:
+        preexisting_job_ids = set((await session.execute(select(Job.id))).scalars().all())
+    try:
+        run1_id = await pipeline.run(
+            db_engine,
+            FixtureProvider([primary], called_at=t1),
+            query,
+            observed_at=t1,
+            clock=FixedClock(t1),
+        )
+        run_ids.append(run1_id)
+        occurrence_primary = await _occurrence_by_job_id(db_engine, "WID-500")
+
+        async def _raise() -> None:
+            raise RuntimeError("simulated attach rollback trigger")
+
+        monkeypatch.setattr(persistence, "_after_attach_flush", _raise)
+
+        with pytest.raises(RuntimeError, match="simulated attach rollback trigger"):
+            await pipeline.run(
+                db_engine,
+                # `unrelated` (a plain insert) is processed first and
+                # commits its own transaction; `secondary` (the attach)
+                # fails mid-transaction.
+                FixtureProvider([unrelated, secondary], called_at=t2),
+                query,
+                observed_at=t2,
+                clock=FixedClock(t2),
+            )
+
+        async with AsyncSession(bind=db_engine) as session:
+            runs = (await session.execute(select(CollectionRun))).scalars().all()
+            failed_run = next(r for r in runs if r.id != run1_id)
+            run_ids.append(failed_run.id)
+            assert failed_run.status == "failed"
+            assert failed_run.jobs_discovered == 2
+            assert failed_run.jobs_inserted == 1  # unrelated's already-committed insert
+            assert failed_run.jobs_updated == 0  # rolled-back attach contributes to neither
+
+            attempts = (
+                (
+                    await session.execute(
+                        select(CollectionRunProviderAttempt).where(
+                            CollectionRunProviderAttempt.collection_run_id == failed_run.id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert len(attempts) == 1
+            assert attempts[0].status == "failed"
+            assert attempts[0].jobs_inserted == 1
+            assert attempts[0].jobs_updated == 0
+
+            job_after = await session.get(Job, occurrence_primary.job_id)
+            assert job_after is not None
+            assert job_after.last_seen_at == t1  # unchanged — rolled back
+
+            occurrence_count = (
+                await session.execute(
+                    select(func.count())
+                    .select_from(JobOccurrence)
+                    .where(JobOccurrence.job_id == occurrence_primary.job_id)
+                )
+            ).scalar_one()
+            assert occurrence_count == 1  # no second occurrence survived
+
+            raw_rows = (await session.execute(select(RawJobIngestion))).scalars().all()
+            raw_ids.extend(row.id for row in raw_rows)
+            assert len(raw_rows) == 3
+            assert sorted(row.processing_status for row in raw_rows) == [
+                "fetched",
+                "normalized",
+                "normalized",
+            ]
+            fetched_row = next(row for row in raw_rows if row.processing_status == "fetched")
+            assert fetched_row.job_occurrence_id is None
+            assert fetched_row.source_identifier == "987650001"
+
+        async with AsyncSession(bind=db_engine) as session:
+            current_job_ids = set((await session.execute(select(Job.id))).scalars().all())
+        job_ids = list(current_job_ids - preexisting_job_ids)
+    finally:
+        await _cleanup(
+            db_engine,
+            user_ids=[],
+            job_ids=job_ids,
+            collection_run_ids=run_ids,
+            raw_ingestion_ids=raw_ids,
+        )
+
+
+async def test_attached_occurrence_behaves_normally_under_tier1_on_resubmission(
+    db_engine: AsyncEngine,
+) -> None:
+    """Resubmitting the *same* natural key that was originally attached
+    via Tier 2 resolves through Tier 1's found branch on the second
+    submission (structurally guaranteed — Tier 2/3 only ever run when
+    Tier 1 finds nothing) — proving the attached occurrence behaves
+    identically to any other occurrence afterward: no duplicate, no
+    residual special state from having been created via Tier 2."""
+    t1 = datetime(2026, 3, 20, tzinfo=UTC)
+    t2 = t1 + timedelta(hours=1)
+    t3 = t2 + timedelta(hours=1)
+    query = SourceQuery(sources=["fixture_ats"])
+
+    primary = _load_fixture("canonical_url_match_primary")
+    secondary = _load_fixture("canonical_url_match_secondary")
+
+    job_ids: list[uuid.UUID] = []
+    collection_run_ids: list[uuid.UUID] = []
+    raw_ids: list[uuid.UUID] = []
+    try:
+        run1_id = await pipeline.run(
+            db_engine,
+            FixtureProvider([primary], called_at=t1),
+            query,
+            observed_at=t1,
+            clock=FixedClock(t1),
+        )
+        collection_run_ids.append(run1_id)
+        occurrence_primary = await _occurrence_by_job_id(db_engine, "WID-500")
+        job_ids.append(occurrence_primary.job_id)
+
+        run2_id = await pipeline.run(
+            db_engine,
+            FixtureProvider([secondary], called_at=t2),
+            query,
+            observed_at=t2,
+            clock=FixedClock(t2),
+        )
+        collection_run_ids.append(run2_id)
+        occurrence_secondary_first = await _occurrence_by_job_id(db_engine, "987650001")
+        assert occurrence_secondary_first.job_id == occurrence_primary.job_id
+
+        run3_id = await pipeline.run(
+            db_engine,
+            FixtureProvider([secondary], called_at=t3),
+            query,
+            observed_at=t3,
+            clock=FixedClock(t3),
+        )
+        collection_run_ids.append(run3_id)
+
+        assert await _job_count(db_engine) == 1
+        assert await _occurrence_count(db_engine) == 2  # unchanged — no third occurrence
+
+        async with AsyncSession(bind=db_engine) as session:
+            run3 = await session.get(CollectionRun, run3_id)
+            assert run3 is not None
+            assert run3.jobs_inserted == 0
+            assert run3.jobs_updated == 1
+
+            occurrence_secondary_after = await session.get(
+                JobOccurrence, occurrence_secondary_first.id
+            )
+            assert occurrence_secondary_after is not None
+            assert occurrence_secondary_after.id == occurrence_secondary_first.id
+            assert occurrence_secondary_after.last_seen_at == t3
+
+            raw_rows = (await session.execute(select(RawJobIngestion))).scalars().all()
+            raw_ids.extend(row.id for row in raw_rows)
+    finally:
+        await _cleanup(
+            db_engine,
+            user_ids=[],
+            job_ids=job_ids,
+            collection_run_ids=collection_run_ids,
+            raw_ingestion_ids=raw_ids,
+        )
+
+
+async def test_attach_never_moves_job_last_seen_at_backward(db_engine: AsyncEngine) -> None:
+    """An attach submitted with an `observed_at` earlier than the existing
+    Job's current `last_seen_at` must never move it backward — mirrors
+    Tier 1's own out-of-order-replay guarantee, now proven for the
+    attach path."""
+    t2 = datetime(2026, 3, 21, tzinfo=UTC)
+    t0 = t2 - timedelta(days=1)  # older than t2, submitted after t2 was already recorded
+    query = SourceQuery(sources=["fixture_ats"])
+
+    primary = _load_fixture("canonical_url_match_primary")
+    secondary = _load_fixture("canonical_url_match_secondary")
+
+    job_ids: list[uuid.UUID] = []
+    collection_run_ids: list[uuid.UUID] = []
+    raw_ids: list[uuid.UUID] = []
+    try:
+        run1_id = await pipeline.run(
+            db_engine,
+            FixtureProvider([primary], called_at=t2),
+            query,
+            observed_at=t2,
+            clock=FixedClock(t2),
+        )
+        collection_run_ids.append(run1_id)
+        occurrence_primary = await _occurrence_by_job_id(db_engine, "WID-500")
+        job_ids.append(occurrence_primary.job_id)
+
+        run2_id = await pipeline.run(
+            db_engine,
+            FixtureProvider([secondary], called_at=t0),
+            query,
+            observed_at=t0,
+            clock=FixedClock(t0),
+        )
+        collection_run_ids.append(run2_id)
+
+        async with AsyncSession(bind=db_engine) as session:
+            job_row = await session.get(Job, occurrence_primary.job_id)
+            assert job_row is not None
+            assert job_row.last_seen_at == t2  # unchanged — t0 < t2, never regresses
+
+            raw_rows = (await session.execute(select(RawJobIngestion))).scalars().all()
+            raw_ids.extend(row.id for row in raw_rows)
     finally:
         await _cleanup(
             db_engine,

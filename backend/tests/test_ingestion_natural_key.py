@@ -1,8 +1,11 @@
 from app.ingestion.natural_key import (
+    NaturalKey,
     NaturalKeyDomain,
+    canonical_url_advisory_lock_key,
     canonicalize_identifier,
     canonicalize_nullable_text,
     resolve_natural_key,
+    tenant_requisition_advisory_lock_key,
 )
 
 
@@ -105,3 +108,54 @@ def test_canonicalize_nullable_text_preserves_case_trims_and_collapses_blank() -
     assert canonicalize_nullable_text("  REQ-1001 ") == "REQ-1001"
     assert canonicalize_nullable_text("   \t\r\n  ") is None
     assert canonicalize_nullable_text(None) is None
+
+
+def test_canonical_url_lock_key_never_collides_with_a_natural_key_lock() -> None:
+    """Tier 2's cross-occurrence lock domain (tag 4) must never collide
+    with any of Tier 1's three natural-key-domain tags (1/2/3), even when
+    the underlying string value is identical."""
+    value = "https://example.com/jobs/1"
+    canonical_url_key = canonical_url_advisory_lock_key(value)
+
+    url_domain_key = NaturalKey(
+        NaturalKeyDomain.URL, "p", "s", url_normalized=value
+    ).advisory_lock_key()
+    assert canonical_url_key != url_domain_key
+
+
+def test_tenant_requisition_lock_key_never_collides_with_a_tenant_natural_key_lock() -> None:
+    """Tier 3's lock domain (tag 5) must never collide with
+    `NaturalKeyDomain.TENANT`'s own lock (tag 1), even when
+    `source_job_id` and `requisition_id_raw` coincidentally hold the same
+    value — the one scenario where the encoded component values would
+    otherwise be byte-for-byte identical apart from the tag."""
+    provider, source, tenant, identifier = "p", "s", "acme-corp", "REQ-1001"
+
+    tenant_requisition_key = tenant_requisition_advisory_lock_key(
+        provider, source, tenant, identifier
+    )
+    natural_tenant_key = NaturalKey(
+        NaturalKeyDomain.TENANT, provider, source, tenant_id=tenant, job_id=identifier
+    ).advisory_lock_key()
+
+    assert tenant_requisition_key != natural_tenant_key
+
+
+def test_canonical_url_and_tenant_requisition_lock_keys_are_deterministic() -> None:
+    """Same input must always yield the same lock key (required for the
+    advisory lock to actually serialize repeated calls for the same
+    signal)."""
+    assert canonical_url_advisory_lock_key("https://example.com/x") == (
+        canonical_url_advisory_lock_key("https://example.com/x")
+    )
+    assert tenant_requisition_advisory_lock_key("p", "s", "t", "r") == (
+        tenant_requisition_advisory_lock_key("p", "s", "t", "r")
+    )
+
+
+def test_tenant_requisition_lock_key_respects_component_boundaries() -> None:
+    """Length-prefixing must prevent a component-boundary ambiguity across
+    all four components, mirroring `NaturalKey`'s own boundary guarantee."""
+    key_ab_c = tenant_requisition_advisory_lock_key("p", "s", "AB", "C")
+    key_a_bc = tenant_requisition_advisory_lock_key("p", "s", "A", "BC")
+    assert key_ab_c != key_a_bc

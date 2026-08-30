@@ -1,0 +1,21 @@
+{
+  "provider": "fixture_provider",
+  "source": "fixture_ats",
+  "source_tenant_id": "widgets-inc",
+  "source_job_id": "WID-500",
+  "requisition_id_raw": "WID-500",
+  "title": "Support Engineer",
+  "company": "Widgets Inc",
+  "location": "Remote",
+  "source_url": "https://widgets.example.com/careers/support-engineer",
+  "apply_url": "https://widgets.example.com/careers/support-engineer/apply",
+  "canonical_url": "https://widgets.example.com/careers/support-engineer",
+  "description": "Support customers.",
+  "compensation_text": "$70,000 - $90,000",
+  "posted_at": "2026-02-01T00:00:00+00:00",
+  "discovered_at": "2026-02-01T00:00:00+00:00",
+  "raw": {
+    "id": "WID-500",
+    "title": "Support Engineer"
+  }
+}

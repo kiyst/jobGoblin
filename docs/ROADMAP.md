@@ -280,8 +280,8 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   domain tables (ADR 0003) are now migrated; the rest of Phase 1's exit gate
   (§[PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md)) remains to be independently
   verified before declaring the phase complete.
-- **Phase 2: in progress (updated 2026-08-30).** One bounded, Class H vertical slice
-  merged into `main` so far: the **natural-key ingestion spine** (offline,
+- **Phase 2: in progress (updated 2026-08-30).** Two bounded, Class H vertical slices
+  merged into `main` so far. The **natural-key ingestion spine** (offline,
   fixture-driven, no live provider) — `DiscoveredJob`/`DiscoveryResult`/`ProviderError`/
   `SourceRunStats` schemas, `DiscoveryProvider` protocol, `FixtureProvider`,
   `ingestion/clock.py`, `ingestion/hashing.py::canonical_json_hash()`,
@@ -291,20 +291,33 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   per-source counter rollups, sanitized failure telemetry) — proves Fixture →
   `RawJobIngestion` → identity resolution → `Job` → `JobOccurrence` end-to-end across
   all three natural-key domains plus the genuinely unkeyable (`parse_error`) case.
-  A second slice, **Tier-1 `evidence_mismatch` conflict persistence**
-  ([DECISIONS/0007](DECISIONS/0007-identity-conflict-quarantine.md)), is implemented
-  and under review on its own feature branch (`phase-2/evidence-mismatch-conflict-
-  persistence`) — **not yet merged into `main`**:
+  **Tier-1 `evidence_mismatch` conflict persistence**
+  ([DECISIONS/0007](DECISIONS/0007-identity-conflict-quarantine.md)) —
   `ingestion/persistence.py::persist_posting()` replaces the spine's original
   fail-closed `DeferredIdentityConflictError` placeholder with real quarantine: a
   canonical-URL evidence mismatch on an existing natural key now updates observational
   fields only, inserts one `identity_conflicts` row per distinct new `RawJobIngestion`,
   and reroutes that raw row to `processing_status='identity_conflict'`, all validated
   against a `SELECT ... FOR UPDATE`-locked `raw_id` and a re-resolved `natural_key`
-  (existence, status, linkage, provider/source, `source_identifier`,
-  `raw_content_hash`, `fetched_at`, and exact natural-key agreement with `job`) before
-  any mutation. Still deferred: identity tiers 2–4, `ambiguous_match`, `QueryPlanner`,
-  `ProviderRegistry`, multi-source partial-success handling, live providers.
+  before any mutation.
+  A third slice, **Tier-2/3 cross-occurrence attachment**
+  ([DECISIONS/0004](DECISIONS/0004-scoped-deterministic-identity.md)'s "Phase 2
+  implementation notes"), is implemented and under review on its own feature branch
+  (`phase-2/tier2-tier3-identity-attachment`) — **not yet merged into `main`**:
+  `upsert_job_occurrence()` now attempts normalized-canonical-URL matching (Tier 2, only
+  when a usable canonical URL exists) or tenant-scoped requisition matching (Tier 3, only
+  when no usable canonical URL exists — the two are mutually exclusive per posting, never
+  a sequential fallback), attaching a new `JobOccurrence` to an existing `Job` (a new
+  `UpsertKind.ATTACHED` outcome, counted as `jobs_updated`) rather than creating a
+  duplicate. Candidate resolution is single-pass and fail-closed under a tier-specific
+  advisory lock (new `canonical_url_advisory_lock_key()`/
+  `tenant_requisition_advisory_lock_key()`): more than one candidate raises
+  `AmbiguousIdentityMatchError`; a candidate that disappears or changes between discovery
+  and its `FOR UPDATE` lock raises `CandidateResolutionUnstableError`, never a retry. Still
+  deferred: Tier 4 (blocked on a company-text-to-`company_id` resolution capability that
+  does not exist yet, not merely unimplemented), `ambiguous_match` persistence and its
+  evidence shape, `QueryPlanner`, `ProviderRegistry`, multi-source partial-success
+  handling, live providers.
 - **Phases 3-14: not started.** Begin each phase only after completing its preflight in
   [PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md) and receiving approval for the next
   smallest slice.

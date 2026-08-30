@@ -143,6 +143,81 @@ match with no conflicting evidence still auto-attaches with no review.
 occurrence's value is most authoritative, after identity resolution — it is never used as
 an input to identity resolution itself.
 
+## Phase 2 implementation notes (Tier 2/3 cross-occurrence attachment slice)
+
+`ingestion/persistence.py::upsert_job_occurrence()` implements match-precedence steps 2
+and 3 as a bounded slice, following Tier 1's own "found" branch. Decisions resolved during
+implementation:
+
+- **Tier 2/3 are mutually exclusive per posting, not sequential fallbacks.** Step 2
+  (canonical URL) is attempted only when the incoming canonical URL normalizes to a usable
+  value; a miss there proceeds directly to step 5 (create a new `Job`) — step 3 (tenant-
+  scoped requisition) is **never** attempted for that posting, even though this ADR's own
+  step ordering lists it next. Step 3 is attempted only when the incoming canonical URL
+  does *not* normalize to a usable value at all, and both `source_tenant_id`/
+  `requisition_id_raw` are present. A usable canonical URL's miss is not license to fall
+  back to step 3's weaker signal for the same posting — doing so risks a false merge (two
+  postings with genuinely different canonical URLs, sharing only a tenant/requisition
+  value) that is more damaging than the duplicate-`Job` outcome it would prevent. The
+  reverse ordering (trying step 3 after any step-2 miss, regardless of canonical-URL
+  usability) was considered and explicitly declined for this slice; adopting it later
+  would be a separate ADR/product decision, not a silent implementation change.
+- **Step 4 (company-scoped requisition, fallback-only) is deferred, not implemented.**
+  `DiscoveredJob.company` is raw text; no capability in the ingestion pipeline resolves
+  raw company text into a `companies.id` today. Step 4's own key,
+  `(company_id, requisition_id_raw)`, needs an input this pipeline cannot produce — this
+  is a missing *prerequisite*, not merely an unwritten implementation, so it cannot be
+  attempted in any form (not even a shadow-detection query) until a dedicated
+  company-resolution capability exists. This slice's own residual duplicate-creation risk
+  for step-4-only-matchable postings (no tenant at all, but a resolvable company+
+  requisition match) is accepted **temporarily**, pending that prerequisite — this slice
+  does not complete deterministic identity resolution.
+- **Candidate counting is by distinct `job_id`, not by occurrence row.** Multiple existing
+  occurrences already correctly attached to the same `Job` (e.g. two prior sources already
+  merged) count as one candidate, not multiple — getting this wrong would make an
+  already-correctly-merged `Job` spuriously ambiguous on its third and further occurrence.
+- **Multiple candidates fail closed** via a new `AmbiguousIdentityMatchError`, raised
+  before any mutation, uncaught in `pipeline.py` — a whole-run failure, not a
+  per-posting-isolated one. `ambiguous_match` persistence (the real `identity_conflicts`
+  row ADR 0007 defines for this case) remains a deliberately separate, later slice —
+  its `incoming_value` shape for `ambiguous_match` is not yet fully specified anywhere
+  (unlike `existing_value`, which DATA_MODEL.md already pins down as a JSON array of
+  candidate `job_id`s) and is exactly the kind of decision that slice should open with,
+  not one this slice should invent silently.
+- **Candidate resolution is single-pass and fail-closed, never retried.** After the
+  tier-specific advisory lock (a new `canonical_url_advisory_lock_key()`/
+  `tenant_requisition_advisory_lock_key()` pair in `natural_key.py`, sharing
+  `NaturalKey`'s own encoding scheme under fresh domain tags 4/5 — deliberately not
+  reusing any `NaturalKeyDomain` tag, including `TENANT`'s own tag 1, since a posting's
+  `source_job_id` and `requisition_id_raw` can coincidentally share a value), a candidate
+  Job is locked `FOR UPDATE` and the same candidate query is re-run once under that lock.
+  If the candidate disappeared (deleted concurrently) or the recheck resolves to a
+  different single Job or more than one Job, `persist_posting` fails closed with
+  `CandidateResolutionUnstableError`/`AmbiguousIdentityMatchError` rather than retrying —
+  retrying while holding a lock on a stale candidate risks accumulating locks in
+  inconsistent order across concurrent transactions, a deadlock surface strictly worse
+  than one safe failure. Lock order is always parent (`Job`) before child
+  (`JobOccurrence`), compatible with `jobs` -> `job_occurrences` `ON DELETE CASCADE`.
+- **Writer discipline this guarantee depends on**: every current ingestion write path
+  treats `job_occurrences`/`jobs` identity evidence as immutable once written — nothing
+  deletes a `Job`/`JobOccurrence` row or updates its identity columns in place. Any future
+  supported path that deletes or changes that evidence (an administrative Job-merge/
+  delete feature, for example) must acquire the corresponding signal's advisory lock and
+  this same parent-before-child lock order, so a delete- or change-in-flight is either
+  fully visible or fully blocked to this code, never half-visible. Out-of-band manual SQL
+  remains outside this guarantee, matching this codebase's posture elsewhere.
+- **A new `UpsertKind.ATTACHED` outcome counts as `jobs_updated`, never `jobs_inserted`**,
+  at both `collection_runs` and `collection_run_provider_attempts` levels — no new `Job`
+  was created; the existing `Job`'s own `last_seen_at` is what advanced, matching a plain
+  update far more than an insertion.
+- **A pre-existing correctness gap, only reachable once a `Job` can have multiple
+  occurrences under different natural keys (which this slice is the first to make
+  possible), was fixed as part of this slice**: Tier 1's own found-branch parent-`Job`
+  fetch changed from a plain `session.get()` to `SELECT ... FOR UPDATE`, since two
+  concurrent updates to the same `Job.last_seen_at` from different natural-key branches
+  (Tier 1 re-observing one occurrence, Tier 2/3 attaching another) could otherwise lose an
+  update under READ COMMITTED, moving `last_seen_at` backward.
+
 ## Consequences
 - Two unrelated companies reusing the same requisition number, or a job board scraping a
   requisition ID without tenant context, can no longer cause a silent cross-employer
