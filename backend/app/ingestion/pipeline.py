@@ -182,6 +182,12 @@ async def run(
                 per_source_inserted[job.source] = per_source_inserted.get(job.source, 0) + 1
             elif outcome.kind is UpsertKind.UPDATED:
                 per_source_updated[job.source] = per_source_updated.get(job.source, 0) + 1
+            elif outcome.kind is UpsertKind.ATTACHED:
+                # A new JobOccurrence was created, but no new Job — the
+                # existing Job's own last_seen_at was what advanced, so
+                # this counts as an update to that Job, not an insertion
+                # of one.
+                per_source_updated[job.source] = per_source_updated.get(job.source, 0) + 1
             else:
                 # Quarantined: descriptive/canonical fields never applied,
                 # but observational state did advance — bucketed with the

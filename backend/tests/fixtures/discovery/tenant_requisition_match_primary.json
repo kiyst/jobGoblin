@@ -1,0 +1,21 @@
+{
+  "provider": "fixture_provider",
+  "source": "fixture_ats",
+  "source_tenant_id": "acme-holdings",
+  "source_job_id": "REQ-777",
+  "requisition_id_raw": "LEGACY-777",
+  "title": "Warehouse Associate",
+  "company": "Acme Holdings",
+  "location": "Columbus, OH",
+  "source_url": "https://acme-holdings.example.com/jobs/REQ-777",
+  "apply_url": "https://acme-holdings.example.com/jobs/REQ-777/apply",
+  "canonical_url": null,
+  "description": "Warehouse operations.",
+  "compensation_text": "$18/hr",
+  "posted_at": "2026-02-05T00:00:00+00:00",
+  "discovered_at": "2026-02-05T00:00:00+00:00",
+  "raw": {
+    "id": "REQ-777",
+    "title": "Warehouse Associate"
+  }
+}

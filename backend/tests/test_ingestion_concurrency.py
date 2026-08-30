@@ -204,3 +204,75 @@ async def test_concurrent_conflicting_canonical_urls_quarantine_the_loser(
                 if existing_job is not None:
                     await session.delete(existing_job)
             await session.commit()
+
+
+async def test_concurrent_tier2_attach_produces_no_duplicate_job(db_engine: AsyncEngine) -> None:
+    """Two genuinely concurrent postings with *different* natural keys
+    (so Tier 1's own lock never serializes them at all) but the same
+    normalized canonical URL: exactly one wins (`INSERTED`) and the other
+    attaches (`ATTACHED`) via Tier 2's own canonical-URL advisory lock —
+    never two Jobs for the same real posting. Assertions read the actual
+    winner back off each task's own outcome, never assuming which one
+    wins."""
+    t1 = datetime(2026, 4, 3, tzinfo=UTC)
+    base = _load_fixture("canonical_url_match_primary")
+    job_a = base.model_copy(update={"source_tenant_id": "tenant-race-a", "source_job_id": "RACE-A"})
+    job_b = base.model_copy(update={"source_tenant_id": "tenant-race-b", "source_job_id": "RACE-B"})
+
+    raw_ids: list[uuid.UUID] = []
+
+    async def _attempt(job: DiscoveredJob) -> UpsertOutcome:
+        natural_key = resolve_identity(job)
+        raw_id = await pipeline._write_fetched_row(db_engine, job, job.discovered_at)
+        raw_ids.append(raw_id)  # captured before persist_posting can raise, never leaked
+        return await persist_posting(db_engine, natural_key, job, t1, raw_id)
+
+    job_ids: list[uuid.UUID] = []
+    try:
+        outcome_a, outcome_b = await asyncio.gather(_attempt(job_a), _attempt(job_b))
+        job_ids.append(outcome_a.job_id)
+
+        assert outcome_a.job_id == outcome_b.job_id
+        assert outcome_a.occurrence_id != outcome_b.occurrence_id  # two distinct occurrences
+        assert {outcome_a.kind, outcome_b.kind} == {UpsertKind.INSERTED, UpsertKind.ATTACHED}
+
+        async with AsyncSession(bind=db_engine) as session:
+            job_count = (
+                await session.execute(
+                    select(func.count()).select_from(Job).where(Job.id == outcome_a.job_id)
+                )
+            ).scalar_one()
+            assert job_count == 1
+
+            occurrence_count = (
+                await session.execute(
+                    select(func.count())
+                    .select_from(JobOccurrence)
+                    .where(JobOccurrence.job_id == outcome_a.job_id)
+                )
+            ).scalar_one()
+            assert occurrence_count == 2  # both postings' own occurrences survive
+
+            raw_rows = (
+                (
+                    await session.execute(
+                        select(RawJobIngestion).where(RawJobIngestion.id.in_(raw_ids))
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert all(row.processing_status == "normalized" for row in raw_rows)
+    finally:
+        async with AsyncSession(bind=db_engine) as session:
+            for raw_id in raw_ids:
+                existing_raw = await session.get(RawJobIngestion, raw_id)
+                if existing_raw is not None:
+                    await session.delete(existing_raw)
+            await session.commit()
+
+            for job_id in job_ids:
+                existing_job = await session.get(Job, job_id)
+                if existing_job is not None:
+                    await session.delete(existing_job)
+            await session.commit()
