@@ -385,5 +385,42 @@ that detail.
 
 ### Work review
 
-_Pending._
-
+- Date/agent: 2026-08-30, Codex. Correction diff reviewed:
+  `54518bd..272afb8` on
+  `phase-2/tier2-tier3-identity-attachment`.
+- Findings 2 and 3 from review commit `54518bd` are closed: both coordinated
+  deletion tests now release their paused peer in `finally`, use a bounded
+  wait, and retain setup ids for best-effort cleanup; the concurrent-attach
+  test records raw ids before persistence can fail; the new entry accurately
+  reports **53** focused tests without rewriting the historical entry.
+- Finding 1 is directionally corrected: Tier 1 no longer locks the occurrence
+  before its parent, the real parent-deletion race is bounded and passes, and
+  the bare parent assertion is gone. One revalidation defect remains:
+  1. **Medium — Tier 1's association recheck can read the session's stale ORM
+     identity-map value instead of the freshly locked database value.** The
+     initial unlocked `_existing_occurrence_query()` loads a full
+     `JobOccurrence` entity. The later locked execution of the same ORM query
+     can return that already-loaded instance without refreshing its loaded
+     `job_id`. If the same occurrence row is reassociated between probe and
+     lock, SQL can select the row while `occurrence.job_id` still contains the
+     old cached parent id, allowing the new equality check to pass and the
+     method to return/update the wrong parent association. Make the initial
+     probe select only fresh scalar identity values (`id`, `job_id`) so it
+     does not seed the ORM identity map, then load the entity only in the
+     post-parent-lock `FOR UPDATE` query; alternatively force an explicit
+     database refresh with equivalent guarantees. Add a regression that
+     changes the occurrence's `job_id` in a separately committed transaction
+     at the test seam and proves `CandidateResolutionUnstableError`, no stale
+     parent update, no raw transition, and failure-safe cleanup. This test is
+     defense-in-depth for the promised revalidation; supported future writers
+     must still obey the documented advisory/row-lock discipline.
+- Independent proportionate verification: repository checker exit 0; Ruff
+  format/check clean; mypy clean across **73 source files**; the named focused
+  suite **53 passed**; `git diff --check` clean; working tree clean. Full-suite
+  and schema results reported in `Work done` were not repeated because this
+  remaining correction is isolated before approval.
+- **Verdict: changes requested.** Make only the scalar-probe/fresh-entity
+  revalidation correction and its regression test, update affected wording,
+  run proportionate verification, append a concise `Work done`, commit and
+  push, then stop for re-review. Do not merge `main`, begin another product
+  slice, or start workflow-automation tooling.
