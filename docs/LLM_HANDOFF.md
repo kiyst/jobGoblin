@@ -374,6 +374,54 @@ remain not started and are not authorized by this merge.
 
 ### Work review
 
-_Pending._
+- Date/agent: 2026-08-30, Codex. Diff reviewed:
+  `bd59a14..988dcd1` on
+  `phase-2/tier2-tier3-identity-attachment`.
+- Independent verification: repository checker exit 0; Ruff format/check
+  clean; mypy clean across **73 source files**; the three named focused
+  files collect and pass **52 tests**; full suite **1174 passed** with a
+  workspace-local `--basetemp`; `alembic check` against `jobgoblin_test`
+  reports no drift (the ordinary development target correctly remains
+  behind at `0006`); `git diff --check` clean. The working tree remained
+  clean throughout review.
+- Findings:
+  1. **Medium — the claimed parent-before-child lock discipline is not true
+     for Tier 1, leaving the newly documented future deletion contract with
+     an opposite-order deadlock.** `_select_existing()` acquires
+     `JobOccurrence FOR UPDATE` first, and the found branch then acquires
+     `Job FOR UPDATE`. A concurrent parent deletion takes the Job lock first
+     and its `ON DELETE CASCADE` then needs the occurrence lock: Tier 1 can
+     wait on the parent while deletion waits on the child. This directly
+     contradicts Iteration 2's “parent-before-child”/compatible-writer claim.
+     Refactor the Tier-1 found path to discover without retaining a child
+     lock, lock/revalidate the parent first, then lock/revalidate and mutate
+     the occurrence; fail closed without a bare assertion if either row or
+     association changed. Add a deterministic real-PostgreSQL Tier-1-vs-
+     parent-delete regression proving completion without a deadlock and
+     complete rollback/final state. Update the lock-order documentation and
+     handoff claim to describe the actual global discipline.
+  2. **Low — the new deletion-race test can hang indefinitely and leak its
+     setup row on an assertion/database failure.** In
+     `test_candidate_deleted_between_discovery_and_lock_uses_real_transactions`,
+     `_delete_candidate()` calls `resume.set()` only on its success path;
+     any failure before that leaves `_attempt_attach()` waiting forever, and
+     cleanup omits `existing_job_id` on the assumption deletion succeeded.
+     Put `resume.set()` in `finally`, bound the coordinated gather with a
+     timeout, and include the candidate id in best-effort cleanup. Apply the
+     same failure-safe principle to the new concurrent-attach test: record
+     each raw id immediately after creation (before persistence can raise),
+     so a regression does not contaminate later database tests.
+  3. **Low — the focused-test result in `Work done` is inaccurate.** The
+     stated three files collect and pass **52**, not **63**, tests on commit
+     `988dcd1`. Correct the new handoff entry without rewriting historical
+     entries, and report the actual post-correction count.
+- **Verdict: changes requested.** The Tier-2/Tier-3 precedence, candidate
+  revalidation, `ATTACHED -> jobs_updated` semantics, three-effect rollback
+  boundary, existing-index reuse, and Tier-4 deferral are otherwise accepted.
+  Make only the three bounded corrections above, rerun proportionate
+  verification (including the new real concurrency regression), append a
+  concise `Work done`, commit and push the feature branch, and stop for
+  re-review. Do not merge `main`, begin `ambiguous_match`/Tier 4, or start the
+  workflow-automation tooling slice.
 
 ---
