@@ -534,3 +534,25 @@ that detail.
 - STOP — awaiting user merge authorization. Do not implement conflict persistence,
   `QueryPlanner`, identity tiers 2–4, multi-source partial-success handling, live
   providers, or modify/merge `main` without separate authorization.
+
+**Merge record (appended, not a rewrite of the entry above):** Approved at review
+commit `dfb2db6` (no findings). Per user authorization, `phase-2/natural-key-
+ingestion-spine` was merged into `main` with a normal merge commit (`20ab7d4`;
+`--no-ff`, no squash/rebase/force-push) and pushed. `main`/`origin/main` are both
+now at `20ab7d4`. Verified: feature branch was clean and `main`/`origin/main` were
+still at `903ad0d` immediately before the merge; `main` has zero content diff
+against the feature branch (`git diff main phase-2/natural-key-ingestion-spine
+--stat` empty); migration `0017` remains the sole Alembic head;
+`python backend/scripts/check_repo.py` exits 0 with zero findings; `git diff
+--check` clean; working tree clean.
+
+**Rollback boundary:** reverting `20ab7d4` (a single merge commit) restores `main`
+to `903ad0d` exactly — no schema/migration exists in this slice to downgrade, and
+no data migration accompanies it. This merges Phase 2's first vertical slice only
+(the natural-key ingestion spine: identity tiers 1/5 across all three ADR-0004
+natural-key forms, observational-only re-observation, fail-closed canonical-URL
+conflict detection, sanitized telemetry/logging, and fail-closed provider/partial-
+result validation) — it does **not** complete Phase 2. `QueryPlanner`,
+`ProviderRegistry`, multi-source/partial-success handling, identity tiers 2–4,
+conflict-quarantine persistence, live providers, Phase 3 normalization, API routes,
+and scheduling all remain not started and are not authorized by this merge.
