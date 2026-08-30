@@ -421,4 +421,116 @@ that detail.
 
 ### Work review
 
-*Pending — awaiting independent review.*
+- Date/reviewer: 2026-08-29, Claude Code (Sonnet 5) acting as independent reviewer
+  (role transferred per the user's explicit instruction for this pass). Diff
+  reviewed: correction commit `7f01a9f` against the six findings in review commit
+  `fde5fa6`, on `phase-2/natural-key-ingestion-spine` (remote tip `66ae644`, a
+  handoff-only rollback-boundary note; no executable change beyond `7f01a9f`).
+- Pre-flight target verification (performed before any database command, per
+  instruction): `docker exec ... \l` and `\dt` confirmed `jobgoblin` (development)
+  holds only the five tables migration `0006` produces and `alembic_version='0006'`;
+  `jobgoblin_test` (disposable) is a distinct database at `alembic_version='0017'`.
+  `Settings().database_url`/`.test_database_url` resolved as expected (dev URL
+  default; test override `None`, falling back to `conftest.py`'s disposable
+  default). Reconfirmed both revisions unchanged after every command below.
+- Independent verification performed (all against real PostgreSQL, `jobgoblin_test`
+  only): `ruff format --check`/`ruff check` — clean; `mypy .` — clean, 91 source
+  files; targeted (`test_ingestion_pipeline.py` + the four sibling ingestion/schema
+  test files) — **41 passed**, matching the claim; full suite with an explicit
+  writable `--basetemp` — **1147 passed**, matching the claim; `alembic heads` —
+  `0017 (head)`; `alembic check` (DATABASE_URL explicitly overridden to
+  `jobgoblin_test`) — `No new upgrade operations detected`; `scripts/check_repo.py`
+  — exit 0; `git status`/`git diff --check` — clean, no executable file touched by
+  this review. Development database reconfirmed at `0006` with its original
+  five-table shape, both before and after the full run.
+- Findings: **none.** Each of the eight required checks was independently
+  confirmed by reading the actual diff and exercising it, not by trusting the
+  `Work done` summary:
+  1. **Re-observation is observational-only.** `persistence.py:118-123` — the
+     found branch mutates only `occurrence.last_seen_at`/`.is_active` and the
+     parent `Job.last_seen_at`; no descriptive/canonical/source field is touched.
+     `test_reobservation_only_advances_observational_fields` submits a replay with
+     both changed and `None`-ed descriptive fields and asserts every one of them
+     still reads back as the *original* posting's values — passed.
+  2. **Canonical-URL conflicts fail closed, pre-mutation, and are never
+     `parse_error`.** `persistence.py:107-117` — `DeferredIdentityConflictError`
+     is raised before any attribute assignment on the found branch. It is a
+     distinct `RuntimeError` subclass; `pipeline.py`'s per-posting loop catches
+     only `UnresolvableIdentityError`, so a conflict propagates to the outer
+     handler as a failed run, never miscategorized as `parse_error`.
+     `test_canonical_evidence_mismatch_fails_closed_before_mutation` (unit level)
+     and `test_pipeline_leaves_conflicting_raw_row_fetched_and_marks_run_failed`
+     (pipeline level: run `status='failed'`, the conflicting posting's raw row
+     stays `'fetched'`, the pre-existing occurrence's `last_seen_at`/
+     `canonical_url` are untouched) both passed.
+  3. **No raw URL, token, payload value, or exception message ever reaches
+     stored telemetry or logs.** `identity.py:26-48` — the exception message is
+     now the fixed `UNRESOLVABLE_IDENTITY_MESSAGE` constant (confirmed via
+     `git show 7f01a9f -- backend/app/ingestion/identity.py`: the prior code
+     literally interpolated `job.source_url!r}` into the exception text — a real
+     secret-leak bug, now removed). `pipeline.py`'s `_mark_parse_error` stores
+     that same constant, never `str(identity_exc)`. Every `logger.*` call in
+     `pipeline.py` (grepped exhaustively — 4 call sites, none in `identity.py`/
+     `persistence.py`/`natural_key.py`) logs only IDs, status strings, counts, or
+     `type(exc).__name__` — never a message or field value.
+     `test_parse_error_telemetry_is_sanitized_logged_safely_and_uses_fetch_time`
+     embeds a literal secret token in both `source_url` and `raw` and asserts it
+     *is* present in `raw_payload` but absent from `error_message` and every
+     captured log record; `test_unexpected_failure_propagates_and_marks_run_failed`
+     and the `provider_error` case of
+     `test_pipeline_fails_closed_for_unsupported_provider_result_states` repeat the
+     same secret-absence proof against a generic exception message and a
+     `ProviderError.detail` string, respectively — all passed.
+  4. **Failed runs retain exact accumulated counters.** `pipeline.py:154-156,246-249`
+     — `per_source_discovered`/`_inserted`/`_updated` are populated incrementally
+     during the per-posting loop and read directly (not re-derived from a
+     zeroed default) by the outer failure handler.
+     `test_unexpected_failure_propagates_and_marks_run_failed` fails deliberately
+     on the second of two postings and asserts both the run row and its one
+     attempt row report `jobs_discovered=2, jobs_inserted=1, jobs_updated=0` —
+     the exact state at the moment of failure, not zero and not the full batch —
+     passed.
+  5. **Provider-identity mismatches and unsupported partial/error results fail
+     closed before any posting write.** `pipeline.py:161-177` — four checks
+     (`result.provider`, source-set equality, per-job provider, `possibly_incomplete`)
+     all run before `_write_fetched_row` is ever called for any job.
+     `test_pipeline_fails_closed_for_unsupported_provider_result_states`
+     (parametrized over all 5 cases named in the finding) asserts zero
+     `RawJobIngestion` and zero `Job` rows exist afterward for every case — passed.
+  6. **Required logging events exist.** `ingestion_run_started`/`_completed` (INFO),
+     `ingestion_parse_error` (WARNING, raw-ingestion id only), `ingestion_run_failed`
+     (ERROR, run id + exception type only) — all four present and asserted via
+     `caplog` in the tests cited under (3)/(4) above.
+  7. **`RawJobIngestion.fetched_at` uses `DiscoveredJob.discovered_at`.**
+     `pipeline.py:182-184` passes `job.discovered_at`, not `observed_at`.
+     `test_parse_error_telemetry_is_sanitized_logged_safely_and_uses_fetch_time`
+     asserts `raw.fetched_at == job.discovered_at` **and** `!= observed_at` with
+     deliberately distinct values — not merely coincidentally equal — passed.
+  8. **Test cleanup is failure-safe; no schema/migration drift.** Every new/edited
+     test either captures IDs immediately after each fetch and before any
+     assertion on that data (the pattern this same review required last pass), or
+     — in the two tests exercising `pipeline.run()` against a pre-existing
+     occurrence — snapshots the full set of `Job`/`CollectionRun`/
+     `RawJobIngestion` ids before the test body runs and cleans up the set
+     difference afterward, which is strictly more robust against a missed
+     `extend()` call. `alembic check` reports no drift; no migration file exists
+     in this diff; development database independently confirmed unchanged at
+     `0006` before and after this review's own verification run.
+- Also explicitly checked, no defect found: the two-source counter test's fixture
+  postings correctly set `provider="two_source_provider"` matching the fake
+  provider's own `DiscoveryResult.provider` (the self-reported "invalid two-source
+  test fake" bug from the prior pass — verified fixed, not merely claimed fixed);
+  the concurrency test suite (`test_ingestion_concurrency.py`) is unaffected by the
+  canonical-URL-conflict check, since every concurrent pair submits an identical
+  payload (identical canonical URL cannot "disagree" with itself); no product
+  documentation (`ARCHITECTURE.md`/`DATA_MODEL.md`/ADRs) was touched by this
+  correction, consistent with the review's own explicit scope boundary (conflict
+  persistence/quarantine documentation is deferred alongside the conflict-writer
+  itself, not part of this bounded pass).
+- Missing/inconclusive checks: none. Every one of the eight required checks was
+  independently reproducible against real PostgreSQL, not merely inferred from the
+  `Work done` narrative.
+- **Verdict: approved. No corrections required.**
+- STOP — awaiting user merge authorization. Do not implement conflict persistence,
+  `QueryPlanner`, identity tiers 2–4, multi-source partial-success handling, live
+  providers, or modify/merge `main` without separate authorization.
