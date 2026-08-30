@@ -23,6 +23,11 @@ class UnresolvableIdentityError(ValueError):
     """
 
 
+UNRESOLVABLE_IDENTITY_MESSAGE = (
+    "posting has neither a stable source identifier nor a normalizable source URL"
+)
+
+
 def resolve_identity(job: DiscoveredJob) -> NaturalKey:
     """Canonicalizes and selects the natural-key form for `job`, per ADR
     0004's precedence order. Raises `UnresolvableIdentityError` if none of
@@ -36,8 +41,9 @@ def resolve_identity(job: DiscoveredJob) -> NaturalKey:
         source_url_normalized=source_url_normalized,
     )
     if natural_key is None:
-        raise UnresolvableIdentityError(
-            f"no source_job_id and source_url {job.source_url!r} did not normalize into a "
-            "usable fallback key — cannot derive any of the three ADR-0004 natural-key forms"
-        )
+        # Never include the raw URL here. This exception is persisted as
+        # ingestion telemetry, and source URLs can contain credentials,
+        # tokens, or applicant-identifying query parameters. The original
+        # evidence remains available in RawJobIngestion.raw_payload.
+        raise UnresolvableIdentityError(UNRESOLVABLE_IDENTITY_MESSAGE)
     return natural_key

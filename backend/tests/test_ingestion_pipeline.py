@@ -1,4 +1,5 @@
 import json
+import logging
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -20,10 +21,21 @@ from app.db.models import (
 from app.ingestion import pipeline
 from app.ingestion.clock import FixedClock
 from app.ingestion.identity import resolve_identity
-from app.ingestion.persistence import upsert_job_occurrence
+from app.ingestion.natural_key import NaturalKey
+from app.ingestion.persistence import (
+    DeferredIdentityConflictError,
+    UpsertOutcome,
+    upsert_job_occurrence,
+)
 from app.providers.base import DiscoveryProvider
 from app.providers.fixture import FixtureProvider
-from app.schemas.discovered_job import DiscoveredJob, DiscoveryResult, SourceRunStats
+from app.schemas.discovered_job import (
+    DiscoveredJob,
+    DiscoveryResult,
+    ProviderError,
+    ProviderErrorCategory,
+    SourceRunStats,
+)
 from app.schemas.provider import ProviderCapabilities, ProviderHealth, SourceQuery
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures" / "discovery"
@@ -277,15 +289,9 @@ async def test_two_run_natural_key_spine(
             assert attempts_2[0].jobs_inserted == 0
             assert attempts_2[0].jobs_updated == 3
 
-            run2_raw_rows = (
-                (
-                    await session.execute(
-                        select(RawJobIngestion).where(RawJobIngestion.fetched_at == t2)
-                    )
-                )
-                .scalars()
-                .all()
-            )
+            all_raw_rows = (await session.execute(select(RawJobIngestion))).scalars().all()
+            run1_raw_ids = set(raw_ingestion_ids)
+            run2_raw_rows = [row for row in all_raw_rows if row.id not in run1_raw_ids]
             raw_ingestion_ids.extend(row.id for row in run2_raw_rows)  # before any assertion
             assert len(run2_raw_rows) == 3
             assert all(row.processing_status == "normalized" for row in run2_raw_rows)
@@ -337,18 +343,12 @@ async def test_two_run_natural_key_spine(
         )
 
 
-async def test_reobservation_normalizes_text_fields_identically_to_first_insert(
+async def test_reobservation_only_advances_observational_fields(
     db_engine: AsyncEngine,
 ) -> None:
-    """Regression: the "found" (update) branch of `upsert_job_occurrence`
-    must apply the exact same `@validates` trim/blank-collapse
-    normalization as the "not found" (insert) branch — a Core-style
-    `update()` statement would bypass `@validates` entirely and let a
-    covered-whitespace-padded value land on re-observation even though the
-    identical value would have been trimmed on first insert. Verified two
-    ways: the stored value is trimmed exactly like the insert path, and a
-    covered-whitespace-*only* value collapses to `NULL` on re-observation
-    too, not just on creation."""
+    """A natural-key replay may advance observation state, but changed or
+    missing source/descriptive values remain frozen until later
+    provenance/merge behavior can reconcile them."""
     job = _load_fixture("clean_tenant_scoped")
     natural_key = resolve_identity(job)
     t1 = datetime(2026, 7, 1, tzinfo=UTC)
@@ -360,27 +360,40 @@ async def test_reobservation_normalizes_text_fields_identically_to_first_insert(
             first = await upsert_job_occurrence(session, natural_key, job, t1)
         job_ids.append(first.job_id)
 
-        padded_job = job.model_copy(
+        changed_job = job.model_copy(
             update={
-                "title": "  Senior Backend Engineer\t",
-                "apply_url": "   \r\n  ",  # covered-whitespace only -> must collapse to None
-                "requisition_id_raw": " REQ-1001 ",
+                "title": "Replacement title must not win",
+                "location": None,
+                "compensation_text": None,
+                "posted_at": None,
+                "apply_url": None,
+                "canonical_url": None,
+                "requisition_id_raw": "DIFFERENT-REQUISITION",
             }
         )
         async with AsyncSession(bind=db_engine) as session, session.begin():
-            second = await upsert_job_occurrence(session, natural_key, padded_job, t2)
+            second = await upsert_job_occurrence(session, natural_key, changed_job, t2)
         assert second.inserted is False
         assert second.occurrence_id == first.occurrence_id
 
         async with AsyncSession(bind=db_engine) as session:
             occurrence = await session.get(JobOccurrence, first.occurrence_id)
             assert occurrence is not None
-            assert occurrence.apply_url is None  # collapsed, not stored as whitespace
-            assert occurrence.requisition_id_raw == "REQ-1001"  # trimmed
+            assert occurrence.last_seen_at == t2
+            assert occurrence.is_active is True
+            assert occurrence.posted_at == job.posted_at
+            assert occurrence.apply_url == job.apply_url
+            assert occurrence.canonical_url == job.canonical_url
+            assert occurrence.canonical_url_normalized == job.canonical_url
+            assert occurrence.requisition_id_raw == job.requisition_id_raw
 
             job_row = await session.get(Job, first.job_id)
             assert job_row is not None
-            assert job_row.title == "Senior Backend Engineer"  # trimmed, matching insert-path rules
+            assert job_row.last_seen_at == t2
+            assert job_row.title == job.title
+            assert job_row.location_raw == job.location
+            assert job_row.compensation_text == job.compensation_text
+            assert job_row.canonical_url == job.canonical_url
     finally:
         async with AsyncSession(bind=db_engine) as session:
             for job_id in job_ids:
@@ -388,6 +401,131 @@ async def test_reobservation_normalizes_text_fields_identically_to_first_insert(
                 if existing is not None:
                     await session.delete(existing)
             await session.commit()
+
+
+async def test_canonical_evidence_mismatch_fails_closed_before_mutation(
+    db_engine: AsyncEngine,
+) -> None:
+    """Until conflict persistence is implemented, a canonical mismatch is
+    a distinct propagated failure: it is not a parse error and cannot
+    mutate even observational state."""
+    job = _load_fixture("clean_tenant_scoped")
+    natural_key = resolve_identity(job)
+    t1 = datetime(2026, 7, 2, tzinfo=UTC)
+    t2 = t1 + timedelta(hours=1)
+
+    job_ids: list[uuid.UUID] = []
+    try:
+        async with AsyncSession(bind=db_engine) as session, session.begin():
+            first = await upsert_job_occurrence(session, natural_key, job, t1)
+        job_ids.append(first.job_id)
+
+        conflicting = job.model_copy(
+            update={"canonical_url": "https://different.example.com/jobs/REQ-1001"}
+        )
+        async with AsyncSession(bind=db_engine) as session:
+            with pytest.raises(DeferredIdentityConflictError):
+                async with session.begin():
+                    await upsert_job_occurrence(session, natural_key, conflicting, t2)
+
+        async with AsyncSession(bind=db_engine) as session:
+            occurrence = await session.get(JobOccurrence, first.occurrence_id)
+            assert occurrence is not None
+            assert occurrence.last_seen_at == t1
+            assert occurrence.canonical_url == job.canonical_url
+            assert occurrence.canonical_url_normalized == job.canonical_url
+
+            job_row = await session.get(Job, first.job_id)
+            assert job_row is not None
+            assert job_row.last_seen_at == t1
+            assert job_row.canonical_url == job.canonical_url
+    finally:
+        async with AsyncSession(bind=db_engine) as session:
+            for job_id in job_ids:
+                existing = await session.get(Job, job_id)
+                if existing is not None:
+                    await session.delete(existing)
+            await session.commit()
+
+
+async def test_pipeline_leaves_conflicting_raw_row_fetched_and_marks_run_failed(
+    db_engine: AsyncEngine,
+) -> None:
+    """The deferred conflict is neither normalized nor parse_error: the
+    durable raw row remains fetched and the enclosing run fails."""
+    job = _load_fixture("clean_tenant_scoped")
+    conflicting = job.model_copy(
+        update={"canonical_url": "https://different.example.com/jobs/REQ-1001"}
+    )
+    query = SourceQuery(sources=["fixture_ats"])
+    t1 = datetime(2026, 7, 3, tzinfo=UTC)
+    t2 = t1 + timedelta(hours=1)
+
+    job_ids: list[uuid.UUID] = []
+    run_ids: list[uuid.UUID] = []
+    raw_ids: list[uuid.UUID] = []
+    async with AsyncSession(bind=db_engine) as session:
+        preexisting_job_ids = set((await session.execute(select(Job.id))).scalars().all())
+        preexisting_run_ids = set((await session.execute(select(CollectionRun.id))).scalars().all())
+        preexisting_raw_ids = set(
+            (await session.execute(select(RawJobIngestion.id))).scalars().all()
+        )
+    try:
+        run1_id = await pipeline.run(
+            db_engine,
+            FixtureProvider([job], called_at=t1),
+            query,
+            observed_at=t1,
+            clock=FixedClock(t1),
+        )
+        run_ids.append(run1_id)
+
+        occurrence = await _occurrence_by_job_id(db_engine, "REQ-1001")
+        job_ids.append(occurrence.job_id)
+
+        with pytest.raises(DeferredIdentityConflictError):
+            await pipeline.run(
+                db_engine,
+                FixtureProvider([conflicting], called_at=t2),
+                query,
+                observed_at=t2,
+                clock=FixedClock(t2),
+            )
+
+        async with AsyncSession(bind=db_engine) as session:
+            runs = (await session.execute(select(CollectionRun))).scalars().all()
+            failed_run = next(run for run in runs if run.id != run1_id)
+            run_ids.append(failed_run.id)
+            assert failed_run.status == "failed"
+            assert failed_run.jobs_discovered == 1
+            assert failed_run.jobs_inserted == 0
+            assert failed_run.jobs_updated == 0
+
+            raw_rows = (await session.execute(select(RawJobIngestion))).scalars().all()
+            raw_ids.extend(row.id for row in raw_rows)
+            assert sorted(row.processing_status for row in raw_rows) == ["fetched", "normalized"]
+
+            reloaded = await session.get(JobOccurrence, occurrence.id)
+            assert reloaded is not None
+            assert reloaded.last_seen_at == t1
+            assert reloaded.canonical_url == job.canonical_url
+    finally:
+        async with AsyncSession(bind=db_engine) as session:
+            current_job_ids = set((await session.execute(select(Job.id))).scalars().all())
+            current_run_ids = set((await session.execute(select(CollectionRun.id))).scalars().all())
+            current_raw_ids = set(
+                (await session.execute(select(RawJobIngestion.id))).scalars().all()
+            )
+        job_ids = list(current_job_ids - preexisting_job_ids)
+        run_ids = list(current_run_ids - preexisting_run_ids)
+        raw_ids = list(current_raw_ids - preexisting_raw_ids)
+        await _cleanup(
+            db_engine,
+            user_ids=[],
+            job_ids=job_ids,
+            collection_run_ids=run_ids,
+            raw_ingestion_ids=raw_ids,
+        )
 
 
 async def test_out_of_order_replay_never_moves_last_seen_at_backward(
@@ -478,13 +616,78 @@ async def test_unprocessable_fixture_isolated_from_siblings(db_engine: AsyncEngi
         )
 
 
+async def test_parse_error_telemetry_is_sanitized_logged_safely_and_uses_fetch_time(
+    db_engine: AsyncEngine,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Raw evidence may contain a secret-bearing malformed URL, but
+    persisted/logged telemetry may not; fetched_at comes from the posting's
+    discovery event rather than the independent observation timestamp."""
+    secret = "TOKEN_DO_NOT_EXPOSE"
+    base = _load_fixture("unprocessable")
+    job = base.model_copy(
+        update={
+            "source_url": f"/careers/postings/456?token={secret}",
+            "raw": {"url": f"/careers/postings/456?token={secret}"},
+        }
+    )
+    observed_at = datetime(2026, 9, 1, tzinfo=UTC)
+    provider = FixtureProvider([job], called_at=observed_at)
+    query = SourceQuery(sources=["fixture_ats"])
+    caplog.set_level(logging.INFO, logger="app.ingestion.pipeline")
+
+    collection_run_ids: list[uuid.UUID] = []
+    raw_ids: list[uuid.UUID] = []
+    try:
+        run_id = await pipeline.run(
+            db_engine,
+            provider,
+            query,
+            observed_at=observed_at,
+            clock=FixedClock(observed_at),
+        )
+        collection_run_ids.append(run_id)
+
+        async with AsyncSession(bind=db_engine) as session:
+            raw = (await session.execute(select(RawJobIngestion))).scalar_one()
+            raw_ids.append(raw.id)
+            assert raw.processing_status == "parse_error"
+            assert raw.fetched_at == job.discovered_at
+            assert raw.fetched_at != observed_at
+            assert raw.error_message == (
+                "posting has neither a stable source identifier nor a normalizable source URL"
+            )
+            assert secret in str(raw.raw_payload)
+            assert secret not in raw.error_message
+
+        messages = [record.getMessage() for record in caplog.records]
+        assert any("ingestion_run_started" in message for message in messages)
+        assert any("ingestion_parse_error" in message for message in messages)
+        assert any("ingestion_run_completed" in message for message in messages)
+        assert all(secret not in message for message in messages)
+        warning_messages = [
+            record.getMessage() for record in caplog.records if record.levelno == logging.WARNING
+        ]
+        assert warning_messages == [f"ingestion_parse_error raw_ingestion_id={raw_ids[0]}"]
+    finally:
+        await _cleanup(
+            db_engine,
+            user_ids=[],
+            job_ids=[],
+            collection_run_ids=collection_run_ids,
+            raw_ingestion_ids=raw_ids,
+        )
+
+
 async def test_unexpected_failure_propagates_and_marks_run_failed(
-    db_engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
+    db_engine: AsyncEngine,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """An exception other than `UnresolvableIdentityError` is never caught
     as a `parse_error` — it propagates, and the run/attempt are marked
-    `failed` best-effort first. Already-committed Transaction-A rows from
-    earlier in the batch remain intact."""
+    `failed` best-effort first. A failure on posting two preserves the
+    exact durable progress from posting one in both telemetry levels."""
     t1 = datetime(2026, 3, 1, tzinfo=UTC)
     job_tenant = _load_fixture("clean_tenant_scoped")
     job_no_tenant = _load_fixture("missing_salary_no_tenant")
@@ -493,42 +696,80 @@ async def test_unexpected_failure_propagates_and_marks_run_failed(
     query = SourceQuery(sources=["fixture_ats"])
     clock = FixedClock(t1)
 
-    async def _broken_persist(*args: object, **kwargs: object) -> None:
-        raise RuntimeError("simulated unexpected persistence failure")
+    original_persist = pipeline._persist_posting
+    call_count = 0
 
-    monkeypatch.setattr(pipeline, "_persist_posting", _broken_persist)
+    async def _fail_on_second_posting(
+        engine: AsyncEngine,
+        natural_key: NaturalKey,
+        job: DiscoveredJob,
+        observed_at: datetime,
+        raw_id: uuid.UUID,
+    ) -> UpsertOutcome:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 2:
+            raise RuntimeError("simulated unexpected persistence failure SECRET_VALUE")
+        return await original_persist(engine, natural_key, job, observed_at, raw_id)
 
-    with pytest.raises(RuntimeError, match="simulated unexpected persistence failure"):
-        await pipeline.run(db_engine, provider, query, observed_at=t1, clock=clock)
+    monkeypatch.setattr(pipeline, "_persist_posting", _fail_on_second_posting)
+    caplog.set_level(logging.INFO, logger="app.ingestion.pipeline")
 
-    async with AsyncSession(bind=db_engine) as session:
-        runs = (await session.execute(select(CollectionRun))).scalars().all()
-        assert len(runs) == 1
-        assert runs[0].status == "failed"
-        run_id = runs[0].id
+    job_ids: list[uuid.UUID] = []
+    collection_run_ids: list[uuid.UUID] = []
+    raw_ids: list[uuid.UUID] = []
+    try:
+        with pytest.raises(RuntimeError, match="simulated unexpected persistence failure"):
+            await pipeline.run(db_engine, provider, query, observed_at=t1, clock=clock)
 
-        attempts = (
-            (
-                await session.execute(
-                    select(CollectionRunProviderAttempt).where(
-                        CollectionRunProviderAttempt.collection_run_id == run_id
+        async with AsyncSession(bind=db_engine) as session:
+            runs = (await session.execute(select(CollectionRun))).scalars().all()
+            assert len(runs) == 1
+            run = runs[0]
+            collection_run_ids.append(run.id)
+            assert run.status == "failed"
+            assert run.jobs_discovered == 2
+            assert run.jobs_inserted == 1
+            assert run.jobs_updated == 0
+
+            attempts = (
+                (
+                    await session.execute(
+                        select(CollectionRunProviderAttempt).where(
+                            CollectionRunProviderAttempt.collection_run_id == run.id
+                        )
                     )
                 )
+                .scalars()
+                .all()
             )
-            .scalars()
-            .all()
+            assert len(attempts) == 1
+            assert attempts[0].status == "failed"
+            assert attempts[0].jobs_discovered == 2
+            assert attempts[0].jobs_inserted == 1
+            assert attempts[0].jobs_updated == 0
+
+            raw_rows = (await session.execute(select(RawJobIngestion))).scalars().all()
+            raw_ids.extend(row.id for row in raw_rows)
+            assert len(raw_rows) == 2
+            assert sorted(row.processing_status for row in raw_rows) == ["fetched", "normalized"]
+
+            jobs = (await session.execute(select(Job))).scalars().all()
+            job_ids.extend(row.id for row in jobs)
+            assert len(jobs) == 1
+
+        messages = [record.getMessage() for record in caplog.records]
+        assert any("ingestion_run_started" in message for message in messages)
+        assert any("ingestion_run_failed" in message for message in messages)
+        assert all("SECRET_VALUE" not in message for message in messages)
+    finally:
+        await _cleanup(
+            db_engine,
+            user_ids=[],
+            job_ids=job_ids,
+            collection_run_ids=collection_run_ids,
+            raw_ingestion_ids=raw_ids,
         )
-        assert len(attempts) == 1
-        assert attempts[0].status == "failed"
-
-        raw_rows = (await session.execute(select(RawJobIngestion))).scalars().all()
-        assert len(raw_rows) == 2  # both Transaction-A rows survived
-        assert all(row.processing_status == "fetched" for row in raw_rows)  # never advanced
-        raw_ids = [row.id for row in raw_rows]
-
-    await _cleanup(
-        db_engine, user_ids=[], job_ids=[], collection_run_ids=[run_id], raw_ingestion_ids=raw_ids
-    )
 
 
 class _TwoSourceProvider:
@@ -577,13 +818,28 @@ async def test_per_source_attempt_counters_are_not_the_run_wide_aggregate(
     t1 = datetime(2026, 8, 1, tzinfo=UTC)
     base = _load_fixture("clean_tenant_scoped")
     job_a = base.model_copy(
-        update={"source": "source_a", "source_job_id": "A-1", "source_tenant_id": "tenant-a"}
+        update={
+            "provider": "two_source_provider",
+            "source": "source_a",
+            "source_job_id": "A-1",
+            "source_tenant_id": "tenant-a",
+        }
     )
     job_b1 = base.model_copy(
-        update={"source": "source_b", "source_job_id": "B-1", "source_tenant_id": "tenant-b"}
+        update={
+            "provider": "two_source_provider",
+            "source": "source_b",
+            "source_job_id": "B-1",
+            "source_tenant_id": "tenant-b",
+        }
     )
     job_b2 = base.model_copy(
-        update={"source": "source_b", "source_job_id": "B-2", "source_tenant_id": "tenant-b"}
+        update={
+            "provider": "two_source_provider",
+            "source": "source_b",
+            "source_job_id": "B-2",
+            "source_tenant_id": "tenant-b",
+        }
     )
 
     provider = _TwoSourceProvider({"source_a": [job_a], "source_b": [job_b1, job_b2]}, called_at=t1)
@@ -688,3 +944,129 @@ async def test_pipeline_rejects_source_stats_mismatched_against_query_sources(
     await _cleanup(
         db_engine, user_ids=[], job_ids=[], collection_run_ids=[run_id], raw_ingestion_ids=[]
     )
+
+
+class _StaticResultProvider:
+    name = "fixture_provider"
+
+    def __init__(self, result: DiscoveryResult) -> None:
+        self._result = result
+
+    async def discover(self, query: SourceQuery) -> DiscoveryResult:
+        return self._result
+
+    def capabilities(self) -> ProviderCapabilities:
+        return ProviderCapabilities(provider=self.name)
+
+    async def health(self) -> ProviderHealth:
+        return ProviderHealth(
+            provider=self.name,
+            healthy=True,
+            last_checked_at=self._result.completed_at,
+        )
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "result_provider_mismatch",
+        "job_provider_mismatch",
+        "provider_error",
+        "source_not_completed",
+        "incomplete_results",
+    ],
+)
+async def test_pipeline_fails_closed_for_unsupported_provider_result_states(
+    db_engine: AsyncEngine,
+    case: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Until the later partial-success slice owns these states, the spine
+    must report failure before writing any posting rather than claiming a
+    fully completed collection."""
+    called_at = datetime(2026, 10, 1, tzinfo=UTC)
+    job = _load_fixture("clean_tenant_scoped")
+    provider_name = "wrong_provider" if case == "result_provider_mismatch" else "fixture_provider"
+    result_jobs = (
+        [job.model_copy(update={"provider": "wrong_provider"})]
+        if case == "job_provider_mismatch"
+        else []
+    )
+
+    stat = SourceRunStats(
+        source="fixture_ats",
+        completed=case != "source_not_completed",
+        jobs_found=len(result_jobs),
+        incomplete_results=case == "incomplete_results",
+    )
+    errors = (
+        [
+            ProviderError(
+                source="fixture_ats",
+                category=ProviderErrorCategory.TIMEOUT,
+                retryable=True,
+                detail="SECRET_PROVIDER_DETAIL",
+                occurred_at=called_at,
+            )
+        ]
+        if case == "provider_error"
+        else []
+    )
+    result = DiscoveryResult(
+        provider=provider_name,
+        jobs=result_jobs,
+        source_stats=[stat],
+        errors=errors,
+        started_at=called_at,
+        completed_at=called_at,
+    )
+    provider: DiscoveryProvider = _StaticResultProvider(result)
+    query = SourceQuery(sources=["fixture_ats"])
+    caplog.set_level(logging.INFO, logger="app.ingestion.pipeline")
+
+    run_ids: list[uuid.UUID] = []
+    async with AsyncSession(bind=db_engine) as session:
+        preexisting_run_ids = set((await session.execute(select(CollectionRun.id))).scalars().all())
+    try:
+        with pytest.raises(pipeline.UnsupportedDiscoveryResultError):
+            await pipeline.run(
+                db_engine,
+                provider,
+                query,
+                observed_at=called_at,
+                clock=FixedClock(called_at),
+            )
+
+        async with AsyncSession(bind=db_engine) as session:
+            run = (await session.execute(select(CollectionRun))).scalar_one()
+            run_ids.append(run.id)
+            assert run.status == "failed"
+            assert run.jobs_discovered == 0
+            attempts = (
+                await session.execute(
+                    select(CollectionRunProviderAttempt).where(
+                        CollectionRunProviderAttempt.collection_run_id == run.id
+                    )
+                )
+            ).scalar_one()
+            assert attempts.status == "failed"
+            assert attempts.jobs_discovered == 0
+            assert (
+                await session.execute(select(func.count()).select_from(RawJobIngestion))
+            ).scalar_one() == 0
+            assert (await session.execute(select(func.count()).select_from(Job))).scalar_one() == 0
+
+        messages = [record.getMessage() for record in caplog.records]
+        assert any("ingestion_run_failed" in message for message in messages)
+        assert all("SECRET_PROVIDER_DETAIL" not in message for message in messages)
+    finally:
+        async with AsyncSession(bind=db_engine) as session:
+            current_run_ids = set((await session.execute(select(CollectionRun.id))).scalars().all())
+        run_ids = list(current_run_ids - preexisting_run_ids)
+        await _cleanup(
+            db_engine,
+            user_ids=[],
+            job_ids=[],
+            collection_run_ids=run_ids,
+            raw_ingestion_ids=[],
+        )
