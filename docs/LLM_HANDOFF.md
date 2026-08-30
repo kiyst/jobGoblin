@@ -408,4 +408,28 @@ that detail.
 
 ### Work review
 
-_Pending._
+- Date/agent: 2026-08-30, Codex. Correction diff reviewed:
+  `103fbaa..1f54e20` on `tooling/workflow-v3-routine-verifier`.
+- All three findings from review commit `103fbaa` are closed:
+  1. The Git step now applies the script-derived repository path through a
+     command-local `-c safe.directory=...` with forward slashes, never global
+     configuration. It succeeds in the Codex reviewer environment that
+     reproduced the original failure.
+  2. Cleanup now requires a strict resolved child, refuses the temp root,
+     propagates removal failures into a reported cleanup result, always runs
+     after verification, and participates in the overall exit decision.
+  3. ROADMAP now marks Phase 1 complete and removes the stale outstanding-
+     exit-gate claim while preserving the correct three-slice Phase-2 status.
+- Independent verification used the new canonical command itself:
+  `python scripts/verify.py --level routine --focus tests/test_verify.py`.
+  All **10 steps passed**: Ruff format/check, mypy, repository checker, Git
+  diff check, database URL safety, real test-database reachability, focused
+  pytest **73 passed**, full suite **1249 passed**, and temporary-directory
+  cleanup. The `.verify-tmp` root was independently confirmed empty afterward;
+  working tree clean.
+- Findings: none.
+- **Verdict: approved.** The Workflow-v3 routine-verifier foundation and its
+  correction pass are accepted. STOP — do not merge this branch into `main`,
+  add schema/high-risk levels or CI/markers/status/handoff automation, or
+  resume Phase-2 product work until the user explicitly authorizes the next
+  action.
