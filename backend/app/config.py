@@ -41,10 +41,10 @@ class Settings(BaseSettings):
     # the same target as `database_url` above. Loaded through this same
     # Settings/`.env` mechanism (not a separate `os.environ.get` in test code)
     # so `.env.example`'s documented value is actually what tests use. `None`
-    # falls back to a hardcoded default in `backend/tests/conftest.py`; either
-    # way, `conftest.py`'s fail-closed guard rejects it if it isn't clearly a
-    # distinct test database — see README.md's "Dedicated test database"
-    # section.
+    # falls back to a hardcoded default in `backend/scripts/db_safety.py`;
+    # either way, that module's fail-closed guard rejects it if it isn't
+    # clearly a distinct test database — see README.md's "Dedicated test
+    # database" section.
     test_database_url: str | None = None
 
 

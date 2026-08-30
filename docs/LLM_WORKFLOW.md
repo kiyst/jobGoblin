@@ -1,9 +1,18 @@
-# Multi-LLM Engineering Workflow v2
+# Multi-LLM Engineering Workflow v3
 
-Status: active as of 2026-08-26. This is the operating process for Claude Code as the
+Status: active as of 2026-08-30. This is the operating process for Claude Code as the
 primary implementer and Codex as the independent reviewer. Product requirements remain
 authoritative in the master guide, architecture, data model, roadmap, and accepted ADRs.
 The user remains the scope and merge authority.
+
+v3 persists, as durable process rather than conversational instruction, the practices
+that emerged across Phase 2's identity-resolution slices: a `Definition of Ready` gate
+before implementation, three named review verdicts, concise amendment tables in place of
+full proposal rewrites for localized feedback, a two-round cap on free-form Class H
+revision, an explicit separation of required invariants from recommended mechanisms, and
+use of the canonical verifier (`scripts/verify.py`, once its own slice is approved) for
+risk-scaled verification. Everything from v2 not superseded below still applies
+unchanged.
 
 ## Objectives
 
@@ -41,6 +50,43 @@ The user remains the scope and merge authority.
 - May directly correct a **mechanical documentation-only defect** during review under
   the standing rule below.
 
+## Definition of Ready
+
+Before implementation begins on any slice — product or tooling — the proposal must state,
+and the user must have approved:
+
+- The bounded outcome: what user-visible or system behavior changes, stated concretely
+  enough that "done" is checkable.
+- Authorized scope and its exact exclusions — what this slice does **not** do, named
+  explicitly so a later reviewer never has to guess whether an omission was deliberate.
+- Dependencies and precedence: what existing code/decisions this slice relies on, and
+  what later work depends on it.
+- Risk class (below) and the verification level that follows from it.
+- Exact files expected to change.
+- Genuinely unresolved decisions only — established conventions are defaults (see below)
+  and are not re-presented as open questions.
+
+A slice is not ready for implementation merely because a proposal exists; it is ready once
+the user has approved these specific points, not the proposal's prose in general.
+
+## Review verdicts
+
+Every `Work review` reaches exactly one of three verdicts:
+
+- **Approved** — no findings requiring a change. The implementer performs no further
+  action beyond waiting for merge authorization.
+- **Approved with binding clarifications** — the reviewer or user identifies small,
+  bounded amendments that do not change the slice's fundamental design; the implementer
+  applies exactly those clarifications and proceeds directly to implementation without a
+  further proposal round. "Binding" means the clarifications are not optional
+  suggestions — they are part of what was approved.
+- **Redesign required** — the finding(s) touch the slice's fundamental design (precedence,
+  invariants, or scope), not a bounded correction. Implementation stops; the next step is
+  a revised proposal (see the two-round limit below), not a code change.
+
+A review finding is never itself authorization to implement a fix — the user still
+approves which findings to act on, per the existing authorization boundary below.
+
 ## Risk classes and slice size
 
 Classify a proposed slice before implementation:
@@ -52,6 +98,25 @@ Classify a proposed slice before implementation:
 | H — high risk | Identity/deduplication, destructive lifecycle, user-state preservation, concurrency, security/privacy, external providers, ingestion, scheduler | One independently testable invariant or vertical slice | Full relevant suite, adversarial/boundary tests, real backing service where required, explicit rollback/failure checks |
 
 When uncertain, use the higher-risk class. A phase boundary never expands authorization.
+
+## Revision discipline for Class H slices
+
+- **Concise amendments, not full rewrites.** When a review's findings are localized
+  (an "approved with binding clarifications" verdict, or a bounded correction request),
+  the implementer's response is a decision/amendment table addressing exactly those
+  findings — corrected pseudocode or wording only where affected — never a full
+  regenerated proposal repeating unaffected sections.
+- **Two-round limit on free-form revision.** A Class H proposal may go through at most
+  two rounds of open-ended, free-form revision (initial proposal, one redesign). If a
+  third round is still needed, both sides move to a **joint decision table**: every
+  remaining finding listed with an explicit accept/reject/defer decision, rather than
+  another open-ended rewrite. This bounds how long a design can stay unsettled.
+- **Required invariants vs. recommended mechanisms.** A proposal or review finding should
+  state which of its claims is a required invariant (the property that must hold,
+  non-negotiable) versus a recommended mechanism (one way to achieve it). A correction
+  that satisfies the same invariant through a different mechanism is acceptable without
+  re-opening the finding — reviewers evaluate against the invariant, not against whether
+  the implementer's mechanism matches the one originally suggested.
 
 ## End-to-end flow
 
@@ -166,6 +231,13 @@ introduces a new semantic choice or a conflict. Examples of established defaults
 - explicit `ON DELETE` behavior and accepted/rejected constraint coverage.
 
 ## Verification matrix
+
+Once `scripts/verify.py` exists (Workflow v3's tooling program; see `docs/ROADMAP.md`'s
+tooling sequence), `python scripts/verify.py --level routine` is the canonical way to run
+the "Python without schema" row below — it wraps the same checks in the same order, never
+a second, independently-drifting copy of the sequence. `--level schema`/`--level
+high-risk` extend this table's remaining rows once those levels exist; until a level
+exists for a given change surface, run this table's explicit command list directly.
 
 Run the smallest set that can actually detect regressions in the changed surface:
 

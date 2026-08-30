@@ -131,7 +131,7 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   PostgreSQL is healthy; Alembic upgrade -> downgrade -> upgrade passes; Ruff, mypy, and
   pytest pass; and live liveness/readiness behavior has been verified with the database
   both available and unavailable.
-- **Phase 1: in progress (updated 2026-08-28).** `users` slice complete and verified: model
+- **Phase 1: complete (updated 2026-08-30).** `users` slice complete and verified: model
   (`backend/app/db/models/user.py`), migrations `0002` (table, reviewed/hand-edited, not
   autogenerate-as-is) and `0003` (forward corrective migration, reversible, fixing the
   email-normalization `CHECK` constraints' whitespace handling — see
@@ -277,10 +277,14 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   for this table, unlike `user_jobs`' `set_status()`; this table's Phase 1 consumers
   are its own factory and the database tests themselves, with Phase 10 remaining its
   first production CRUD writer (see `docs/DATA_MODEL.md`). All fifteen Phase 1
-  domain tables (ADR 0003) are now migrated; the rest of Phase 1's exit gate
-  (§[PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md)) remains to be independently
-  verified before declaring the phase complete.
-- **Phase 2: in progress (updated 2026-08-30).** Two bounded, Class H vertical slices
+  domain tables (ADR 0003) are migrated, and Phase 1's own closure slice
+  (`phase-1/closure`, merge commit `bfdd56d`) is merged into `main`. Phase 2 was
+  subsequently authorized and three of its vertical slices are merged (below) —
+  under [PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md)'s own phase-gating rule
+  ("confirm the previous phase's exit gate is complete" before starting the next
+  phase), that would not have been authorized had Phase 1's exit gate not already
+  been satisfied.
+- **Phase 2: in progress (updated 2026-08-30).** Three bounded, Class H vertical slices
   merged into `main` so far. The **natural-key ingestion spine** (offline,
   fixture-driven, no live provider) — `DiscoveredJob`/`DiscoveryResult`/`ProviderError`/
   `SourceRunStats` schemas, `DiscoveryProvider` protocol, `FixtureProvider`,
@@ -302,8 +306,7 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   before any mutation.
   A third slice, **Tier-2/3 cross-occurrence attachment**
   ([DECISIONS/0004](DECISIONS/0004-scoped-deterministic-identity.md)'s "Phase 2
-  implementation notes"), is implemented and under review on its own feature branch
-  (`phase-2/tier2-tier3-identity-attachment`) — **not yet merged into `main`**:
+  implementation notes"), is merged into `main`:
   `upsert_job_occurrence()` now attempts normalized-canonical-URL matching (Tier 2, only
   when a usable canonical URL exists) or tenant-scoped requisition matching (Tier 3, only
   when no usable canonical URL exists — the two are mutually exclusive per posting, never
