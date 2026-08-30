@@ -371,3 +371,32 @@ that detail.
   merge this branch into `main`, begin `ambiguous_match`/Tier 4 or another
   product slice, or start workflow-automation tooling until the user
   explicitly authorizes the next action.
+
+**Merge record (appended, not a rewrite of the entry above):** Approved at review
+commit `b235d18` (no findings). Per user authorization,
+`phase-2/tier2-tier3-identity-attachment` was merged into `main` with a normal
+merge commit (`1f4f787`; `--no-ff`, no squash/rebase/force-push) and pushed.
+`main`/`origin/main` are both now at `1f4f787`. Verified: feature branch was
+clean and pushed at `b235d18` and `main`/`origin/main` were still at `bd59a14`
+immediately before the merge; `main` has zero content diff against the feature
+branch (`git diff main phase-2/tier2-tier3-identity-attachment --stat` empty);
+migration `0017` remains the sole Alembic head; `python
+backend/scripts/check_repo.py` exits 0 with zero findings; `git diff --check`
+clean; development database reconfirmed at `0006`; working tree clean.
+
+**Rollback boundary:** reverting `1f4f787` (a single merge commit) restores
+`main` to `bd59a14` exactly — no schema/migration exists in this slice to
+downgrade, and no data migration accompanies it (Tier-3's supporting index,
+`ix_job_occurrences_tenant_requisition_lookup`, already existed before this
+slice). This merges Phase 2's fourth vertical slice only (Tier-2/Tier-3
+cross-occurrence identity attachment: mutually exclusive Tier-2/Tier-3
+precedence, single-pass fail-closed candidate resolution,
+`AmbiguousIdentityMatchError`/`CandidateResolutionUnstableError`, the new
+canonical-URL/tenant-requisition advisory-lock domain, `UpsertKind.ATTACHED`,
+the corrected global parent-before-child lock discipline including Tier 1's
+own found-branch fix, and the scalar-probe fresh-entity revalidation) — it
+does **not** complete Phase 2. `ambiguous_match` persistence, Tier 4, the
+company-resolution prerequisite it depends on, `QueryPlanner`,
+`ProviderRegistry`, multi-source partial-success handling, live providers,
+Phase 3 normalization, API routes, scheduling, and the workflow-automation
+tooling slice all remain not started and are not authorized by this merge.
