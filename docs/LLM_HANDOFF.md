@@ -424,4 +424,66 @@ all of which remain not started and are not authorized by this merge.
 
 ### Work review
 
-_Pending._
+- Date/agent: 2026-08-30, Codex. Diff reviewed:
+  `de2b15a..bbf3f64` on `phase-4/greenhouse-canary`.
+- Independent verification performed: inspected all four changed files and the live
+  canary's actual HTTP/mapping/output boundaries; confirmed the committed fixture is
+  allowlisted and contains no `content`/description HTML; confirmed the default test
+  suite and routine verifier contain no live-canary invocation; ran the genuine
+  external `scripts/verify.py --level routine --focus
+  tests/test_canary_greenhouse_mapping.py` from `backend/` — all 10 steps PASS,
+  including Ruff, mypy, repository/diff checks, disposable-test-database safety and
+  reachability, **45 focused tests**, **1294 full-suite tests**, and cleanup. No live
+  Greenhouse request was repeated during review; development data was not touched.
+- Findings, by severity:
+  1. **Medium — the response-size limit does not bound the download.**
+     `backend/scripts/canary_greenhouse.py:215-225` uses `client.get()` and then reads
+     `response.content`; httpx has therefore already buffered the complete response
+     before `validate_and_parse_response()` checks `MAX_RESPONSE_BYTES`. The script
+     rejects an oversized payload only after consuming it, so the advertised memory/
+     response-size safety boundary is ineffective against an unexpectedly large
+     upstream response. Required invariant: stop consuming the response as soon as
+     the cumulative streamed byte count exceeds the cap, while still making exactly
+     one GET and never logging/persisting the body. A streaming implementation is the
+     recommended mechanism, not itself the invariant. Add an offline regression that
+     proves bytes beyond the cap are not consumed, rather than only passing an already
+     oversized in-memory `bytes` value to the pure validator.
+  2. **Medium — malformed external job entries are not actually rejected at the
+     selection/mapping boundary.** `select_representative_job()` at line 235 treats
+     every non-`None` `id` as usable (including booleans, containers, blank strings,
+     or otherwise non-Greenhouse-shaped identifiers), while lines 280-301 accept any
+     non-empty string as `absolute_url` and silently turn a malformed or timezone-naive
+     present `first_published` value into either `None` or a naive datetime. This is
+     weaker than the slice's fail-closed malformed-schema claim and could hand the next
+     live-to-pipeline slice an unstable identity, unsafe/non-absolute URL, or invalid
+     business timestamp. Required invariant: the selected entry must satisfy the
+     documented Greenhouse identity/mapping shape before it becomes a `DiscoveredJob`;
+     absent optional values may remain `None`, but present malformed values must fail
+     cleanly. Validate a real usable job ID, an absolute HTTPS URL, and an aware
+     `first_published` timestamp when present; select deterministically among entries
+     that meet the required mapping shape; surface a sanitized `CanaryFetchError`
+     without a raw traceback/body. Add offline accepted/rejected boundary tests. Do not
+     make another live request or change the existing fixture unless the stricter
+     validator shows that fixture is invalid.
+  3. **Low — `--fixture-out` can escape the one authorized repository location.**
+     Lines 400-401 create and overwrite any caller-supplied filesystem path, despite
+     the approved invariant limiting repository output to the single sanitized fixture.
+     Constrain output to the intended fixture location (removing the option is the
+     simplest acceptable mechanism), and write it atomically so a failed write cannot
+     leave a truncated committed fixture. Add offline tests for path refusal/atomic
+     replacement as applicable to the chosen mechanism.
+- Missing/inconclusive checks: the review intentionally did not repeat the authorized
+  external request; its recorded status/size/timing cannot be independently reproduced
+  without performing a second live call. The committed sample and offline behavior were
+  independently verified. Greenhouse terms remain explicitly unreviewed, as disclosed.
+- Verdict: **Approved with binding clarifications** — the canary design and the real
+  fetch/mapping result are accepted, but Findings 1-3 require one bounded correction
+  pass before merge. No proposal rewrite is required.
+- Exact bounded correction: modify only the canary script, its offline test file, and
+  this handoff entry as needed to close Findings 1-3; preserve the existing sanitized
+  fixture unless stricter validation demonstrates it is invalid. Run no additional live
+  request. Run the routine verifier with the focused canary tests, record actual counts,
+  commit/push the correction branch, and stop for re-review.
+- STOP — do not merge `main`, implement the provider adapter or pipeline integration,
+  add QueryPlanner/ProviderRegistry, resume Phase 2/3 product work, or perform another
+  live Greenhouse request without separate user authorization.
