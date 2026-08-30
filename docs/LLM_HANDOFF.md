@@ -98,272 +98,6 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-08-29, Claude Code (Sonnet 5). Authorized slice: Phase 2's first
-  vertical slice, the "natural-key ingestion spine" — Class H (first permanent
-  ingestion writer; identity/concurrency risk per PHASE_RISK_CHECKLIST.md's Phase 2
-  primary risks). Base `903ad0d` on `main` -> branch
-  `phase-2/natural-key-ingestion-spine`. Implements the twice-revised, fully
-  negotiated proposal (11 binding decisions from the final approval) proving
-  Fixture -> `RawJobIngestion` -> identity resolution (natural-key tiers 1/5 only,
-  all three key forms) -> `Job`/`JobOccurrence` -> two distinct `CollectionRun`s,
-  against real PostgreSQL, zero network, one provider/one source.
-- Outcome, per the approved binding decisions:
-  1. **Four fixtures, two `CollectionRun`s**: `clean_tenant_scoped` (tenant-scoped
-     key), `missing_salary_no_tenant` (no-tenant key), `url_fallback_only`
-     (`source_job_id=None`, URL-fallback key), `unprocessable` (`source_job_id=None`
-     *and* an unnormalizable relative `source_url` — genuinely no key of any form).
-     Run 1 processes all four (`status='completed_with_errors'`, one
-     `collection_run_provider_attempts` row `status='completed'`); a `UserJob` is
-     created against run 1's tenant-scoped `Job` between the two runs; run 2
-     resubmits the three resolvable fixtures byte-identical
-     (`status='completed'`). Exact counters: run 1 `jobs_discovered=4/inserted=3/
-     updated=0`; run 2 `jobs_discovered=3/inserted=0/updated=3`; 7
-     `RawJobIngestion` rows total (4 + 3), 3 `Job`/`JobOccurrence` rows total (never
-     duplicated between runs).
-  2. **File layout exactly as dictated**: `app/schemas/discovered_job.py`
-     (`DiscoveredJob`, `DiscoveryResult`, `ProviderErrorCategory`, `ProviderError`,
-     `SourceRunStats`), `app/schemas/provider.py` (`SourceQuery`,
-     `SourceCapabilities`, `ProviderCapabilities`, `ProviderHealth`,
-     `SourceHealth`), `app/providers/base.py` (`DiscoveryProvider` Protocol only).
-  3. **Natural-key canonicalization + advisory lock**
-     (`app/ingestion/natural_key.py`): provider/source canonicalized identically to
-     `JobOccurrence`'s own ORM validators (trim+lower; documented "must stay in
-     sync"); a versioned, domain-tagged (tenant/no-tenant/URL), length-prefixed byte
-     encoding (never a colon-joined string) hashed via SHA-256 into a signed 64-bit
-     `pg_advisory_xact_lock` key — never Python's `hash()` or Postgres's 32-bit
-     `hashtext()`.
-  4. Casing/whitespace-collision, component-boundary-ambiguity, and domain-
-     separation tests in `test_ingestion_natural_key.py`; genuine concurrent-
-     insertion safety proven for **all three** natural-key forms in
-     `test_ingestion_concurrency.py` (parametrized), not just the tenant-scoped one.
-  5. **Durable run-init transaction**: `CollectionRun`/`CollectionRunProviderAttempt`
-     committed `status='running'` *before* `provider.discover()` is ever called, so
-     the best-effort failure handler always has rows to update. Run/attempt
-     lifecycle timestamps come from an injected `Clock`
-     (`app/ingestion/clock.py`, `FixedClock` in tests); `Job`/`JobOccurrence`
-     business timestamps come from a separate, explicit `observed_at` parameter.
-  6. `last_seen_at` (occurrence and parent `Job`) only ever advances —
-     `max(existing, incoming)`, computed against the value read under the row lock
-     already held, never a blind overwrite. A dedicated out-of-order-replay test
-     proves an older resubmission cannot move it backward.
-  7. **Upsert lifecycle**: `pipeline.py` writes each `DiscoveredJob` through two
-     transactions — Transaction A_i commits one `RawJobIngestion`
-     (`processing_status='fetched'`) independently; Transaction B_i (identity +
-     `Job`/`JobOccurrence` upsert + terminal `RawJobIngestion` update, one
-     transaction) or Transaction C_i (reroute to `parse_error`) follows. The advisory
-     lock (point 3 above) serializes concurrent attempts at the same key so the
-     "not found" branch never races — no `ON CONFLICT` clause exists or is needed.
-  8. `canonical_json_hash` (`app/ingestion/hashing.py`):
-     `json.dumps(sort_keys=True, separators=(",", ":"), ensure_ascii=True,
-     allow_nan=False)` then SHA-256; tested against top-level and nested key-order
-     variation (not just file reloads), Unicode-non-normalized-but-visually-similar
-     strings, and NaN/Infinity rejection matching what PostgreSQL's own `jsonb`
-     input function would reject.
-  9. Only `identity.py`'s one `UnresolvableIdentityError` is ever caught and
-     reclassified as `parse_error`. Every other exception — including
-     `asyncio.CancelledError` — triggers a best-effort attempt to mark the
-     `CollectionRun`/attempt `failed` and is always re-raised;
-     `KeyboardInterrupt`/`SystemExit` are never in any `except` clause.
-  10. Narrow documentation clarification (no schema/migration change): tier 5
-     ("no deterministic match → create a new `Job`") now states explicitly that it
-     requires a derivable key (`source_job_id` or a normalizable `source_url`); a
-     payload with neither is `parse_error`, not an unkeyed occurrence — added to
-     `docs/ARCHITECTURE.md` §8, `docs/DECISIONS/0004-scoped-deterministic-identity.md`,
-     and `docs/DATA_MODEL.md`'s `job_occurrences` unique-constraints note.
-  11. `FixtureProvider` (`app/providers/fixture.py`) takes its fixture list as an
-     explicit constructor argument — fixture selection never hides inside
-     `SourceQuery` filters. Contract tests for the schemas layer
-     (`test_schemas_discovery.py`, 11 tests): mutable-default isolation (4 cases),
-     `DiscoveryResult`'s duplicate-source/orphaned-job/orphaned-error/
-     `completed=False`-with-jobs rejections, derived-property behavior;
-     `pipeline.py` itself asserts `SourceQuery.sources == DiscoveryResult.
-     requested_sources` (a call-site invariant per ARCHITECTURE.md §6.3, not
-     something the model can check alone), tested via a deliberately mismatched
-     fake provider.
-  - `__init__.py` present in all three new packages (`schemas/`, `providers/`,
-    `ingestion/`). No migration — every table touched (`jobs`, `job_occurrences`,
-    `raw_job_ingestions`, `collection_runs`, `collection_run_provider_attempts`)
-    already existed.
-- Files changed:
-  - `backend/app/schemas/{__init__.py,discovered_job.py,provider.py}` (new).
-  - `backend/app/providers/{__init__.py,base.py,fixture.py}` (new).
-  - `backend/app/ingestion/{__init__.py,clock.py,hashing.py,identity.py,
-    natural_key.py,persistence.py,pipeline.py}` (new).
-  - `backend/tests/fixtures/discovery/{clean_tenant_scoped,missing_salary_no_tenant,
-    url_fallback_only,unprocessable}.json` (new).
-  - `backend/tests/test_ingestion_pipeline.py` (new, 7 tests),
-    `test_ingestion_concurrency.py` (new, 1 test × 3 params),
-    `test_ingestion_hashing.py` (new, 5 tests), `test_ingestion_natural_key.py`
-    (new, 7 tests), `test_schemas_discovery.py` (new, 11 tests) — 33 collected.
-  - `docs/ARCHITECTURE.md`, `docs/DECISIONS/0004-scoped-deterministic-identity.md`,
-    `docs/DATA_MODEL.md` — narrow tier-5/unkeyed-occurrence clarification (point 10
-    above).
-- Commands run and exact results:
-  - `ruff format --check`/`ruff format` → clean after formatting.
-  - `ruff check .` → all checks passed.
-  - `mypy .` → success, 91 source files.
-  - Targeted (all 5 new test files) → **33 passed**.
-  - `pytest -q` (full suite, writable `--basetemp`) → **1139 passed** (up from
-    1106 — 33 new tests, all collected, matches exactly).
-  - `alembic check` (against `jobgoblin_test`) → `No new upgrade operations
-    detected` — confirms no migration needed.
-  - `alembic heads` → `0017 (head)`, unchanged.
-  - `alembic current` against the **development** database (no override, fresh
-    shell) → `0006`, unchanged throughout.
-  - `python scripts/check_repo.py` (from `backend/`) → exit 0, zero findings.
-- Adversarial self-review (fresh Explore-agent context, no prior knowledge of the
-  implementation, run against the actual staged diff before commit; full Class H
-  depth): **3 High, 2 Medium fixed; 2 Low documented, not fixed**:
-  1. **High — `suppress(Exception)` around the best-effort failure-telemetry
-     block did not also suppress `asyncio.CancelledError`** (a `BaseException`
-     subclass, not `Exception`), so a second cancellation during that block could
-     replace the original exception instead of the intended `raise` re-raising it.
-     Fixed: `suppress(Exception, asyncio.CancelledError)`.
-  2. **High — the "found" (re-observation) branch used a Core-style `update()`
-     statement, which bypasses `JobOccurrence`/`Job`'s own `@validates`
-     normalization** that the "not found" (insert) branch gets automatically — an
-     incidentally-whitespace-padded or blank re-observed field could be stored
-     un-normalized (or violate a `CHECK` a first insert would have satisfied).
-     Fixed: rewrote `persistence.py` to fetch and mutate the ORM entities directly
-     (`occurrence.field = value`) on both branches, so `@validates` applies
-     identically either way. New regression test added
-     (`test_reobservation_normalizes_text_fields_identically_to_first_insert`)
-     proves a covered-whitespace-only re-observed value collapses to `NULL` and a
-     padded value trims, exactly as the insert path already did.
-  3. **High — every `CollectionRunProviderAttempt` row was written the run-wide
-     aggregate count, not its own source's count** — invisible with one source per
-     run (aggregate and per-source coincide), but silently wrong the moment a
-     future slice adds a second source, contradicting the model's own "authoritative
-     per-source detail" docstring. Fixed: `pipeline.py` now tracks per-source
-     discovered/inserted/updated dicts and writes each attempt row its own source's
-     numbers; `collection_runs`' three counters remain the correct run-level sum.
-     New regression test added
-     (`test_per_source_attempt_counters_are_not_the_run_wide_aggregate`, a two-source
-     fake provider) proves two sources with deliberately different counts each land
-     on their own attempt row correctly.
-  4. **Medium — cleanup-tracking lists in `test_ingestion_pipeline.py`'s flagship
-     test were populated after assertions that could fail**, risking a leaked row
-     in the shared disposable test database on an assertion failure. Fixed:
-     moved `raw_ingestion_ids.extend(...)`/`job_ids.extend(...)` to immediately
-     after each fetch, before any assertion on the fetched data.
-  5. **Medium — the `UserJob`-untouched proof never asserted `updated_at`**, the
-     one column the model's own docstring says advances on any write to the row —
-     the single strongest signal ingestion never touched `user_jobs`. Fixed: added
-     to both the snapshot and the final assertion.
-  - **Documented, not fixed** (explicitly out of this slice's approved scope):
-    (a) `provider`/`source` values are canonicalized but not validated against the
-    ASCII-slug grammar before the lock/lookup stage — a misconfigured provider
-    constant would only fail at the database `CHECK` inside Transaction B_i,
-    aborting the whole run rather than failing at construction time; acceptable
-    since `provider`/`source` are adapter-level constants, not per-posting data, in
-    every phase through Phase 4. (b) The concurrency test's race has the same
-    timing-luck weakness already accepted elsewhere in this codebase (bare
-    `asyncio.gather`, no explicit interleaving barrier) — consistent with existing
-    precedent, not a new regression. (c) `DiscoveredJob.raw` has no JSON-
-    serializability enforcement at the schema level; a non-JSON-native value would
-    raise a generic `TypeError` from `canonical_json_hash`, not a friendly error —
-    acceptable since every fixture is JSON-loaded (hence always JSON-safe); a live
-    provider adapter (Phase 4+) will need to guarantee this itself.
-  - Also explicitly checked and found clean: no other divergence between the
-    natural-key canonicalizer and `JobOccurrence`'s ORM validators (stress-tested
-    non-ASCII/whitespace input); all three partial-index domains genuinely
-    exercised in both the natural-key unit tests and the concurrency test; no FK
-    deletion behavior introduced by this slice (none applicable); the new
-    ARCHITECTURE.md/ADR-0004/DATA_MODEL.md wording matches what the code actually
-    does, not just internally consistent prose.
-- Deviations/known limitations: the three "documented, not fixed" items above.
-  `source_url`/`source_url_normalized` are deliberately never refreshed on
-  re-observation (only observational fields and other display text are) — these are
-  the URL-fallback domain's own identity-key components, and blindly overwriting
-  them without reconciliation logic would risk a subtle mismatch between what's
-  stored and what the row was actually looked up by; not exercised by any test since
-  every re-observation fixture in this slice is byte-identical. No `QueryPlanner`,
-  `ProviderRegistry`, multiple sources/providers per run, identity tiers 2–4,
-  conflict quarantine, company resolution, Phase 3 normalization, live providers,
-  API routes, or scheduling — all explicitly out of scope. `main` untouched.
-- STOP — awaiting Codex review. Do not begin any further Phase 2 slice (tiers 2–4,
-  conflict quarantine, `QueryPlanner`, multi-source), modify or merge `main`, or add
-  Phase 3/4/8/9/10 behavior.
-
-### Work review
-
-- Date/reviewer: 2026-08-29, Codex. Diff reviewed: `903ad0d..e725fd2` on
-  `phase-2/natural-key-ingestion-spine`. Verdict: **changes requested**.
-- Independent verification completed against real PostgreSQL: the five new targeted
-  test files pass (**33 passed**); the full suite passes (**1139 passed**); Ruff format
-  and lint pass; mypy passes; `scripts/check_repo.py` exits 0; test DB is at sole head
-  `0017`; `alembic check` reports no drift. These results establish that the current
-  tests and schema are green, but do not close the contract defects below.
-- Findings, highest severity first:
-  1. **High — re-observation violates the Phase 2 idempotency/conflict contract.**
-     `backend/app/ingestion/persistence.py:100-115` overwrites `posted_at`, `apply_url`,
-     both canonical-URL fields, `requisition_id_raw`, and the parent `Job`'s title,
-     location, compensation text, and canonical URL. The Phase 2 exit gate requires a
-     fixture replay to *only* advance observational fields
-     (`PHASE_RISK_CHECKLIST.md:136-142`), while ADR 0007 requires a Tier-1 canonical-URL
-     mismatch to leave disputed fields untouched and enter conflict quarantine. The
-     current behavior can silently erase known values with incoming `NULL`, replace
-     canonical evidence, and bypass the deferred provenance/merge policy. The new
-     `test_reobservation_normalizes_text_fields_identically_to_first_insert` positively
-     codifies this incorrect overwrite behavior. In this bounded slice, make the found
-     branch observational-only (`last_seen_at`, `is_active`; applicant fields only if
-     the schema later supplies them). Do not mutate descriptive/canonical fields. Add
-     regressions proving changed and missing incoming non-observational values remain
-     frozen. For a Tier-1 match where both normalized canonical URLs are non-null and
-     differ, fail closed with a distinct, non-`parse_error` deferred-conflict exception
-     before mutation; do not implement conflict-row persistence without a separately
-     approved scope.
-  2. **High — a malformed URL can leak secrets/PII into persisted error telemetry.**
-     `identity.py:39-42` embeds the raw `source_url` in
-     `UnresolvableIdentityError`; `pipeline.py:46-60` stores that exception text in
-     `raw_job_ingestions.error_message`. Source URLs commonly contain tokens, query
-     strings, or user-identifying data, and the approved observability contract says
-     field values must not be exposed. Persist a fixed, sanitized error message/code
-     that identifies only the failure class; retain the original evidence solely in
-     `raw_payload`. Add a secret-bearing malformed-URL regression proving the secret is
-     absent from stored error text and logs.
-  3. **Medium — failed-run telemetry loses already-committed progress.**
-     `pipeline.py:210-231` marks the run/attempt failed but never writes the counters
-     accumulated before the exception. Because each earlier posting commits
-     independently, a failure after one successful posting leaves durable Job/raw rows
-     while both telemetry rows falsely report zero. The approved proposal explicitly
-     required "whatever counts had accumulated so far." Initialize counters before
-     fallible provider/posting work, persist the exact run and per-source counters in
-     the best-effort failure transaction, and add a fail-on-the-second-posting test.
-  4. **Medium — provider result failures and identity are silently misreported.**
-     `pipeline.py:137-207` validates only the set of source names. It does not require
-     `result.provider == provider.name` or each job's provider to match, and ignores
-     `DiscoveryResult.errors`, `SourceRunStats.completed=False`,
-     `incomplete_results`, and `possibly_incomplete`; such a result is recorded as a
-     fully completed attempt/run. Full partial-failure persistence is excluded from
-     this slice, so fail closed before posting writes when any unsupported partial/error
-     state is returned, and validate provider identity. Add adversarial tests for a
-     mismatched result/job provider and each unsupported partial/error signal. Do not
-     implement the later multi-source partial-success policy in this correction pass.
-  5. **Medium — the approved safe observability layer is absent.** The proposal required
-     `logging.getLogger(__name__)`, payload-free INFO start/end events, a WARNING per
-     parse error containing only the raw-ingestion id, and an ERROR at the outer failure
-     boundary. No ingestion logger or log call exists. Implement those bounded events
-     and use `caplog` to prove both event presence and absence of payload/field values.
-     Avoid logging exception messages or traceback locals at this boundary.
-  6. **Low — `RawJobIngestion.fetched_at` is populated with the wrong clock.**
-     `pipeline.py:145-147` passes the Job/Occurrence business `observed_at`, even though
-     the model defines `fetched_at` as the posting's actual fetch event and
-     `DiscoveredJob` already supplies `discovered_at`. This collapses timestamps the
-     proposal explicitly separated and makes backfill audit ordering inaccurate. Use
-     `job.discovered_at` for the raw row, keep `observed_at` exclusively for
-     Job/Occurrence observation fields, and test deliberately different timestamps.
-- Exact correction scope: address only the six findings above; no migration is expected.
-  Replace the regression that expects descriptive-field overwrite, add the specified
-  adversarial cases, rerun the Class-H verification matrix and fresh-context self-review,
-  append a new `Work done`, and stop for re-review. Do not begin conflict persistence,
-  QueryPlanner, tiers 2-4, multi-source partial-success handling, live providers, or
-  merge/modify `main`.
-
-## Iteration 2
-
-### Work done
-
 - Date/agent: 2026-08-29, Codex acting as authorized implementer. Class H correction
   pass for the six findings in review commit `fde5fa6`. Branch:
   `phase-2/natural-key-ingestion-spine`; base `fde5fa6` -> correction commit
@@ -556,3 +290,130 @@ result validation) — it does **not** complete Phase 2. `QueryPlanner`,
 `ProviderRegistry`, multi-source/partial-success handling, identity tiers 2–4,
 conflict-quarantine persistence, live providers, Phase 3 normalization, API routes,
 and scheduling all remain not started and are not authorized by this merge.
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-08-30, Claude Code (Sonnet 5). Authorized slice: Phase 2's
+  second vertical slice, Tier-1 `evidence_mismatch` conflict persistence — Class H
+  (identity/concurrency risk per PHASE_RISK_CHECKLIST.md's Phase 2 primary risks).
+  Base `main`@`10aa747` -> branch
+  `phase-2/evidence-mismatch-conflict-persistence`. Implements the twice-revised,
+  fully negotiated proposal (replacing `DeferredIdentityConflictError` with real
+  ADR-0007 quarantine persistence), including both of the final round's corrections
+  (raw-association `raw_content_hash`/`fetched_at` checks; a private, patchable
+  rollback-test seam replacing the earlier, structurally-impossible "inject after
+  return" design) plus this pass's four additional binding clarifications
+  (quarantine still advances parent `Job.last_seen_at`; rollback proof extended to
+  the parent `Job`; a monotonic-timestamp regression for the conflict path; the
+  secret-leakage test's secret placed in a `normalize_url()`-surviving query
+  parameter).
+- Outcome:
+  1. **`persistence.py::persist_posting(engine, natural_key, job, observed_at,
+     raw_id) -> UpsertOutcome`** — new transaction-owning entry point.
+     `UpsertOutcome.inserted: bool` -> `.kind: UpsertKind`
+     (`INSERTED`/`UPDATED`/`QUARANTINED`) plus `conflict_id: uuid.UUID | None`.
+     `upsert_job_occurrence()` keeps its original signature and now always
+     advances observational fields (occurrence `last_seen_at`/`is_active`, parent
+     `Job.last_seen_at`) on a found match, returning `kind=QUARANTINED` instead of
+     raising when the normalized canonical URL disagrees — it never touches
+     `RawJobIngestion`/`IdentityConflict` itself.
+  2. **Raw-association validation** (`_validate_raw_association`, under a
+     `SELECT ... FOR UPDATE` lock, before any mutation): existence,
+     `processing_status=='fetched'`, `job_occurrence_id IS NULL`, provider/source,
+     `source_identifier`, `raw_content_hash == canonical_json_hash(job.raw)`,
+     `fetched_at == job.discovered_at`. The last two close the URL-fallback-domain
+     gap where `source_identifier` alone is `NULL` for every such posting from a
+     given provider/source. `InvalidRawIngestionAssociationError` raised before any
+     occurrence/conflict/raw mutation; this also structurally enforces "one
+     conflict per distinct new `RawJobIngestion`" (a consumed raw row fails the
+     `processing_status` check on any retry).
+  3. **Quarantine transaction**: on `QUARANTINED`, inserts one `IdentityConflict`
+     (`conflict_type='evidence_mismatch'`, `existing_value`/`incoming_value` =
+     `{"canonical_url_normalized": ...}`, `status='open'`) and reroutes the raw row
+     to `processing_status='identity_conflict'` linked to the *existing* occurrence
+     — never a second `job_occurrences` row. `pipeline.py` buckets a quarantined
+     outcome as `jobs_updated`, sets `completed_with_errors`, and logs one sanitized
+     WARNING (`ingestion_identity_conflict`: raw/conflict/occurrence ids only).
+  4. **Private rollback-test seam**: `persistence._after_quarantine_flush()`, a
+     no-op called after the occurrence+parent-Job+conflict+raw writes are flushed
+     but before `persist_posting`'s own `session.begin()` block exits — not a
+     public parameter. Monkeypatched to raise in
+     `test_quarantine_rollback_discards_all_effects_and_marks_run_failed`, which
+     proves all four effects roll back together and the run/attempt report the
+     exact counters from the one posting that had already, separately, committed.
+  5. Exact three-run counter/table matrix (`test_three_run_conflict_matrix`):
+     Run 1 inserts cleanly; Run 2 quarantines a conflicting re-observation
+     alongside one unrelated valid posting; Run 3 quarantines the same dispute
+     again via a distinct new ingestion (a second, independent conflict — not a
+     duplicate). Cumulative `IdentityConflict` count: 0 -> 1 -> 2. A `UserJob`
+     created after Run 1 is proven byte-identical (including `updated_at`) after
+     both Run 2 and Run 3.
+  6. Nondeterministic-order-safe concurrency test
+     (`test_concurrent_conflicting_canonical_urls_quarantine_the_loser`): two
+     postings race the same absent natural key with different canonical URLs;
+     assertions determine winner/loser from each task's own returned `outcome.kind`
+     rather than assuming which one wins.
+  7. Two adversarial raw-association tests isolate the content-hash and
+     `fetched_at` checks independently in the URL-fallback domain; two
+     reprocessing-guard tests (plain and quarantine-specific) prove a consumed
+     `raw_id` cannot be replayed into a duplicate mutation or a second conflict.
+- Files changed: `backend/app/ingestion/{persistence.py,pipeline.py}`;
+  `backend/tests/fixtures/discovery/evidence_mismatch_conflicting.json` (new);
+  `backend/tests/{test_ingestion_pipeline.py,test_ingestion_concurrency.py}`;
+  `docs/DECISIONS/0007-identity-conflict-quarantine.md` (narrow "Phase 2
+  implementation notes" addendum, no schema change); `docs/ROADMAP.md` (Phase 2
+  status paragraph); this handoff. No migration — no schema changed.
+- Commands run and exact results:
+  - `ruff format`/`ruff format --check .` → 3 files reformatted, then clean;
+    `ruff check .` → all checks passed.
+  - `mypy app/` and the two edited test files → clean (one `str | None` narrowing
+    fix applied in a new test).
+  - Targeted (`test_ingestion_pipeline.py` + `test_ingestion_concurrency.py`) →
+    **27 passed**.
+  - Full suite (`pytest`) → **1156 passed** (was 1147).
+  - `alembic heads` → `0017 (head)`, unchanged; no migration in this diff.
+  - Development database reconfirmed at `0006` with its original five-table shape
+    both before and after this pass; `jobgoblin_test` confirmed already at `0017`.
+  - `python scripts/check_repo.py` → exit 0, zero findings.
+  - `git diff --check` → clean (only a benign LF/CRLF note, not a whitespace
+    violation).
+  - Table-count query against `jobgoblin_test` after the full suite → all
+    ingestion-related tables at 0 rows; no leaked test data.
+- Adversarial self-review (fresh read of the diff before this entry): found and
+  fixed **one High** bug during the initial targeted test run — a new test's
+  `make_user_job(..., status="applied")` call omitted `applied_at`, tripping
+  `user_jobs`' `status_changed_at`/`applied_at` consistency `CHECK` mid-test. The
+  crash propagated past the test's `job_ids`/`raw_ingestion_ids` collection points,
+  so `finally`'s cleanup ran with incomplete id lists and left one orphaned
+  `Job`/`JobOccurrence` and one orphaned `normalized` `RawJobIngestion` row in
+  `jobgoblin_test`, which then made an unrelated concurrency-test assertion and a
+  raw-row-count assertion in a later test fail (both symptoms of the same root
+  leak, not independent bugs). Fixed by adding `applied_at=t1`; purged the leaked
+  rows by hand and reran the full targeted suite clean. Also hardened the shared
+  `_cleanup()` helper (used by every test in `test_ingestion_pipeline.py`) to
+  delete `IdentityConflict` rows referencing the raw ids being cleaned up before
+  deleting those raw rows — previously absent, since no test before this slice
+  ever created a real, committed `IdentityConflict` row; without this fix, every
+  conflict-producing test would have permanently accumulated an orphaned
+  `identity_conflicts` row (both FKs `SET NULL`, never cascade-deleted) in the
+  shared disposable test database.
+- Deviations/known limitations: none beyond the natural-key spine's own
+  already-documented residual limits. The raw-association hash/timestamp checks
+  cannot distinguish two postings that are byte-identical in both `raw` content
+  and `discovered_at` — an accepted, disclosed degenerate case, since the actual
+  pipeline call site always pairs `job`/`raw_id` in lockstep and never needs this
+  distinction in practice. `ambiguous_match`, identity tiers 2–4, `QueryPlanner`,
+  `ProviderRegistry`, multi-source partial-success handling, live providers, Phase
+  3 normalization, API routes, and scheduling remain explicitly out of scope.
+  `main` untouched throughout.
+- STOP — awaiting Codex review. Do not begin `ambiguous_match`, identity tiers
+  2–4, `QueryPlanner`, `ProviderRegistry`, multi-source handling, live providers,
+  normalization, APIs, scheduling, or modify/merge `main`.
+
+### Work review
+
+_Pending._
+
+---

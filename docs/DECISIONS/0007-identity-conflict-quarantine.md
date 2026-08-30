@@ -124,6 +124,42 @@ writes to it** — Phase 1 only migrates the schema.
    occurrence's disputed field through the normal application write path. No automated
    resolution exists.
 
+## Phase 2 implementation notes (evidence_mismatch conflict persistence slice)
+
+`ingestion/persistence.py::persist_posting()` implements the transaction walkthrough above
+verbatim, with these decisions resolved during implementation:
+
+- **Repeated mismatch**: a natural key already under an open `evidence_mismatch` that is
+  observed again with the *same* disputed evidence still produces a **new**
+  `identity_conflicts` row per distinct new `RawJobIngestion` — never deduplicated or
+  merged with the earlier open conflict. `resolution`/`status` transitions are a human
+  review action against each row individually; nothing in this slice auto-closes an older
+  conflict just because a newer, structurally identical one exists.
+- **Counter bucket**: a quarantined posting increments `jobs_updated` (both
+  `collection_runs` and `collection_run_provider_attempts`), not `jobs_inserted` — the
+  occurrence's observational state did advance, even though its disputed field did not.
+- **Evidence sensitivity**: `existing_value`/`incoming_value` are protected, narrowly-
+  scoped evidence — the same sensitivity tier as `raw_job_ingestions.raw_payload` — and are
+  never copied into logs, `error_message`, or (in a later API phase) an unauthenticated
+  response. The one log line this slice adds (`ingestion_identity_conflict`, `WARNING`)
+  carries only the three relevant ids (`raw_ingestion_id`, `identity_conflict_id`,
+  `job_occurrence_id`), never either disputed value.
+- **`error_message`**: stays `NULL` for a quarantined `RawJobIngestion` row — quarantine is
+  not a parse failure, and the disputed evidence itself already lives in
+  `identity_conflicts`, not in a free-text message.
+- **`created_at`/`updated_at`**: rely on the table's existing `server_default now()`; no
+  explicit timestamp is set by application code at conflict-creation time.
+- **Raw-ingestion association**: `persist_posting()` never trusts a caller-supplied
+  `raw_id` to actually correspond to `job`. Before any mutation, it locks the row
+  (`SELECT ... FOR UPDATE`) and validates existence, `processing_status = 'fetched'`,
+  `job_occurrence_id IS NULL`, provider/source, `source_identifier`, `raw_content_hash`,
+  and `fetched_at` — the last two specifically because `source_identifier` alone is `NULL`
+  for every URL-fallback-domain posting from a given provider/source, not just the correct
+  one, and so cannot alone distinguish an unrelated fetched row from the genuine match.
+  This also structurally enforces "one conflict per distinct new ingestion": a raw row
+  already turned `identity_conflict`/`normalized` fails the `processing_status` check
+  before it could ever produce a second conflict row.
+
 ## Consequences
 - The natural-key unique index is never at risk of violation by conflict handling —
   every write path that could hit a conflict either `UPDATE`s an existing row or
