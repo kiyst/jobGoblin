@@ -433,3 +433,31 @@ that detail.
   add schema/high-risk levels or CI/markers/status/handoff automation, or
   resume Phase-2 product work until the user explicitly authorizes the next
   action.
+
+**Merge record (appended, not a rewrite of the entry above):** Approved at review
+commit `0c9787b` (no findings). Per user authorization,
+`tooling/workflow-v3-routine-verifier` was merged into `main` with a normal merge
+commit (`257b6a5`; `--no-ff`, no squash/rebase/force-push) and pushed.
+`main`/`origin/main` are both now at `257b6a5`. Verified: feature branch was clean
+and pushed at `0c9787b` and `main`/`origin/main` were still at `adb6e62`
+immediately before the merge; `main` has zero content diff against the feature
+branch (`git diff main tooling/workflow-v3-routine-verifier --stat` empty);
+migration `0017` remains the sole Alembic head; the canonical
+`python scripts/verify.py --level routine` command itself was run against merged
+`main` and reported **all 9 steps PASS** (Ruff format/check, mypy, `check_repo.py`,
+`git diff --check`, database URL safety, real test-database reachability, full
+suite **1249 passed**, temporary-directory cleanup) in `117.52s`; `.verify-tmp`
+confirmed to contain no run directory afterward; development database reconfirmed
+at `0006`; working tree clean.
+
+**Rollback boundary:** reverting `257b6a5` (a single merge commit) restores `main`
+to `adb6e62` exactly — no schema/migration exists in this slice to downgrade, and
+no data migration accompanies it. This merges the Workflow v3 tooling program's
+first slice only (the routine-verifier foundation: `scripts/verify.py --level
+routine`, `scripts/db_safety.py`, the fail-closed temporary-directory cleanup
+reported as its own step, the reviewer-safe `git diff --check` invocation, the
+Phase-1-complete/three-slice-Phase-2 ROADMAP correction, and Workflow v3's durable
+process rules in `docs/LLM_WORKFLOW.md`) — it does **not** add CI, pytest markers,
+`--level schema`/`--level high-risk`, a canonical-status generator, handoff-
+structure automation, process/performance metrics, or any Phase 2 product change,
+all of which remain not started and are not authorized by this merge.
