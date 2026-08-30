@@ -414,6 +414,55 @@ and scheduling all remain not started and are not authorized by this merge.
 
 ### Work review
 
-_Pending._
+- Date/agent: 2026-08-30, Codex. Diff reviewed: `10aa747..4684a4b` on
+  `phase-2/evidence-mismatch-conflict-persistence`. Review type: independent
+  Class H implementation review against the approved twice-revised proposal and
+  its four final binding clarifications.
+- Verification reproduced: `scripts/check_repo.py` exit 0; Ruff format/check
+  clean; mypy clean across `app tests scripts`; focused ingestion/concurrency
+  suite **27 passed**; full suite **1156 passed** using a workspace-local
+  `--basetemp` (the first run's eight setup errors were solely the already-known
+  Windows host-temp permission problem); `alembic check` reports no drift;
+  `jobgoblin_test` is at `0017 (head)` and development `jobgoblin` remains at
+  `0006`; working tree clean after verification.
+- Findings:
+  1. **High — `persist_posting()` does not prove the supplied `NaturalKey`
+     belongs to the supplied `DiscoveredJob`.** `_validate_raw_association()`
+     compares raw provider/source/source-identifier to `natural_key`, and raw
+     hash/time to `job`, but never compares `natural_key` to `job`. A caller can
+     therefore combine a genuine raw/job pair with a different posting's key.
+     The found branch can mutate/quarantine the wrong occurrence; the insert
+     branch can acquire an advisory lock for one key while inserting an
+     occurrence whose provider/source fields come from another, defeating the
+     concurrency guarantee. Re-resolve the expected natural key from `job` and
+     require exact equality before mutation (or remove the independently
+     supplied key); add an adversarial mismatched-key test proving no rows mutate.
+  2. **Medium — the advertised exact three-run matrix is only partially
+     asserted.** `test_three_run_conflict_matrix` does not check cumulative
+     `CollectionRun`/attempt-row totals after each run, does not prove every
+     run's attempt status/counters (only Run 2's partial counters), and calls the
+     `UserJob` byte-identical while snapshotting only `status` and `updated_at`.
+     Complete the promised run/attempt matrix and compare every persisted
+     `UserJob` column (or narrow the claim, but the approved matrix requires the
+     complete proof). Also assert quarantined raw rows keep `error_message IS
+     NULL` as the approved decision states.
+  3. **Low — ADR/roadmap wording disagrees with the executable behavior and
+     branch state.** ADR 0007 still says the implemented walkthrough uses
+     `last_seen_at = now()` and updates applicant-count fields, while this slice
+     correctly uses injected `observed_at` and currently has no applicant-count
+     input; its new addendum nevertheless says the walkthrough is implemented
+     “verbatim.” Correct the walkthrough to name the actual current fields
+     (occurrence `last_seen_at`/`is_active`, parent `Job.last_seen_at`) and note
+     applicant-count observation is deferred until represented by
+     `DiscoveredJob`. `ROADMAP.md` also says both Phase 2 slices are “merged so
+     far,” although this slice is still only on its feature branch; use wording
+     accurate both before and after review/merge.
+- **Verdict: changes requested.** The quarantine transaction, rollback seam,
+  nondeterministic concurrency assertions, sanitized logging, monotonic parent/
+  occurrence observation updates, and distinct-ingestion idempotency are sound;
+  corrections are bounded to the three findings above. Rerun Ruff/mypy, the
+  focused suites, full pytest, repository checker, and `alembic check`; append a
+  new `Work done` entry and stop for re-review. No migration is expected. Do not
+  begin another Phase 2 slice or modify/merge `main`.
 
 ---
