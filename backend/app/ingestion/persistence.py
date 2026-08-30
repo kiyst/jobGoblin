@@ -105,10 +105,12 @@ class AmbiguousIdentityMatchError(RuntimeError):
 
 
 class CandidateResolutionUnstableError(RuntimeError):
-    """A single candidate Job found by `_discover_candidates` could not be
-    stably confirmed after acquiring its row lock — either it was deleted
-    between discovery and lock acquisition, or the candidate query no
-    longer resolves to that same single Job once re-run under the lock.
+    """A single existing/candidate row found by an unlocked discovery query
+    could not be stably confirmed after acquiring its row lock(s) — either
+    a row was deleted between discovery and lock acquisition, or the same
+    discovery query no longer resolves to that same single row once re-run
+    under the lock. Raised by both Tier 1's own found-branch revalidation
+    (`upsert_job_occurrence`) and Tier 2/3's `_attach_to_candidate`.
 
     Distinct from `AmbiguousIdentityMatchError`: this means the candidate
     set was *unstable* under concurrent modification, not that a genuine,
@@ -117,13 +119,13 @@ class CandidateResolutionUnstableError(RuntimeError):
     identity evidence — exists as a defensive bound, never as an expected
     code path in normal operation.
 
-    Never retried within the same transaction. `_attach_to_candidate`
-    fails closed on the first sign of instability rather than looping:
-    retrying while still holding a lock on a stale candidate would risk
-    accumulating locks in inconsistent orders across concurrent
-    transactions — a deadlock surface strictly worse than failing this one
-    transaction closed and letting the caller (ultimately a fresh
-    `pipeline.run()` invocation) resolve it fresh.
+    Never retried within the same transaction. Both call sites fail closed
+    on the first sign of instability rather than looping: retrying while
+    still holding a lock on a stale row would risk accumulating locks in
+    inconsistent orders across concurrent transactions — a deadlock
+    surface strictly worse than failing this one transaction closed and
+    letting the caller (ultimately a fresh `pipeline.run()` invocation)
+    resolve it fresh.
     """
 
 
@@ -133,11 +135,19 @@ def _normalize_canonical_url(job: DiscoveredJob) -> str | None:
     return normalize_url(job.canonical_url, provider=job.provider, source=job.source)
 
 
-def _select_existing(natural_key: NaturalKey) -> Select[tuple[JobOccurrence]]:
-    """Selects the full ORM entity (not bare columns) so the "found" branch
-    below can update it by plain attribute assignment — which runs through
-    `JobOccurrence`'s own `@validates` normalization — rather than a
-    Core-style `update()` statement, which does not."""
+def _existing_occurrence_query(natural_key: NaturalKey) -> Select[tuple[JobOccurrence]]:
+    """Tier 1's own domain-scoped lookup (ADR 0004's three natural-key
+    forms). Selects the full ORM entity (not bare columns) so the "found"
+    branch below can update it by plain attribute assignment — which runs
+    through `JobOccurrence`'s own `@validates` normalization — rather than
+    a Core-style `update()` statement, which does not.
+
+    Deliberately returns an *unlocked* query — never `.with_for_update()`
+    itself. `upsert_job_occurrence`'s found branch runs this once unlocked
+    to discover the candidate row, then again (chained with
+    `.with_for_update()` by the caller) to revalidate it only after the
+    parent `Job`'s own row lock is already held — see that function's own
+    docstring for why parent-before-child ordering matters here."""
     query = select(JobOccurrence).where(
         JobOccurrence.provider == natural_key.provider,
         JobOccurrence.source == natural_key.source,
@@ -157,7 +167,7 @@ def _select_existing(natural_key: NaturalKey) -> Select[tuple[JobOccurrence]]:
             JobOccurrence.source_job_id.is_(None),
             JobOccurrence.source_url_normalized == natural_key.url_normalized,
         )
-    return query.with_for_update()
+    return query
 
 
 async def _discover_candidates(
@@ -185,6 +195,17 @@ async def _before_candidate_lock() -> None:
     deterministically exercise "candidate deleted concurrently" using two
     real, separately-committed PostgreSQL transactions rather than
     relying on real-world timing or mocking the query itself."""
+    return None
+
+
+async def _before_tier1_parent_lock() -> None:
+    """Test seam only — a no-op in production. Tests monkeypatch this to
+    pause execution between Tier 1's initial unlocked existing-occurrence
+    discovery and the parent `Job` row-lock attempt below, to
+    deterministically exercise "parent Job deleted concurrently" using two
+    real, separately-committed PostgreSQL transactions — the Tier-1
+    analogue of `_before_candidate_lock` above, kept as a separate seam
+    since the two pause points guard unrelated code paths."""
     return None
 
 
@@ -325,19 +346,36 @@ async def upsert_job_occurrence(
     the returned outcome's `kind` is `QUARANTINED` rather than `UPDATED` —
     `persist_posting` uses that signal to record the `IdentityConflict`
     row ADR 0007 requires; this function itself never mutates the
-    disputed field and never creates that row. The found branch's parent
-    `Job` fetch is `SELECT ... FOR UPDATE`, not a plain `session.get()` —
-    required *because* Tier 2/3 below can now give one Job more than one
-    occurrence under different natural keys (reachable via different
-    advisory locks that do not serialize against each other); without the
-    row lock here, two concurrent updates to the same Job's `last_seen_at`
-    from different natural-key branches could lose an update, moving it
-    backward. (The occurrence itself is already `FOR UPDATE`-locked by
-    `_select_existing`, which — being the child row in the `jobs` ->
-    `job_occurrences` cascade — already blocks a concurrent cascading
-    delete of the parent from proceeding, so the immediately-following
-    `assert job_row is not None` remains safe: no new revalidation is
-    needed here the way Tier 2/3's candidate resolution needs it below.)
+    disputed field and never creates that row.
+
+    The found branch discovers the existing occurrence via an *unlocked*
+    query first (`_existing_occurrence_query`), then acquires the parent
+    `Job`'s row lock via `SELECT ... FOR UPDATE` *before* re-locking the
+    occurrence itself — parent-before-child, the same order Tier 2/3's
+    `_attach_to_candidate` uses below, and the order compatible with
+    `jobs` -> `job_occurrences` `ON DELETE CASCADE`. An earlier version of
+    this function locked the occurrence (child) first and the parent `Job`
+    second; that was itself a latent opposite-order deadlock surface
+    against any future writer that deletes a `Job` (which locks the parent
+    first, then cascades to lock its children): this function would hold
+    the child lock while wanting the parent, while such a writer would
+    hold the parent while wanting the child. Discovering unlocked and
+    re-locking parent-then-child removes that surface entirely — both this
+    function and any lock-order-compliant future writer always contend for
+    the parent first, so one simply waits for the other rather than
+    deadlocking.
+
+    Once the parent lock is held, the occurrence is re-fetched via the
+    same domain query, now `FOR UPDATE`; if it no longer exists, resolves
+    to a different row than the one just probed, or its `job_id` no longer
+    matches the just-locked parent, this fails closed with
+    `CandidateResolutionUnstableError` — never a bare assertion. The
+    parent lock itself is also required *because* Tier 2/3 below can give
+    one Job more than one occurrence under different natural keys
+    (reachable via different advisory locks that do not serialize against
+    each other); without it, two concurrent updates to the same Job's
+    `last_seen_at` from different natural-key branches could lose an
+    update, moving it backward.
 
     Tier 2 and Tier 3 are **mutually exclusive per posting**, matching
     ADR 0004's own conservative precedence: Tier 2 is attempted only when
@@ -370,9 +408,36 @@ async def upsert_job_occurrence(
     await session.execute(text("SELECT pg_advisory_xact_lock(:key)").bindparams(key=lock_key))
 
     incoming_canonical_url = _normalize_canonical_url(job)
-    occurrence = (await session.execute(_select_existing(natural_key))).scalar_one_or_none()
+    existing_probe = (
+        await session.execute(_existing_occurrence_query(natural_key))
+    ).scalar_one_or_none()
 
-    if occurrence is not None:
+    if existing_probe is not None:
+        probed_job_id = existing_probe.job_id
+        probed_occurrence_id = existing_probe.id
+
+        await _before_tier1_parent_lock()
+
+        job_row = (
+            await session.execute(select(Job).where(Job.id == probed_job_id).with_for_update())
+        ).scalar_one_or_none()
+        if job_row is None:
+            raise CandidateResolutionUnstableError(
+                "existing occurrence's parent job was deleted before its lock could be acquired"
+            )
+
+        occurrence = (
+            await session.execute(_existing_occurrence_query(natural_key).with_for_update())
+        ).scalar_one_or_none()
+        if (
+            occurrence is None
+            or occurrence.id != probed_occurrence_id
+            or occurrence.job_id != probed_job_id
+        ):
+            raise CandidateResolutionUnstableError(
+                "existing occurrence was deleted or reassociated before its lock could be acquired"
+            )
+
         is_conflict = (
             occurrence.canonical_url_normalized is not None
             and incoming_canonical_url is not None
@@ -381,11 +446,6 @@ async def upsert_job_occurrence(
 
         occurrence.last_seen_at = max(occurrence.last_seen_at, observed_at)
         occurrence.is_active = True
-
-        job_row = (
-            await session.execute(select(Job).where(Job.id == occurrence.job_id).with_for_update())
-        ).scalar_one_or_none()
-        assert job_row is not None
         job_row.last_seen_at = max(job_row.last_seen_at, observed_at)
 
         await session.flush()

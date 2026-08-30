@@ -98,156 +98,6 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-08-30, Claude Code (Sonnet 5). Class H correction pass on
-  `phase-2/evidence-mismatch-conflict-persistence` for the three findings in
-  review commit `8c1388e` (`10aa747..4684a4b`). Base `4684a4b`.
-- Outcome, addressing each finding exactly:
-  1. **High — `persist_posting()` now proves `natural_key` belongs to `job`.**
-     `_validate_raw_association()` re-resolves `job`'s own identity via
-     `resolve_identity(job)` and requires exact equality with the supplied
-     `natural_key`, run last among the pre-mutation checks (existence, status,
-     linkage, provider/source, `source_identifier`, `raw_content_hash`,
-     `fetched_at`, then this). A `natural_key` differing only in a forged
-     `source_tenant_id` (or, structurally, a forged normalized URL) now fails
-     closed before any mutation, since neither is a column `RawJobIngestion`
-     itself stores to compare against. Added
-     `test_persist_posting_rejects_natural_key_that_does_not_match_the_job`: a
-     genuinely valid raw/job pair (`clean_tenant_scoped`, matching hash and
-     `fetched_at`) combined with a `NaturalKey` differing only by
-     `tenant_id="evil-corp"` — proves the raw row stays `fetched`/unlinked, no
-     `Job`/`JobOccurrence` is created, and no `IdentityConflict` references
-     that raw id.
-  2. **Medium — the three-run matrix now asserts everything the proposal
-     promised.** `test_three_run_conflict_matrix` now checks, after every one
-     of the three runs: cumulative `CollectionRun` and
-     `CollectionRunProviderAttempt` row totals (1/2/3 each); each run's own
-     attempt row `status` plus exact `jobs_discovered`/`jobs_inserted`/
-     `jobs_updated` (not only Run 2's); every persisted `UserJob` column
-     (via a `_user_job_snapshot()` helper covering all ten non-`id` columns,
-     not just `status`/`updated_at`) unchanged after Run 2 and Run 3; and that
-     every quarantined `RawJobIngestion` row (one after Run 2, two after
-     Run 3) has `error_message IS NULL`. Added `_collection_run_count()`/
-     `_attempt_count()` helpers alongside the existing per-table counters.
-  3. **Low — ADR 0007 and ROADMAP.md now match the executable behavior and
-     branch state.** ADR 0007's transaction walkthrough (step 5a) and its
-     "Decision" summary bullet now both name the actual implemented fields —
-     `last_seen_at = max(existing, observed_at)` (the injected business
-     timestamp, never `now()`) and `is_active` on the occurrence, plus the
-     parent `Job.last_seen_at` the same way — and state explicitly that
-     `applicant_count`/`applicant_count_text` are deferred because
-     `DiscoveredJob` does not currently represent either field. The
-     "Raw-ingestion association" implementation note was extended to describe
-     the new `natural_key`-vs-`job` check. `ROADMAP.md`'s Phase 2 paragraph
-     now says one slice (the natural-key spine) is merged into `main` and
-     names this slice's own feature branch explicitly as **not yet merged**.
-- Files changed: `backend/app/ingestion/persistence.py`;
-  `backend/tests/test_ingestion_pipeline.py`;
-  `docs/DECISIONS/0007-identity-conflict-quarantine.md`; `docs/ROADMAP.md`;
-  this handoff.
-- Commands run and exact results:
-  - `ruff format .` → 1 file reformatted, then clean; `ruff check .` → all
-    checks passed.
-  - `mypy app tests scripts` → clean, 73 source files.
-  - Focused (`test_ingestion_pipeline.py` + `test_ingestion_concurrency.py`) →
-    **28 passed** (was 27; +1 new adversarial test).
-  - Full suite with a workspace-local `--basetemp` → **1157 passed** (was
-    1156).
-  - `alembic check` (against `jobgoblin_test`) → `No new upgrade operations
-    detected`; `alembic heads` → `0017 (head)`, unchanged; no migration in
-    this diff.
-  - Development database reconfirmed at `0006` with its original five-table
-    shape both before and after this pass; `jobgoblin_test` confirmed already
-    at `0017`.
-  - `python scripts/check_repo.py` → exit 0, zero findings.
-  - `git diff --check` → clean (only benign LF/CRLF notices, not whitespace
-    violations).
-  - Table-count queries against `jobgoblin_test` after both the focused and
-    full runs → all ingestion-related tables at 0 rows; no leaked test data.
-- Adversarial self-review: traced every existing test that constructs a
-  `natural_key`/`job` pair and passes it to `persist_posting`/
-  `upsert_job_occurrence` to confirm the new re-resolution check could not
-  spuriously reject a legitimate case — every existing test either derives
-  `natural_key` directly from the same `job` via `resolve_identity()`, or
-  varies only fields that do not participate in natural-key resolution
-  (`canonical_url`, `discovered_at` where isolating the hash/`fetched_at`
-  checks specifically). Confirmed empirically: all pre-existing tests in both
-  edited files still pass unchanged. Also confirmed the new adversarial test
-  actually isolates the new check (not an existing one) by checking that
-  `raw.source_identifier` still agrees with the forged key's `job_id` — only
-  `tenant_id` differs, which no other check compares.
-- Deviations/known limitations: none beyond those already recorded in
-  Iteration 1. `ambiguous_match`, identity tiers 2–4, `QueryPlanner`,
-  `ProviderRegistry`, multi-source partial-success handling, live providers,
-  Phase 3 normalization, API routes, and scheduling remain explicitly out of
-  scope. `main` untouched throughout.
-- STOP — awaiting Codex re-review. Do not begin `ambiguous_match`, identity
-  tiers 2–4, `QueryPlanner`, `ProviderRegistry`, multi-source handling, live
-  providers, normalization, APIs, scheduling, or modify/merge `main`.
-
-### Work review
-
-- Date/agent: 2026-08-30, Codex. Correction diff reviewed:
-  `8c1388e..6238096` on
-  `phase-2/evidence-mismatch-conflict-persistence`; original implementation
-  context rechecked against `10aa747..6238096` where relevant.
-- The three findings from review commit `8c1388e` are closed:
-  1. `persist_posting()` now re-resolves `job` through `resolve_identity()` and
-     requires exact `NaturalKey` equality before mutation. The adversarial
-     forged-tenant-key regression keeps every earlier raw-association signal
-     valid, proves this new check is the rejecting boundary, and proves the raw
-     row, Job/Occurrence population, and conflict population remain unchanged.
-  2. The three-run test now proves cumulative run/attempt totals, every run and
-     attempt's exact status/counters, every persisted `UserJob` column on the
-     same id, and `error_message IS NULL` for every quarantined raw row.
-  3. ADR 0007 now describes injected `observed_at`, the exact currently
-     represented observation fields, the parent-Job update, and the explicit
-     applicant-count deferral. ROADMAP accurately distinguishes the merged
-     natural-key spine from this still-unmerged feature branch.
-- Independent verification: `scripts/check_repo.py` exit 0; Ruff format/check
-  clean; mypy clean across **73 source files**; focused ingestion/concurrency
-  suite **28 passed**; full suite **1157 passed** with workspace-local
-  `--basetemp`; `alembic check` reports no drift; `jobgoblin_test` remains at
-  `0017 (head)` and development `jobgoblin` remains at `0006`; working tree
-  clean after removing the review temp directory.
-- Findings: none.
-- **Verdict: approved.** Tier-1 `evidence_mismatch` conflict persistence and
-  its correction pass are accepted. STOP — do not merge this branch into
-  `main` or begin `ambiguous_match`, identity tiers 2–4, `QueryPlanner`,
-  `ProviderRegistry`, multi-source handling, live providers, normalization,
-  APIs, scheduling, or any other slice until the user explicitly authorizes
-  the next action.
-
-**Merge record (appended, not a rewrite of the entry above):** Approved at review
-commit `f2472f2` (no findings). Per user authorization,
-`phase-2/evidence-mismatch-conflict-persistence` was merged into `main` with a
-normal merge commit (`227184e`; `--no-ff`, no squash/rebase/force-push) and
-pushed. `main`/`origin/main` are both now at `227184e`. Verified: feature
-branch was clean at `f2472f2` and `main`/`origin/main` were still at `10aa747`
-immediately before the merge; `main` has zero content diff against the feature
-branch (`git diff main phase-2/evidence-mismatch-conflict-persistence --stat`
-empty); migration `0017` remains the sole Alembic head; `python
-backend/scripts/check_repo.py` exits 0 with zero findings; `git diff --check`
-clean; development database reconfirmed at `0006` with its original five-table
-shape; working tree clean.
-
-**Rollback boundary:** reverting `227184e` (a single merge commit) restores
-`main` to `10aa747` exactly — no schema/migration exists in this slice to
-downgrade, and no data migration accompanies it. This merges Phase 2's second
-vertical slice only (Tier-1 `evidence_mismatch` conflict persistence:
-`persist_posting()`'s raw/natural-key-validated quarantine transaction, the
-private rollback-test seam, the nondeterministic concurrency proof, the
-three-run counter matrix, and the sanitized `ingestion_identity_conflict`
-telemetry) — it does **not** complete Phase 2. `ambiguous_match`, identity
-tiers 2–4, `QueryPlanner`, `ProviderRegistry`, multi-source partial-success
-handling, live providers, Phase 3 normalization, API routes, and scheduling all
-remain not started and are not authorized by this merge.
-
----
-
-## Iteration 2
-
-### Work done
-
 - Date/agent: 2026-08-30, Claude Code (Sonnet 5). Authorized slice: Phase 2's
   third vertical slice, **Tier-2/Tier-3 cross-occurrence identity
   attachment** — Class H (identity/concurrency risk per
@@ -425,3 +275,115 @@ remain not started and are not authorized by this merge.
   workflow-automation tooling slice.
 
 ---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-08-30, Claude Code (Sonnet 5). Class H correction pass on
+  `phase-2/tier2-tier3-identity-attachment` for the three bounded findings in
+  review commit `54518bd` (`988dcd1..54518bd`). Base `988dcd1`. Addresses
+  exactly Findings 1-3 from Iteration 1's `Work review`; every
+  otherwise-approved Tier-2/Tier-3 behavior (precedence, candidate
+  revalidation, `ATTACHED -> jobs_updated`, three-effect rollback boundary,
+  existing-index reuse, Tier-4 deferral) is unchanged.
+- Outcome, addressing each finding exactly:
+  1. **Medium — Tier 1's found branch now genuinely locks parent-before-
+     child.** `_select_existing` (always `FOR UPDATE`) is replaced by
+     `_existing_occurrence_query` (unlocked). `upsert_job_occurrence`'s found
+     branch now: probes the existing occurrence unlocked -> pauses at the new
+     `_before_tier1_parent_lock()` test seam -> locks the parent `Job`
+     `FOR UPDATE` (raising `CandidateResolutionUnstableError` if it is gone,
+     never a bare assertion) -> re-runs the identical domain query, now
+     `FOR UPDATE`, and fails closed with the same error if the occurrence is
+     gone or its `job_id` no longer matches the just-locked parent. This
+     removes the opposite-order deadlock surface Codex identified: any
+     future Job-deletion writer that also locks parent-before-child now only
+     ever contends for the parent first, never a mix of orders. Added
+     `test_tier1_reobservation_vs_parent_deletion_uses_real_transactions_no_deadlock`:
+     two real, separately-committed PostgreSQL transactions (via
+     `_before_tier1_parent_lock` + `asyncio.Event`s, mirroring the existing
+     Tier-2/3 deletion-race test's shape) — transaction A pauses right
+     before the parent lock, transaction B deletes and commits that same
+     Job, transaction A resumes and fails closed with
+     `CandidateResolutionUnstableError`; bounded by a 10s timeout so a
+     regression to the old order fails the test rather than hanging it.
+     Updated `upsert_job_occurrence`'s own docstring and ADR 0004's Phase-2
+     notes to describe the corrected, now-global parent-before-child
+     discipline and why the old order was unsafe.
+  2. **Low — hardened both real-transaction concurrency tests.** In
+     `test_candidate_deleted_between_discovery_and_lock_uses_real_transactions`,
+     `_delete_candidate()`'s `resume.set()` moved into a `finally` block so a
+     failed delete can never leave the paired task waiting forever; the
+     coordinated `asyncio.gather` is now wrapped in `asyncio.wait_for(...,
+     timeout=10)`; `existing_job_id` is now included in `job_ids` for
+     best-effort cleanup. In `test_concurrent_tier2_attach_produces_no_duplicate_job`
+     (`test_ingestion_concurrency.py`), each `raw_id` is now appended to the
+     shared `raw_ids` list immediately after `_write_fetched_row` returns —
+     before `persist_posting` runs and could raise — so a regression can no
+     longer leak an uncleaned raw row into later tests.
+  3. **Low — corrected the focused-test count.** The three named files
+     collect and pass **53** tests on this branch (52 at `988dcd1`, the
+     count Codex verified independently, plus the one new Tier-1-vs-parent-
+     deletion test added for Finding 1). Iteration 1's own entries above are
+     left unedited per the two-iteration rotation rule's "do not rewrite the
+     other LLM's entry" — the 63 previously reported there was simply wrong
+     and is called out, not silently replaced.
+- Files changed: `backend/app/ingestion/persistence.py`;
+  `backend/tests/test_ingestion_pipeline.py`;
+  `backend/tests/test_ingestion_concurrency.py`;
+  `docs/DECISIONS/0004-scoped-deterministic-identity.md`; this handoff. No
+  migration; no change to `natural_key.py` or `pipeline.py`.
+- Commands run and exact results:
+  - `ruff format .` / `ruff check .` -> clean.
+  - `mypy app tests scripts` -> clean, 73 source files.
+  - Focused (`test_ingestion_pipeline.py` + `test_ingestion_concurrency.py`
+    + `test_ingestion_natural_key.py`) -> **53 passed** (53 collected;
+    corrected count, +1 over the 52 Codex verified at `988dcd1`).
+  - Full suite with a workspace-local `--basetemp` -> **1175 passed** (was
+    1174).
+  - The three real-transaction concurrency tests (the two pre-existing
+    genuine races plus the new Tier-1-vs-parent-deletion one) rerun 5x each
+    in a stress loop -> stable, no flakiness, no timeouts.
+  - `alembic check` (against `jobgoblin_test`) -> `No new upgrade operations
+    detected`; `alembic heads` -> `0017 (head)`, unchanged.
+  - `\d`-equivalent index query against `jobgoblin_test` -> confirmed
+    `ix_job_occurrences_tenant_requisition_lookup` still
+    `btree (provider, source, source_tenant_id, requisition_id_raw)`,
+    unchanged.
+  - Development database (`alembic current`, default `DATABASE_URL`) ->
+    `0006`, unchanged.
+  - `python scripts/check_repo.py` -> exit 0, zero findings.
+  - `git diff --check` -> clean (benign LF/CRLF notices only).
+  - Table-count queries against `jobgoblin_test` after the full run ->
+    every ingestion-related table at 0 rows; no leaked test data.
+- Adversarial self-review (fresh read of the complete corrected diff before
+  this entry): re-derived the deadlock argument independently (parent-
+  before-child on both sides of any future concurrent delete removes the
+  opposite-order cycle) rather than trusting the prior entry's now-known-
+  wrong version of that same claim; confirmed no other test constructs a
+  `natural_key`/`job` pair that could be spuriously affected by the
+  reordered found-branch queries (the full suite passing at 1175 is
+  consistent with, not a substitute for, that trace); confirmed
+  `CandidateResolutionUnstableError`'s docstring broadening (now shared by
+  Tier 1 and Tier 2/3) does not change any existing `pytest.raises`/
+  `isinstance` assertion, since none of them match on the exception's
+  message text. Found no further issues beyond the three findings addressed
+  above.
+- Deviations/known limitations: none beyond those already disclosed in
+  Iteration 1 (Tier 4's deferral; `ambiguous_match` persistence and its
+  evidence shape as a separate future slice; multiple-candidate failures
+  are whole-run, not per-posting-isolated, until that future slice lands).
+  `QueryPlanner`, `ProviderRegistry`, multi-source partial-success handling,
+  live providers, Phase 3 normalization, API routes, scheduling, and the
+  workflow-automation/tooling slice remain explicitly out of scope. `main`
+  untouched throughout.
+- STOP — awaiting Codex re-review. Do not begin `ambiguous_match`, Tier 4,
+  `QueryPlanner`, `ProviderRegistry`, multi-source handling, live providers,
+  normalization, APIs, scheduling, the workflow-automation/tooling slice, or
+  modify/merge `main`.
+
+### Work review
+
+_Pending._
+

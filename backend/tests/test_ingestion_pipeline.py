@@ -2550,7 +2550,11 @@ async def test_candidate_deleted_between_discovery_and_lock_uses_real_transactio
     the `_before_candidate_lock` test seam); transaction B deletes and
     commits the candidate Job; transaction A resumes and attempts the Job
     lock. Must raise `CandidateResolutionUnstableError` with complete
-    rollback, never mutate a stale candidate."""
+    rollback, never mutate a stale candidate. The coordinated gather is
+    bounded by a timeout and the deleting task always signals `resume` in
+    `finally`, so a failure on either side cannot hang the suite; cleanup
+    includes the candidate Job id best-effort even though the race itself
+    is expected to delete it."""
     t0 = datetime(2026, 3, 18, tzinfo=UTC)
     t1 = t0 + timedelta(hours=1)
     job_existing = _load_fixture("canonical_url_match_primary").model_copy(
@@ -2589,17 +2593,24 @@ async def test_candidate_deleted_between_discovery_and_lock_uses_real_transactio
 
     async def _delete_candidate() -> None:
         await paused.wait()
-        async with AsyncSession(bind=db_engine) as session:
-            job_row = await session.get(Job, existing_job_id)
-            assert job_row is not None
-            await session.delete(job_row)
-            await session.commit()
-        resume.set()
+        try:
+            async with AsyncSession(bind=db_engine) as session:
+                job_row = await session.get(Job, existing_job_id)
+                assert job_row is not None
+                await session.delete(job_row)
+                await session.commit()
+        finally:
+            # Always unblocks the paused attach task, even if the delete
+            # itself failed — otherwise a failure here leaves
+            # `_attempt_attach()` waiting on `resume` forever.
+            resume.set()
 
-    job_ids: list[uuid.UUID] = []
+    job_ids: list[uuid.UUID] = [existing_job_id]  # best-effort cleanup even if the race fails
     raw_ids = [raw_id]
     try:
-        result, _ = await asyncio.gather(_attempt_attach(), _delete_candidate())
+        result, _ = await asyncio.wait_for(
+            asyncio.gather(_attempt_attach(), _delete_candidate()), timeout=10
+        )
 
         assert isinstance(result, CandidateResolutionUnstableError)
 
@@ -2618,6 +2629,96 @@ async def test_candidate_deleted_between_discovery_and_lock_uses_real_transactio
             raw_row = await session.get(RawJobIngestion, raw_id)
             assert raw_row is not None
             assert raw_row.processing_status == "fetched"
+            assert raw_row.job_occurrence_id is None
+    finally:
+        await _cleanup(
+            db_engine,
+            user_ids=[],
+            job_ids=job_ids,
+            collection_run_ids=[],
+            raw_ingestion_ids=raw_ids,
+        )
+
+
+async def test_tier1_reobservation_vs_parent_deletion_uses_real_transactions_no_deadlock(
+    db_engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Genuine two-transaction race proving Tier 1's parent-before-child
+    lock order (the review's Finding-1 correction) is deadlock-free:
+    transaction A completes its unlocked existing-occurrence discovery and
+    pauses (via the `_before_tier1_parent_lock` test seam) immediately
+    before acquiring the parent `Job`'s row lock; transaction B deletes
+    and commits that same Job (cascading to its occurrence); transaction
+    A resumes and attempts the parent lock. Must raise
+    `CandidateResolutionUnstableError` with complete rollback — and, the
+    point of this test, must complete at all rather than deadlock. An
+    earlier child-before-parent lock order could deadlock against exactly
+    this kind of concurrent parent delete; the bounded timeout below turns
+    a regression back to that order into a test failure instead of a hung
+    suite."""
+    t0 = datetime(2026, 3, 20, tzinfo=UTC)
+    t1 = t0 + timedelta(hours=1)
+    job = _load_fixture("clean_tenant_scoped").model_copy(
+        update={"source_job_id": "TIER1-PARENT-DELETE-RACE"}
+    )
+
+    existing_job_id = await _create_job_and_occurrence_directly(db_engine, job, observed_at=t0)
+
+    paused = asyncio.Event()
+    resume = asyncio.Event()
+
+    async def _pause_before_parent_lock() -> None:
+        paused.set()
+        await resume.wait()
+
+    monkeypatch.setattr(persistence, "_before_tier1_parent_lock", _pause_before_parent_lock)
+
+    natural_key = resolve_identity(job)
+    raw_id = await pipeline._write_fetched_row(db_engine, job, job.discovered_at)
+
+    async def _attempt_reobservation() -> Exception | UpsertOutcome:
+        try:
+            return await persist_posting(db_engine, natural_key, job, t1, raw_id)
+        except Exception as exc:  # noqa: BLE001 - captured for assertion below, not swallowed
+            return exc
+
+    async def _delete_parent() -> None:
+        await paused.wait()
+        try:
+            async with AsyncSession(bind=db_engine) as session:
+                job_row = await session.get(Job, existing_job_id)
+                assert job_row is not None
+                await session.delete(job_row)
+                await session.commit()
+        finally:
+            # Always unblocks the paused reobservation task, even if the
+            # delete itself failed.
+            resume.set()
+
+    job_ids: list[uuid.UUID] = [existing_job_id]  # best-effort cleanup even if the race fails
+    raw_ids = [raw_id]
+    try:
+        result, _ = await asyncio.wait_for(
+            asyncio.gather(_attempt_reobservation(), _delete_parent()), timeout=10
+        )
+
+        assert isinstance(result, CandidateResolutionUnstableError)
+
+        async with AsyncSession(bind=db_engine) as session:
+            assert (await session.get(Job, existing_job_id)) is None  # genuinely deleted by task B
+
+            occurrence_count = (
+                await session.execute(
+                    select(func.count())
+                    .select_from(JobOccurrence)
+                    .where(JobOccurrence.source_job_id == "TIER1-PARENT-DELETE-RACE")
+                )
+            ).scalar_one()
+            assert occurrence_count == 0  # cascaded away with the parent
+
+            raw_row = await session.get(RawJobIngestion, raw_id)
+            assert raw_row is not None
+            assert raw_row.processing_status == "fetched"  # reobservation never completed
             assert raw_row.job_occurrence_id is None
     finally:
         await _cleanup(

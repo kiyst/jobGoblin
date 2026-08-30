@@ -197,7 +197,13 @@ implementation:
   retrying while holding a lock on a stale candidate risks accumulating locks in
   inconsistent order across concurrent transactions, a deadlock surface strictly worse
   than one safe failure. Lock order is always parent (`Job`) before child
-  (`JobOccurrence`), compatible with `jobs` -> `job_occurrences` `ON DELETE CASCADE`.
+  (`JobOccurrence`), compatible with `jobs` -> `job_occurrences` `ON DELETE CASCADE`. This
+  parent-before-child order is now global, not Tier-2/3-specific: Tier 1's own found
+  branch (below) discovers its existing occurrence unlocked, locks the parent `Job`
+  first, then re-locks and revalidates the occurrence — an initial implementation locked
+  the occurrence (child) first and the parent second, which was itself a latent
+  opposite-order deadlock surface against any future writer that deletes a `Job`; see the
+  correctness-gap note below.
 - **Writer discipline this guarantee depends on**: every current ingestion write path
   treats `job_occurrences`/`jobs` identity evidence as immutable once written — nothing
   deletes a `Job`/`JobOccurrence` row or updates its identity columns in place. Any future
@@ -217,6 +223,21 @@ implementation:
   concurrent updates to the same `Job.last_seen_at` from different natural-key branches
   (Tier 1 re-observing one occurrence, Tier 2/3 attaching another) could otherwise lose an
   update under READ COMMITTED, moving `last_seen_at` backward.
+- **A correction to that fix, made during review**: the fix above was initially applied
+  by locking the occurrence (child) first via its own discovery query, then the parent
+  `Job` second — the opposite of the parent-before-child order this same document
+  requires of Tier 2/3 and of any future Job-deletion writer. That opposite order was
+  itself a latent deadlock surface: a future delete path locks the parent first, then
+  cascades to lock children, so Tier 1 holding the child while waiting on the parent could
+  deadlock against it holding the parent while waiting on the child. The found branch now
+  discovers the existing occurrence unlocked, locks the parent `Job` first, then re-locks
+  and revalidates the occurrence by re-running the identical discovery query — if either
+  row is gone, or the occurrence no longer belongs to the just-locked parent,
+  `upsert_job_occurrence` fails closed with `CandidateResolutionUnstableError` rather than
+  a bare assertion. A real two-transaction PostgreSQL test
+  (`test_tier1_reobservation_vs_parent_deletion_uses_real_transactions_no_deadlock`)
+  proves both outcomes: no deadlock, and correct fail-closed behavior when the parent is
+  deleted mid-resolution.
 
 ## Consequences
 - Two unrelated companies reusing the same requisition number, or a job board scraping a

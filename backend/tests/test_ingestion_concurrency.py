@@ -219,19 +219,17 @@ async def test_concurrent_tier2_attach_produces_no_duplicate_job(db_engine: Asyn
     job_a = base.model_copy(update={"source_tenant_id": "tenant-race-a", "source_job_id": "RACE-A"})
     job_b = base.model_copy(update={"source_tenant_id": "tenant-race-b", "source_job_id": "RACE-B"})
 
-    async def _attempt(job: DiscoveredJob) -> tuple[uuid.UUID, UpsertOutcome]:
+    raw_ids: list[uuid.UUID] = []
+
+    async def _attempt(job: DiscoveredJob) -> UpsertOutcome:
         natural_key = resolve_identity(job)
         raw_id = await pipeline._write_fetched_row(db_engine, job, job.discovered_at)
-        outcome = await persist_posting(db_engine, natural_key, job, t1, raw_id)
-        return raw_id, outcome
+        raw_ids.append(raw_id)  # captured before persist_posting can raise, never leaked
+        return await persist_posting(db_engine, natural_key, job, t1, raw_id)
 
     job_ids: list[uuid.UUID] = []
-    raw_ids: list[uuid.UUID] = []
     try:
-        (raw_id_a, outcome_a), (raw_id_b, outcome_b) = await asyncio.gather(
-            _attempt(job_a), _attempt(job_b)
-        )
-        raw_ids.extend([raw_id_a, raw_id_b])
+        outcome_a, outcome_b = await asyncio.gather(_attempt(job_a), _attempt(job_b))
         job_ids.append(outcome_a.job_id)
 
         assert outcome_a.job_id == outcome_b.job_id
@@ -258,7 +256,7 @@ async def test_concurrent_tier2_attach_produces_no_duplicate_job(db_engine: Asyn
             raw_rows = (
                 (
                     await session.execute(
-                        select(RawJobIngestion).where(RawJobIngestion.id.in_([raw_id_a, raw_id_b]))
+                        select(RawJobIngestion).where(RawJobIngestion.id.in_(raw_ids))
                     )
                 )
                 .scalars()
