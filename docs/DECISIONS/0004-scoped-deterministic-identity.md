@@ -238,6 +238,24 @@ implementation:
   (`test_tier1_reobservation_vs_parent_deletion_uses_real_transactions_no_deadlock`)
   proves both outcomes: no deadlock, and correct fail-closed behavior when the parent is
   deleted mid-resolution.
+- **A further correction, made during a second review pass**: the unlocked discovery step
+  above was itself initially implemented by loading the full `JobOccurrence` ORM entity —
+  which seeds the session's identity map keyed by that row's primary key. SQLAlchemy does
+  not refresh an already-loaded instance's attributes from a later `SELECT` matching the
+  same primary key within the same session/transaction unless explicitly told to, so the
+  later `FOR UPDATE` query could have returned that same cached instance with its `job_id`
+  still reading the value from *before* a concurrent reassociation, letting the intended
+  revalidation check pass against a parent that was no longer this occurrence's actual
+  parent. The initial probe now selects only bare `id`/`job_id` scalar columns
+  (`_existing_occurrence_identity_query`), never the ORM entity, so it never touches the
+  identity map — the later `FOR UPDATE` load of the full entity is always that row's
+  *first* load into the session, guaranteed fresh from the database. A real
+  two-transaction PostgreSQL test
+  (`test_tier1_reassociation_between_probe_and_lock_is_detected_not_stale`) reassigns the
+  occurrence's `job_id` to a second Job between the scalar probe and the parent lock,
+  proving `CandidateResolutionUnstableError` is still raised and neither Job's
+  observational state advances. This is defense-in-depth: no current writer reassigns
+  `job_id` at all; only a documented advisory/row-lock-compliant future writer would.
 
 ## Consequences
 - Two unrelated companies reusing the same requisition number, or a job board scraping a

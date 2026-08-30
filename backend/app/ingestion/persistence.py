@@ -135,39 +135,70 @@ def _normalize_canonical_url(job: DiscoveredJob) -> str | None:
     return normalize_url(job.canonical_url, provider=job.provider, source=job.source)
 
 
-def _existing_occurrence_query(natural_key: NaturalKey) -> Select[tuple[JobOccurrence]]:
-    """Tier 1's own domain-scoped lookup (ADR 0004's three natural-key
-    forms). Selects the full ORM entity (not bare columns) so the "found"
-    branch below can update it by plain attribute assignment — which runs
-    through `JobOccurrence`'s own `@validates` normalization — rather than
-    a Core-style `update()` statement, which does not.
-
-    Deliberately returns an *unlocked* query — never `.with_for_update()`
-    itself. `upsert_job_occurrence`'s found branch runs this once unlocked
-    to discover the candidate row, then again (chained with
-    `.with_for_update()` by the caller) to revalidate it only after the
-    parent `Job`'s own row lock is already held — see that function's own
-    docstring for why parent-before-child ordering matters here."""
-    query = select(JobOccurrence).where(
+def _existing_occurrence_conditions(natural_key: NaturalKey) -> list[ColumnElement[bool]]:
+    """Tier 1's own domain-scoped lookup conditions (ADR 0004's three
+    natural-key forms) — shared by both query shapes below, so the scalar
+    identity probe and the full-entity query can never drift apart and
+    match different rows."""
+    conditions: list[ColumnElement[bool]] = [
         JobOccurrence.provider == natural_key.provider,
         JobOccurrence.source == natural_key.source,
-    )
+    ]
     if natural_key.domain is NaturalKeyDomain.TENANT:
-        query = query.where(
+        conditions += [
             JobOccurrence.source_tenant_id == natural_key.tenant_id,
             JobOccurrence.source_job_id == natural_key.job_id,
-        )
+        ]
     elif natural_key.domain is NaturalKeyDomain.NO_TENANT:
-        query = query.where(
+        conditions += [
             JobOccurrence.source_tenant_id.is_(None),
             JobOccurrence.source_job_id == natural_key.job_id,
-        )
+        ]
     else:
-        query = query.where(
+        conditions += [
             JobOccurrence.source_job_id.is_(None),
             JobOccurrence.source_url_normalized == natural_key.url_normalized,
-        )
-    return query
+        ]
+    return conditions
+
+
+def _existing_occurrence_query(natural_key: NaturalKey) -> Select[tuple[JobOccurrence]]:
+    """Selects the full ORM entity (not bare columns) so the "found" branch
+    below can update it by plain attribute assignment — which runs through
+    `JobOccurrence`'s own `@validates` normalization — rather than a
+    Core-style `update()` statement, which does not.
+
+    Deliberately returns an *unlocked* query shape — never `.with_for_update()`
+    itself. `upsert_job_occurrence`'s found branch chains `.with_for_update()`
+    onto this query itself only to load the entity *fresh*, for the first
+    time, after the parent `Job`'s own row lock is already held — never for
+    the initial, unlocked discovery probe. See `_existing_occurrence_identity_query`
+    and that function's own docstring for why."""
+    return select(JobOccurrence).where(*_existing_occurrence_conditions(natural_key))
+
+
+def _existing_occurrence_identity_query(
+    natural_key: NaturalKey,
+) -> Select[tuple[uuid.UUID, uuid.UUID]]:
+    """The initial, unlocked Tier-1 discovery probe — selects only the bare
+    `id`/`job_id` scalar columns, never the `JobOccurrence` ORM entity.
+
+    This is deliberate, not an optimization: loading the full entity here
+    would seed the session's identity map with a `JobOccurrence` instance
+    keyed by its primary key. SQLAlchemy does not refresh an already-loaded
+    instance's attributes from a later `SELECT` matching the same primary
+    key inside the same session/transaction unless explicitly told to — so
+    if `upsert_job_occurrence`'s later `FOR UPDATE` query happened to return
+    that same cached instance, its `job_id` could still read the *stale*
+    value from this probe even though the database row had since been
+    reassociated to a different `Job`, defeating the revalidation check
+    below. Selecting bare columns here never touches the identity map, so
+    the later `FOR UPDATE` load of `_existing_occurrence_query` is always
+    that entity's *first* load into this session — guaranteed fresh from
+    the database, not a cached instance."""
+    return select(JobOccurrence.id, JobOccurrence.job_id).where(
+        *_existing_occurrence_conditions(natural_key)
+    )
 
 
 async def _discover_candidates(
@@ -349,33 +380,40 @@ async def upsert_job_occurrence(
     disputed field and never creates that row.
 
     The found branch discovers the existing occurrence via an *unlocked*
-    query first (`_existing_occurrence_query`), then acquires the parent
-    `Job`'s row lock via `SELECT ... FOR UPDATE` *before* re-locking the
-    occurrence itself — parent-before-child, the same order Tier 2/3's
-    `_attach_to_candidate` uses below, and the order compatible with
-    `jobs` -> `job_occurrences` `ON DELETE CASCADE`. An earlier version of
-    this function locked the occurrence (child) first and the parent `Job`
-    second; that was itself a latent opposite-order deadlock surface
-    against any future writer that deletes a `Job` (which locks the parent
-    first, then cascades to lock its children): this function would hold
-    the child lock while wanting the parent, while such a writer would
-    hold the parent while wanting the child. Discovering unlocked and
-    re-locking parent-then-child removes that surface entirely — both this
-    function and any lock-order-compliant future writer always contend for
-    the parent first, so one simply waits for the other rather than
-    deadlocking.
+    scalar-only probe first (`_existing_occurrence_identity_query` — bare
+    `id`/`job_id` columns, deliberately never the ORM entity; see that
+    function's own docstring for why loading the entity here would risk
+    revalidating against a stale, session-cached value instead of the
+    database's current one), then acquires the parent `Job`'s row lock via
+    `SELECT ... FOR UPDATE` *before* loading the occurrence entity itself —
+    parent-before-child, the same order Tier 2/3's `_attach_to_candidate`
+    uses below, and the order compatible with `jobs` -> `job_occurrences`
+    `ON DELETE CASCADE`. An earlier version of this function locked the
+    occurrence (child) first and the parent `Job` second; that was itself a
+    latent opposite-order deadlock surface against any future writer that
+    deletes a `Job` (which locks the parent first, then cascades to lock
+    its children): this function would hold the child lock while wanting
+    the parent, while such a writer would hold the parent while wanting the
+    child. Discovering unlocked and re-locking parent-then-child removes
+    that surface entirely — both this function and any lock-order-compliant
+    future writer always contend for the parent first, so one simply waits
+    for the other rather than deadlocking.
 
-    Once the parent lock is held, the occurrence is re-fetched via the
-    same domain query, now `FOR UPDATE`; if it no longer exists, resolves
-    to a different row than the one just probed, or its `job_id` no longer
-    matches the just-locked parent, this fails closed with
-    `CandidateResolutionUnstableError` — never a bare assertion. The
-    parent lock itself is also required *because* Tier 2/3 below can give
-    one Job more than one occurrence under different natural keys
-    (reachable via different advisory locks that do not serialize against
-    each other); without it, two concurrent updates to the same Job's
-    `last_seen_at` from different natural-key branches could lose an
-    update, moving it backward.
+    Once the parent lock is held, the occurrence entity is loaded — for the
+    first time in this session — via the same domain query, now
+    `FOR UPDATE` (`_existing_occurrence_query`); if it no longer exists, or
+    its `id`/`job_id` disagree with the earlier scalar probe, this fails
+    closed with `CandidateResolutionUnstableError` — never a bare assertion.
+    Because this `FOR UPDATE` load is always that row's *first* load into
+    the session (the probe above never touched the ORM identity map), its
+    `job_id` is guaranteed fresh from the database — not a cached value
+    left over from before a concurrent reassociation. The parent lock
+    itself is also required *because* Tier 2/3 below can give one Job more
+    than one occurrence under different natural keys (reachable via
+    different advisory locks that do not serialize against each other);
+    without it, two concurrent updates to the same Job's `last_seen_at`
+    from different natural-key branches could lose an update, moving it
+    backward.
 
     Tier 2 and Tier 3 are **mutually exclusive per posting**, matching
     ADR 0004's own conservative precedence: Tier 2 is attempted only when
@@ -409,12 +447,11 @@ async def upsert_job_occurrence(
 
     incoming_canonical_url = _normalize_canonical_url(job)
     existing_probe = (
-        await session.execute(_existing_occurrence_query(natural_key))
-    ).scalar_one_or_none()
+        await session.execute(_existing_occurrence_identity_query(natural_key))
+    ).one_or_none()
 
     if existing_probe is not None:
-        probed_job_id = existing_probe.job_id
-        probed_occurrence_id = existing_probe.id
+        probed_occurrence_id, probed_job_id = existing_probe
 
         await _before_tier1_parent_lock()
 

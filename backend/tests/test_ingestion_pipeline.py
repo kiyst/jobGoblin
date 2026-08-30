@@ -2730,6 +2730,117 @@ async def test_tier1_reobservation_vs_parent_deletion_uses_real_transactions_no_
         )
 
 
+async def test_tier1_reassociation_between_probe_and_lock_is_detected_not_stale(
+    db_engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Genuine two-transaction race proving the scalar-only initial probe
+    (`_existing_occurrence_identity_query`) actually prevents a stale ORM
+    identity-map read, not just a stale-`Job`-lock read: transaction A
+    completes its unlocked scalar probe and pauses (via the
+    `_before_tier1_parent_lock` test seam) before acquiring the parent
+    `Job`'s row lock; transaction B reassigns that same occurrence's
+    `job_id` to a second, independently existing Job and commits;
+    transaction A resumes, locks the *original* parent (which still
+    exists — this is reassociation, not deletion), then loads the
+    occurrence fresh under its own `FOR UPDATE` and finds its `job_id` no
+    longer matches the scalar probe. Must raise
+    `CandidateResolutionUnstableError` before any mutation — if the probe
+    had instead loaded the full ORM entity (the defect this test guards
+    against), the session's identity map could have returned that same
+    stale-`job_id` instance on the later `FOR UPDATE` load, letting the
+    equality check pass against a parent that is no longer this
+    occurrence's actual parent. Proves neither Job's `last_seen_at`
+    advances and the raw row stays `fetched`/unlinked. This is
+    defense-in-depth: no current writer reassigns `job_id` at all; only a
+    documented advisory/row-lock-compliant future writer would."""
+    t0 = datetime(2026, 3, 21, tzinfo=UTC)
+    t1 = t0 + timedelta(hours=1)
+    job = _load_fixture("clean_tenant_scoped").model_copy(
+        update={"source_job_id": "TIER1-REASSOC-RACE"}
+    )
+
+    original_job_id = await _create_job_and_occurrence_directly(db_engine, job, observed_at=t0)
+
+    async with AsyncSession(bind=db_engine) as session, session.begin():
+        second_job = Job(
+            title="Second job for reassociation race",
+            first_seen_at=t0,
+            last_seen_at=t0,
+        )
+        session.add(second_job)
+        await session.flush()
+        second_job_id = second_job.id
+
+    occurrence_before = await _occurrence_by_job_id(db_engine, "TIER1-REASSOC-RACE")
+    occurrence_id = occurrence_before.id
+
+    paused = asyncio.Event()
+    resume = asyncio.Event()
+
+    async def _pause_before_parent_lock() -> None:
+        paused.set()
+        await resume.wait()
+
+    monkeypatch.setattr(persistence, "_before_tier1_parent_lock", _pause_before_parent_lock)
+
+    natural_key = resolve_identity(job)
+    raw_id = await pipeline._write_fetched_row(db_engine, job, job.discovered_at)
+
+    async def _attempt_reobservation() -> Exception | UpsertOutcome:
+        try:
+            return await persist_posting(db_engine, natural_key, job, t1, raw_id)
+        except Exception as exc:  # noqa: BLE001 - captured for assertion below, not swallowed
+            return exc
+
+    async def _reassign_occurrence() -> None:
+        await paused.wait()
+        try:
+            async with AsyncSession(bind=db_engine) as session, session.begin():
+                occurrence = await session.get(JobOccurrence, occurrence_id)
+                assert occurrence is not None
+                occurrence.job_id = second_job_id
+        finally:
+            # Always unblocks the paused reobservation task, even if the
+            # reassignment itself failed.
+            resume.set()
+
+    job_ids: list[uuid.UUID] = [original_job_id, second_job_id]
+    raw_ids = [raw_id]
+    try:
+        result, _ = await asyncio.wait_for(
+            asyncio.gather(_attempt_reobservation(), _reassign_occurrence()), timeout=10
+        )
+
+        assert isinstance(result, CandidateResolutionUnstableError)
+
+        async with AsyncSession(bind=db_engine) as session:
+            original_job_after = await session.get(Job, original_job_id)
+            assert original_job_after is not None
+            assert original_job_after.last_seen_at == t0  # unchanged — reobservation never landed
+
+            second_job_after = await session.get(Job, second_job_id)
+            assert second_job_after is not None
+            assert second_job_after.last_seen_at == t0  # never touched either
+
+            occurrence_after = await session.get(JobOccurrence, occurrence_id)
+            assert occurrence_after is not None
+            assert occurrence_after.job_id == second_job_id  # task B's reassignment did commit
+            assert occurrence_after.last_seen_at == t0  # reobservation never mutated it
+
+            raw_row = await session.get(RawJobIngestion, raw_id)
+            assert raw_row is not None
+            assert raw_row.processing_status == "fetched"
+            assert raw_row.job_occurrence_id is None
+    finally:
+        await _cleanup(
+            db_engine,
+            user_ids=[],
+            job_ids=job_ids,
+            collection_run_ids=[],
+            raw_ingestion_ids=raw_ids,
+        )
+
+
 async def test_attach_rollback_discards_all_three_effects_and_marks_run_failed(
     db_engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
 ) -> None:
