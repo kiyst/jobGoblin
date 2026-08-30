@@ -99,157 +99,6 @@ that detail.
 ### Work done
 
 - Date/agent: 2026-08-30, Claude Code (Sonnet 5). Class H correction pass on
-  `phase-2/tier2-tier3-identity-attachment` for the three bounded findings in
-  review commit `54518bd` (`988dcd1..54518bd`). Base `988dcd1`. Addresses
-  exactly Findings 1-3 from Iteration 1's `Work review`; every
-  otherwise-approved Tier-2/Tier-3 behavior (precedence, candidate
-  revalidation, `ATTACHED -> jobs_updated`, three-effect rollback boundary,
-  existing-index reuse, Tier-4 deferral) is unchanged.
-- Outcome, addressing each finding exactly:
-  1. **Medium — Tier 1's found branch now genuinely locks parent-before-
-     child.** `_select_existing` (always `FOR UPDATE`) is replaced by
-     `_existing_occurrence_query` (unlocked). `upsert_job_occurrence`'s found
-     branch now: probes the existing occurrence unlocked -> pauses at the new
-     `_before_tier1_parent_lock()` test seam -> locks the parent `Job`
-     `FOR UPDATE` (raising `CandidateResolutionUnstableError` if it is gone,
-     never a bare assertion) -> re-runs the identical domain query, now
-     `FOR UPDATE`, and fails closed with the same error if the occurrence is
-     gone or its `job_id` no longer matches the just-locked parent. This
-     removes the opposite-order deadlock surface Codex identified: any
-     future Job-deletion writer that also locks parent-before-child now only
-     ever contends for the parent first, never a mix of orders. Added
-     `test_tier1_reobservation_vs_parent_deletion_uses_real_transactions_no_deadlock`:
-     two real, separately-committed PostgreSQL transactions (via
-     `_before_tier1_parent_lock` + `asyncio.Event`s, mirroring the existing
-     Tier-2/3 deletion-race test's shape) — transaction A pauses right
-     before the parent lock, transaction B deletes and commits that same
-     Job, transaction A resumes and fails closed with
-     `CandidateResolutionUnstableError`; bounded by a 10s timeout so a
-     regression to the old order fails the test rather than hanging it.
-     Updated `upsert_job_occurrence`'s own docstring and ADR 0004's Phase-2
-     notes to describe the corrected, now-global parent-before-child
-     discipline and why the old order was unsafe.
-  2. **Low — hardened both real-transaction concurrency tests.** In
-     `test_candidate_deleted_between_discovery_and_lock_uses_real_transactions`,
-     `_delete_candidate()`'s `resume.set()` moved into a `finally` block so a
-     failed delete can never leave the paired task waiting forever; the
-     coordinated `asyncio.gather` is now wrapped in `asyncio.wait_for(...,
-     timeout=10)`; `existing_job_id` is now included in `job_ids` for
-     best-effort cleanup. In `test_concurrent_tier2_attach_produces_no_duplicate_job`
-     (`test_ingestion_concurrency.py`), each `raw_id` is now appended to the
-     shared `raw_ids` list immediately after `_write_fetched_row` returns —
-     before `persist_posting` runs and could raise — so a regression can no
-     longer leak an uncleaned raw row into later tests.
-  3. **Low — corrected the focused-test count.** The three named files
-     collect and pass **53** tests on this branch (52 at `988dcd1`, the
-     count Codex verified independently, plus the one new Tier-1-vs-parent-
-     deletion test added for Finding 1). Iteration 1's own entries above are
-     left unedited per the two-iteration rotation rule's "do not rewrite the
-     other LLM's entry" — the 63 previously reported there was simply wrong
-     and is called out, not silently replaced.
-- Files changed: `backend/app/ingestion/persistence.py`;
-  `backend/tests/test_ingestion_pipeline.py`;
-  `backend/tests/test_ingestion_concurrency.py`;
-  `docs/DECISIONS/0004-scoped-deterministic-identity.md`; this handoff. No
-  migration; no change to `natural_key.py` or `pipeline.py`.
-- Commands run and exact results:
-  - `ruff format .` / `ruff check .` -> clean.
-  - `mypy app tests scripts` -> clean, 73 source files.
-  - Focused (`test_ingestion_pipeline.py` + `test_ingestion_concurrency.py`
-    + `test_ingestion_natural_key.py`) -> **53 passed** (53 collected;
-    corrected count, +1 over the 52 Codex verified at `988dcd1`).
-  - Full suite with a workspace-local `--basetemp` -> **1175 passed** (was
-    1174).
-  - The three real-transaction concurrency tests (the two pre-existing
-    genuine races plus the new Tier-1-vs-parent-deletion one) rerun 5x each
-    in a stress loop -> stable, no flakiness, no timeouts.
-  - `alembic check` (against `jobgoblin_test`) -> `No new upgrade operations
-    detected`; `alembic heads` -> `0017 (head)`, unchanged.
-  - `\d`-equivalent index query against `jobgoblin_test` -> confirmed
-    `ix_job_occurrences_tenant_requisition_lookup` still
-    `btree (provider, source, source_tenant_id, requisition_id_raw)`,
-    unchanged.
-  - Development database (`alembic current`, default `DATABASE_URL`) ->
-    `0006`, unchanged.
-  - `python scripts/check_repo.py` -> exit 0, zero findings.
-  - `git diff --check` -> clean (benign LF/CRLF notices only).
-  - Table-count queries against `jobgoblin_test` after the full run ->
-    every ingestion-related table at 0 rows; no leaked test data.
-- Adversarial self-review (fresh read of the complete corrected diff before
-  this entry): re-derived the deadlock argument independently (parent-
-  before-child on both sides of any future concurrent delete removes the
-  opposite-order cycle) rather than trusting the prior entry's now-known-
-  wrong version of that same claim; confirmed no other test constructs a
-  `natural_key`/`job` pair that could be spuriously affected by the
-  reordered found-branch queries (the full suite passing at 1175 is
-  consistent with, not a substitute for, that trace); confirmed
-  `CandidateResolutionUnstableError`'s docstring broadening (now shared by
-  Tier 1 and Tier 2/3) does not change any existing `pytest.raises`/
-  `isinstance` assertion, since none of them match on the exception's
-  message text. Found no further issues beyond the three findings addressed
-  above.
-- Deviations/known limitations: none beyond those already disclosed in
-  Iteration 1 (Tier 4's deferral; `ambiguous_match` persistence and its
-  evidence shape as a separate future slice; multiple-candidate failures
-  are whole-run, not per-posting-isolated, until that future slice lands).
-  `QueryPlanner`, `ProviderRegistry`, multi-source partial-success handling,
-  live providers, Phase 3 normalization, API routes, scheduling, and the
-  workflow-automation/tooling slice remain explicitly out of scope. `main`
-  untouched throughout.
-- STOP — awaiting Codex re-review. Do not begin `ambiguous_match`, Tier 4,
-  `QueryPlanner`, `ProviderRegistry`, multi-source handling, live providers,
-  normalization, APIs, scheduling, the workflow-automation/tooling slice, or
-  modify/merge `main`.
-
-### Work review
-
-- Date/agent: 2026-08-30, Codex. Correction diff reviewed:
-  `54518bd..272afb8` on
-  `phase-2/tier2-tier3-identity-attachment`.
-- Findings 2 and 3 from review commit `54518bd` are closed: both coordinated
-  deletion tests now release their paused peer in `finally`, use a bounded
-  wait, and retain setup ids for best-effort cleanup; the concurrent-attach
-  test records raw ids before persistence can fail; the new entry accurately
-  reports **53** focused tests without rewriting the historical entry.
-- Finding 1 is directionally corrected: Tier 1 no longer locks the occurrence
-  before its parent, the real parent-deletion race is bounded and passes, and
-  the bare parent assertion is gone. One revalidation defect remains:
-  1. **Medium — Tier 1's association recheck can read the session's stale ORM
-     identity-map value instead of the freshly locked database value.** The
-     initial unlocked `_existing_occurrence_query()` loads a full
-     `JobOccurrence` entity. The later locked execution of the same ORM query
-     can return that already-loaded instance without refreshing its loaded
-     `job_id`. If the same occurrence row is reassociated between probe and
-     lock, SQL can select the row while `occurrence.job_id` still contains the
-     old cached parent id, allowing the new equality check to pass and the
-     method to return/update the wrong parent association. Make the initial
-     probe select only fresh scalar identity values (`id`, `job_id`) so it
-     does not seed the ORM identity map, then load the entity only in the
-     post-parent-lock `FOR UPDATE` query; alternatively force an explicit
-     database refresh with equivalent guarantees. Add a regression that
-     changes the occurrence's `job_id` in a separately committed transaction
-     at the test seam and proves `CandidateResolutionUnstableError`, no stale
-     parent update, no raw transition, and failure-safe cleanup. This test is
-     defense-in-depth for the promised revalidation; supported future writers
-     must still obey the documented advisory/row-lock discipline.
-- Independent proportionate verification: repository checker exit 0; Ruff
-  format/check clean; mypy clean across **73 source files**; the named focused
-  suite **53 passed**; `git diff --check` clean; working tree clean. Full-suite
-  and schema results reported in `Work done` were not repeated because this
-  remaining correction is isolated before approval.
-- **Verdict: changes requested.** Make only the scalar-probe/fresh-entity
-  revalidation correction and its regression test, update affected wording,
-  run proportionate verification, append a concise `Work done`, commit and
-  push, then stop for re-review. Do not merge `main`, begin another product
-  slice, or start workflow-automation tooling.
-
----
-
-## Iteration 2
-
-### Work done
-
-- Date/agent: 2026-08-30, Claude Code (Sonnet 5). Class H correction pass on
   `phase-2/tier2-tier3-identity-attachment` for the single bounded finding in
   review commit `6eadd00` (`272afb8..6eadd00`). Base `272afb8`. Addresses
   exactly Finding 1 from Iteration 1's `Work review`; every otherwise-approved
@@ -400,3 +249,163 @@ company-resolution prerequisite it depends on, `QueryPlanner`,
 `ProviderRegistry`, multi-source partial-success handling, live providers,
 Phase 3 normalization, API routes, scheduling, and the workflow-automation
 tooling slice all remain not started and are not authorized by this merge.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-08-30, Claude Code (Sonnet 5). Authorized slice: Workflow v3
+  automation/tooling program, **first bounded slice — routine-verifier
+  foundation** — Class H (safety-relevant database-target logic; otherwise
+  Class R tooling). Base `main`@`adb6e62` -> branch
+  `tooling/workflow-v3-routine-verifier`. Implements exactly the approved
+  proposal's first slice with the 11 binding clarifications; no CI, markers,
+  `--level schema`/`--level high-risk`, status generator, metrics, or handoff
+  automation.
+- Outcome, per the binding clarifications:
+  1. **`backend/scripts/db_safety.py`** — `assert_is_disposable_test_database`,
+     its `_redact` helper (renamed `redact_database_url`, same body), and
+     `DEFAULT_TEST_DATABASE_URL` moved out of `tests/conftest.py` verbatim
+     (behavior/exception type/redaction/conservative name-only comparison all
+     unchanged — proven by `test_users.py`'s 9 existing assertions passing
+     unmodified against the new import path). New `resolve_test_database_url()`
+     factors out the `test_database_url or DEFAULT_TEST_DATABASE_URL` fallback
+     so `conftest.py`'s `db_engine` fixture and `verify.py` share one
+     expression, never two copies. Deliberately not under `app/db/` — tooling
+     only, never packaged (`pyproject.toml` ships only `app/`).
+  2. **`backend/scripts/verify.py --level routine`** — runs, in order: Ruff
+     format check, Ruff lint, mypy, `check_repo.py` (its own subprocess step,
+     `-m scripts.check_repo`, never assumed covered merely by
+     `test_check_repo.py`'s in-process function tests), `git diff --check`, a
+     pure URL-parsing disposable-test-database validation (dev DB need not be
+     reachable), a real test-database reachability preflight (must succeed
+     before pytest runs), optional focused pytest when `--focus` is given, then
+     the full suite. Every step reports PASS/FAIL/NOT RUN with a duration;
+     first failure blocks all later steps as NOT RUN rather than silently
+     omitting them. Every tool invocation is `[sys.executable, "-m", ...]`
+     (`git diff --check` is the one necessary exception) — identical on
+     Windows and Linux, confirmed by real runs from both `backend/` and the
+     repository root.
+  3. **`.verify-tmp/<unique-per-run>/`** — `create_run_dir()` uses
+     `tempfile.mkdtemp` under a gitignored `.verify-tmp/` root; `safe_rmtree()`
+     resolves both paths and refuses to delete anything not actually located
+     under that root (proven against a `.verify-tmp-evil` lookalike-prefix
+     attempt, not just a naive string check) before removing only that
+     invocation's own directory in `finally`.
+  4. **`--focus`** accepts file paths and `path::node_id` targets; each is
+     validated (no leading `-`; the pre-`::` portion must resolve to a real
+     file under `backend/tests`) before being passed to pytest as argv list
+     elements, never a shell string. Focused and full-suite results are
+     reported as separate steps; routine verification always runs the full
+     suite regardless of `--focus`.
+  5. **No recursive pytest invocation**: `test_verify.py`'s 65 tests inject a
+     fake subprocess runner and/or a fake connectivity check everywhere;
+     `verify.main()` is never called from any test (confirmed by grep). The
+     genuine end-to-end `python scripts/verify.py --level routine` command was
+     run for real, repeatedly, outside pytest — see Commands below.
+  6. **Pytest result parsing**: `parse_pytest_summary()` scans backward for
+     pytest 8.3.4's real summary line, handling both the framed and `-q`
+     unframed shapes and the optional parenthesized `(H:MM:SS)` suffix pytest
+     appends on longer runs. **Found and fixed during verification**: the
+     first version didn't anticipate that suffix, so a genuine full-suite run
+     ("1235 passed in 101.82s (0:01:41)") reported PASS but "counts
+     unavailable" — never a wrong or invented count, but not the intended
+     accurate report either. Fixed and reconfirmed against a real run.
+  7. **`docs/LLM_WORKFLOW.md`** now durably contains: a `Definition of Ready`
+     section; three named review verdicts (Approved / Approved with binding
+     clarifications / Redesign required); a concise-amendments-not-full-
+     rewrites rule; a two-round Class H revision limit with a joint-decision-
+     table fallback; a required-invariants-vs-recommended-mechanisms
+     distinction; a `Verification matrix` note pointing at `verify.py` as the
+     canonical way to run its "Python without schema" row once a level exists.
+     `docs/PHASE_RISK_CHECKLIST.md` was deliberately **not** touched — it
+     already contains a generic pointer to `LLM_WORKFLOW.md` for exactly this
+     content, so no additional pointer was needed.
+  8. **Corrected known-stale status now**: `README.md` no longer claims
+     "Phase 1 in progress, users-only"; `docs/ROADMAP.md` no longer claims
+     "two Phase 2 slices merged" / Tier-2/Tier-3 "not yet merged" — both now
+     state the Git-verified truth (three Phase 2 vertical slices merged
+     through `main`@`adb6e62`, confirmed via `git log --oneline --merges main`
+     before writing either correction). No status generator was built.
+     `README.md`'s Verification section now leads with
+     `python scripts/verify.py --level routine`; the prior manual chain
+     remains as an explicitly-labeled troubleshooting/reference fallback, now
+     also including `git diff --check` (missing from the original chain) so
+     it doesn't silently under-represent what the canonical command runs.
+  9. **Roadmap ordering correction recorded, not implemented**: routine
+     verifier (this slice) -> schema level -> minimal CI (routine/schema only)
+     -> high-risk level + incremental marker adoption -> canonical-status/
+     handoff validators -> mechanically-derived metrics. CI is explicitly not
+     gated behind complete marker adoption or high-risk orchestration.
+- Files changed: `backend/scripts/verify.py` (new), `backend/scripts/db_safety.py`
+  (new), `backend/tests/test_verify.py` (new, 65 tests), `backend/tests/conftest.py`,
+  `backend/tests/test_users.py`, `backend/app/config.py` (one-line comment fix,
+  found by adversarial review — see below), `.gitignore`, `README.md`,
+  `docs/LLM_WORKFLOW.md`, `docs/ROADMAP.md`, this handoff. `docs/PHASE_RISK_CHECKLIST.md`
+  deliberately not touched. No migration; no CI YAML; no product code changed.
+- Commands run and exact results:
+  - `ruff format .` / `ruff check .` -> clean on all changed/new files.
+  - `mypy app tests scripts` -> clean, 76 source files (was 73).
+  - `python -m pytest tests/test_verify.py -q` -> **65 passed** (unit tests
+    only; never launches a real subprocess or calls `main()`).
+  - `python -m pytest tests/test_users.py -q` -> **26 passed**, unchanged,
+    proving the `db_safety.py` extraction is behavior-preserving.
+  - Full suite with a workspace-local `--basetemp` -> **1241 passed** (was
+    1176 on `main`; +65 new unit tests).
+  - `python -m scripts.check_repo` -> exit 0, zero findings.
+  - `git diff --check` -> clean (benign LF/CRLF notices only).
+  - **Genuine external `python scripts/verify.py --level routine`** (never
+    from inside pytest), run repeatedly across fixes: final run -> all 8
+    steps PASS, `1241 passed`, `108.33s` total; also run successfully from
+    the repository root (not just `backend/`) with identical behavior; also
+    run with `--focus tests/test_ingestion_hashing.py` -> focused (5 passed)
+    and full-suite steps both reported separately, both PASS.
+  - Adversarial external runs (real invocations, not just unit tests):
+    `TEST_DATABASE_URL` malformed -> `disposable test-database URL
+    validation` FAILs cleanly with `ArgumentError` (see finding below), no
+    crash, no credential leak, pytest steps NOT RUN; `TEST_DATABASE_URL`
+    equal to the dev database -> same step FAILs with the guard's own safe
+    message, pytest steps NOT RUN; `TEST_DATABASE_URL` safely-named but
+    unroutable (port 1) -> URL validation PASSes, reachability preflight
+    FAILs with `unreachable: ConnectionRefusedError` (type name only), full
+    suite correctly NOT RUN rather than silently skipped/passing; `--focus`
+    given a `-`-prefixed or path-outside-`backend/tests` target -> rejected
+    before any step runs, exit 2.
+  - Development database (`alembic current`, default `DATABASE_URL`) ->
+    `0006`, unchanged; no migration touched.
+  - `.verify-tmp/` confirmed empty (only the gitignored root itself remains)
+    after every genuine run, including the deliberately-failing adversarial
+    ones.
+- Adversarial self-review: dispatched a fresh subagent (no prior context on
+  this diff) to independently check all 11 binding requirements plus general
+  correctness against the actual repository. It found and I fixed **two Low
+  findings**, both documentation drift this slice's own refactor introduced:
+  `app/config.py`'s comment on `test_database_url` still named
+  `tests/conftest.py` as `DEFAULT_TEST_DATABASE_URL`'s home (now
+  `scripts/db_safety.py`); `README.md`'s "Dedicated test database" section
+  still named `tests/conftest.py::assert_is_disposable_test_database` as the
+  guard's defining location (now `scripts/db_safety.py`, re-imported by
+  `conftest.py`). Both fixed; full verification matrix rerun clean afterward.
+  Separately, I found and fixed the pytest-summary-parser gap under item 6
+  above by running the genuine full suite and noticing "counts unavailable"
+  where a count was expected — the pinned-shape assumption was incomplete,
+  not the parsing logic's fail-closed behavior, which worked exactly as
+  designed (reported unavailable, never invented zero). No other findings
+  from either pass.
+- Deviations/known limitations: `redact_database_url`'s em-dash character in
+  `assert_is_disposable_test_database`'s message can render as a mangled
+  glyph on a non-UTF-8 Windows console codepage when printed — a pre-existing
+  cosmetic property of the message string itself (moved verbatim, not
+  introduced by this slice), not a data-correctness issue. `--level schema`/
+  `--level high-risk`, CI, markers, the status generator, handoff-structure
+  validation, and process metrics remain explicitly out of scope, per the
+  recorded roadmap ordering. `main` untouched throughout.
+- STOP — awaiting Codex review. Do not add CI, resume Phase 2 product work,
+  begin `--level schema`/`high-risk`, markers, the status generator, metrics,
+  or handoff automation, or merge `main`.
+
+### Work review
+
+_Pending._

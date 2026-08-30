@@ -280,7 +280,7 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   domain tables (ADR 0003) are now migrated; the rest of Phase 1's exit gate
   (§[PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md)) remains to be independently
   verified before declaring the phase complete.
-- **Phase 2: in progress (updated 2026-08-30).** Two bounded, Class H vertical slices
+- **Phase 2: in progress (updated 2026-08-30).** Three bounded, Class H vertical slices
   merged into `main` so far. The **natural-key ingestion spine** (offline,
   fixture-driven, no live provider) — `DiscoveredJob`/`DiscoveryResult`/`ProviderError`/
   `SourceRunStats` schemas, `DiscoveryProvider` protocol, `FixtureProvider`,
@@ -302,8 +302,7 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   before any mutation.
   A third slice, **Tier-2/3 cross-occurrence attachment**
   ([DECISIONS/0004](DECISIONS/0004-scoped-deterministic-identity.md)'s "Phase 2
-  implementation notes"), is implemented and under review on its own feature branch
-  (`phase-2/tier2-tier3-identity-attachment`) — **not yet merged into `main`**:
+  implementation notes"), is merged into `main`:
   `upsert_job_occurrence()` now attempts normalized-canonical-URL matching (Tier 2, only
   when a usable canonical URL exists) or tenant-scoped requisition matching (Tier 3, only
   when no usable canonical URL exists — the two are mutually exclusive per posting, never
