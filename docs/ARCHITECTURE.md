@@ -915,7 +915,23 @@ unrelated employer's job that happens to reuse the same number.
    all. Weaker than tier 3 because a requisition ID isn't guaranteed unique across a
    company's own multiple ATS instances (e.g. mid-migration). If this fallback matches
    **more than one** existing distinct `Job`, that's ambiguous, not a match — see below.
-5. **No deterministic match** → create a new `Job` with this as its sole occurrence.
+5. **No deterministic match** → create a new `Job` with this as its sole occurrence —
+   **but only when a stable occurrence key can actually be derived**, from either
+   `source_job_id` (tiers 1/3/4 above) or a normalized `source_url` (tier 2's fallback
+   form, `job_occurrences_fallback_url_key`). "No deterministic match" means no *existing*
+   row was found under whichever key applies — it does not mean no key exists at all.
+   **Clarification (Phase 2, narrow):** if a payload has neither `source_job_id` nor a
+   `source_url` that normalizes into a usable fallback key, tier 5 does not apply and no
+   `Job`/`JobOccurrence` is created — persisting an occurrence with no natural key of any
+   form would be silently unenforceable (none of the three partial unique indexes could
+   meaningfully key it; a NULL `source_url_normalized` is not distinct from another NULL
+   for uniqueness purposes, reopening the exact bug class this section's NULL-safety fix
+   already exists to prevent). The raw payload is still preserved
+   (`raw_job_ingestions.raw_payload`, written before identity resolution ever runs — §9)
+   and the ingestion attempt is recorded as `processing_status = 'parse_error'`, the same
+   outcome already documented for a payload that fails content parsing. No migration or
+   schema change accompanies this clarification — it narrows application-level behavior
+   only.
 
 ### NULL-safe natural key (Rev 3 fix, item 1)
 

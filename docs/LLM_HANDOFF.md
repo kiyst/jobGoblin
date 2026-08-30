@@ -96,438 +96,441 @@ that detail.
 
 ## Iteration 1
 
-*Rotated in from "Iteration 2" per the two-iteration rule: the prior Iteration 1 (the
-`job_notes` correction pass, its approval, and merge record) was removed rather than kept
-alongside a third entry, since it is fully merged and no longer pending. Nothing below
-was rewritten — only renumbered.*
-
 ### Work done
 
-- Date/agent: 2026-08-29, Claude Code (Sonnet 5). Authorized slice: Phase 1 closure —
-  Class H per the user's explicit reclassification (the permanent write boundary for
-  user-owned profile/saved-search data). Base `66f3d29` on `main` -> branch
-  `phase-1/closure`. Follows the read-only Phase 1 exit-gate audit performed against
-  `main`@`66f3d29`, which found two unmet/inconsistent Phase 1 exit criteria (no
-  service-layer CRUD for `CandidateProfile`/`SavedSearch`; an internal §8/§13
-  contradiction about a re-ingestion test Phase 1 cannot yet provide) plus several
-  mechanical documentation defects.
-- Outcome, per the user's binding decisions:
-  1. **`app/services/candidate_profiles.py` and `app/services/saved_searches.py`
-     (new)** — this codebase's second and third service modules, mirroring
-     `user_jobs.py::set_status()`'s established shape: every function takes
-     `session: AsyncSession` explicitly, `create()`/`update()` flush but never commit
-     or roll back (caller owns the transaction). `create()`/`get_for_user()`/`update()`
-     for each table; no delete, no list-all, no child-table (`SavedSearchTitle`/
-     `SavedSearchLocation`) CRUD, no API routes.
-  2. **"Seeded" (ARCHITECTURE.md §13) satisfied by test-only proof**: real-Postgres
-     tests create a committed `User`, then create/fetch/update a `CandidateProfile`
-     and a `SavedSearch` exclusively through the new service functions — no seed
-     script/CLI added.
-  3. **Ownership scoping**: `CandidateProfile.update(session, user_id, **fields)` and
-     `SavedSearch.update(session, user_id, saved_search_id, **fields)` never accept a
-     pre-fetched instance — both internally re-fetch, scoped by owner column(s), on
-     every call. A wrong-owner `SavedSearch` update is indistinguishable from a
-     nonexistent row (`None`, zero mutation) — proven by
-     `test_update_by_wrong_owner_returns_none_and_leaves_database_unchanged`, which
-     re-fetches as the real owner afterward to confirm the database itself, not just
-     the return value, is unchanged.
-  4. **Explicit allow-lists enumerated from the actual models**: `CandidateProfile`
-     (12 fields) / `SavedSearch` (20 fields) — every mapped column except `id`,
-     `user_id`, `created_at`, `updated_at`. `SavedSearch.is_active` omitted from
-     `create()`'s parameters (server default genuinely exercised — proven by a
-     real-commit-and-refresh test) but included in `update()`'s allow-list.
-  5. **Validation before mutation**: unknown field names and invalid enum values
-     (`remote_preference`; `remote_rules`/`polling_schedule`) raise `ValueError`
-     before any fetch or mutation, proven independent of whether a row exists
-     (`test_update_validates_before_checking_existence`, both tables). All other
-     `CHECK`-backed fields (non-negative/ordering constraints) are left to PostgreSQL
-     alone — proven as backstops, not duplicated in Python.
-  6. Every required test category from the binding decisions is covered in both new
-     test files (30 tests total, later 34 after the adversarial-review fixes below):
-     flush-without-commit + caller rollback (real `db_engine`/two-session visibility
-     proof, mirroring `test_user_jobs_service.py`'s own pattern), missing/wrong-owner
-     `None`, partial update preserving untouched fields, an explicit-`None` nullable
-     clear, enum rejection with zero mutation, database rejection of non-enum
-     `CHECK`-backed values (including two new cross-column ordering-`CHECK` backstops
-     and one `NOT NULL` backstop added during the adversarial review — see below),
-     `CandidateProfile` duplicate-user rejection (database `UNIQUE`, not a Python
-     pre-check), multiple `SavedSearch` rows per user, and the `is_active` server
-     default.
-  - **Real bug found and fixed during implementation** (not by review): `create()`
-    originally passed `enabled_sources=None`/`scoring_weights=None` explicitly into
-    the `SavedSearch` constructor. SQLAlchemy's `JSONB` type (no `none_as_null=True`
-    set on this column) serializes an explicitly-assigned Python `None` as the JSON
-    literal `null`, not SQL `NULL` — which fails the column's own
-    `jsonb_typeof(...) = 'object'` `CHECK`. Fixed by omitting these two kwargs from
-    the constructor entirely when `None`, matching this schema's existing
-    omit-rather-than-`None` convention (documented in both functions' docstrings).
-    `update()` has the same latent landmine for these two specific fields if a
-    caller ever passes them as `None` to clear them — disclosed as a known
-    limitation in its docstring rather than worked around, since no Phase 1 caller
-    needs to clear either field yet.
+- Date/agent: 2026-08-29, Claude Code (Sonnet 5). Authorized slice: Phase 2's first
+  vertical slice, the "natural-key ingestion spine" — Class H (first permanent
+  ingestion writer; identity/concurrency risk per PHASE_RISK_CHECKLIST.md's Phase 2
+  primary risks). Base `903ad0d` on `main` -> branch
+  `phase-2/natural-key-ingestion-spine`. Implements the twice-revised, fully
+  negotiated proposal (11 binding decisions from the final approval) proving
+  Fixture -> `RawJobIngestion` -> identity resolution (natural-key tiers 1/5 only,
+  all three key forms) -> `Job`/`JobOccurrence` -> two distinct `CollectionRun`s,
+  against real PostgreSQL, zero network, one provider/one source.
+- Outcome, per the approved binding decisions:
+  1. **Four fixtures, two `CollectionRun`s**: `clean_tenant_scoped` (tenant-scoped
+     key), `missing_salary_no_tenant` (no-tenant key), `url_fallback_only`
+     (`source_job_id=None`, URL-fallback key), `unprocessable` (`source_job_id=None`
+     *and* an unnormalizable relative `source_url` — genuinely no key of any form).
+     Run 1 processes all four (`status='completed_with_errors'`, one
+     `collection_run_provider_attempts` row `status='completed'`); a `UserJob` is
+     created against run 1's tenant-scoped `Job` between the two runs; run 2
+     resubmits the three resolvable fixtures byte-identical
+     (`status='completed'`). Exact counters: run 1 `jobs_discovered=4/inserted=3/
+     updated=0`; run 2 `jobs_discovered=3/inserted=0/updated=3`; 7
+     `RawJobIngestion` rows total (4 + 3), 3 `Job`/`JobOccurrence` rows total (never
+     duplicated between runs).
+  2. **File layout exactly as dictated**: `app/schemas/discovered_job.py`
+     (`DiscoveredJob`, `DiscoveryResult`, `ProviderErrorCategory`, `ProviderError`,
+     `SourceRunStats`), `app/schemas/provider.py` (`SourceQuery`,
+     `SourceCapabilities`, `ProviderCapabilities`, `ProviderHealth`,
+     `SourceHealth`), `app/providers/base.py` (`DiscoveryProvider` Protocol only).
+  3. **Natural-key canonicalization + advisory lock**
+     (`app/ingestion/natural_key.py`): provider/source canonicalized identically to
+     `JobOccurrence`'s own ORM validators (trim+lower; documented "must stay in
+     sync"); a versioned, domain-tagged (tenant/no-tenant/URL), length-prefixed byte
+     encoding (never a colon-joined string) hashed via SHA-256 into a signed 64-bit
+     `pg_advisory_xact_lock` key — never Python's `hash()` or Postgres's 32-bit
+     `hashtext()`.
+  4. Casing/whitespace-collision, component-boundary-ambiguity, and domain-
+     separation tests in `test_ingestion_natural_key.py`; genuine concurrent-
+     insertion safety proven for **all three** natural-key forms in
+     `test_ingestion_concurrency.py` (parametrized), not just the tenant-scoped one.
+  5. **Durable run-init transaction**: `CollectionRun`/`CollectionRunProviderAttempt`
+     committed `status='running'` *before* `provider.discover()` is ever called, so
+     the best-effort failure handler always has rows to update. Run/attempt
+     lifecycle timestamps come from an injected `Clock`
+     (`app/ingestion/clock.py`, `FixedClock` in tests); `Job`/`JobOccurrence`
+     business timestamps come from a separate, explicit `observed_at` parameter.
+  6. `last_seen_at` (occurrence and parent `Job`) only ever advances —
+     `max(existing, incoming)`, computed against the value read under the row lock
+     already held, never a blind overwrite. A dedicated out-of-order-replay test
+     proves an older resubmission cannot move it backward.
+  7. **Upsert lifecycle**: `pipeline.py` writes each `DiscoveredJob` through two
+     transactions — Transaction A_i commits one `RawJobIngestion`
+     (`processing_status='fetched'`) independently; Transaction B_i (identity +
+     `Job`/`JobOccurrence` upsert + terminal `RawJobIngestion` update, one
+     transaction) or Transaction C_i (reroute to `parse_error`) follows. The advisory
+     lock (point 3 above) serializes concurrent attempts at the same key so the
+     "not found" branch never races — no `ON CONFLICT` clause exists or is needed.
+  8. `canonical_json_hash` (`app/ingestion/hashing.py`):
+     `json.dumps(sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+     allow_nan=False)` then SHA-256; tested against top-level and nested key-order
+     variation (not just file reloads), Unicode-non-normalized-but-visually-similar
+     strings, and NaN/Infinity rejection matching what PostgreSQL's own `jsonb`
+     input function would reject.
+  9. Only `identity.py`'s one `UnresolvableIdentityError` is ever caught and
+     reclassified as `parse_error`. Every other exception — including
+     `asyncio.CancelledError` — triggers a best-effort attempt to mark the
+     `CollectionRun`/attempt `failed` and is always re-raised;
+     `KeyboardInterrupt`/`SystemExit` are never in any `except` clause.
+  10. Narrow documentation clarification (no schema/migration change): tier 5
+     ("no deterministic match → create a new `Job`") now states explicitly that it
+     requires a derivable key (`source_job_id` or a normalizable `source_url`); a
+     payload with neither is `parse_error`, not an unkeyed occurrence — added to
+     `docs/ARCHITECTURE.md` §8, `docs/DECISIONS/0004-scoped-deterministic-identity.md`,
+     and `docs/DATA_MODEL.md`'s `job_occurrences` unique-constraints note.
+  11. `FixtureProvider` (`app/providers/fixture.py`) takes its fixture list as an
+     explicit constructor argument — fixture selection never hides inside
+     `SourceQuery` filters. Contract tests for the schemas layer
+     (`test_schemas_discovery.py`, 11 tests): mutable-default isolation (4 cases),
+     `DiscoveryResult`'s duplicate-source/orphaned-job/orphaned-error/
+     `completed=False`-with-jobs rejections, derived-property behavior;
+     `pipeline.py` itself asserts `SourceQuery.sources == DiscoveryResult.
+     requested_sources` (a call-site invariant per ARCHITECTURE.md §6.3, not
+     something the model can check alone), tested via a deliberately mismatched
+     fake provider.
+  - `__init__.py` present in all three new packages (`schemas/`, `providers/`,
+    `ingestion/`). No migration — every table touched (`jobs`, `job_occurrences`,
+    `raw_job_ingestions`, `collection_runs`, `collection_run_provider_attempts`)
+    already existed.
 - Files changed:
-  - `backend/app/services/candidate_profiles.py`, `backend/app/services/
-    saved_searches.py` (new).
-  - `backend/tests/test_candidate_profiles_service.py` (new, 14 tests),
-    `backend/tests/test_saved_searches_service.py` (new, 19 tests).
-  - `backend/tests/conftest.py` — one new helper, `real_committed_user` (bare `User`
-    via a real commit on `db_engine`, no child row — the new services create their
-    own child row under test; cleanup relies on `ON DELETE CASCADE` from `users`,
-    verified via `grep` and cited in the docstring per the adversarial-review fix
-    below).
-  - `docs/ARCHITECTURE.md` — §8/§13: the natural-key re-ingestion/upsert test
-    explicitly reclassified from a required Phase 1 case to Phase-2-deferred
-    (matching the reasoning already applied to the `UserJob`-reingestion case one
-    paragraph below it); the two uniqueness cases remain in Phase 1 unchanged. §4
-    changelog and §13: stale `tests/db/`/`tests/integration/` references corrected
-    to the actual flat `backend/tests/` layout, retaining the rule that a future
-    live-network test must be isolated and excluded from the default run.
-  - `docs/DECISIONS/0005-raw-ingestion-vs-provider-attempts.md` — `status = 'ok'`
-    corrected to `status = 'completed'` (the actual enum has no `'ok'` value).
-  - `docs/DATA_MODEL.md` — added the missing `companies.duplicate_of_company_id →
-    companies` (`SET NULL`) row to the consolidated FK-behavior summary table.
-  - `docs/ROADMAP.md` — `job_occurrences`' three partial/functional unique indexes
-    no longer all attributed to "ADR-0004" (only two are; the third is an
-    independent fallback natural key); stale Phase 1 status date updated.
-  - `docs/LLM_WORKFLOW.md` — the adversarial-review checklist's question 11
-    strengthened per the user's binding decision: timestamp-independence claims must
-    now name the exact asserted field(s); "first X"/superlative claims must cite the
-    exact search rerun to verify them. The AST-based prose-linter alternative is
-    recorded as considered but deliberately not adopted (a keyword-triggered checker
-    risks false positives against indirect/aliased access patterns it can't see —
-    the brittle-natural-language-linting failure mode this project avoids); this
-    checklist strengthening is the deliberate substitute.
+  - `backend/app/schemas/{__init__.py,discovered_job.py,provider.py}` (new).
+  - `backend/app/providers/{__init__.py,base.py,fixture.py}` (new).
+  - `backend/app/ingestion/{__init__.py,clock.py,hashing.py,identity.py,
+    natural_key.py,persistence.py,pipeline.py}` (new).
+  - `backend/tests/fixtures/discovery/{clean_tenant_scoped,missing_salary_no_tenant,
+    url_fallback_only,unprocessable}.json` (new).
+  - `backend/tests/test_ingestion_pipeline.py` (new, 7 tests),
+    `test_ingestion_concurrency.py` (new, 1 test × 3 params),
+    `test_ingestion_hashing.py` (new, 5 tests), `test_ingestion_natural_key.py`
+    (new, 7 tests), `test_schemas_discovery.py` (new, 11 tests) — 33 collected.
+  - `docs/ARCHITECTURE.md`, `docs/DECISIONS/0004-scoped-deterministic-identity.md`,
+    `docs/DATA_MODEL.md` — narrow tier-5/unkeyed-occurrence clarification (point 10
+    above).
 - Commands run and exact results:
-  - `pytest tests/test_candidate_profiles_service.py tests/test_saved_searches_service.py -v`
-    → all passed (30, then 33 after the adversarial-review additions below).
-  - `pytest -q` (full suite) → 1095 passed (up from 1065) before the adversarial
-    review; **1098 passed** after its three new regression tests were added.
-  - `ruff check .` → all checks passed. `mypy .` → success, 73 source files (one
-    `SyntaxWarning` from an over-escaped docstring, introduced and fixed within this
-    same pass, confirmed clean via `python -W error::SyntaxWarning -c "import
-    tests.conftest"`).
-  - `python scripts/check_repo.py` (from `backend/`) → exit 0, zero findings (run
-    twice: once after the documentation edits, once after the final conftest fix).
-  - `alembic heads` → `0017 (head)`, unchanged — no migration in this slice.
+  - `ruff format --check`/`ruff format` → clean after formatting.
+  - `ruff check .` → all checks passed.
+  - `mypy .` → success, 91 source files.
+  - Targeted (all 5 new test files) → **33 passed**.
+  - `pytest -q` (full suite, writable `--basetemp`) → **1139 passed** (up from
+    1106 — 33 new tests, all collected, matches exactly).
+  - `alembic check` (against `jobgoblin_test`) → `No new upgrade operations
+    detected` — confirms no migration needed.
+  - `alembic heads` → `0017 (head)`, unchanged.
   - `alembic current` against the **development** database (no override, fresh
     shell) → `0006`, unchanged throughout.
-  - `git status --short` / `git diff --check` → only the files listed above.
+  - `python scripts/check_repo.py` (from `backend/`) → exit 0, zero findings.
 - Adversarial self-review (fresh Explore-agent context, no prior knowledge of the
-  implementation, run against the actual staged diff before commit; full 12-question
-  Class H depth, including live empirical probes against real Postgres, not just
-  reading code): **four findings, all fixed**:
-  1. Low — `real_committed_user`'s new docstring made an unqualified "every child
-     table... CASCADE" claim without citing the search that verifies it, violating
-     the very checklist rule this same pass just added. Fixed by citing the exact
-     `grep` and its three matches inline.
-  2. Low, coverage gap — `is_active=None` via `update()` (a `NOT NULL` column in the
-     update allow-list) was untested. Added
-     `test_update_database_rejects_is_active_none`.
-  3. Low, coverage gap — the two cross-column ordering `CHECK`s
-     (`salary_expectation_min_le_max`, `salary_floor_le_preferred_salary`) were
-     untested as backstops; only single-column non-negativity checks were proven.
-     Added one ordering-backstop regression test per table.
-  4. Informational — `SavedSearch.get_for_user`'s `None`-for-both-missing-and-
-     wrong-owner design means a future Phase 8 API route cannot recover a
-     403-vs-404 distinction from this boundary alone. Documented explicitly in the
-     function's own docstring as a deliberate, disclosed Phase 1 limitation for
-     Phase 8 to account for, not fixed (fixing it is out of this slice's scope and
-     Phase 8 doesn't exist yet).
-  - Also explicitly checked and found clean: normalization-order (validators fire
-    before the service's own `flush()`, so no post-validation renormalization can
-    reintroduce a prohibited value); no other nullable field shares the JSONB
-    None-vs-null landmine (empirically probed: `ARRAY`-typed nullable fields clear
-    to `None` correctly on both tables); no ORM/direct-SQL divergence (no raw SQL
-    in either service); test cleanup discipline for the two real-commit-based flush
-    tests (verified `real_committed_user`'s `finally` block always runs and
-    cascades correctly, including on an exception path); allow-lists independently
-    re-enumerated against the actual model columns with zero mismatch either
-    direction.
-- Deviations/known limitations: the disclosed JSONB-update and 404-vs-403 items
-  above (findings 4 and the JSONB bug's `update()` half) are documented limitations,
-  not defects requiring a fix in this slice — no Phase 1 caller exercises either
-  path. No migrations, API routes, deletion/list operations, child-title/location
-  services, ingestion/upsert implementation, or Phase 2 behavior added, per explicit
-  scope. `main` untouched.
-- STOP — awaiting Codex review. Do not begin Phase 2, modify or merge `main`, or add
-  Phase 10/API-route behavior.
+  implementation, run against the actual staged diff before commit; full Class H
+  depth): **3 High, 2 Medium fixed; 2 Low documented, not fixed**:
+  1. **High — `suppress(Exception)` around the best-effort failure-telemetry
+     block did not also suppress `asyncio.CancelledError`** (a `BaseException`
+     subclass, not `Exception`), so a second cancellation during that block could
+     replace the original exception instead of the intended `raise` re-raising it.
+     Fixed: `suppress(Exception, asyncio.CancelledError)`.
+  2. **High — the "found" (re-observation) branch used a Core-style `update()`
+     statement, which bypasses `JobOccurrence`/`Job`'s own `@validates`
+     normalization** that the "not found" (insert) branch gets automatically — an
+     incidentally-whitespace-padded or blank re-observed field could be stored
+     un-normalized (or violate a `CHECK` a first insert would have satisfied).
+     Fixed: rewrote `persistence.py` to fetch and mutate the ORM entities directly
+     (`occurrence.field = value`) on both branches, so `@validates` applies
+     identically either way. New regression test added
+     (`test_reobservation_normalizes_text_fields_identically_to_first_insert`)
+     proves a covered-whitespace-only re-observed value collapses to `NULL` and a
+     padded value trims, exactly as the insert path already did.
+  3. **High — every `CollectionRunProviderAttempt` row was written the run-wide
+     aggregate count, not its own source's count** — invisible with one source per
+     run (aggregate and per-source coincide), but silently wrong the moment a
+     future slice adds a second source, contradicting the model's own "authoritative
+     per-source detail" docstring. Fixed: `pipeline.py` now tracks per-source
+     discovered/inserted/updated dicts and writes each attempt row its own source's
+     numbers; `collection_runs`' three counters remain the correct run-level sum.
+     New regression test added
+     (`test_per_source_attempt_counters_are_not_the_run_wide_aggregate`, a two-source
+     fake provider) proves two sources with deliberately different counts each land
+     on their own attempt row correctly.
+  4. **Medium — cleanup-tracking lists in `test_ingestion_pipeline.py`'s flagship
+     test were populated after assertions that could fail**, risking a leaked row
+     in the shared disposable test database on an assertion failure. Fixed:
+     moved `raw_ingestion_ids.extend(...)`/`job_ids.extend(...)` to immediately
+     after each fetch, before any assertion on the fetched data.
+  5. **Medium — the `UserJob`-untouched proof never asserted `updated_at`**, the
+     one column the model's own docstring says advances on any write to the row —
+     the single strongest signal ingestion never touched `user_jobs`. Fixed: added
+     to both the snapshot and the final assertion.
+  - **Documented, not fixed** (explicitly out of this slice's approved scope):
+    (a) `provider`/`source` values are canonicalized but not validated against the
+    ASCII-slug grammar before the lock/lookup stage — a misconfigured provider
+    constant would only fail at the database `CHECK` inside Transaction B_i,
+    aborting the whole run rather than failing at construction time; acceptable
+    since `provider`/`source` are adapter-level constants, not per-posting data, in
+    every phase through Phase 4. (b) The concurrency test's race has the same
+    timing-luck weakness already accepted elsewhere in this codebase (bare
+    `asyncio.gather`, no explicit interleaving barrier) — consistent with existing
+    precedent, not a new regression. (c) `DiscoveredJob.raw` has no JSON-
+    serializability enforcement at the schema level; a non-JSON-native value would
+    raise a generic `TypeError` from `canonical_json_hash`, not a friendly error —
+    acceptable since every fixture is JSON-loaded (hence always JSON-safe); a live
+    provider adapter (Phase 4+) will need to guarantee this itself.
+  - Also explicitly checked and found clean: no other divergence between the
+    natural-key canonicalizer and `JobOccurrence`'s ORM validators (stress-tested
+    non-ASCII/whitespace input); all three partial-index domains genuinely
+    exercised in both the natural-key unit tests and the concurrency test; no FK
+    deletion behavior introduced by this slice (none applicable); the new
+    ARCHITECTURE.md/ADR-0004/DATA_MODEL.md wording matches what the code actually
+    does, not just internally consistent prose.
+- Deviations/known limitations: the three "documented, not fixed" items above.
+  `source_url`/`source_url_normalized` are deliberately never refreshed on
+  re-observation (only observational fields and other display text are) — these are
+  the URL-fallback domain's own identity-key components, and blindly overwriting
+  them without reconciliation logic would risk a subtle mismatch between what's
+  stored and what the row was actually looked up by; not exercised by any test since
+  every re-observation fixture in this slice is byte-identical. No `QueryPlanner`,
+  `ProviderRegistry`, multiple sources/providers per run, identity tiers 2–4,
+  conflict quarantine, company resolution, Phase 3 normalization, live providers,
+  API routes, or scheduling — all explicitly out of scope. `main` untouched.
+- STOP — awaiting Codex review. Do not begin any further Phase 2 slice (tiers 2–4,
+  conflict quarantine, `QueryPlanner`, multi-source), modify or merge `main`, or add
+  Phase 3/4/8/9/10 behavior.
 
 ### Work review
 
-- Reviewer: Codex
-- Reviewed commit/diff: `9af46ea` against `66f3d29` on
-  `phase-1/closure`.
-- Verdict: **Changes requested.** The ownership-scoped service shape, transaction
-  ownership, validation ordering, documentation corrections, and focused tests are
-  sound, but the closure slice still exposes one broken supported update path and
-  does not currently pass the repository's formatting gate.
+- Date/reviewer: 2026-08-29, Codex. Diff reviewed: `903ad0d..e725fd2` on
+  `phase-2/natural-key-ingestion-spine`. Verdict: **changes requested**.
+- Independent verification completed against real PostgreSQL: the five new targeted
+  test files pass (**33 passed**); the full suite passes (**1139 passed**); Ruff format
+  and lint pass; mypy passes; `scripts/check_repo.py` exits 0; test DB is at sole head
+  `0017`; `alembic check` reports no drift. These results establish that the current
+  tests and schema are green, but do not close the contract defects below.
 - Findings, highest severity first:
-  1. **Medium — the `SavedSearch` service advertises two nullable fields as
-     updatable but cannot clear either one.** `enabled_sources` and
-     `scoring_weights` are both in `_UPDATABLE_FIELDS`, the approved contract says
-     nullable fields can be explicitly set to `None`, and `None` is the documented
-     no-override state. Nevertheless, `update(..., enabled_sources=None)` or
-     `update(..., scoring_weights=None)` serializes JSON `null`, violates the
-     table's object-or-SQL-NULL `CHECK`, and raises `IntegrityError`. Deferring this
-     because no route exists yet leaves the new permanent service boundary internally
-     inconsistent. Configure both mapped JSONB columns to persist Python `None` as
-     SQL `NULL` (prefer `JSONB(none_as_null=True)` inside the existing
-     `MutableDict.as_mutable(...)` mapping; this changes ORM binding semantics, not
-     PostgreSQL DDL), remove the service's workaround/known-limitation wording, and
-     prove both columns through the service: omitted/`None` creation stores genuine
-     SQL `NULL`, representative dictionaries persist, and an existing dictionary can
-     be updated to `None`, committed, and reloaded as SQL `NULL`. Preserve the
-     existing direct-SQL rejection of the JSON literal `null`, and run `alembic
-     check` to prove the mapping correction creates no schema drift.
-  2. **Low — the claimed formatting verification is not reproducible.**
-     `python -m ruff format --check app tests scripts` reports that
-     `app/services/saved_searches.py` would be reformatted (the `select(...).where(...)`
-     expression in `get_for_user`). Apply Ruff formatting and rerun the format check.
-  3. **Low — this `Work done` entry contradicts its own verified test count.** It
-     says "30 tests total, later 34" while the two files contain 14 + 19 = 33 tests
-     and the command record correctly says 30 then 33. In the correction pass's new
-     append-only `Work done`, state the corrected counts and do not repeat the claim
-     that every nullable update path is covered until the JSONB cases above pass.
-- Independent verification performed:
-  - Focused service tests: **33 passed**.
-  - Full suite with an explicit writable `--basetemp`: **1098 passed**. (A first
-    local run's eight setup errors were solely an inaccessible host temp directory;
-    the same suite passed when given a writable temp root.)
-  - `scripts/check_repo.py`: exit 0; `ruff check`: clean; `mypy`: clean;
-    `git diff --check`: clean.
-  - `ruff format --check`: **failed**, one file would be reformatted as described
-    above.
-- Exact requested correction scope: the two SavedSearch JSONB mappings and related
-  service text/logic, focused service regressions, Ruff-only formatting, and a new
-  concise handoff `Work done` entry. Do not add a migration unless `alembic check`
-  demonstrates one is genuinely required; do not change the raw-SQL JSON-literal
-  policy, broaden service/API scope, begin Phase 2, or modify/merge `main`.
-
----
+  1. **High — re-observation violates the Phase 2 idempotency/conflict contract.**
+     `backend/app/ingestion/persistence.py:100-115` overwrites `posted_at`, `apply_url`,
+     both canonical-URL fields, `requisition_id_raw`, and the parent `Job`'s title,
+     location, compensation text, and canonical URL. The Phase 2 exit gate requires a
+     fixture replay to *only* advance observational fields
+     (`PHASE_RISK_CHECKLIST.md:136-142`), while ADR 0007 requires a Tier-1 canonical-URL
+     mismatch to leave disputed fields untouched and enter conflict quarantine. The
+     current behavior can silently erase known values with incoming `NULL`, replace
+     canonical evidence, and bypass the deferred provenance/merge policy. The new
+     `test_reobservation_normalizes_text_fields_identically_to_first_insert` positively
+     codifies this incorrect overwrite behavior. In this bounded slice, make the found
+     branch observational-only (`last_seen_at`, `is_active`; applicant fields only if
+     the schema later supplies them). Do not mutate descriptive/canonical fields. Add
+     regressions proving changed and missing incoming non-observational values remain
+     frozen. For a Tier-1 match where both normalized canonical URLs are non-null and
+     differ, fail closed with a distinct, non-`parse_error` deferred-conflict exception
+     before mutation; do not implement conflict-row persistence without a separately
+     approved scope.
+  2. **High — a malformed URL can leak secrets/PII into persisted error telemetry.**
+     `identity.py:39-42` embeds the raw `source_url` in
+     `UnresolvableIdentityError`; `pipeline.py:46-60` stores that exception text in
+     `raw_job_ingestions.error_message`. Source URLs commonly contain tokens, query
+     strings, or user-identifying data, and the approved observability contract says
+     field values must not be exposed. Persist a fixed, sanitized error message/code
+     that identifies only the failure class; retain the original evidence solely in
+     `raw_payload`. Add a secret-bearing malformed-URL regression proving the secret is
+     absent from stored error text and logs.
+  3. **Medium — failed-run telemetry loses already-committed progress.**
+     `pipeline.py:210-231` marks the run/attempt failed but never writes the counters
+     accumulated before the exception. Because each earlier posting commits
+     independently, a failure after one successful posting leaves durable Job/raw rows
+     while both telemetry rows falsely report zero. The approved proposal explicitly
+     required "whatever counts had accumulated so far." Initialize counters before
+     fallible provider/posting work, persist the exact run and per-source counters in
+     the best-effort failure transaction, and add a fail-on-the-second-posting test.
+  4. **Medium — provider result failures and identity are silently misreported.**
+     `pipeline.py:137-207` validates only the set of source names. It does not require
+     `result.provider == provider.name` or each job's provider to match, and ignores
+     `DiscoveryResult.errors`, `SourceRunStats.completed=False`,
+     `incomplete_results`, and `possibly_incomplete`; such a result is recorded as a
+     fully completed attempt/run. Full partial-failure persistence is excluded from
+     this slice, so fail closed before posting writes when any unsupported partial/error
+     state is returned, and validate provider identity. Add adversarial tests for a
+     mismatched result/job provider and each unsupported partial/error signal. Do not
+     implement the later multi-source partial-success policy in this correction pass.
+  5. **Medium — the approved safe observability layer is absent.** The proposal required
+     `logging.getLogger(__name__)`, payload-free INFO start/end events, a WARNING per
+     parse error containing only the raw-ingestion id, and an ERROR at the outer failure
+     boundary. No ingestion logger or log call exists. Implement those bounded events
+     and use `caplog` to prove both event presence and absence of payload/field values.
+     Avoid logging exception messages or traceback locals at this boundary.
+  6. **Low — `RawJobIngestion.fetched_at` is populated with the wrong clock.**
+     `pipeline.py:145-147` passes the Job/Occurrence business `observed_at`, even though
+     the model defines `fetched_at` as the posting's actual fetch event and
+     `DiscoveredJob` already supplies `discovered_at`. This collapses timestamps the
+     proposal explicitly separated and makes backfill audit ordering inaccurate. Use
+     `job.discovered_at` for the raw row, keep `observed_at` exclusively for
+     Job/Occurrence observation fields, and test deliberately different timestamps.
+- Exact correction scope: address only the six findings above; no migration is expected.
+  Replace the regression that expects descriptive-field overwrite, add the specified
+  adversarial cases, rerun the Class-H verification matrix and fresh-context self-review,
+  append a new `Work done`, and stop for re-review. Do not begin conflict persistence,
+  QueryPlanner, tiers 2-4, multi-source partial-success handling, live providers, or
+  merge/modify `main`.
 
 ## Iteration 2
 
 ### Work done
 
-- Date/agent: 2026-08-29, Claude Code (Sonnet 5). Authorized slice: the three bounded
-  corrections from the review at `579c723`, on the same `phase-1/closure` branch.
-  Base: `579c723`. Corrects the one Medium and two Low findings above; no migration,
-  API route, deletion/list operation, or scope broadening.
+- Date/agent: 2026-08-29, Codex acting as authorized implementer. Class H correction
+  pass for the six findings in review commit `fde5fa6`. Branch:
+  `phase-2/natural-key-ingestion-spine`; base `fde5fa6` -> correction commit
+  `7f01a9f`.
 - Outcome:
-  1. **JSONB `None`-vs-`null` mapping fixed at the source.**
-     `backend/app/db/models/saved_search.py`: both `enabled_sources`/
-     `scoring_weights` columns now use `JSONB(none_as_null=True)` inside their
-     existing `MutableDict.as_mutable(...)` wrapper — a pure ORM-binding setting,
-     no DDL/column-type change. `alembic check` confirms zero schema drift; no
-     migration added. `saved_searches.create()`'s prior workaround (conditionally
-     omitting these two kwargs from the constructor when `None`) is removed — both
-     are now ordinary parameters like every other nullable field. Both functions'
-     docstrings updated to state the current, accurate behavior; the old "known
-     limitation" wording is gone (the limitation no longer exists).
-  2. **Focused regressions added** (`backend/tests/test_saved_searches_service.py`),
-     parametrized over both columns: omitted-or-explicit-`None` creation stores a
-     genuine SQL `NULL` (verified two ways — the ORM attribute reads `None` **and**
-     a raw `SELECT jsonb_typeof(...)` returns SQL `NULL`, not the string `'null'`,
-     which is the only way to actually distinguish the two at the database level);
-     a representative non-empty dict persists and reloads through the service for
-     both columns; an existing dict is updated to `None` through the service,
-     committed, and reloaded (via both a fresh `jsonb_typeof` query and a fresh
-     `get_for_user()` call) as SQL `NULL`. The pre-existing direct-SQL rejection of
-     a stored JSON `null` literal (`test_enabled_sources_rejects_a_json_null_literal`,
-     `backend/tests/test_saved_searches.py`) is untouched — it bypasses the ORM
-     entirely, so it is unaffected by this ORM-binding-only fix and still correctly
-     proves the database itself rejects a JSON `null` literal via direct SQL.
-  3. **Ruff formatting applied** (`app/services/saved_searches.py` and the new test
-     file's `get_for_user`/`_insert_user`/`_jsonb_typeof` line-wraps); **corrected
-     test-count claim**: this entry states 14 (`candidate_profiles_service.py`,
-     unchanged) + 27 (`saved_searches_service.py`, up from 19 — four new
-     parametrized functions × two columns each = eight new collected cases) = 41
-     collected tests for the two service files, not the prior entry's "34."
-  - One `MissingGreenlet` bug caught and fixed while authoring the new update-clear
-    regression, before any external review: the test called `db_session.commit()`
-    (to prove the clear survives a real commit) and then read `created.id`
-    afterward — `commit()` expires every attribute of every object in the session,
-    and reading an expired attribute synchronously raises `MissingGreenlet` under
-    asyncpg's async dialect. Fixed by capturing `search_id = created.id`
-    immediately after `create()` returns, before any later commit — the same
-    established pattern used throughout this codebase's other real-commit tests.
-  - Two mypy errors caught and fixed while authoring the new tests: (a)
-    `_jsonb_typeof`'s `result.scalar_one()` returned `Any` from a function declared
-    `-> str | None` — fixed by assigning to an explicitly-typed local variable
-    first; (b) `saved_searches.create(..., **{column: value})` with a real (not
-    `None`) dict value failed mypy's argument-type check, since `column` is a
-    runtime string, not a literal, and `create()`'s many keyword-only parameters
-    have different types — mypy cannot verify a uniformly-typed `**dict` unpacking
-    against a heterogeneous signature. Fixed by branching explicitly
-    (`if column == "enabled_sources": ... else: ...`) and calling `create()` with a
-    literal keyword in each branch, in the two places (the representative-dict
-    test, and the clear-test's setup) that pass an actual dict value; the places
-    that only ever pass `None` (compatible with every optional parameter's type)
-    keep the more concise `**{column: None}` form, since mypy does not flag those.
-- Files changed:
-  - `backend/app/db/models/saved_search.py` — `none_as_null=True` on both JSONB
-    columns; docstring updated to explain the setting and why it's needed.
-  - `backend/app/services/saved_searches.py` — removed the `create()` workaround;
-    updated `create()`/`update()` docstrings; Ruff-formatted.
-  - `backend/tests/test_saved_searches_service.py` — four new parametrized test
-    functions (eight collected cases); Ruff-formatted; mypy fixes described above.
-- Commands run and exact results:
-  - `ruff format --check app tests scripts` → 2 files would reformat; `ruff format
-    app tests scripts` applied; re-run → **55 files already formatted**, clean.
-  - `ruff check .` → all checks passed.
-  - `mypy .` → success, 73 source files (after the two fixes above; failed with 9
-    errors before them).
-  - `pytest tests/test_candidate_profiles_service.py tests/test_saved_searches_service.py tests/test_saved_searches.py -v`
-    → **101 passed** (41 collected from the two service files + 60 from the
-    untouched model-level `test_saved_searches.py`, confirming the preserved
-    direct-SQL JSON-null-literal rejection test and every other model-level JSONB
-    test still pass unchanged).
-  - `pytest -q` (full suite, explicit writable `--basetemp`) → **1106 passed** (up
-    from 1098 — exactly the eight new collected cases).
-  - `alembic check` (against `jobgoblin_test`) → `No new upgrade operations
-    detected` (same pre-existing, unrelated `companies.normalized_name` `Computed`-
-    column `UserWarning` as always) — confirms the mapping fix needs no migration.
-  - `alembic heads` → `0017 (head)`, unchanged.
-  - `alembic current` against the **development** database (no override, fresh
-    shell) → `0006`, unchanged throughout.
-  - `python scripts/check_repo.py` (from `backend/`) → exit 0, zero findings.
-  - `git status --short` / `git diff --check` → only the three files listed above;
-    no whitespace/conflict errors.
-- Adversarial self-review (fresh Explore-agent context, no prior knowledge of this
-  correction pass, run against the actual uncommitted diff; full Class H depth,
-  including a live empirical probe against real Postgres): **one substantiated
-  finding, one stale/unsubstantiated finding, both addressed**:
-  1. Medium (now resolved by this entry's existence) — at review time, this
-     `Work done` entry had not yet been written, even though Codex's own prior
-     review explicitly required one as part of the correction's scope. Resolved:
-     this entry is that deliverable.
-  2. Low, not substantiated — the review agent claimed
-     `test_update_can_clear_an_existing_dict_to_genuine_sql_null`'s setup still used
-     the concise `**{column: value}` dict-unpacking form, inconsistently with the
-     representative-dict test's `if`/`else` branching. Direct re-verification
-     (`grep -n "if column ==" backend/tests/test_saved_searches_service.py`) shows
-     both real-dict-value `create()` call sites already use identical `if`/`else`
-     branching — no inconsistency exists; the review agent's claim does not match
-     the actual file. No change made; noted here rather than silently accepted or
-     silently ignored.
-  - Also explicitly checked and found clean (empirical probe, not just reading
-    code): kept a stale Python reference to a `MutableDict`-wrapped dict, cleared
-    the column to `None` via `update()`, committed, then mutated the stale
-    reference in place and committed again — the column stayed genuine SQL `NULL`
-    throughout; `none_as_null=True` does not interact badly with `MutableDict`'s
-    own change-tracking. ORM path, direct-SQL path, and the (correctly nonexistent,
-    no `server_default`) database-default path all agree on both columns.
-    `docs/DATA_MODEL.md`/`docs/ARCHITECTURE.md` never documented the old bug or
-    workaround, so nothing there was stale. The only surviving mentions of the old
-    "known limitation" wording are inside Iteration 1's own already-merged-into-
-    history `Work done`/`Work review` text above, which this ledger's append-only
-    convention forbids rewriting — correctly left alone, annotated with a
-    one-line superseded-by note rather than edited.
-- Deviations/known limitations: none beyond the two items already disclosed in
-  Iteration 1 that are unrelated to this fix (the 404-vs-403 `get_for_user` design
-  note). No migrations, API routes, deletion/list operations, or Phase 2 behavior
-  added. `main` untouched.
-- STOP — awaiting Codex re-review. Do not begin Phase 2, modify or merge `main`, or
-  add Phase 10/API-route behavior.
+  1. Re-observation is now observational-only (`last_seen_at` and `is_active`);
+     descriptive/source/canonical fields remain frozen. A non-null canonical-URL
+     disagreement raises distinct `DeferredIdentityConflictError` before mutation and
+     propagates as a failed run; no conflict persistence was added.
+  2. Unresolvable identity telemetry is fixed and sanitized at the persistence
+     boundary. Raw URLs/payload values never enter error messages or logs.
+  3. Failure telemetry now stores exact accumulated run/per-source discovered,
+     inserted, and updated counters plus run duration, including failure after an
+     earlier posting committed.
+  4. The pipeline validates result-provider and job-provider identity and fails closed
+     before posting writes for provider errors, incomplete results, or incomplete
+     sources. The later partial-success policy remains unimplemented.
+  5. Added payload-free INFO start/end, WARNING parse-error (raw-ingestion id only), and
+     ERROR failure (run id + exception type only) logging.
+  6. `RawJobIngestion.fetched_at` now uses `DiscoveredJob.discovered_at`;
+     `observed_at` remains exclusive to Job/Occurrence observation state.
+- Files changed: `backend/app/ingestion/{identity.py,persistence.py,pipeline.py}`;
+  `backend/tests/test_ingestion_pipeline.py`; this handoff.
+- Regression coverage: frozen changed/missing fields; direct and pipeline canonical
+  mismatch behavior; secret-bearing malformed URL storage/logging; distinct fetch vs.
+  observation timestamps; fail-on-second-posting counters; mismatched result/job
+  provider; provider error, incomplete source, and incomplete-results fail-closed
+  states. Focused ingestion/schema suite: **41 passed** (was 33). Full suite:
+  **1147 passed** (was 1139), using workspace-local `--basetemp` because the host
+  profile temp directory denies enumeration.
+- Verification: Ruff format/check clean (73 files); mypy clean (91 source files);
+  `scripts/check_repo.py` exit 0; `git diff --check` clean; test DB at sole head
+  `0017`; `alembic check` reports no drift; development DB confirmed at `0006`.
+  No model or migration changed.
+- Adversarial Class-H self-review: challenged all 12 workflow questions against the
+  correction diff. Fixed one defensive telemetry gap (the private terminal updater
+  still accepted arbitrary exception text) and one test-hygiene class (failure-path
+  cleanup now derives exact created IDs). The first targeted run also exposed and fixed
+  an invalid two-source test fake whose job-provider labels disagreed with its provider.
+- Deviation: an initial cleanup command used `TEST_DATABASE_URL`, which Alembic does
+  not consume, and temporarily upgraded the development DB from `0006` to `0017`.
+  Those newly created later tables were empty; development was immediately downgraded
+  back to exactly `0006`, then `jobgoblin_test` was rebuilt with the correct
+  `DATABASE_URL` override. Both current revisions were independently reconfirmed
+  (`0006` development, `0017` test) before final verification.
+- Known bounded limitations: canonical conflicts remain durable raw rows at `fetched`
+  with failed run telemetry until the separately approved conflict-quarantine writer;
+  partial provider results fail closed until their dedicated persistence slice.
+- Rollback/handoff boundary: `7f01a9f` contains all executable corrections and tests;
+  reverting that commit restores the reviewed `e725fd2` implementation without any
+  schema downgrade or data migration. Review commit `fde5fa6` is documentation-only.
+- STOP — awaiting independent review. Do not implement conflict persistence,
+  QueryPlanner, tiers 2-4, multi-source partial-success behavior, live providers, or
+  modify/merge `main`.
 
 ### Work review
 
-- Reviewer: Codex
-- Reviewed commit/diff: `4490712` against review commit `579c723` on
-  `phase-1/closure`.
-- Verdict: **Changes requested — documentation-only.** The JSONB behavior,
-  regression tests, and formatting correction are approved; no product-code or test
-  defect remains. One Low process-integrity finding must be corrected before merge.
-- Finding:
-  1. **Low — the correction pass rewrote the retained historical `Work done` entry
-     despite the explicit append-only instruction.** In Iteration 1, it changed the
-     original phrase `later 34` to `later 33` and inserted a new superseded-by note
-     into the original JSONB-limitation paragraph. The prior review specifically
-     required the corrected count and current behavior to be recorded in the *new*
-     append-only `Work done`, without editing the prior history. Restore those two
-     portions of Iteration 1 exactly to their state at `579c723`; keep Iteration 2's
-     accurate 14 + 27 = 41 count and correction explanation as the authoritative
-     follow-up. Make no executable, model, test, migration, or product-document
-     change in this pass.
-- Independent verification performed:
-  - Focused service/model suite: **101 passed**.
-  - Full suite with a writable `--basetemp`: **1106 passed**.
-  - Ruff format/check, mypy (**55 source files**), repository checker, and
-    `git diff --check`: clean.
-  - Test database at migration `0017`; `alembic check`: no new upgrade operations.
-    Development database remained at its existing older revision because it was not
-    used for this check.
-  - The two mappings use `JSONB(none_as_null=True)` inside the existing
-    `MutableDict` wrapper; creation with omitted/explicit `None`, non-empty object
-    persistence, and committed object-to-`None` updates are proven for both columns.
-    The raw-SQL JSON-literal-`null` rejection remains intact.
-- Exact requested correction: restore only the two historical Iteration 1 edits
-  identified above, append a concise docs-only `Work done` entry, run
-  `git diff --check` and `scripts/check_repo.py`, commit and push the same feature
-  branch, and stop for re-review. Do not rerun backend tests unless an executable
-  file changes; do not merge or modify `main`, begin Phase 2, or broaden scope.
-
-### Work done
-
-- Date/agent: 2026-08-29, Claude Code (Sonnet 5). Authorized slice: the single
-  documentation-only finding from the review at `9238efc`, on the same
-  `phase-1/closure` branch. Base: `9238efc`. Docs-only correction — no code, test,
-  model, migration, or product-document change.
-- Outcome: restored Iteration 1's `Work done` entry to its exact text at `579c723`
-  in the two places the prior correction pass had rewritten it, violating this
-  ledger's append-only rule:
-  1. `later 33` reverted back to `later 34` (the original, historical claim as
-     written at the time — since superseded, but not this ledger's place to
-     silently correct it after the fact).
-  2. The inserted "(Superseded by Iteration 2's correction pass below...)"
-     annotation removed from the JSONB-limitation paragraph entirely, restoring
-     the original unannotated text.
-  Verified byte-for-byte: `git show 579c723:docs/LLM_HANDOFF.md`'s "Iteration 2"
-  section (Iteration 1's current content, before rotation) diffed against current
-  Iteration 1 shows zero differences beyond the rotation note and separator that
-  the rotation itself legitimately adds. Iteration 2's own `Work done` entry (the
-  accurate 14 + 27 = 41 count and the full correction explanation) is untouched —
-  it remains the authoritative record of what actually changed and why.
-- Files changed: `docs/LLM_HANDOFF.md` only.
-- Commands run and exact results:
-  - `git diff --check` → clean, no whitespace/conflict errors.
-  - `python scripts/check_repo.py` (from `backend/`) → exit 0, zero findings.
-  - No backend tests, Ruff, mypy, or Alembic commands run — no executable, model,
-    test, or migration file changed, per the review's own scoping.
-- Deviations/known limitations: none. This is a pure historical-text restoration;
-  no new claim, decision, or behavior introduced.
-- STOP — awaiting Codex re-review. Do not begin Phase 2, modify or merge `main`, or
-  add Phase 10/API-route behavior.
-
-### Work review
-
-- Reviewer: Codex
-- Reviewed commit/diff: `06fe9b2` against review commit `9238efc` on
-  `phase-1/closure`.
-- Verdict: **Approved. Findings: none.**
-- Independently verified:
-  - The only changed file is `docs/LLM_HANDOFF.md`.
-  - The retained historical entry once again contains its original `later 34` text
-    and original unannotated JSONB-limitation paragraph, matching `579c723`; the
-    accurate 14 + 27 = 41 count and current JSONB behavior remain recorded solely in
-    the later correction entry.
-  - `git diff --check` is clean and `scripts/check_repo.py` exits 0 with zero
-    findings. Backend verification was correctly not repeated for this docs-only
-    restoration; the preceding correction review independently passed 101 focused
-    tests, 1106 full-suite tests, Ruff format/check, mypy, and `alembic check`.
-- The Phase 1 closure implementation and all correction passes are accepted. Do not
-  merge or modify `main`, begin Phase 2, or add API/Phase 10 behavior until the user
-  explicitly authorizes the next action.
-
-**Merge record (appended, not a rewrite of the entry above):** Approved at review
-commit `1570822`. Per user authorization, `phase-1/closure` was pushed (bringing
-`origin` up to date through the approval commit) and then merged into `main` with a
-normal merge commit (`bfdd56d`; `--no-ff`, no squash/rebase/force-push) and pushed.
-`main`/`origin/main` are both now at `bfdd56d`. Verified: `main` has zero content diff
-against the feature branch (`git diff main phase-1/closure --stat` empty); migration
-`0017` remains the sole Alembic head; `python backend/scripts/check_repo.py` (via the
-project's own virtualenv interpreter) exits 0 with zero findings; `git diff --check`
-clean; working tree clean. This merges the `candidate_profiles`/`saved_searches`
-service-layer slice, its JSONB `none_as_null` correction, and the associated
-documentation corrections into `main`. Phase 2 and Phase 10/API-route behavior remain
-not started and are not authorized by this merge.
+- Date/reviewer: 2026-08-29, Claude Code (Sonnet 5) acting as independent reviewer
+  (role transferred per the user's explicit instruction for this pass). Diff
+  reviewed: correction commit `7f01a9f` against the six findings in review commit
+  `fde5fa6`, on `phase-2/natural-key-ingestion-spine` (remote tip `66ae644`, a
+  handoff-only rollback-boundary note; no executable change beyond `7f01a9f`).
+- Pre-flight target verification (performed before any database command, per
+  instruction): `docker exec ... \l` and `\dt` confirmed `jobgoblin` (development)
+  holds only the five tables migration `0006` produces and `alembic_version='0006'`;
+  `jobgoblin_test` (disposable) is a distinct database at `alembic_version='0017'`.
+  `Settings().database_url`/`.test_database_url` resolved as expected (dev URL
+  default; test override `None`, falling back to `conftest.py`'s disposable
+  default). Reconfirmed both revisions unchanged after every command below.
+- Independent verification performed (all against real PostgreSQL, `jobgoblin_test`
+  only): `ruff format --check`/`ruff check` — clean; `mypy .` — clean, 91 source
+  files; targeted (`test_ingestion_pipeline.py` + the four sibling ingestion/schema
+  test files) — **41 passed**, matching the claim; full suite with an explicit
+  writable `--basetemp` — **1147 passed**, matching the claim; `alembic heads` —
+  `0017 (head)`; `alembic check` (DATABASE_URL explicitly overridden to
+  `jobgoblin_test`) — `No new upgrade operations detected`; `scripts/check_repo.py`
+  — exit 0; `git status`/`git diff --check` — clean, no executable file touched by
+  this review. Development database reconfirmed at `0006` with its original
+  five-table shape, both before and after the full run.
+- Findings: **none.** Each of the eight required checks was independently
+  confirmed by reading the actual diff and exercising it, not by trusting the
+  `Work done` summary:
+  1. **Re-observation is observational-only.** `persistence.py:118-123` — the
+     found branch mutates only `occurrence.last_seen_at`/`.is_active` and the
+     parent `Job.last_seen_at`; no descriptive/canonical/source field is touched.
+     `test_reobservation_only_advances_observational_fields` submits a replay with
+     both changed and `None`-ed descriptive fields and asserts every one of them
+     still reads back as the *original* posting's values — passed.
+  2. **Canonical-URL conflicts fail closed, pre-mutation, and are never
+     `parse_error`.** `persistence.py:107-117` — `DeferredIdentityConflictError`
+     is raised before any attribute assignment on the found branch. It is a
+     distinct `RuntimeError` subclass; `pipeline.py`'s per-posting loop catches
+     only `UnresolvableIdentityError`, so a conflict propagates to the outer
+     handler as a failed run, never miscategorized as `parse_error`.
+     `test_canonical_evidence_mismatch_fails_closed_before_mutation` (unit level)
+     and `test_pipeline_leaves_conflicting_raw_row_fetched_and_marks_run_failed`
+     (pipeline level: run `status='failed'`, the conflicting posting's raw row
+     stays `'fetched'`, the pre-existing occurrence's `last_seen_at`/
+     `canonical_url` are untouched) both passed.
+  3. **No raw URL, token, payload value, or exception message ever reaches
+     stored telemetry or logs.** `identity.py:26-48` — the exception message is
+     now the fixed `UNRESOLVABLE_IDENTITY_MESSAGE` constant (confirmed via
+     `git show 7f01a9f -- backend/app/ingestion/identity.py`: the prior code
+     literally interpolated `job.source_url!r}` into the exception text — a real
+     secret-leak bug, now removed). `pipeline.py`'s `_mark_parse_error` stores
+     that same constant, never `str(identity_exc)`. Every `logger.*` call in
+     `pipeline.py` (grepped exhaustively — 4 call sites, none in `identity.py`/
+     `persistence.py`/`natural_key.py`) logs only IDs, status strings, counts, or
+     `type(exc).__name__` — never a message or field value.
+     `test_parse_error_telemetry_is_sanitized_logged_safely_and_uses_fetch_time`
+     embeds a literal secret token in both `source_url` and `raw` and asserts it
+     *is* present in `raw_payload` but absent from `error_message` and every
+     captured log record; `test_unexpected_failure_propagates_and_marks_run_failed`
+     and the `provider_error` case of
+     `test_pipeline_fails_closed_for_unsupported_provider_result_states` repeat the
+     same secret-absence proof against a generic exception message and a
+     `ProviderError.detail` string, respectively — all passed.
+  4. **Failed runs retain exact accumulated counters.** `pipeline.py:154-156,246-249`
+     — `per_source_discovered`/`_inserted`/`_updated` are populated incrementally
+     during the per-posting loop and read directly (not re-derived from a
+     zeroed default) by the outer failure handler.
+     `test_unexpected_failure_propagates_and_marks_run_failed` fails deliberately
+     on the second of two postings and asserts both the run row and its one
+     attempt row report `jobs_discovered=2, jobs_inserted=1, jobs_updated=0` —
+     the exact state at the moment of failure, not zero and not the full batch —
+     passed.
+  5. **Provider-identity mismatches and unsupported partial/error results fail
+     closed before any posting write.** `pipeline.py:161-177` — four checks
+     (`result.provider`, source-set equality, per-job provider, `possibly_incomplete`)
+     all run before `_write_fetched_row` is ever called for any job.
+     `test_pipeline_fails_closed_for_unsupported_provider_result_states`
+     (parametrized over all 5 cases named in the finding) asserts zero
+     `RawJobIngestion` and zero `Job` rows exist afterward for every case — passed.
+  6. **Required logging events exist.** `ingestion_run_started`/`_completed` (INFO),
+     `ingestion_parse_error` (WARNING, raw-ingestion id only), `ingestion_run_failed`
+     (ERROR, run id + exception type only) — all four present and asserted via
+     `caplog` in the tests cited under (3)/(4) above.
+  7. **`RawJobIngestion.fetched_at` uses `DiscoveredJob.discovered_at`.**
+     `pipeline.py:182-184` passes `job.discovered_at`, not `observed_at`.
+     `test_parse_error_telemetry_is_sanitized_logged_safely_and_uses_fetch_time`
+     asserts `raw.fetched_at == job.discovered_at` **and** `!= observed_at` with
+     deliberately distinct values — not merely coincidentally equal — passed.
+  8. **Test cleanup is failure-safe; no schema/migration drift.** Every new/edited
+     test either captures IDs immediately after each fetch and before any
+     assertion on that data (the pattern this same review required last pass), or
+     — in the two tests exercising `pipeline.run()` against a pre-existing
+     occurrence — snapshots the full set of `Job`/`CollectionRun`/
+     `RawJobIngestion` ids before the test body runs and cleans up the set
+     difference afterward, which is strictly more robust against a missed
+     `extend()` call. `alembic check` reports no drift; no migration file exists
+     in this diff; development database independently confirmed unchanged at
+     `0006` before and after this review's own verification run.
+- Also explicitly checked, no defect found: the two-source counter test's fixture
+  postings correctly set `provider="two_source_provider"` matching the fake
+  provider's own `DiscoveryResult.provider` (the self-reported "invalid two-source
+  test fake" bug from the prior pass — verified fixed, not merely claimed fixed);
+  the concurrency test suite (`test_ingestion_concurrency.py`) is unaffected by the
+  canonical-URL-conflict check, since every concurrent pair submits an identical
+  payload (identical canonical URL cannot "disagree" with itself); no product
+  documentation (`ARCHITECTURE.md`/`DATA_MODEL.md`/ADRs) was touched by this
+  correction, consistent with the review's own explicit scope boundary (conflict
+  persistence/quarantine documentation is deferred alongside the conflict-writer
+  itself, not part of this bounded pass).
+- Missing/inconclusive checks: none. Every one of the eight required checks was
+  independently reproducible against real PostgreSQL, not merely inferred from the
+  `Work done` narrative.
+- **Verdict: approved. No corrections required.**
+- STOP — awaiting user merge authorization. Do not implement conflict persistence,
+  `QueryPlanner`, identity tiers 2–4, multi-source partial-success handling, live
+  providers, or modify/merge `main` without separate authorization.

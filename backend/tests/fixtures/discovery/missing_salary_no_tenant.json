@@ -1,0 +1,22 @@
+{
+  "provider": "fixture_provider",
+  "source": "fixture_ats",
+  "source_tenant_id": null,
+  "source_job_id": "987654321",
+  "requisition_id_raw": null,
+  "title": "Product Designer",
+  "company": "Beta Widgets",
+  "location": "New York, NY",
+  "source_url": "https://jobs.example.com/postings/987654321",
+  "apply_url": "https://jobs.example.com/postings/987654321/apply",
+  "canonical_url": "https://jobs.example.com/postings/987654321",
+  "description": "Design product experiences.",
+  "compensation_text": null,
+  "posted_at": "2026-01-02T00:00:00+00:00",
+  "discovered_at": "2026-01-02T00:00:00+00:00",
+  "raw": {
+    "id": "987654321",
+    "title": "Product Designer",
+    "compensation": null
+  }
+}

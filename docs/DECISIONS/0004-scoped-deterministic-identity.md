@@ -76,7 +76,14 @@ matching.
    exact match, used only when `source_tenant_id` is unavailable at all. Weaker, because
    a requisition ID isn't guaranteed unique across a company's own multiple ATS
    instances.
-5. No match → create a new `Job`.
+5. No match → create a new `Job` — provided a stable occurrence key can actually be
+   derived (`source_job_id`, or a normalized `source_url` via the fallback
+   `job_occurrences_fallback_url_key` index). **Phase 2 clarification (narrow, no schema
+   change):** a payload with neither is not "no match" in the sense this step means —
+   there is no key at all to create an occurrence *under*. Such a payload is recorded as
+   `processing_status = 'parse_error'` (its raw form still preserved in
+   `raw_job_ingestions.raw_payload`) rather than persisted as an unkeyed occurrence, which
+   the database could not actually enforce as unique.
 
 ### NULL-safety (Rev 3 fix)
 Step 1's natural key was originally one partial unique index —
