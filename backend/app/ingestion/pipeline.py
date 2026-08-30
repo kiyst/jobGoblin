@@ -17,8 +17,7 @@ from app.ingestion.identity import (
     UnresolvableIdentityError,
     resolve_identity,
 )
-from app.ingestion.natural_key import NaturalKey
-from app.ingestion.persistence import UpsertOutcome, upsert_job_occurrence
+from app.ingestion.persistence import UpsertKind, persist_posting
 from app.providers.base import DiscoveryProvider
 from app.schemas.discovered_job import DiscoveredJob
 from app.schemas.provider import SourceQuery
@@ -71,28 +70,6 @@ async def _mark_parse_error(
             raw.error_message = UNRESOLVABLE_IDENTITY_MESSAGE
     except Exception as terminal_update_exc:
         raise terminal_update_exc from identity_exc
-
-
-async def _persist_posting(
-    engine: AsyncEngine,
-    natural_key: NaturalKey,
-    job: DiscoveredJob,
-    observed_at: datetime,
-    raw_id: uuid.UUID,
-) -> UpsertOutcome:
-    """Transaction B_i: `Job`/`JobOccurrence` upsert and the terminal
-    `RawJobIngestion` update, in the same transaction. Any exception here —
-    including from `upsert_job_occurrence` itself — is not caught: it
-    propagates out of this function, `session.begin()` rolls back
-    everything this transaction touched, and the row from Transaction A_i
-    is left exactly as it was (`fetched`), untouched."""
-    async with AsyncSession(bind=engine) as session, session.begin():
-        outcome = await upsert_job_occurrence(session, natural_key, job, observed_at)
-        raw = await session.get(RawJobIngestion, raw_id)
-        assert raw is not None
-        raw.processing_status = "normalized"
-        raw.job_occurrence_id = outcome.occurrence_id
-    return outcome
 
 
 async def run(
@@ -190,6 +167,7 @@ async def run(
         # counters are the run-level rollup (the sum across sources), which
         # is genuinely a different, correctly-shared value.
         had_parse_error = False
+        had_conflict = False
         for job, raw_id in zip(result.jobs, raw_ingestion_ids, strict=True):
             try:
                 natural_key = resolve_identity(job)
@@ -199,16 +177,35 @@ async def run(
                 had_parse_error = True
                 continue
 
-            outcome = await _persist_posting(engine, natural_key, job, observed_at, raw_id)
-            if outcome.inserted:
+            outcome = await persist_posting(engine, natural_key, job, observed_at, raw_id)
+            if outcome.kind is UpsertKind.INSERTED:
                 per_source_inserted[job.source] = per_source_inserted.get(job.source, 0) + 1
-            else:
+            elif outcome.kind is UpsertKind.UPDATED:
                 per_source_updated[job.source] = per_source_updated.get(job.source, 0) + 1
+            elif outcome.kind is UpsertKind.ATTACHED:
+                # A new JobOccurrence was created, but no new Job — the
+                # existing Job's own last_seen_at was what advanced, so
+                # this counts as an update to that Job, not an insertion
+                # of one.
+                per_source_updated[job.source] = per_source_updated.get(job.source, 0) + 1
+            else:
+                # Quarantined: descriptive/canonical fields never applied,
+                # but observational state did advance — bucketed with the
+                # other partial-write outcome, not with a clean insert.
+                per_source_updated[job.source] = per_source_updated.get(job.source, 0) + 1
+                had_conflict = True
+                logger.warning(
+                    "ingestion_identity_conflict raw_ingestion_id=%s "
+                    "identity_conflict_id=%s job_occurrence_id=%s",
+                    raw_id,
+                    outcome.conflict_id,
+                    outcome.occurrence_id,
+                )
 
         jobs_discovered = sum(per_source_discovered.values())
         inserted = sum(per_source_inserted.values())
         updated = sum(per_source_updated.values())
-        run_status = "completed_with_errors" if had_parse_error else "completed"
+        run_status = "completed_with_errors" if had_parse_error or had_conflict else "completed"
         completed_at = clock.now()
         duration_ms = int((completed_at - run_started_at).total_seconds() * 1000)
 

@@ -6,7 +6,6 @@ from datetime import datetime
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.engine import URL, make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
 from app.config import Settings, get_settings
@@ -30,75 +29,7 @@ from app.db.models import (
 from app.db.session import check_database_connection
 from app.main import app
 from app.normalization.url import normalize_url
-
-# The disposable database `db_engine`/`db_session` run destructive schema
-# tests against. Only used as a fallback when `Settings.test_database_url`
-# (loaded from `.env`/`TEST_DATABASE_URL`, same mechanism as every other
-# setting — see app/config.py) isn't set. See .env.example and README.md's
-# "Dedicated test database" section.
-DEFAULT_TEST_DATABASE_URL = "postgresql+asyncpg://jobgoblin:jobgoblin@localhost:5432/jobgoblin_test"
-
-
-def _redact(url: str | URL) -> str:
-    """A safe-to-print form of a database URL: driver/host/port/database
-    only — never username or password. Used anywhere a misconfigured URL
-    might otherwise end up in a raised exception or test output."""
-    parsed = url if isinstance(url, URL) else make_url(url)
-    return f"{parsed.drivername}://{parsed.host}:{parsed.port}/{parsed.database}"
-
-
-def assert_is_disposable_test_database(test_url: str, development_url: str) -> None:
-    """Fail closed: refuse to run destructive database tests against
-    anything that doesn't clearly look like a disposable test database,
-    *distinct from the actually-configured development database*.
-
-    Raises `RuntimeError` (a hard test failure, not a skip) if either:
-    - `test_url`'s database name equals `development_url`'s database name
-      (case-insensitive) — compared by **name alone**, deliberately ignoring
-      host, port, credentials, or driver spelling. A first version of this
-      guard compared `(host, port, database)` tuples, which let a
-      `localhost` test URL and a `127.0.0.1` development URL — or an
-      explicit `:5432` versus an omitted default port — pass as "different"
-      even when they resolve to the exact same server. Two different
-      connection strings can reach the same database in more ways than can
-      be reliably enumerated, so this guard doesn't try: it's deliberately
-      conservative and rejects on name match alone, accepting that a
-      same-named database on a genuinely separate server will also be
-      rejected. For a fail-closed guard protecting against irreversible
-      schema/data loss, an occasional false rejection is the correct
-      trade-off against a false acceptance.
-    - `test_url`'s database name doesn't contain "test" at all.
-
-    Database tests create and drop schema/data; running them against
-    whatever `DATABASE_URL` actually points at — the real check, not a
-    hardcoded name — would corrupt real development state. Never includes a
-    raw, credential-bearing URL in the raised message; see `_redact` above.
-    """
-    test_parsed = make_url(test_url)
-    dev_parsed = make_url(development_url)
-
-    test_name = (test_parsed.database or "").lower()
-    dev_name = (dev_parsed.database or "").lower()
-
-    same_name_as_development = test_name == dev_name
-    missing_test_marker = "test" not in test_name
-
-    if same_name_as_development or missing_test_marker:
-        reasons = []
-        if same_name_as_development:
-            reasons.append(
-                "its database name matches the configured development database's "
-                f"name ({_redact(dev_parsed)})"
-            )
-        if missing_test_marker:
-            reasons.append("its database name does not contain 'test'")
-        raise RuntimeError(
-            f"Refusing to run database tests against {_redact(test_parsed)}: "
-            + " and ".join(reasons)
-            + ". Set TEST_DATABASE_URL to a distinct, clearly-named disposable "
-            "test database — see README.md's 'Dedicated test database' section."
-        )
-
+from scripts.db_safety import assert_is_disposable_test_database, resolve_test_database_url
 
 # Deliberately unroutable-fast: port 1 on loopback refuses connections
 # immediately on every platform this runs on, so the "database unavailable"
@@ -159,7 +90,7 @@ async def db_engine() -> AsyncGenerator[AsyncEngine]:
     README.md's "Dedicated test database" section.
     """
     settings = get_settings()
-    test_url = settings.test_database_url or DEFAULT_TEST_DATABASE_URL
+    test_url = resolve_test_database_url(settings.test_database_url)
     assert_is_disposable_test_database(test_url, settings.database_url)
     engine = create_async_engine(test_url)
     yield engine

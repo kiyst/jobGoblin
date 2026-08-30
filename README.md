@@ -4,10 +4,11 @@ Job aggregation and market-intelligence platform. See [docs/ARCHITECTURE.md](doc
 [docs/DATA_MODEL.md](docs/DATA_MODEL.md), and [docs/ROADMAP.md](docs/ROADMAP.md) for the
 full design. Before planning or reviewing a phase, use
 [docs/PHASE_RISK_CHECKLIST.md](docs/PHASE_RISK_CHECKLIST.md) as its engineering preflight.
-**Phase 0** (repository scaffolding) is complete. **Phase 1** is in progress: the `users`
-table (model, migration, and database tests) is implemented and verified — see
-[docs/ROADMAP.md](docs/ROADMAP.md) for exact status. No providers, ingestion, or other
-Phase 1 tables exist yet.
+**Phase 0** (repository scaffolding) and **Phase 1** (domain model — all fifteen tables)
+are complete. **Phase 2** (provider interface) is in progress: three vertical slices are
+merged into `main` (the natural-key ingestion spine, Tier-1 `evidence_mismatch` conflict
+persistence, and Tier-2/Tier-3 cross-occurrence identity attachment) — see
+[docs/ROADMAP.md](docs/ROADMAP.md) for exact status and what remains.
 
 ## Requirements
 
@@ -66,9 +67,10 @@ docker compose up -d
 Tests that create/drop schema or rows (`backend/tests/test_users.py`) run against a
 **separate, disposable** PostgreSQL database — `jobgoblin_test` — never the ordinary
 `jobgoblin` development database. This is enforced, not just documented:
-`backend/tests/conftest.py::assert_is_disposable_test_database` raises a hard error
-(fails the test, does not skip) if `TEST_DATABASE_URL` doesn't resolve to a database name
-containing `test` and different from `jobgoblin`.
+`backend/scripts/db_safety.py::assert_is_disposable_test_database` (imported by
+`tests/conftest.py`'s `db_engine` fixture) raises a hard error (fails the test, does not
+skip) if `TEST_DATABASE_URL` doesn't resolve to a database name containing `test` and
+different from `jobgoblin`.
 
 **One-time setup**, only needed once per `postgres_data` Docker volume:
 
@@ -133,32 +135,54 @@ No test contacts the public internet.
 
 ## Verification
 
-One command that runs everything (formatting check, lint, type-check, tests) from `backend/`:
+The canonical routine verification command, from `backend/` (identical on Windows and
+Linux — see `scripts/verify.py`'s own docstring):
 
 ```bash
-ruff format --check . && ruff check . && mypy app tests scripts && pytest
+python scripts/verify.py --level routine
 ```
 
-PowerShell 7 (stops at the first failed check):
+Runs, in order, Ruff format check, Ruff lint, mypy, `scripts/check_repo.py`,
+`git diff --check`, a disposable-test-database URL safety check, a real test-database
+reachability preflight, and the full pytest suite — reporting each step as PASS, FAIL, or
+NOT RUN with a duration, never silently skipping a required check. Add
+`--focus <pytest file paths / node IDs>` to also run a targeted subset before the full
+suite (routine verification always runs the full suite regardless):
+
+```bash
+python scripts/verify.py --level routine --focus tests/test_ingestion_pipeline.py::test_x
+```
+
+Only `--level routine` exists today; `schema` and `high-risk` levels are later,
+separately authorized additions (see `docs/ROADMAP.md`).
+
+### Manual commands (troubleshooting / reference only)
+
+`scripts/verify.py --level routine` is the canonical, authoritative sequence — the
+commands below are the same checks run by hand, useful for isolating a single failing
+step, not a second equally-valid workflow. The disposable-test-database URL check and
+reachability preflight have no separate manual command: `tests/conftest.py`'s `db_engine`
+fixture already runs the same `assert_is_disposable_test_database` guard on every test
+that uses it, so a manual `pytest` run gets that protection for free, just not as its own
+reported step:
+
+```bash
+ruff format --check . && ruff check . && mypy app tests scripts && python scripts/check_repo.py && git diff --check && pytest
+```
 
 ```powershell
-ruff format --check . && ruff check . && mypy app tests scripts && pytest
+# PowerShell 7 (stops at the first failed check)
+ruff format --check . && ruff check . && mypy app tests scripts && python scripts/check_repo.py && git diff --check && pytest
 ```
 
-### Repository consistency checker
-
-A deterministic, offline, database-free check for documentation/migration drift —
-broken markdown links and heading anchors, duplicate rows in `docs/DATA_MODEL.md`'s
-constraints-summary table, stale Alembic revision references, and migration-chain
-integrity. Run from `backend/` after any documentation or migration change:
-
-```bash
-python scripts/check_repo.py
-```
-
-Prints sorted `path:line: message` findings and exits non-zero if any are found. It is
-also run as part of the ordinary `pytest` suite (`tests/test_check_repo.py`), so CI/local
-test runs catch this drift without a separate step.
+`scripts/check_repo.py` is a deterministic, offline, database-free check for
+documentation/migration drift — broken markdown links and heading anchors, duplicate rows
+in `docs/DATA_MODEL.md`'s constraints-summary table, stale Alembic revision references,
+and migration-chain integrity. It is also run as part of the ordinary `pytest` suite
+(`tests/test_check_repo.py`), which exercises its functions directly — but
+`scripts/verify.py` also runs it as its own subprocess step, since covering its
+*functions* under pytest is not the same as covering the *script* actually working as
+invoked.
 
 To also prove the full migration cycle against real PostgreSQL, use the **dedicated test
 database** (see above) — never run destructive migration verification against the
@@ -170,6 +194,9 @@ DATABASE_URL=postgresql+asyncpg://jobgoblin:jobgoblin@localhost:5432/jobgoblin_t
 DATABASE_URL=postgresql+asyncpg://jobgoblin:jobgoblin@localhost:5432/jobgoblin_test alembic downgrade base
 DATABASE_URL=postgresql+asyncpg://jobgoblin:jobgoblin@localhost:5432/jobgoblin_test alembic upgrade head
 ```
+
+This migration round-trip is not yet part of `scripts/verify.py` — it becomes
+`--level schema` in a later, separately authorized slice (see `docs/ROADMAP.md`).
 
 ## Project layout
 

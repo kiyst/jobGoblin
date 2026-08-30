@@ -8,7 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.db.models import User
-from tests.conftest import (
+from scripts.db_safety import (
     DEFAULT_TEST_DATABASE_URL,
     assert_is_disposable_test_database,
 )

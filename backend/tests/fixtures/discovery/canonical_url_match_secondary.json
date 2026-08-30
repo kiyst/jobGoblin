@@ -1,0 +1,21 @@
+{
+  "provider": "fixture_provider",
+  "source": "fixture_ats",
+  "source_tenant_id": null,
+  "source_job_id": "987650001",
+  "requisition_id_raw": null,
+  "title": "Support Engineer (Board X copy)",
+  "company": "Widgets Inc",
+  "location": "Remote",
+  "source_url": "https://boardx.example.com/postings/987650001",
+  "apply_url": "https://boardx.example.com/postings/987650001/apply",
+  "canonical_url": "https://widgets.example.com/careers/support-engineer?utm_source=boardx",
+  "description": "Support customers.",
+  "compensation_text": null,
+  "posted_at": "2026-02-02T00:00:00+00:00",
+  "discovered_at": "2026-02-02T00:00:00+00:00",
+  "raw": {
+    "id": "987650001",
+    "title": "Support Engineer (Board X copy)"
+  }
+}
