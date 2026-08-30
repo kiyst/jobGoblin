@@ -6,9 +6,12 @@ matrix already requires by hand for a "Python without schema" change
 surface: Ruff format check, Ruff lint, mypy, the repository consistency
 checker (`check_repo.py`, run as its own step — never assumed to be covered
 merely because `tests/test_check_repo.py` also exercises its functions),
-`git diff --check`, a disposable-test-database URL safety check, a real
-test-database reachability preflight, an optional focused pytest selection,
-then the full pytest suite.
+`git diff --check` (with a command-local `safe.directory` override — see
+`git_diff_check_command`), a disposable-test-database URL safety check, a
+real test-database reachability preflight, an optional focused pytest
+selection, then the full pytest suite — and, finally, this invocation's own
+temporary-directory cleanup, itself reported as a PASS/FAIL step rather than
+performed silently outside the result set (see `cleanup_run_dir_step`).
 
     cd backend && python scripts/verify.py --level routine
     cd backend && python scripts/verify.py --level routine --focus tests/test_x.py::test_y
@@ -136,7 +139,16 @@ def check_repo_command() -> list[str]:
 
 
 def git_diff_check_command() -> list[str]:
-    return ["git", "diff", "--check"]
+    """`-c safe.directory=<REPO_ROOT>` is command-local — scoped to this one
+    `git` invocation via `-c`, never written to any global/user Git config —
+    required because some environments this script runs in (confirmed:
+    the Codex reviewer's own checkout) refuse to operate on this repository
+    at all ("detected dubious ownership") without it. `REPO_ROOT` is always
+    this script's own derived absolute path (never hardcoded), rendered with
+    forward slashes via `Path.as_posix()` since Git's config-value parser
+    treats a bare backslash as an escape character — a Windows path's native
+    backslashes would otherwise be misparsed."""
+    return ["git", "-c", f"safe.directory={REPO_ROOT.as_posix()}", "diff", "--check"]
 
 
 def pytest_command(targets: list[str], basetemp: Path) -> list[str]:
@@ -408,18 +420,55 @@ def validate_focus_target(target: str) -> str:
 # --------------------------------------------------------------------------
 
 
-def safe_rmtree(path: Path, *, must_be_under: Path) -> None:
+def _default_remove(path: Path) -> None:
+    shutil.rmtree(path)
+
+
+def safe_rmtree(
+    path: Path, *, must_be_under: Path, remove: Callable[[Path], None] = _default_remove
+) -> None:
     """Recursively deletes `path` only after confirming its *resolved*
-    location is actually under `must_be_under`'s *resolved* location —
-    never trusts an unresolved/relative path, and never deletes anything
-    computed incorrectly (binding requirement). Raises rather than deleting
-    if the check fails; deletion failures themselves are best-effort
-    (`ignore_errors=True`) since this only ever runs during cleanup."""
+    location is a **strict child** of `must_be_under`'s *resolved* location —
+    never `must_be_under` itself, and never anything not actually located
+    under it. Never trusts an unresolved/relative path, and never deletes
+    anything computed incorrectly (binding requirement).
+
+    Raises rather than deleting if either check fails. Deletion failures are
+    never swallowed: `remove` (real default: `shutil.rmtree`, no
+    `ignore_errors`) is called directly, so a permission error or any other
+    failure propagates to the caller rather than being silently discarded —
+    a verifier run that reports success while actually failing to clean up
+    would reproduce the exact stale-directory problem this tool exists to
+    eliminate. `remove` is injectable so tests can prove a deletion failure
+    is genuinely surfaced without depending on real, unreliable-to-simulate
+    filesystem permission behavior."""
     resolved = path.resolve()
     root = must_be_under.resolve()
+    if resolved == root:
+        raise RuntimeError(f"refusing to delete {resolved} — that is the root itself, not a child")
     if not resolved.is_relative_to(root):
         raise RuntimeError(f"refusing to delete {resolved} — not located under {root}")
-    shutil.rmtree(resolved, ignore_errors=True)
+    remove(resolved)
+
+
+def cleanup_run_dir_step(
+    run_dir: Path, *, remove: Callable[[Path], None] = _default_remove
+) -> StepResult:
+    """Reports this invocation's temporary-directory cleanup as its own
+    PASS/FAIL step (binding requirement) — never silently performed outside
+    the reported result set, and never assumed to have succeeded merely
+    because it was attempted."""
+    name = "temporary-directory cleanup"
+    start = time.monotonic()
+    try:
+        safe_rmtree(run_dir, must_be_under=VERIFY_TMP_ROOT, remove=remove)
+    except Exception as exc:  # noqa: BLE001 - reported as a step failure, never re-raised
+        duration = time.monotonic() - start
+        return StepResult(
+            name, StepStatus.FAIL, duration, f"failed to remove {run_dir}: {type(exc).__name__}"
+        )
+    duration = time.monotonic() - start
+    return StepResult(name, StepStatus.PASS, duration, f"removed {run_dir}")
 
 
 # --------------------------------------------------------------------------
@@ -518,6 +567,22 @@ def create_run_dir() -> Path:
     return Path(tempfile.mkdtemp(prefix="run-", dir=str(VERIFY_TMP_ROOT)))
 
 
+def _execute_and_cleanup(
+    steps: list[Step], run_dir: Path, *, remove: Callable[[Path], None] = _default_remove
+) -> list[StepResult]:
+    """Runs `steps`, then *always* attempts this invocation's temporary-
+    directory cleanup — including when an earlier step failed (binding
+    requirement: cleanup is never skipped just because verification already
+    failed) — and appends its own PASS/FAIL result to the returned list
+    rather than performing it silently outside the reported results."""
+    results: list[StepResult] = []
+    try:
+        results = _run_steps(steps)
+    finally:
+        results.append(cleanup_run_dir_step(run_dir, remove=remove))
+    return results
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
 
@@ -532,13 +597,13 @@ def main(argv: list[str] | None = None) -> int:
     test_url = resolve_test_database_url(settings.test_database_url)
 
     run_dir = create_run_dir()
-    try:
-        steps = _build_steps(focus_targets, dev_url, test_url, run_dir)
-        results = _run_steps(steps)
-        _print_summary(results)
-        return 0 if all(result.status is StepStatus.PASS for result in results) else 1
-    finally:
-        safe_rmtree(run_dir, must_be_under=VERIFY_TMP_ROOT)
+    steps = _build_steps(focus_targets, dev_url, test_url, run_dir)
+    results = _execute_and_cleanup(steps, run_dir)
+
+    _print_summary(results)
+    # A failed cleanup makes the overall exit nonzero too — every result,
+    # including the cleanup step's own, must be PASS (binding requirement).
+    return 0 if all(result.status is StepStatus.PASS for result in results) else 1
 
 
 if __name__ == "__main__":

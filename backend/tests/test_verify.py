@@ -48,7 +48,21 @@ def test_check_repo_command_uses_module_invocation_not_a_direct_path() -> None:
 
 
 def test_git_diff_check_command_is_the_one_non_python_step() -> None:
-    assert verify.git_diff_check_command() == ["git", "diff", "--check"]
+    """Must include a command-local `-c safe.directory=<REPO_ROOT>` (forward
+    slashes, never backslashes) so this exact argv also works in an
+    environment that refuses to operate on this checkout otherwise — a real
+    defect found by running the genuine verifier in the Codex reviewer's own
+    environment. Never mutates global/user Git config: the override is
+    scoped to this one invocation via `-c`."""
+    expected_root = verify.REPO_ROOT.as_posix()
+    assert verify.git_diff_check_command() == [
+        "git",
+        "-c",
+        f"safe.directory={expected_root}",
+        "diff",
+        "--check",
+    ]
+    assert "\\" not in verify.git_diff_check_command()[2]
 
 
 def test_pytest_command_includes_basetemp_and_targets_as_separate_argv_elements() -> None:
@@ -545,15 +559,47 @@ def test_safe_rmtree_refuses_a_sibling_directory_that_merely_shares_a_name_prefi
     assert lookalike.exists()
 
 
-def test_safe_rmtree_is_best_effort_on_deletion_failure_but_not_on_the_safety_check(
-    tmp_path: Path,
-) -> None:
+def test_safe_rmtree_refuses_to_delete_the_root_itself(tmp_path: Path) -> None:
+    """`path == must_be_under` must be rejected — a strict-child check, not
+    merely `is_relative_to` (every path is "relative to" itself)."""
     root = tmp_path / ".verify-tmp"
     root.mkdir()
-    child = root / "run-does-not-exist"
-    # Never created — deletion of a nonexistent-but-safely-located path must
-    # not raise (ignore_errors=True), unlike an actual safety violation.
-    verify.safe_rmtree(child, must_be_under=root)
+
+    with pytest.raises(RuntimeError, match="that is the root itself"):
+        verify.safe_rmtree(root, must_be_under=root)
+
+    assert root.exists()
+
+
+def test_safe_rmtree_never_ignores_a_deletion_failure(tmp_path: Path) -> None:
+    """A deletion failure must propagate, never be swallowed
+    (`ignore_errors=True` is no longer used) — proven via an injected
+    `remove` that raises, since real filesystem permission failures are
+    unreliable to simulate portably."""
+    root = tmp_path / ".verify-tmp"
+    root.mkdir()
+    child = root / "run-abc123"
+    child.mkdir()
+
+    def _failing_remove(path: Path) -> None:
+        raise PermissionError("simulated: cannot delete")
+
+    with pytest.raises(PermissionError, match="simulated"):
+        verify.safe_rmtree(child, must_be_under=root, remove=_failing_remove)
+
+    assert child.exists()  # the failure is real — nothing was actually removed
+
+
+def test_safe_rmtree_deletion_of_a_nonexistent_child_now_fails_closed(tmp_path: Path) -> None:
+    """Without `ignore_errors=True`, deleting an already-gone (but safely
+    located) child now correctly raises rather than silently succeeding —
+    the opposite of this test's own pre-correction behavior."""
+    root = tmp_path / ".verify-tmp"
+    root.mkdir()
+    child = root / "run-does-not-exist"  # never created
+
+    with pytest.raises(FileNotFoundError):
+        verify.safe_rmtree(child, must_be_under=root)
 
 
 # --------------------------------------------------------------------------
@@ -596,6 +642,106 @@ def test_create_run_dir_cleanup_of_one_run_never_deletes_a_concurrent_runs_direc
 
         verify.safe_rmtree(run_dir_a, must_be_under=verify.VERIFY_TMP_ROOT)
 
+        assert not run_dir_a.exists()
+        assert run_dir_b.exists()
+        assert (run_dir_b / "still-active.txt").exists()
+    finally:
+        verify.safe_rmtree(run_dir_b, must_be_under=verify.VERIFY_TMP_ROOT)
+
+
+# --------------------------------------------------------------------------
+# cleanup_run_dir_step — reported as its own PASS/FAIL result
+# --------------------------------------------------------------------------
+
+
+def test_cleanup_run_dir_step_reports_pass_and_actually_removes_the_directory() -> None:
+    run_dir = verify.create_run_dir()
+    result = verify.cleanup_run_dir_step(run_dir)
+    assert result.status is verify.StepStatus.PASS
+    assert result.name == "temporary-directory cleanup"
+    assert not run_dir.exists()
+
+
+def test_cleanup_run_dir_step_reports_fail_when_removal_raises() -> None:
+    run_dir = verify.create_run_dir()
+    try:
+
+        def _failing_remove(path: Path) -> None:
+            raise PermissionError("simulated: cannot delete")
+
+        result = verify.cleanup_run_dir_step(run_dir, remove=_failing_remove)
+        assert result.status is verify.StepStatus.FAIL
+        assert "PermissionError" in result.detail
+        assert run_dir.exists()  # the failure is real
+    finally:
+        verify.safe_rmtree(run_dir, must_be_under=verify.VERIFY_TMP_ROOT)
+
+
+# --------------------------------------------------------------------------
+# _execute_and_cleanup — cleanup always attempted, always reported
+# --------------------------------------------------------------------------
+
+
+def test_execute_and_cleanup_reports_cleanup_after_all_steps_pass() -> None:
+    run_dir = verify.create_run_dir()
+    steps = [_passing_step("a"), _passing_step("b")]
+
+    results = verify._execute_and_cleanup(steps, run_dir)
+
+    names_and_statuses = {r.name: r.status for r in results}
+    assert names_and_statuses["a"] is verify.StepStatus.PASS
+    assert names_and_statuses["b"] is verify.StepStatus.PASS
+    assert names_and_statuses["temporary-directory cleanup"] is verify.StepStatus.PASS
+    assert not run_dir.exists()
+
+
+def test_execute_and_cleanup_still_runs_cleanup_after_an_earlier_verification_failure() -> None:
+    """Binding requirement: cleanup must always be attempted, including
+    after a verification step already failed — never skipped just because
+    the run is already going to be reported as failed."""
+    run_dir = verify.create_run_dir()
+    steps = [_failing_step("a"), _passing_step("b")]
+
+    results = verify._execute_and_cleanup(steps, run_dir)
+
+    by_name = {r.name: r for r in results}
+    assert by_name["a"].status is verify.StepStatus.FAIL
+    assert by_name["b"].status is verify.StepStatus.NOT_RUN
+    assert by_name["temporary-directory cleanup"].status is verify.StepStatus.PASS
+    assert not run_dir.exists()
+
+
+def test_execute_and_cleanup_surfaces_a_cleanup_failure_as_its_own_result() -> None:
+    run_dir = verify.create_run_dir()
+    try:
+
+        def _failing_remove(path: Path) -> None:
+            raise OSError("simulated: disk error")
+
+        results = verify._execute_and_cleanup([_passing_step("a")], run_dir, remove=_failing_remove)
+
+        by_name = {r.name: r for r in results}
+        assert by_name["a"].status is verify.StepStatus.PASS
+        assert by_name["temporary-directory cleanup"].status is verify.StepStatus.FAIL
+        # All results being PASS is what main() uses to decide the exit code —
+        # a failed cleanup must make that condition false.
+        assert not all(r.status is verify.StepStatus.PASS for r in results)
+    finally:
+        verify.safe_rmtree(run_dir, must_be_under=verify.VERIFY_TMP_ROOT)
+
+
+def test_execute_and_cleanup_isolates_concurrent_run_directories() -> None:
+    """Cleaning up one invocation's run directory must never touch a
+    concurrent invocation's still-active directory."""
+    run_dir_a = verify.create_run_dir()
+    run_dir_b = verify.create_run_dir()
+    try:
+        (run_dir_b / "still-active.txt").write_text("run B's own file")
+
+        results = verify._execute_and_cleanup([_passing_step("a")], run_dir_a)
+
+        cleanup_result = next(r for r in results if r.name == "temporary-directory cleanup")
+        assert cleanup_result.status is verify.StepStatus.PASS
         assert not run_dir_a.exists()
         assert run_dir_b.exists()
         assert (run_dir_b / "still-active.txt").exists()

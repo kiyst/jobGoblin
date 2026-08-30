@@ -98,164 +98,6 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-08-30, Claude Code (Sonnet 5). Class H correction pass on
-  `phase-2/tier2-tier3-identity-attachment` for the single bounded finding in
-  review commit `6eadd00` (`272afb8..6eadd00`). Base `272afb8`. Addresses
-  exactly Finding 1 from Iteration 1's `Work review`; every otherwise-approved
-  Tier-2/Tier-3 and Tier-1 behavior (precedence, candidate revalidation,
-  `ATTACHED -> jobs_updated`, three-effect rollback boundary, existing-index
-  reuse, Tier-4 deferral, parent-before-child lock order) is unchanged.
-- Outcome, addressing the finding exactly:
-  1. **Medium — Tier 1's initial probe no longer seeds the ORM identity map.**
-     `_existing_occurrence_query()` (full entity, `FOR UPDATE`-chainable) is
-     unchanged in shape but its domain-filter conditions are now shared via a
-     new `_existing_occurrence_conditions()` helper. A new
-     `_existing_occurrence_identity_query()` selects only the bare
-     `JobOccurrence.id`/`job_id` scalar columns — never the ORM entity — and
-     is what `upsert_job_occurrence`'s found branch now uses for the initial,
-     unlocked probe. Because that probe never touches the identity map, the
-     later `FOR UPDATE` load of `_existing_occurrence_query()` is always that
-     row's *first* load into the session, so its `job_id` is guaranteed fresh
-     from the database rather than a value cached from before a concurrent
-     reassociation. The revalidation check (`occurrence.id`/`job_id` vs. the
-     scalar probe) is otherwise unchanged — still fails closed with
-     `CandidateResolutionUnstableError`, never a bare assertion. Added
-     `test_tier1_reassociation_between_probe_and_lock_is_detected_not_stale`:
-     two real, separately-committed PostgreSQL transactions (via
-     `_before_tier1_parent_lock` + `asyncio.Event`s, mirroring the existing
-     Tier-1-vs-parent-deletion test's shape) — transaction A pauses right
-     after the scalar probe, transaction B reassigns the same occurrence's
-     `job_id` to a second, independently existing Job and commits,
-     transaction A resumes, locks the *original* parent (which still exists),
-     loads the occurrence fresh, and fails closed with
-     `CandidateResolutionUnstableError` before any mutation. Proved this is a
-     genuine regression test, not vacuous, by temporarily reverting the probe
-     to the full-entity query and confirming the test fails (it returned
-     `UpsertKind.UPDATED` instead of raising) before restoring the fix and
-     re-confirming green. Also proves neither Job's `last_seen_at` advances
-     and the raw row stays `fetched`/unlinked. Updated
-     `upsert_job_occurrence`'s docstring and ADR 0004's Phase-2 notes to
-     describe the identity-map hazard and the scalar-probe correction.
-- Files changed: `backend/app/ingestion/persistence.py`;
-  `backend/tests/test_ingestion_pipeline.py`;
-  `docs/DECISIONS/0004-scoped-deterministic-identity.md`; this handoff. No
-  migration; no change to `natural_key.py`, `pipeline.py`, or
-  `test_ingestion_concurrency.py`.
-- Commands run and exact results:
-  - `ruff format .` / `ruff check .` -> clean.
-  - `mypy app tests scripts` -> clean, 73 source files.
-  - Focused (`test_ingestion_pipeline.py` + `test_ingestion_concurrency.py`
-    + `test_ingestion_natural_key.py`) -> **54 passed** (53 at `272afb8`, +1
-    new reassociation regression).
-  - Full suite with a workspace-local `--basetemp` -> **1176 passed** (was
-    1175).
-  - The four real-transaction concurrency tests (both pre-existing genuine
-    races, the Tier-1-vs-parent-deletion one, and the new reassociation one)
-    rerun 5x each in a stress loop -> stable, no flakiness, no timeouts.
-  - `alembic check` (against `jobgoblin_test`) -> `No new upgrade operations
-    detected`.
-  - Development database (`alembic current`, default `DATABASE_URL`) ->
-    `0006`, unchanged.
-  - `python scripts/check_repo.py` -> exit 0, zero findings.
-  - `git diff --check` -> clean (benign LF/CRLF notices only).
-  - Table-count queries against `jobgoblin_test` after the full run, and
-    after the deliberate revert-and-fail run below -> every ingestion-related
-    table at 0 rows both times; no leaked test data, including on the
-    intentional failure path.
-- Adversarial self-review (fresh read of the complete corrected diff before
-  this entry): rather than only reasoning about the fix, empirically proved
-  the new test is a genuine regression guard by reverting the probe to
-  `_existing_occurrence_query()` (loading the full entity) and rerunning it
-  in isolation — it failed with the stale `job_id` silently accepted
-  (`UpsertKind.UPDATED` returned instead of the exception), and its own
-  `finally`-based cleanup still left zero leaked rows even on that induced
-  failure; then restored the fix and reconfirmed green. Confirmed
-  `_discover_candidates` (Tier 2/3's own candidate discovery) has no
-  analogous defect: it already selects only the scalar `job_id` column and
-  never loads a `JobOccurrence` entity before the candidate's `Job` lock, so
-  Tier 2/3's `_attach_to_candidate` was never exposed to this identity-map
-  hazard in the first place. Confirmed the `Job` `FOR UPDATE` load in Tier
-  1's found branch is likewise always a first load (nothing earlier in that
-  transaction touches `Job` via the ORM). Found no further issues beyond the
-  one finding addressed above.
-- Deviations/known limitations: none beyond those already disclosed in
-  Iteration 1 (Tier 4's deferral; `ambiguous_match` persistence and its
-  evidence shape as a separate future slice; multiple-candidate failures are
-  whole-run, not per-posting-isolated, until that future slice lands).
-  `QueryPlanner`, `ProviderRegistry`, multi-source partial-success handling,
-  live providers, Phase 3 normalization, API routes, scheduling, and the
-  workflow-automation/tooling slice remain explicitly out of scope. `main`
-  untouched throughout.
-- STOP — awaiting Codex re-review. Do not begin `ambiguous_match`, Tier 4,
-  `QueryPlanner`, `ProviderRegistry`, multi-source handling, live providers,
-  normalization, APIs, scheduling, the workflow-automation/tooling slice, or
-  modify/merge `main`.
-
-### Work review
-
-- Date/agent: 2026-08-30, Codex. Correction diff reviewed:
-  `6eadd00..370af23` on
-  `phase-2/tier2-tier3-identity-attachment`.
-- The remaining finding from review commit `6eadd00` is closed:
-  `_existing_occurrence_identity_query()` now probes only bare `id`/`job_id`
-  columns and therefore cannot seed SQLAlchemy's ORM identity map. After the
-  parent `Job` lock, `_existing_occurrence_query().with_for_update()` performs
-  the entity's first session load and compares its fresh database `id` and
-  `job_id` against the scalar probe before any mutation. Shared conditions
-  keep the two query shapes aligned.
-- The new two-transaction regression pauses after the scalar probe, commits a
-  real reassociation to a second parent, and proves
-  `CandidateResolutionUnstableError`, unchanged observational state on both
-  Jobs and the occurrence, and a fetched/unlinked raw row. Its timeout,
-  `finally` release, and cleanup cover the prior test-hygiene requirements.
-- Independent proportionate verification: repository checker exit 0; Ruff
-  format/check clean; mypy clean across **73 source files**; focused suite
-  **54 passed**; `alembic check` against `jobgoblin_test` reports no drift;
-  `git diff --check` clean; working tree clean. The correction is localized,
-  so the independently reported full-suite **1176 passed** result was not
-  redundantly repeated in this re-review.
-- Findings: none.
-- **Verdict: approved.** The Tier-2/Tier-3 cross-occurrence identity-
-  attachment slice and all correction passes are accepted. STOP — do not
-  merge this branch into `main`, begin `ambiguous_match`/Tier 4 or another
-  product slice, or start workflow-automation tooling until the user
-  explicitly authorizes the next action.
-
-**Merge record (appended, not a rewrite of the entry above):** Approved at review
-commit `b235d18` (no findings). Per user authorization,
-`phase-2/tier2-tier3-identity-attachment` was merged into `main` with a normal
-merge commit (`1f4f787`; `--no-ff`, no squash/rebase/force-push) and pushed.
-`main`/`origin/main` are both now at `1f4f787`. Verified: feature branch was
-clean and pushed at `b235d18` and `main`/`origin/main` were still at `bd59a14`
-immediately before the merge; `main` has zero content diff against the feature
-branch (`git diff main phase-2/tier2-tier3-identity-attachment --stat` empty);
-migration `0017` remains the sole Alembic head; `python
-backend/scripts/check_repo.py` exits 0 with zero findings; `git diff --check`
-clean; development database reconfirmed at `0006`; working tree clean.
-
-**Rollback boundary:** reverting `1f4f787` (a single merge commit) restores
-`main` to `bd59a14` exactly — no schema/migration exists in this slice to
-downgrade, and no data migration accompanies it (Tier-3's supporting index,
-`ix_job_occurrences_tenant_requisition_lookup`, already existed before this
-slice). This merges Phase 2's fourth vertical slice only (Tier-2/Tier-3
-cross-occurrence identity attachment: mutually exclusive Tier-2/Tier-3
-precedence, single-pass fail-closed candidate resolution,
-`AmbiguousIdentityMatchError`/`CandidateResolutionUnstableError`, the new
-canonical-URL/tenant-requisition advisory-lock domain, `UpsertKind.ATTACHED`,
-the corrected global parent-before-child lock discipline including Tier 1's
-own found-branch fix, and the scalar-probe fresh-entity revalidation) — it
-does **not** complete Phase 2. `ambiguous_match` persistence, Tier 4, the
-company-resolution prerequisite it depends on, `QueryPlanner`,
-`ProviderRegistry`, multi-source partial-success handling, live providers,
-Phase 3 normalization, API routes, scheduling, and the workflow-automation
-tooling slice all remain not started and are not authorized by this merge.
-
----
-
-## Iteration 2
-
-### Work done
-
 - Date/agent: 2026-08-30, Claude Code (Sonnet 5). Authorized slice: Workflow v3
   automation/tooling program, **first bounded slice — routine-verifier
   foundation** — Class H (safety-relevant database-target logic; otherwise
@@ -458,3 +300,112 @@ tooling slice all remain not started and are not authorized by this merge.
   verifier end to end plus focused/static checks, append concise `Work done`,
   commit and push, then stop for re-review. Do not add CI/schema/high-risk
   levels or resume product work.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-08-30, Claude Code (Sonnet 5). Class H correction pass on
+  `tooling/workflow-v3-routine-verifier` for the three bounded findings in
+  review commit `103fbaa` (`6000658..103fbaa`). Base `6000658`. Addresses
+  exactly Findings 1-3 from Iteration 1's `Work review`; every
+  otherwise-accepted routine-verifier behavior (safety extraction, command
+  structure, direct repository-check step, focus validation, non-recursive
+  tests, database preflight/redaction, unique run directories, Workflow-v3
+  durable rules, Phase-2 status, result model) is unchanged.
+- Outcome, addressing each finding exactly:
+  1. **Medium — `git diff --check` now works in the Codex reviewer
+     environment.** `git_diff_check_command()` returns
+     `["git", "-c", f"safe.directory={REPO_ROOT.as_posix()}", "diff",
+     "--check"]` — command-local via `-c`, never global/user Git config.
+     `REPO_ROOT.as_posix()` (forward slashes) because Git's config-value
+     parser treats a bare backslash as an escape character, which a raw
+     Windows path would otherwise trip. Added
+     `test_git_diff_check_command_is_the_one_non_python_step`'s exact-argv
+     assertion (including a `no backslash` check) and reran the genuine
+     `python scripts/verify.py --level routine --focus tests/test_verify.py`
+     from both `backend/` and the repository root.
+  2. **Medium — temporary-directory cleanup now fails closed and is its own
+     reported step.** `safe_rmtree()` now refuses `path == must_be_under`
+     (a strict-child check, not merely `is_relative_to`, which is trivially
+     true of a path and itself) and never passes `ignore_errors=True` — its
+     new injectable `remove` parameter (default `shutil.rmtree`) lets a
+     deletion failure propagate to the caller instead of being swallowed.
+     New `cleanup_run_dir_step()` wraps it as a PASS/FAIL `StepResult`; new
+     `_execute_and_cleanup()` runs the step list, then *always* appends the
+     cleanup result in a `finally` — including after an earlier verification
+     failure — before returning. `main()` now builds its exit code from
+     *all* results, so a failed cleanup alone makes the run exit nonzero.
+     Added 8 tests: root-refusal, a genuinely-surfaced deletion failure (via
+     injected `remove`, since real filesystem permission failures are
+     unreliable to simulate portably), a nonexistent-child deletion now
+     correctly raising instead of silently succeeding, `cleanup_run_dir_step`
+     PASS/FAIL reporting, and — via `_execute_and_cleanup` — cleanup still
+     running and reported after an earlier step's failure, a surfaced
+     cleanup failure making the overall result set non-all-PASS, and
+     concurrent-run isolation (cleaning up one invocation's directory never
+     touches a second, still-active one).
+  3. **Low — corrected the remaining stale Phase-1 ROADMAP statements.**
+     `docs/ROADMAP.md`: "Phase 1: in progress (updated 2026-08-28)" ->
+     "Phase 1: complete (updated 2026-08-30)"; removed the closing claim that
+     "the rest of Phase 1's exit gate... remains to be independently
+     verified before declaring the phase complete", replaced with the
+     Git-verified basis for completion — all fifteen tables migrated, the
+     `phase-1/closure` slice merged (`bfdd56d`), and Phase 2 subsequently
+     authorized and three vertical slices merged, which
+     `PHASE_RISK_CHECKLIST.md`'s own phase-gating rule could not have
+     permitted had Phase 1's exit gate not already been satisfied. The
+     already-correct three-slice Phase-2 paragraph is untouched. Recorded
+     here, in this new entry — Iteration 1's historical `Work done`/
+     `Work review` text is left exactly as written.
+- Files changed: `backend/scripts/verify.py`; `backend/tests/test_verify.py`;
+  `docs/ROADMAP.md`; this handoff. No migration; no product code; no
+  `db_safety.py` change (Finding 1/2 are both `verify.py`-local).
+- Commands run and exact results:
+  - `ruff format .` / `ruff check .` -> clean.
+  - `mypy app tests scripts` -> clean, 76 source files.
+  - `python -m pytest tests/test_verify.py -q` -> **73 passed** (was 65;
+    net +8 for this pass's new/replaced cleanup and Git-argv tests).
+  - Full suite with a workspace-local `--basetemp` -> **1249 passed** (was
+    1241).
+  - `python -m scripts.check_repo` -> exit 0, zero findings (confirms the
+    ROADMAP.md edits introduced no broken links/anchors and no stale
+    migration-revision references — `bfdd56d` is a commit hash, not a
+    4-digit migration revision, so it does not trip that check).
+  - `git diff --check` -> clean (benign LF/CRLF notices only).
+  - **Genuine external verifier reruns** (never from inside pytest): both
+    `cd backend && python scripts/verify.py --level routine --focus
+    tests/test_verify.py` and the repository-root equivalent
+    (`python backend/scripts/verify.py --level routine --focus
+    tests/test_verify.py`) -> all **10** steps PASS in each run, including
+    the new `temporary-directory cleanup` step; `focused pytest` **73
+    passed**, `full pytest suite` **1249 passed**.
+  - `.verify-tmp/` confirmed to contain only the empty, gitignored root after
+    every run in this pass.
+- Adversarial self-review (fresh read of the corrected diff before this
+  entry): confirmed the strict-child check is evaluated *before*
+  `is_relative_to` specifically because `Path.is_relative_to` is trivially
+  true of a path compared to itself — without the explicit `resolved ==
+  root` branch, the prior code would have let `must_be_under` itself reach
+  `remove()`, exactly the defect Codex found. Confirmed `_execute_and_cleanup`
+  correctly appends the cleanup result even when `_run_steps` itself never
+  raises (the normal case, including the fail-fast/NOT-RUN path) and traced
+  that an unexpected exception escaping `_run_steps` would still run cleanup
+  via `finally` before re-propagating (a genuine crash, not a reported
+  result — outside this finding's scope, unchanged from before). Confirmed
+  `main()`'s `remove=` is never overridden from its real default in
+  production, only in tests. Found no further issues beyond the three
+  findings addressed above.
+- Deviations/known limitations: unchanged from Iteration 1 (no CI, markers,
+  `--level schema`/`--level high-risk`, status generator, metrics, or
+  handoff automation; `--level` choices remain `["routine"]` only). `main`
+  untouched throughout.
+- STOP — awaiting Codex re-review. Do not add CI, schema/high-risk levels,
+  markers, status automation, handoff automation, metrics, or resume product
+  work, or merge `main`.
+
+### Work review
+
+_Pending._

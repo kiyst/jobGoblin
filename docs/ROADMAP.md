@@ -131,7 +131,7 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   PostgreSQL is healthy; Alembic upgrade -> downgrade -> upgrade passes; Ruff, mypy, and
   pytest pass; and live liveness/readiness behavior has been verified with the database
   both available and unavailable.
-- **Phase 1: in progress (updated 2026-08-28).** `users` slice complete and verified: model
+- **Phase 1: complete (updated 2026-08-30).** `users` slice complete and verified: model
   (`backend/app/db/models/user.py`), migrations `0002` (table, reviewed/hand-edited, not
   autogenerate-as-is) and `0003` (forward corrective migration, reversible, fixing the
   email-normalization `CHECK` constraints' whitespace handling — see
@@ -277,9 +277,13 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   for this table, unlike `user_jobs`' `set_status()`; this table's Phase 1 consumers
   are its own factory and the database tests themselves, with Phase 10 remaining its
   first production CRUD writer (see `docs/DATA_MODEL.md`). All fifteen Phase 1
-  domain tables (ADR 0003) are now migrated; the rest of Phase 1's exit gate
-  (§[PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md)) remains to be independently
-  verified before declaring the phase complete.
+  domain tables (ADR 0003) are migrated, and Phase 1's own closure slice
+  (`phase-1/closure`, merge commit `bfdd56d`) is merged into `main`. Phase 2 was
+  subsequently authorized and three of its vertical slices are merged (below) —
+  under [PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md)'s own phase-gating rule
+  ("confirm the previous phase's exit gate is complete" before starting the next
+  phase), that would not have been authorized had Phase 1's exit gate not already
+  been satisfied.
 - **Phase 2: in progress (updated 2026-08-30).** Three bounded, Class H vertical slices
   merged into `main` so far. The **natural-key ingestion spine** (offline,
   fixture-driven, no live provider) — `DiscoveredJob`/`DiscoveryResult`/`ProviderError`/
