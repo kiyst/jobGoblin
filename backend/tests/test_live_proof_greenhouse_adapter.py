@@ -11,12 +11,15 @@ global counts).
 
 **No test in this file ever performs a real `CREATE DATABASE`/
 `DROP DATABASE`, subprocess invocation, or network request.** `main()`,
-`_run_proof()`, `fetch_greenhouse_jobs_raw`, `_create_database`,
-`_drop_database_if_exists`, `_database_exists`, and `_run_alembic_upgrade`'s
-real subprocess runner are never invoked here — confirmed by a dedicated
-grep-based test, mirroring `test_canary_greenhouse_mapping.py`'s own
-established pattern. The cleanup/leak-check step is exercised entirely
-through injected fake `drop`/`check_exists` callables instead.
+`fetch_greenhouse_jobs_raw`, `_create_database`, `_drop_database_if_exists`,
+`_database_exists`, and `_run_alembic_upgrade`'s real subprocess runner are
+never invoked here — confirmed by a dedicated grep-based test, mirroring
+`test_canary_greenhouse_mapping.py`'s own established pattern. `_run_proof()`
+*is* called directly by two orchestration-level tests, but only with every
+one of those same functions replaced by a call-recording fake via
+`monkeypatch` first, so no real I/O ever occurs even then. The
+cleanup/leak-check step is exercised separately through injected fake
+`drop`/`check_exists` callables.
 """
 
 import json
@@ -39,6 +42,7 @@ from app.db.models import (
 )
 from app.ingestion import pipeline
 from app.ingestion.clock import FixedClock
+from app.ingestion.hashing import canonical_json_hash
 from app.schemas.discovered_job import DiscoveredJob, SourceRunStats
 from app.schemas.provider import SourceQuery
 from scripts import canary_greenhouse as canary
@@ -298,51 +302,182 @@ def test_parse_args_accepts_when_the_confirmation_flag_is_present() -> None:
 
 
 # --------------------------------------------------------------------------
+# _run_proof orchestration — a rejected target must never touch any
+# database or network function at all, including cleanup. Every
+# database/network-facing function is replaced with a call-recording fake
+# via monkeypatch; none of them may ever be invoked in these two tests.
+# --------------------------------------------------------------------------
+
+
+def _patch_all_database_and_network_functions(
+    monkeypatch: pytest.MonkeyPatch, calls: list[str]
+) -> None:
+    async def fake_create(*_args: Any, **_kwargs: Any) -> None:
+        calls.append("create")
+
+    async def fake_drop(*_args: Any, **_kwargs: Any) -> None:
+        calls.append("drop")
+
+    async def fake_exists(*_args: Any, **_kwargs: Any) -> bool:
+        calls.append("exists")
+        return False
+
+    def fake_alembic(*_args: Any, **_kwargs: Any) -> live_proof._StepResult:
+        calls.append("migrate")
+        return live_proof._StepResult("migrate", live_proof._StepStatus.PASS, "")
+
+    async def fake_reachability(*_args: Any, **_kwargs: Any) -> live_proof._StepResult:
+        calls.append("reachability")
+        return live_proof._StepResult("reachability", live_proof._StepStatus.PASS, "")
+
+    async def fake_fetch(*_args: Any, **_kwargs: Any) -> Any:
+        calls.append("fetch")
+        raise AssertionError("fetch must never be called when the target is rejected")
+
+    async def fake_pipeline_passes(*_args: Any, **_kwargs: Any) -> live_proof._StepResult:
+        calls.append("pipeline")
+        return live_proof._StepResult("pipeline", live_proof._StepStatus.PASS, "")
+
+    monkeypatch.setattr(live_proof, "_create_database", fake_create)
+    monkeypatch.setattr(live_proof, "_drop_database_if_exists", fake_drop)
+    monkeypatch.setattr(live_proof, "_database_exists", fake_exists)
+    monkeypatch.setattr(live_proof, "_run_alembic_upgrade", fake_alembic)
+    monkeypatch.setattr(live_proof, "_reachability_preflight", fake_reachability)
+    monkeypatch.setattr(live_proof.canary, "fetch_greenhouse_jobs_raw", fake_fetch)
+    monkeypatch.setattr(live_proof, "_run_two_pipeline_passes", fake_pipeline_passes)
+
+
+async def test_run_proof_rejects_production_before_touching_any_database_or_network(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    _patch_all_database_and_network_functions(monkeypatch, calls)
+    monkeypatch.setattr(
+        live_proof,
+        "get_settings",
+        lambda: live_proof.Settings(
+            database_url="postgresql+asyncpg://jobgoblin:jobgoblin@localhost:5432/jobgoblin",
+            app_env="production",
+        ),
+    )
+
+    result = await live_proof._run_proof("acme", "Acme")
+
+    assert result is False
+    assert calls == [], f"expected zero database/network calls, got {calls}"
+
+
+async def test_run_proof_rejects_a_remote_host_before_touching_any_database_or_network(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    _patch_all_database_and_network_functions(monkeypatch, calls)
+    monkeypatch.setattr(
+        live_proof,
+        "get_settings",
+        lambda: live_proof.Settings(
+            database_url="postgresql+asyncpg://jobgoblin:jobgoblin@remote.example.com:5432/jobgoblin",
+            app_env="development",
+        ),
+    )
+
+    result = await live_proof._run_proof("acme", "Acme")
+
+    assert result is False
+    assert calls == [], f"expected zero database/network calls, got {calls}"
+
+
+# --------------------------------------------------------------------------
 # two pipeline.run() passes, offline, against the shared jobgoblin_test
 # database — scoped to this test's own natural key only (binding
 # requirement: no global-count assertions against a shared database)
 # --------------------------------------------------------------------------
 
 
-async def _cleanup_scoped(
-    engine: AsyncEngine,
-    *,
-    collection_run_ids: list[Any],
-    job_ids: list[Any],
-    raw_ingestion_ids: list[Any],
-) -> None:
-    """Deletes only what this test itself created, in FK-safe order —
-    mirrors `test_ingestion_pipeline.py`'s own established `_cleanup`
-    helper. `Job` cascades to `JobOccurrence`/`UserJob`; `CollectionRun`
-    cascades to `CollectionRunProviderAttempt`. `RawJobIngestion`/
-    `IdentityConflict` have no cascade pointing at them and are deleted
-    explicitly. Always runs through a fresh session, so it succeeds even
-    after an earlier session's transaction failed or was never committed.
-    """
+async def _capture_identity_scope(
+    engine: AsyncEngine, *, board_token: str | None, source_job_id: str | None
+) -> dict[str, set[Any]]:
+    """A before/after snapshot of every row shape this natural key could
+    touch, keyed by id — diffed by the caller (`_delete_new_rows`) to find
+    exactly what a `pipeline.run()` call created, even when that call
+    itself raised before ever returning a run id (so no id could be
+    captured from a return value at all). `CollectionRun`/
+    `CollectionRunProviderAttempt` have no natural-key column of their own
+    and are snapshotted as the whole table — safe because this suite runs
+    single-process and sequentially (no `pytest-xdist`), so no concurrent
+    test can create an unrelated row between the "before" and "after"
+    snapshots taken within one test."""
     async with AsyncSession(bind=engine) as session:
-        if raw_ingestion_ids:
-            conflicts = (
+        collection_run_ids = set((await session.execute(select(CollectionRun.id))).scalars().all())
+        occurrence_rows = (
+            await session.execute(
+                select(JobOccurrence.id, JobOccurrence.job_id).where(
+                    JobOccurrence.source_tenant_id == board_token,
+                    JobOccurrence.source_job_id == source_job_id,
+                )
+            )
+        ).all()
+        occurrence_ids = {row.id for row in occurrence_rows}
+        job_ids = {row.job_id for row in occurrence_rows}
+        raw_ids = set(
+            (
+                await session.execute(
+                    select(RawJobIngestion.id).where(
+                        RawJobIngestion.provider == "ats_scrapers",
+                        RawJobIngestion.source == "greenhouse",
+                        RawJobIngestion.source_identifier == source_job_id,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        conflict_ids: set[Any] = set()
+        if raw_ids:
+            conflict_ids = set(
                 (
                     await session.execute(
-                        select(IdentityConflict).where(
-                            IdentityConflict.incoming_raw_job_ingestion_id.in_(raw_ingestion_ids)
+                        select(IdentityConflict.id).where(
+                            IdentityConflict.incoming_raw_job_ingestion_id.in_(raw_ids)
                         )
                     )
                 )
                 .scalars()
                 .all()
             )
-            for conflict in conflicts:
-                await session.delete(conflict)
-        for raw_id in raw_ingestion_ids:
-            existing = await session.get(RawJobIngestion, raw_id)
-            if existing is not None:
-                await session.delete(existing)
-        for run_id in collection_run_ids:
+    return {
+        "collection_run_ids": collection_run_ids,
+        "occurrence_ids": occurrence_ids,
+        "job_ids": job_ids,
+        "raw_ids": raw_ids,
+        "conflict_ids": conflict_ids,
+    }
+
+
+async def _delete_new_rows(
+    engine: AsyncEngine, before: dict[str, set[Any]], after: dict[str, set[Any]]
+) -> None:
+    """Deletes exactly the rows present in `after` but absent from
+    `before`, in FK-safe order, through a fresh session — recovers every
+    row a `pipeline.run()` call committed regardless of whether that call
+    itself ever returned normally. `Job` cascades to `JobOccurrence`/
+    `UserJob`; `CollectionRun` cascades to `CollectionRunProviderAttempt`.
+    `RawJobIngestion`/`IdentityConflict` have no cascade pointing at them
+    and are deleted explicitly."""
+    async with AsyncSession(bind=engine) as session:
+        for conflict_id in after["conflict_ids"] - before["conflict_ids"]:
+            existing_conflict = await session.get(IdentityConflict, conflict_id)
+            if existing_conflict is not None:
+                await session.delete(existing_conflict)
+        for raw_id in after["raw_ids"] - before["raw_ids"]:
+            existing_raw = await session.get(RawJobIngestion, raw_id)
+            if existing_raw is not None:
+                await session.delete(existing_raw)
+        for run_id in after["collection_run_ids"] - before["collection_run_ids"]:
             existing_run = await session.get(CollectionRun, run_id)
             if existing_run is not None:
                 await session.delete(existing_run)
-        for job_id in job_ids:
+        for job_id in after["job_ids"] - before["job_ids"]:
             existing_job = await session.get(Job, job_id)
             if existing_job is not None:
                 await session.delete(existing_job)
@@ -358,16 +493,15 @@ async def test_two_pipeline_runs_insert_then_update_without_duplication(
     t1 = job.discovered_at
     t2 = t1 + timedelta(hours=6)
 
-    collection_run_ids: list[Any] = []
-    job_ids: list[Any] = []
-    raw_ingestion_ids: list[Any] = []
+    before = await _capture_identity_scope(
+        db_engine, board_token=board_token, source_job_id=job.source_job_id
+    )
 
     try:
         provider1 = live_proof._SingleJobReplayProvider(job, source="greenhouse", called_at=t1)
         run1_id = await pipeline.run(
             db_engine, provider1, query, observed_at=t1, clock=FixedClock(t1)
         )
-        collection_run_ids.append(run1_id)
 
         async with AsyncSession(bind=db_engine) as session:
             run1 = await session.get(CollectionRun, run1_id)
@@ -376,6 +510,8 @@ async def test_two_pipeline_runs_insert_then_update_without_duplication(
             assert run1.jobs_discovered == 1
             assert run1.jobs_inserted == 1
             assert run1.jobs_updated == 0
+            assert run1.completed_at is not None
+            assert run1.completed_at >= run1.started_at
 
             attempts = (
                 (
@@ -389,6 +525,9 @@ async def test_two_pipeline_runs_insert_then_update_without_duplication(
                 .all()
             )
             assert len(attempts) == 1
+            assert attempts[0].provider == "ats_scrapers"
+            assert attempts[0].source == "greenhouse"
+            assert attempts[0].status == "completed"
             assert attempts[0].jobs_inserted == 1
             assert attempts[0].jobs_updated == 0
 
@@ -400,7 +539,6 @@ async def test_two_pipeline_runs_insert_then_update_without_duplication(
                     )
                 )
             ).scalar_one()
-            job_ids.append(occurrence.job_id)
             occurrence_id = occurrence.id
             job_id = occurrence.job_id
             assert occurrence.first_seen_at == t1
@@ -420,9 +558,10 @@ async def test_two_pipeline_runs_insert_then_update_without_duplication(
                 .scalars()
                 .all()
             )
-            raw_ingestion_ids.extend(row.id for row in raw_rows)
             assert len(raw_rows) == 1
             assert raw_rows[0].processing_status == "normalized"
+            assert raw_rows[0].job_occurrence_id == occurrence_id
+            assert raw_rows[0].raw_content_hash == canonical_json_hash(job.raw)
 
             conflicts = (
                 (
@@ -441,7 +580,6 @@ async def test_two_pipeline_runs_insert_then_update_without_duplication(
         run2_id = await pipeline.run(
             db_engine, provider2, query, observed_at=t2, clock=FixedClock(t2)
         )
-        collection_run_ids.append(run2_id)
 
         async with AsyncSession(bind=db_engine) as session:
             run2 = await session.get(CollectionRun, run2_id)
@@ -463,6 +601,9 @@ async def test_two_pipeline_runs_insert_then_update_without_duplication(
                 .all()
             )
             assert len(attempts2) == 1
+            assert attempts2[0].provider == "ats_scrapers"
+            assert attempts2[0].source == "greenhouse"
+            assert attempts2[0].status == "completed"
             assert attempts2[0].jobs_inserted == 0
             assert attempts2[0].jobs_updated == 1
 
@@ -505,14 +646,18 @@ async def test_two_pipeline_runs_insert_then_update_without_duplication(
                 .scalars()
                 .all()
             )
-            raw_ingestion_ids = [row.id for row in raw_rows]
             assert len(raw_rows) == 2
-            assert {row.processing_status for row in raw_rows} == {"normalized"}
+            for raw in raw_rows:
+                assert raw.processing_status == "normalized"
+                assert raw.job_occurrence_id == occurrence_id
+                assert raw.raw_content_hash == canonical_json_hash(job.raw)
+                assert raw.source_identifier == job.source_job_id
 
             job_row = await session.get(Job, job_id)
             assert job_row is not None
-            assert job_row.last_seen_at == t2
+            assert job_row.canonical_url == job.canonical_url
             assert job_row.first_seen_at == t1
+            assert job_row.last_seen_at == t2
 
             conflicts = (
                 (
@@ -533,87 +678,94 @@ async def test_two_pipeline_runs_insert_then_update_without_duplication(
             )
             assert user_jobs == []
     finally:
-        await _cleanup_scoped(
-            db_engine,
-            collection_run_ids=collection_run_ids,
-            job_ids=job_ids,
-            raw_ingestion_ids=raw_ingestion_ids,
+        after = await _capture_identity_scope(
+            db_engine, board_token=board_token, source_job_id=job.source_job_id
         )
+        await _delete_new_rows(db_engine, before, after)
 
 
 async def test_cleanup_removes_every_row_even_when_an_assertion_fails_afterward(
     db_engine: AsyncEngine,
 ) -> None:
-    """Deliberately fails after run 1 to prove the `finally` cleanup still
-    runs, then re-queries through a *fresh* session/connection to prove
-    nothing was left behind — not merely that cleanup was *called*."""
+    """Deliberately fails after run 1 to prove cleanup still runs, then
+    re-queries through a *fresh* session/connection to prove nothing was
+    left behind — not merely that cleanup was *called*."""
     job = _mapped_job(datetime(2026, 1, 2, tzinfo=UTC))
     board_token = job.source_tenant_id
     query = SourceQuery(sources=["greenhouse"])
     t1 = job.discovered_at
 
-    collection_run_ids: list[Any] = []
-    job_ids: list[Any] = []
-    raw_ingestion_ids: list[Any] = []
+    before = await _capture_identity_scope(
+        db_engine, board_token=board_token, source_job_id=job.source_job_id
+    )
 
     with pytest.raises(AssertionError, match="deliberate failure"):
         try:
             provider = live_proof._SingleJobReplayProvider(job, source="greenhouse", called_at=t1)
-            run_id = await pipeline.run(
-                db_engine, provider, query, observed_at=t1, clock=FixedClock(t1)
-            )
-            collection_run_ids.append(run_id)
-
-            async with AsyncSession(bind=db_engine) as session:
-                occurrence = (
-                    await session.execute(
-                        select(JobOccurrence).where(
-                            JobOccurrence.source_tenant_id == board_token,
-                            JobOccurrence.source_job_id == job.source_job_id,
-                        )
-                    )
-                ).scalar_one()
-                job_ids.append(occurrence.job_id)
-                raw_rows = (
-                    (
-                        await session.execute(
-                            select(RawJobIngestion).where(
-                                RawJobIngestion.provider == "ats_scrapers",
-                                RawJobIngestion.source == "greenhouse",
-                                RawJobIngestion.source_identifier == job.source_job_id,
-                            )
-                        )
-                    )
-                    .scalars()
-                    .all()
-                )
-                raw_ingestion_ids.extend(row.id for row in raw_rows)
-
+            await pipeline.run(db_engine, provider, query, observed_at=t1, clock=FixedClock(t1))
             raise AssertionError("deliberate failure to prove cleanup still runs")
         finally:
-            await _cleanup_scoped(
-                db_engine,
-                collection_run_ids=collection_run_ids,
-                job_ids=job_ids,
-                raw_ingestion_ids=raw_ingestion_ids,
+            after = await _capture_identity_scope(
+                db_engine, board_token=board_token, source_job_id=job.source_job_id
             )
+            await _delete_new_rows(db_engine, before, after)
 
-    async with AsyncSession(bind=db_engine) as session:
-        remaining_occurrences = (
-            (
-                await session.execute(
-                    select(JobOccurrence).where(
-                        JobOccurrence.source_tenant_id == board_token,
-                        JobOccurrence.source_job_id == job.source_job_id,
-                    )
-                )
-            )
-            .scalars()
-            .all()
+    final = await _capture_identity_scope(
+        db_engine, board_token=board_token, source_job_id=job.source_job_id
+    )
+    assert final == before
+
+
+async def test_cleanup_recovers_rows_left_by_a_pipeline_run_that_raises_mid_transaction(
+    db_engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`pipeline.run()` commits its `CollectionRun`/
+    `CollectionRunProviderAttempt` insert, then each job's
+    `RawJobIngestion` row, as separate already-committed sub-transactions
+    *before* `persist_posting` ever runs — so a failure inside
+    `persist_posting` itself still leaves those earlier rows committed even
+    though `pipeline.run()` never returns a run id at all. Monkeypatching
+    `pipeline.persist_posting` to raise reproduces exactly that gap, and
+    proves the before/after snapshot approach (not a return-value-derived
+    id list) recovers every row regardless."""
+    job = _mapped_job(datetime(2026, 1, 4, tzinfo=UTC))
+    board_token = job.source_tenant_id
+    query = SourceQuery(sources=["greenhouse"])
+    t1 = job.discovered_at
+
+    before = await _capture_identity_scope(
+        db_engine, board_token=board_token, source_job_id=job.source_job_id
+    )
+
+    async def _raise_after_commit(*_args: Any, **_kwargs: Any) -> Any:
+        raise RuntimeError("deliberate failure after a committed sub-transaction")
+
+    monkeypatch.setattr(pipeline, "persist_posting", _raise_after_commit)
+
+    provider = live_proof._SingleJobReplayProvider(job, source="greenhouse", called_at=t1)
+    try:
+        with pytest.raises(RuntimeError, match="deliberate failure"):
+            await pipeline.run(db_engine, provider, query, observed_at=t1, clock=FixedClock(t1))
+    finally:
+        after = await _capture_identity_scope(
+            db_engine, board_token=board_token, source_job_id=job.source_job_id
         )
-        assert remaining_occurrences == []
-        assert await session.get(CollectionRun, collection_run_ids[0]) is None
-        assert await session.get(Job, job_ids[0]) is None
+        # Prove the gap was genuinely reproduced — an orphaned
+        # RawJobIngestion and a failed CollectionRun really were left
+        # behind — before cleanup removes the evidence.
+        assert after["raw_ids"] - before["raw_ids"], "expected an orphaned RawJobIngestion row"
+        assert (
+            after["collection_run_ids"] - before["collection_run_ids"]
+        ), "expected a failed CollectionRun row"
+        assert not (
+            after["job_ids"] - before["job_ids"]
+        ), "persist_posting never ran; no Job should have been created"
+        await _delete_new_rows(db_engine, before, after)
+
+    final = await _capture_identity_scope(
+        db_engine, board_token=board_token, source_job_id=job.source_job_id
+    )
+    assert final == before
 
 
 # --------------------------------------------------------------------------
@@ -635,7 +787,6 @@ def test_this_test_file_never_calls_the_real_network_or_database_lifecycle_funct
     forbidden_calls = [
         "fetch_greenhouse_jobs_raw(",
         "live_proof.main(",
-        "live_proof._run_proof(",
         "live_proof._create_database(",
         "live_proof._drop_database_if_exists(",
         "live_proof._database_exists(",

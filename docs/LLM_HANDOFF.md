@@ -98,172 +98,6 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-08-30, Claude Code (Sonnet 5). Class H correction pass on
-  `phase-4/greenhouse-canary` for the three bounded findings in review commit
-  `1eeb189` (`bbf3f64..1eeb189`). Base `bbf3f64`. Addresses exactly Findings
-  1-3 from Iteration 1's `Work review`; every otherwise-approved behavior
-  (identity labels, HTTP-boundary/validation/mapping separation, allowlisted
-  fixture, no database writes, no retries/pagination) is unchanged. No new
-  live Greenhouse request was made; the existing committed fixture was
-  preserved after confirming it satisfies the stricter validation added
-  below.
-- Outcome, addressing each finding exactly:
-  1. **Medium — the response is now genuinely streamed and capped, not
-     buffered then checked.** `fetch_greenhouse_jobs_raw` now uses
-     `client.stream("GET", url)` and `response.aiter_bytes()`, accumulating
-     chunks and breaking out of the loop the moment the cumulative byte
-     count exceeds `MAX_RESPONSE_BYTES` — the oversized remainder of the
-     body is never read. Still exactly one GET, no retries, no logging of
-     the body. The function now accepts an injectable `client:
-     httpx.AsyncClient | None` (production leaves it `None` and gets a real
-     single-use client); offline tests pass a client built on
-     `httpx.MockTransport` (an in-process fake transport, never a real
-     socket) with a body served by an async generator that records how many
-     chunks it was asked to produce. Added
-     `test_fetch_stops_consuming_bytes_once_the_cap_is_exceeded` (asserts
-     the generator produced far fewer than the chunks needed for the full
-     body), `test_fetch_makes_exactly_one_request_even_when_oversized`, and
-     `test_fetch_accepts_a_well_formed_streamed_response`.
-  2. **Medium — malformed present job fields are now rejected, not
-     silently degraded.** New pure predicates `_is_usable_job_id` (rejects
-     `bool`, non-`int`/`str`, and blank strings), `_is_absolute_https_url`
-     (requires `https` scheme and a non-empty host), and
-     `_is_valid_optional_first_published` (absent is valid; present must be
-     `datetime.fromisoformat`-parseable *and* timezone-aware) compose into
-     `_has_required_mapping_shape`. `select_representative_job` now filters
-     on this full shape (previously only checked `id is not None`) and
-     raises a sanitized `CanaryFetchError` naming the required shape, never
-     the raw job, when no candidate qualifies.
-     `map_job_to_discovered_job` uses the same predicates as defense in
-     depth and now raises `ValueError` (rather than silently mapping to
-     `None` or a naive datetime) for a present-but-malformed `id`,
-     `absolute_url`, or `first_published`. Added 10 new tests: 6
-     shape-exclusion cases at the selection boundary (bool id, blank id,
-     non-https/relative URL, naive/malformed `first_published`), one
-     proving a shaped job is still selected alongside a malformed one, one
-     accepting a valid aware timestamp, and 3 parametrized mapping-boundary
-     tests (bad id types, bad URLs, bad timestamps) covering the same
-     conditions directly against `map_job_to_discovered_job`. Added
-     `test_committed_fixture_job_satisfies_the_stricter_required_mapping_shape`
-     to prove the existing committed fixture remains valid under the
-     stricter validator — no new live request was needed.
-  3. **Low — fixture output is now constrained to one location and written
-     atomically.** Removed the `--fixture-out` CLI argument entirely;
-     `run_canary` always writes to `DEFAULT_FIXTURE_PATH`. New
-     `_write_fixture_atomically` writes to a sibling temporary file via
-     `tempfile.mkstemp` in the destination's own directory, then moves it
-     into place with `os.replace` (atomic on both POSIX and Windows for a
-     same-directory rename); any failure removes the temp file and
-     re-raises without touching the previously committed fixture. Added
-     `test_write_fixture_atomically_writes_valid_sorted_json`,
-     `test_write_fixture_atomically_leaves_original_untouched_on_replace_failure`
-     (injects a failing `os.replace`, asserts the original file's content
-     and the absence of any leftover temp file), and two tests confirming
-     `--fixture-out` is no longer accepted and the parsed args carry no
-     such attribute.
-- Files changed: `backend/scripts/canary_greenhouse.py`;
-  `backend/tests/test_canary_greenhouse_mapping.py`; this handoff. No
-  migration; no product code; the committed fixture
-  (`greenhouse_live_canary.json`) is unchanged — confirmed still valid
-  under the stricter validator rather than replaced.
-- Commands run and exact results:
-  - `ruff format .` / `ruff check .` -> clean.
-  - `mypy app tests scripts` -> clean, 78 source files.
-  - `python -m pytest tests/test_canary_greenhouse_mapping.py -q` ->
-    **76 passed** (was 45; net +31 for this pass's new streaming/shape/
-    atomic-write tests).
-  - Full suite with a workspace-local `--basetemp` -> **1325 passed** (was
-    1294).
-  - `python -m scripts.check_repo` -> exit 0, zero findings.
-  - `git diff --check` -> clean (benign LF/CRLF notices only).
-  - **Genuine external `python scripts/verify.py --level routine --focus
-    tests/test_canary_greenhouse_mapping.py`** -> all **10 steps PASS**
-    (Ruff format/check, mypy, `check_repo.py`, `git diff --check`, database
-    URL safety, real test-database reachability, focused pytest **76
-    passed**, full suite **1325 passed**, temporary-directory cleanup) in
-    `111.28s`.
-  - `.verify-tmp/` confirmed to contain no run directory afterward.
-  - No live Greenhouse request was performed in this pass; development
-    database untouched throughout.
-- Deviations/known limitations: unchanged from Iteration 1 — the follow-up
-  `DiscoveryProvider` adapter, pipeline integration,
-  `QueryPlanner`/`ProviderRegistry`, database writes, scheduling, and Phase
-  3 normalization remain explicitly out of scope. `main` untouched
-  throughout.
-- STOP — awaiting Codex re-review. Do not merge `main`, implement the
-  follow-up adapter, pipeline integration, QueryPlanner/ProviderRegistry,
-  resume Phase 2/3 product work, or perform another live Greenhouse request
-  without separate user authorization.
-
-### Work review
-
-- Date/agent: 2026-08-30, Codex. Correction diff reviewed:
-  `1eeb189..84aa4bc` on `phase-4/greenhouse-canary`.
-- Independent verification performed: inspected the complete correction diff and
-  re-derived each prior invariant from the executable path; confirmed the existing
-  sanitized fixture is byte-unchanged and satisfies the stricter mapping predicates;
-  confirmed no additional live request exists in this pass; ran the genuine external
-  `scripts/verify.py --level routine --focus
-  tests/test_canary_greenhouse_mapping.py` from `backend/` — all 10 steps PASS,
-  including Ruff, mypy, repository/diff checks, disposable-test-database safety and
-  reachability, **76 focused tests**, **1325 full-suite tests**, and temporary-directory
-  cleanup. Development data was not touched.
-- Prior-finding disposition:
-  1. **Closed — streamed size cap.** The real fetch path uses one
-     `client.stream("GET", ...)` request and stops iterating immediately after the
-     cumulative cap is exceeded. The injected `MockTransport` regression proves the
-     producer is not fully consumed, and a separate regression proves the oversized
-     path still makes exactly one request.
-  2. **Closed — fail-closed mapping shape.** Selection and direct mapping share the
-     same usable-ID, absolute-HTTPS-URL, and optional-aware-publication-time predicates.
-     Malformed entries cannot become `DiscoveredJob` values; selection failure is a
-     fixed, sanitized `CanaryFetchError` that contains no raw job evidence. The existing
-     real fixture passes the stricter boundary without being regenerated.
-  3. **Closed — constrained atomic output.** The caller-controlled output option is
-     gone; the executable path always targets `DEFAULT_FIXTURE_PATH`. The same-directory
-     temporary-file/`os.replace` implementation preserves the prior file on failure and
-     cleans the temporary file, proven offline.
-- Findings: **none**.
-- Missing/inconclusive checks: the external API call was intentionally not repeated;
-  this re-review accepts the previously recorded one-request observation and independently
-  verifies the resulting sanitized fixture and every offline correction invariant.
-  Greenhouse terms remain explicitly unreviewed, as disclosed.
-- Verdict: **Approved**. The bounded Greenhouse live-canary slice and its correction
-  pass are accepted at `84aa4bc`.
-- Exact requested corrections: none.
-- STOP — wait for the user's explicit authorization before merging
-  `phase-4/greenhouse-canary` into `main`. Do not begin the live-to-test-database
-  provider adapter, pipeline integration, QueryPlanner/ProviderRegistry, Phase 2/3
-  product work, scheduling, or another live Greenhouse request.
-
-**Merge record (appended, not a rewrite of the entry above):** Approved at review
-commit `a4816d3` (no findings). Per user authorization, `phase-4/greenhouse-canary`
-was merged into `main` with a normal merge commit (`64a3534`; `--no-ff`, no
-squash/rebase/amend/force-push) and pushed. `main`/`origin/main` are both now at
-`64a3534`. Verified: feature branch was clean and pushed at `a4816d3`, and
-`main`/`origin/main` were still at `de2b15a` immediately before the merge; `main`
-has zero content diff against the feature branch (`git diff main
-phase-4/greenhouse-canary --stat` empty); migration `0017` remains the sole
-Alembic head; `python -m scripts.check_repo` exited `0`; `git diff --check` was
-clean; working tree clean throughout. No additional live Greenhouse request was
-made during the merge.
-
-**Rollback boundary:** reverting `64a3534` (a single merge commit) restores `main`
-to `de2b15a` exactly — no schema/migration exists in this slice to downgrade, and
-no data migration accompanies it. This merges the bounded read-only Greenhouse
-live ATS canary only (`backend/scripts/canary_greenhouse.py`, its offline test
-file, one committed sanitized fixture, and this handoff's record) — it does
-**not** add a `DiscoveryProvider` adapter, pipeline integration,
-`QueryPlanner`/`ProviderRegistry`, database writes, scheduling, Phase 3
-normalization, or any other product change, all of which remain not started and
-are not authorized by this merge.
-
----
-
-## Iteration 2
-
-### Work done
-
 - Date/agent: 2026-08-30, Claude Code (Sonnet 5). Authorized slice: Greenhouse
   live-to-disposable-database ingestion proof (Phase 4 prework) — Class H
   (external provider + ingestion + identity resolution). Approved with 17
@@ -530,3 +364,129 @@ are not authorized by this merge.
 - STOP — do not merge `main`, contact Greenhouse again, run another live proof, alter
   production ingestion/provider code, or begin QueryPlanner/ProviderRegistry,
   normalization, scheduling, or another slice.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-08-31, Claude Code (Sonnet 5). Class H correction pass on
+  `phase-4/greenhouse-live-proof` for the three bounded findings in review
+  commit `d1d1e69` (`f4a1a5b..d1d1e69`). Base `f4a1a5b`. Addresses exactly
+  Findings 1-3 from Iteration 1's `Work review`; Finding 4 (two live
+  requests made against an authorization for one) required no executable
+  change — its disposition is strict adherence to the stop boundary below.
+  No network request and no real `CREATE`/`DROP DATABASE` were performed
+  during this pass, per the review's own instruction.
+- Outcome, addressing each finding exactly:
+  1. **High — a rejected database target can no longer reach the
+     destructive cleanup path.** `_run_proof` now tracks a separate
+     `cleanup_authorized` flag, initialized `False` and set `True` only
+     once `assert_safe_for_local_destructive_lifecycle` has genuinely
+     passed (i.e. only once an admin connection is about to be opened to
+     attempt `CREATE DATABASE`). The `finally` block now gates on
+     `cleanup_authorized`, not on `quoted_name is not None` — a production
+     `APP_ENV`, a remote/missing host, or a non-disposable name now never
+     opens an admin connection at all, let alone issues `DROP DATABASE`/
+     queries `pg_database`. An *authorized* creation attempt that then
+     fails (e.g. a transient connection error) still sets
+     `cleanup_authorized = True` before the attempt, so cleanup still runs
+     for that case, matching the review's own guidance. Added two
+     orchestration-level offline tests
+     (`test_run_proof_rejects_production_before_touching_any_database_or_network`,
+     `test_run_proof_rejects_a_remote_host_before_touching_any_database_or_network`)
+     that call the real `_run_proof` with every database/network-facing
+     function (`_create_database`, `_drop_database_if_exists`,
+     `_database_exists`, `_run_alembic_upgrade`, `_reachability_preflight`,
+     `canary.fetch_greenhouse_jobs_raw`, `_run_two_pipeline_passes`)
+     replaced by a call-recording fake via `monkeypatch`, and a faked
+     `get_settings()` returning a production/remote-host `Settings` —
+     both assert the recorded call list is empty and `_run_proof` returns
+     `False`.
+  2. **Medium — the shared-test-database cleanup is now failure-safe when
+     `pipeline.run()` itself raises.** Replaced the list-based
+     `_cleanup_scoped` helper (which only ever recorded ids *after* a
+     successful return/query, so a `pipeline.run()` call that raised before
+     returning left rows no captured id could find) with
+     `_capture_identity_scope`/`_delete_new_rows`: a before/after snapshot,
+     scoped by the full `(provider, source, tenant, source_job_id)` natural
+     key for `JobOccurrence`/`Job`/`RawJobIngestion`/`IdentityConflict`
+     (`CollectionRun` has no natural-key column of its own and is
+     snapshotted as the whole table — safe since this suite runs
+     single-process and sequentially, never under `pytest-xdist`), diffed
+     to find exactly what a call created regardless of whether it returned.
+     Rewrote both existing database-touching tests to use this mechanism.
+     Added
+     `test_cleanup_recovers_rows_left_by_a_pipeline_run_that_raises_mid_transaction`,
+     which monkeypatches `pipeline.persist_posting` to raise immediately —
+     reproducing the exact gap: `pipeline.run()` already committed its
+     `CollectionRun`/`CollectionRunProviderAttempt` (before its own `try:`
+     block) and the job's `RawJobIngestion` row (Transaction A_i, before
+     `persist_posting` is ever called) as separate prior sub-transactions,
+     so both are left behind (and asserted to genuinely be present) before
+     the snapshot-diff cleanup removes them; a final snapshot proves
+     nothing remains.
+  3. **Low — added the previously absent persisted-state assertions**, to
+     both the live proof and the offline test: run-one
+     `completed_at >= started_at`; run-two attempt's
+     `provider`/`source`/`status`; both runs' raw rows checked individually
+     (not just as a status set) for `raw_content_hash`/`source_identifier`/
+     `job_occurrence_id` linkage; and the surviving parent `Job`'s
+     `canonical_url`/`first_seen_at` rechecked unchanged after
+     re-observation (only `last_seen_at` may advance).
+- Files changed: `backend/scripts/live_proof_greenhouse_ingestion.py`;
+  `backend/tests/test_live_proof_greenhouse_adapter.py`; this handoff.
+  `backend/scripts/db_safety.py`, the ADR 0004 addendum, the canary, its
+  fixture, the application pipeline, schema, and migrations are all
+  unchanged — confirmed by `git status`/`git diff --check` showing no
+  modification to any of them.
+- Commands run and exact results:
+  - `ruff format .` / `ruff check .` -> clean, whole repo.
+  - `mypy app tests scripts` -> clean, 81 source files.
+  - `python -m pytest tests/test_live_proof_greenhouse_adapter.py
+    tests/test_db_safety.py -q` -> **45 passed** (was 42; net +3: two
+    orchestration-level guard-rejection tests, one injected
+    mid-transaction-failure test), offline only.
+  - Full suite -> **1370 passed** (was 1367).
+  - `python -m scripts.check_repo` -> exit 0, zero findings.
+  - `git diff --check` -> clean.
+  - **Genuine external `python scripts/verify.py --level routine --focus
+    tests/test_live_proof_greenhouse_adapter.py tests/test_db_safety.py`**
+    -> all **10 steps PASS** (Ruff format/check, mypy, `check_repo.py`,
+    `git diff --check`, database URL safety, real test-database
+    reachability, focused pytest **45 passed**, full suite **1370
+    passed**, temporary-directory cleanup) in `110.42s`.
+  - No live Greenhouse request and no real `CREATE`/`DROP DATABASE` were
+    performed during this correction pass, per the review's instruction —
+    development (`jobgoblin`) and shared test (`jobgoblin_test`) databases
+    were the only databases touched, exactly as in every other slice.
+- Adversarial self-review: re-read the corrected diff before this entry,
+  confirming (a) `cleanup_authorized` is set only after the guard call
+  succeeds and never before, so a guard `RuntimeError` always leaves it
+  `False`; (b) an authorized creation attempt that itself fails still
+  reaches cleanup, since `cleanup_authorized` is set before
+  `_create_database` is called, not after; (c) `_capture_identity_scope`'s
+  `CollectionRun` snapshot is a genuine before/after diff of the whole
+  table, correct under this suite's single-process, sequential execution
+  model but explicitly documented as depending on that (no `pytest-xdist`);
+  (d) the new mid-transaction-failure test's own assertions
+  (`after["raw_ids"] - before["raw_ids"]` non-empty,
+  `after["job_ids"] - before["job_ids"]` empty) independently prove the gap
+  was genuinely reproduced, not merely that a fake raised. Found no further
+  issues beyond the three findings addressed above.
+- Deviations/known limitations: unchanged from Iteration 1 (no
+  `DiscoveryProvider` registration, scheduler wiring, `QueryPlanner`/
+  `ProviderRegistry`, Phase 3 normalization, or company resolution). Finding
+  4's disposition (no further live request without separate authorization)
+  is treated as a durable constraint on this and any future correction pass
+  for this slice, not merely a one-time acknowledgment. `main` untouched
+  throughout.
+- STOP — awaiting Codex re-review. Do not merge `main`, contact Greenhouse
+  again, run another live proof, alter production ingestion/provider code,
+  or begin QueryPlanner/ProviderRegistry, normalization, scheduling, or
+  another slice.
+
+### Work review
+
+_Pending._

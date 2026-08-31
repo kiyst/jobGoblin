@@ -351,7 +351,7 @@ async def _reachability_preflight(database_url: str) -> _StepResult:
 
 async def _assert_state_after_run_one(
     engine: AsyncEngine, *, run_id: Any, job: DiscoveredJob, board_token: str, observed_at: datetime
-) -> tuple[Any, Any]:
+) -> tuple[Any, Any, datetime]:
     async with AsyncSession(bind=engine) as session:
         collection_run = await session.get(CollectionRun, run_id)
         assert collection_run is not None, "CollectionRun row missing after run 1"
@@ -360,6 +360,8 @@ async def _assert_state_after_run_one(
         assert collection_run.jobs_inserted == 1
         assert collection_run.jobs_updated == 0
         assert collection_run.failures == []
+        assert collection_run.completed_at is not None
+        assert collection_run.completed_at >= collection_run.started_at
 
         attempts = (
             (
@@ -380,14 +382,6 @@ async def _assert_state_after_run_one(
         assert attempt.jobs_discovered == 1
         assert attempt.jobs_inserted == 1
         assert attempt.jobs_updated == 0
-
-        raw_rows = (await session.execute(select(RawJobIngestion))).scalars().all()
-        assert len(raw_rows) == 1, f"expected 1 RawJobIngestion, found {len(raw_rows)}"
-        raw = raw_rows[0]
-        assert raw.processing_status == "normalized"
-        assert raw.job_occurrence_id is not None
-        assert raw.raw_content_hash == canonical_json_hash(job.raw)
-        assert raw.source_identifier == job.source_job_id
 
         jobs = (await session.execute(select(Job))).scalars().all()
         assert len(jobs) == 1, f"expected 1 Job, found {len(jobs)}"
@@ -413,12 +407,20 @@ async def _assert_state_after_run_one(
         assert occurrence.posted_at == job.posted_at
         assert occurrence.is_active is True
 
+        raw_rows = (await session.execute(select(RawJobIngestion))).scalars().all()
+        assert len(raw_rows) == 1, f"expected 1 RawJobIngestion, found {len(raw_rows)}"
+        raw = raw_rows[0]
+        assert raw.processing_status == "normalized"
+        assert raw.job_occurrence_id == occurrence.id
+        assert raw.raw_content_hash == canonical_json_hash(job.raw)
+        assert raw.source_identifier == job.source_job_id
+
         conflicts = (await session.execute(select(IdentityConflict))).scalars().all()
         assert conflicts == [], f"expected zero IdentityConflict rows, found {len(conflicts)}"
         user_jobs = (await session.execute(select(UserJob))).scalars().all()
         assert user_jobs == [], f"expected zero UserJob rows, found {len(user_jobs)}"
 
-        return occurrence.job_id, occurrence.id
+        return occurrence.job_id, occurrence.id, job_row.first_seen_at
 
 
 async def _assert_state_after_run_two(
@@ -427,6 +429,7 @@ async def _assert_state_after_run_two(
     run2_id: Any,
     prior_job_id: Any,
     prior_occurrence_id: Any,
+    prior_first_seen_at: datetime,
     job: DiscoveredJob,
     board_token: str,
     observed_at_2: datetime,
@@ -444,17 +447,26 @@ async def _assert_state_after_run_two(
         attempts = (await session.execute(select(CollectionRunProviderAttempt))).scalars().all()
         assert len(attempts) == 2, f"expected 2 provider attempts, found {len(attempts)}"
         attempt2 = next(a for a in attempts if a.collection_run_id == run2_id)
+        assert attempt2.provider == "ats_scrapers"
+        assert attempt2.source == "greenhouse"
+        assert attempt2.status == "completed"
         assert attempt2.jobs_discovered == 1
         assert attempt2.jobs_inserted == 0
         assert attempt2.jobs_updated == 1
 
         raw_rows = (await session.execute(select(RawJobIngestion))).scalars().all()
         assert len(raw_rows) == 2, f"expected 2 RawJobIngestion rows, found {len(raw_rows)}"
-        assert {r.processing_status for r in raw_rows} == {"normalized"}
+        for raw in raw_rows:
+            assert raw.processing_status == "normalized"
+            assert raw.job_occurrence_id == prior_occurrence_id
+            assert raw.raw_content_hash == canonical_json_hash(job.raw)
+            assert raw.source_identifier == job.source_job_id
 
         jobs = (await session.execute(select(Job))).scalars().all()
         assert len(jobs) == 1, f"expected still exactly 1 Job, found {len(jobs)}"
         assert jobs[0].id == prior_job_id
+        assert jobs[0].canonical_url == job.canonical_url
+        assert jobs[0].first_seen_at == prior_first_seen_at
         assert jobs[0].last_seen_at == observed_at_2
 
         occurrences = (await session.execute(select(JobOccurrence))).scalars().all()
@@ -492,7 +504,7 @@ async def _run_two_pipeline_passes(
         run1_id = await pipeline.run(
             engine, provider1, query, observed_at=observed_at_1, clock=SystemClock()
         )
-        prior_job_id, prior_occurrence_id = await _assert_state_after_run_one(
+        prior_job_id, prior_occurrence_id, prior_first_seen_at = await _assert_state_after_run_one(
             engine, run_id=run1_id, job=job, board_token=board_token, observed_at=observed_at_1
         )
     except AssertionError as exc:
@@ -514,6 +526,7 @@ async def _run_two_pipeline_passes(
             run2_id=run2_id,
             prior_job_id=prior_job_id,
             prior_occurrence_id=prior_occurrence_id,
+            prior_first_seen_at=prior_first_seen_at,
             job=job,
             board_token=board_token,
             observed_at_2=observed_at_2,
@@ -564,6 +577,14 @@ async def _run_proof(board_token: str, company: str) -> bool:
     admin_url = _admin_url(settings.database_url, database=_MAINTENANCE_DATABASE)
 
     proceed = quoted_name is not None
+    # Becomes True only once the destructive-lifecycle guard has genuinely
+    # passed — i.e. only once an admin connection is about to be opened to
+    # attempt `CREATE DATABASE`. A rejected target (production `APP_ENV`,
+    # a remote/missing host, or a non-disposable name) must never cause the
+    # `finally` block below to open an admin connection at all, let alone
+    # issue `DROP DATABASE`/query `pg_database` against it — this flag is
+    # what keeps that true regardless of where the sequence stops later.
+    cleanup_authorized = False
     if proceed:
         try:
             assert_safe_for_local_destructive_lifecycle(
@@ -576,6 +597,7 @@ async def _run_proof(board_token: str, company: str) -> bool:
                     redact_database_url(candidate_url),
                 )
             )
+            cleanup_authorized = True
         except RuntimeError as exc:
             results.append(
                 _StepResult("local destructive-lifecycle safety guard", _StepStatus.FAIL, str(exc))
@@ -646,7 +668,8 @@ async def _run_proof(board_token: str, company: str) -> bool:
                 await engine.dispose()
             results.append(pipeline_result)
     finally:
-        if quoted_name is not None:
+        if cleanup_authorized:
+            assert quoted_name is not None
             results.extend(
                 await _perform_cleanup(
                     drop=lambda: _drop_database_if_exists(admin_url, quoted_name),
