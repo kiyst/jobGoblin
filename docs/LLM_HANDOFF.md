@@ -470,3 +470,25 @@ that detail.
   `phase-4/greenhouse-canary` into `main`. Do not begin the live-to-test-database
   provider adapter, pipeline integration, QueryPlanner/ProviderRegistry, Phase 2/3
   product work, scheduling, or another live Greenhouse request.
+
+**Merge record (appended, not a rewrite of the entry above):** Approved at review
+commit `a4816d3` (no findings). Per user authorization, `phase-4/greenhouse-canary`
+was merged into `main` with a normal merge commit (`64a3534`; `--no-ff`, no
+squash/rebase/amend/force-push) and pushed. `main`/`origin/main` are both now at
+`64a3534`. Verified: feature branch was clean and pushed at `a4816d3`, and
+`main`/`origin/main` were still at `de2b15a` immediately before the merge; `main`
+has zero content diff against the feature branch (`git diff main
+phase-4/greenhouse-canary --stat` empty); migration `0017` remains the sole
+Alembic head; `python -m scripts.check_repo` exited `0`; `git diff --check` was
+clean; working tree clean throughout. No additional live Greenhouse request was
+made during the merge.
+
+**Rollback boundary:** reverting `64a3534` (a single merge commit) restores `main`
+to `de2b15a` exactly — no schema/migration exists in this slice to downgrade, and
+no data migration accompanies it. This merges the bounded read-only Greenhouse
+live ATS canary only (`backend/scripts/canary_greenhouse.py`, its offline test
+file, one committed sanitized fixture, and this handoff's record) — it does
+**not** add a `DiscoveryProvider` adapter, pipeline integration,
+`QueryPlanner`/`ProviderRegistry`, database writes, scheduling, Phase 3
+normalization, or any other product change, all of which remain not started and
+are not authorized by this merge.
