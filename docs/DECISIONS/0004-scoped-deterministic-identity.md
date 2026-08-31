@@ -276,3 +276,31 @@ implementation:
   tuning once Phase 4/7 adapters see actual ATS/aggregator URLs; it's deliberately
   specified as "starts conservative, grows with evidence" rather than guessed exhaustively
   now.
+
+## Addendum (2026-08-30): the Greenhouse live-ingestion proof's identity labels
+
+The Greenhouse live-to-disposable-database ingestion proof
+(`backend/scripts/live_proof_greenhouse_ingestion.py`) is a diagnostic script that
+fetches one real posting directly over HTTP — it does not invoke the `ats-scrapers`
+dependency at all — yet it deliberately labels every row it produces
+`provider="ats_scrapers"`, `source="greenhouse"`, the same pair the (still purely
+diagnostic, non-shipped) Greenhouse canary already used. This is a narrow, explicit
+extension of this ADR's identity model, not a silent inheritance:
+
+- `provider`/`source` are this project's internal categorization labels for the
+  natural-key/identity domain (see `app/db/models/raw_job_ingestions.py`'s own
+  docstring), not a literal attribution of which Python dependency performed a fetch.
+  This ADR's own natural-key design exists specifically to make *the same real-world
+  posting* collide onto the same `(provider, source, tenant, job_id)` tuple regardless
+  of which code path observed it — a real `AtsScrapersProvider`-based Greenhouse
+  adapter, built later, must resolve to the same `Job`/`JobOccurrence` this diagnostic
+  script creates for a genuinely re-observed posting, not a duplicate one requiring a
+  future backfill migration to unify two label spaces.
+- **This does not authorize a production direct-HTTP Greenhouse adapter**, and it does
+  not redefine `provider="ats_scrapers"` to mean "any direct HTTP call to an ATS this
+  project happens to make." It authorizes exactly one diagnostic script's identity
+  labels, for the reason stated above. A future production adapter that fetches
+  Greenhouse directly (bypassing `ats-scrapers`) as a deliberate, permanent design —
+  rather than a one-off diagnostic proof — would need its own explicit identity-label
+  decision, made the same way this one was: stated, reasoned, and recorded here, not
+  inferred from this diagnostic script's precedent alone.
