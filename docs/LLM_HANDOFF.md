@@ -458,4 +458,75 @@ are not authorized by this merge.
 
 ### Work review
 
-_Pending._
+- Date/agent: 2026-08-31, Codex. Diff reviewed:
+  `4cb8492..f4a1a5b` on `phase-4/greenhouse-live-proof`.
+- Independent verification performed: inspected all six changed files and traced the
+  safety/create/migrate/fetch/pipeline/drop/leak-check orchestration from the executable
+  entry point; independently queried the running PostgreSQL container and confirmed no
+  `jobgoblin_test_live_proof_%` database remains, development is still at migration
+  `0006`, and `jobgoblin_test` is at `0017`; ran both targeted files directly — **42
+  passed**; ran the genuine external routine verifier (Ruff, mypy, repository/diff
+  checks, DB safety/reachability, pytest, cleanup) — all 10 steps PASS and **1367
+  full-suite tests** pass. No Greenhouse request or disposable-database lifecycle was
+  repeated during review.
+- Findings, by severity:
+  1. **High — a rejected database target still reaches the destructive cleanup path.**
+     In `backend/scripts/live_proof_greenhouse_ingestion.py:569-582`, a failed
+     `assert_safe_for_local_destructive_lifecycle()` only sets `proceed = False`.
+     The unconditional `finally` at lines 648-656 nevertheless calls
+     `_drop_database_if_exists(admin_url, quoted_name)` and `_database_exists(...)`
+     whenever the generated name was quoteable. Consequently `APP_ENV=production` or
+     a remote/missing host prevents `CREATE DATABASE` but still opens the rejected admin
+     connection and issues `DROP DATABASE IF EXISTS ... WITH (FORCE)`. This defeats the
+     guard's core invariant and contradicts the claim that a safety failure contacts no
+     database. Required correction: track a separate cleanup authorization that becomes
+     true only after the destructive-lifecycle guard passes and database creation is
+     about to be attempted. Run drop/leak cleanup after any *authorized creation
+     attempt* (including an ambiguous create failure), but never open the admin
+     connection when the guard itself failed. Add orchestration-level offline tests for
+     remote-host and production guard failures proving create, drop, leak-check,
+     migration, fetch, and pipeline functions are all untouched.
+  2. **Medium — the shared-test-database cleanup is not failure-safe when
+     `pipeline.run()` itself raises.** In
+     `backend/tests/test_live_proof_greenhouse_adapter.py:363-370` and `441-444`, run
+     IDs are recorded only after `pipeline.run()` returns; raw/job IDs are discovered
+     later. The pipeline commits its `CollectionRun` and raw-ingestion transactions
+     before later persistence can raise, so a failure during either call can leave rows
+     that the `finally` cleanup has no IDs for. The existing deliberate-failure test
+     raises only after a successful run and after all IDs have been collected, so it
+     does not prove the required failure case. Required correction: establish
+     before/after ID snapshots (or an equivalently failure-safe scoped mechanism) so
+     cleanup can recover every row committed by a pipeline call that never returned;
+     use the full `(provider, source, tenant, source_job_id)` identity scope; add an
+     injected failure after a committed pipeline sub-transaction and prove a fresh
+     session finds no leaked run, attempt, raw, conflict, Job, or JobOccurrence rows.
+  3. **Low — several explicitly approved persisted-state assertions are absent.** The
+     live proof does not assert run-one `completed_at >= started_at`; run two's attempt
+     is not checked for provider/source/status; the two raw rows are not independently
+     checked for hash/source identifier/linkage; and the surviving parent Job's mapped
+     descriptive fields are not rechecked after re-observation. Add these assertions to
+     the live proof and the relevant offline path without expanding product scope.
+  4. **Medium process deviation — two live requests were made after authorization for
+     exactly one.** This cannot be undone through a code correction and does not
+     invalidate the successful persisted-state result; it was disclosed accurately and
+     both disposable databases were removed. It is nevertheless an authorization-boundary
+     violation. The durable disposition is: accept the already-recorded evidence, make
+     **no further live request** during correction/re-review, and treat repeatability as
+     an offline concern unless the user separately authorizes another external call.
+- Missing/inconclusive checks: the recorded two live invocations were not repeated, so
+  their external response/timing claims are accepted as historical execution evidence
+  rather than independently reproduced. Local PostgreSQL state and every offline claim
+  above were independently checked.
+- Verdict: **Approved with binding clarifications** — the live-to-disposable-PostgreSQL
+  architecture and successful real-data proof are accepted, but Findings 1-3 require
+  one bounded correction pass before merge. Finding 4 requires no executable change
+  beyond strict adherence to the stop boundary.
+- Exact bounded correction: modify only the live-proof script, its offline tests, and
+  this handoff as needed for Findings 1-3. `db_safety.py`, ADR 0004, the canary, fixture,
+  application pipeline, schema, and migrations are accepted unchanged. Run the two
+  targeted offline files and the routine verifier, record actual counts, commit/push,
+  and stop for re-review. Perform **no network request** and no real create/drop proof
+  during this correction pass.
+- STOP — do not merge `main`, contact Greenhouse again, run another live proof, alter
+  production ingestion/provider code, or begin QueryPlanner/ProviderRegistry,
+  normalization, scheduling, or another slice.
