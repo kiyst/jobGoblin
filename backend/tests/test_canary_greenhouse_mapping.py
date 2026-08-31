@@ -2,24 +2,29 @@
 response validation, deterministic job selection, and Greenhouse-job-dict
 to `DiscoveredJob` mapping.
 
-**No test in this file ever calls `fetch_greenhouse_jobs_raw` or performs
-any network I/O.** Every test exercises `validate_and_parse_response`,
-`select_representative_job`, `map_job_to_discovered_job`, or
-`build_sanitized_fixture` directly, against either synthetic dicts or the
-committed sanitized fixture (`tests/fixtures/discovery/
-greenhouse_live_canary.json`) — never a real Greenhouse request. This
-mirrors `test_verify.py`'s own pattern for keeping default test runs
-network-free (`docs/PHASE_RISK_CHECKLIST.md`'s cross-cutting non-negotiable
-"default tests never contact public job sources"); `scripts/verify.py
---level routine` never imports this module's network-touching function
-either.
+**No test in this file ever performs any real network I/O.** Most tests
+exercise `validate_and_parse_response`, `select_representative_job`,
+`map_job_to_discovered_job`, or `build_sanitized_fixture` directly, against
+either synthetic dicts or the committed sanitized fixture (`tests/fixtures/
+discovery/greenhouse_live_canary.json`) — never a real Greenhouse request.
+A small number of tests do call `fetch_greenhouse_jobs_raw` itself, but only
+with an injected `client=` built on `httpx.MockTransport` — an in-process
+fake transport that never opens a socket — specifically to exercise its
+streaming/size-cap behavior, which cannot be observed by calling the pure
+validator alone. This mirrors `test_verify.py`'s own pattern for keeping
+default test runs network-free (`docs/PHASE_RISK_CHECKLIST.md`'s
+cross-cutting non-negotiable "default tests never contact public job
+sources"); `scripts/verify.py --level routine` never imports this module's
+network-touching function either.
 """
 
 import json
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 
 from app.schemas.discovered_job import DiscoveredJob
@@ -165,12 +170,93 @@ def test_validate_and_parse_response_error_never_contains_the_response_body() ->
 
 
 # --------------------------------------------------------------------------
+# fetch_greenhouse_jobs_raw — streaming/size-cap behavior, via an injected
+# in-process httpx.MockTransport client (never a real socket)
+# --------------------------------------------------------------------------
+
+
+async def _byte_stream(
+    produced: list[int], *, chunk_size: int, num_chunks: int
+) -> AsyncIterator[bytes]:
+    for i in range(num_chunks):
+        produced.append(i)
+        yield b"x" * chunk_size
+
+
+def _mock_client(handler: Any) -> httpx.AsyncClient:
+    return httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+
+async def test_fetch_stops_consuming_bytes_once_the_cap_is_exceeded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Proves the invariant a synthetic already-oversized `bytes` value
+    passed to the pure validator cannot prove: that the stream itself is
+    not fully read once the cumulative byte count exceeds the cap."""
+    monkeypatch.setattr(canary, "MAX_RESPONSE_BYTES", 5_000)
+    produced: list[int] = []
+    num_chunks = 100  # 100 * 1000 = 100 000 bytes total if fully consumed
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-type": "application/json"},
+            content=_byte_stream(produced, chunk_size=1_000, num_chunks=num_chunks),
+        )
+
+    async with _mock_client(handler) as client:
+        with pytest.raises(canary.CanaryFetchError, match="response too large"):
+            await canary.fetch_greenhouse_jobs_raw("acme", client=client)
+
+    assert len(produced) < num_chunks
+
+
+async def test_fetch_makes_exactly_one_request_even_when_oversized(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(canary, "MAX_RESPONSE_BYTES", 5_000)
+    request_count = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal request_count
+        request_count += 1
+        return httpx.Response(
+            200,
+            headers={"content-type": "application/json"},
+            content=_byte_stream([], chunk_size=1_000, num_chunks=100),
+        )
+
+    async with _mock_client(handler) as client:
+        with pytest.raises(canary.CanaryFetchError, match="response too large"):
+            await canary.fetch_greenhouse_jobs_raw("acme", client=client)
+
+    assert request_count == 1
+
+
+async def test_fetch_accepts_a_well_formed_streamed_response() -> None:
+    body = b'{"jobs": [{"id": 1, "absolute_url": "https://x/1"}]}'
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, headers={"content-type": "application/json"}, content=body)
+
+    async with _mock_client(handler) as client:
+        payload, metadata = await canary.fetch_greenhouse_jobs_raw("acme", client=client)
+
+    assert payload["jobs"] == [{"id": 1, "absolute_url": "https://x/1"}]
+    assert metadata.byte_count == len(body)
+
+
+# --------------------------------------------------------------------------
 # select_representative_job — deterministic, order-independent
 # --------------------------------------------------------------------------
 
 
+def _shaped_job(job_id: Any, absolute_url: str = "https://x/1") -> dict[str, Any]:
+    return {"id": job_id, "absolute_url": absolute_url}
+
+
 def test_select_representative_job_is_independent_of_input_order() -> None:
-    jobs = [{"id": 300}, {"id": 100}, {"id": 200}]
+    jobs = [_shaped_job(300), _shaped_job(100), _shaped_job(200)]
     forward = canary.select_representative_job(jobs)
     backward = canary.select_representative_job(list(reversed(jobs)))
     shuffled = canary.select_representative_job([jobs[1], jobs[2], jobs[0]])
@@ -179,19 +265,62 @@ def test_select_representative_job_is_independent_of_input_order() -> None:
 
 
 def test_select_representative_job_ignores_jobs_missing_an_id() -> None:
-    jobs: list[dict[str, Any]] = [{"title": "no id here"}, {"id": 42, "title": "has an id"}]
+    jobs: list[dict[str, Any]] = [
+        {"title": "no id here", "absolute_url": "https://x/1"},
+        _shaped_job(42, "https://x/42"),
+    ]
     selected = canary.select_representative_job(jobs)
     assert selected["id"] == 42
 
 
 def test_select_representative_job_raises_when_no_job_has_a_usable_id() -> None:
-    with pytest.raises(canary.CanaryFetchError, match="no job.*usable 'id'"):
-        canary.select_representative_job([{"title": "no id"}, {"id": None}])
+    with pytest.raises(canary.CanaryFetchError, match="required mapping shape"):
+        canary.select_representative_job(
+            [
+                {"title": "no id", "absolute_url": "https://x/1"},
+                {"id": None, "absolute_url": "https://x/2"},
+            ]
+        )
 
 
 def test_select_representative_job_raises_on_an_empty_list() -> None:
     with pytest.raises(canary.CanaryFetchError):
         canary.select_representative_job([])
+
+
+@pytest.mark.parametrize(
+    "job",
+    [
+        {"id": True, "absolute_url": "https://x/1"},  # bool id, not a real identifier
+        {"id": "   ", "absolute_url": "https://x/1"},  # blank string id
+        {"id": 1, "absolute_url": "http://x/1"},  # not https
+        {"id": 1, "absolute_url": "/relative/path"},  # not absolute
+        {"id": 1, "absolute_url": "https://x/1", "first_published": "2026-01-01T00:00:00"},
+        # ^ present first_published without a timezone
+        {"id": 1, "absolute_url": "https://x/1", "first_published": "not-a-timestamp"},
+    ],
+)
+def test_select_representative_job_excludes_jobs_with_a_malformed_present_field(
+    job: dict[str, Any],
+) -> None:
+    with pytest.raises(canary.CanaryFetchError, match="required mapping shape"):
+        canary.select_representative_job([job])
+
+
+def test_select_representative_job_still_selects_a_shaped_job_alongside_a_malformed_one() -> None:
+    malformed = {"id": 1, "absolute_url": "http://not-https/1"}
+    shaped = _shaped_job(2, "https://x/2")
+    selected = canary.select_representative_job([malformed, shaped])
+    assert selected == shaped
+
+
+def test_select_representative_job_accepts_a_valid_aware_first_published() -> None:
+    job = {
+        "id": 1,
+        "absolute_url": "https://x/1",
+        "first_published": "2026-01-01T00:00:00+00:00",
+    }
+    assert canary.select_representative_job([job]) == job
 
 
 # --------------------------------------------------------------------------
@@ -341,6 +470,46 @@ def test_mapping_tolerates_a_missing_location() -> None:
     assert discovered.location is None
 
 
+@pytest.mark.parametrize("bad_id", [True, False, "   ", "", None, [], {}])
+def test_mapping_raises_on_an_unusable_id_type(bad_id: Any) -> None:
+    job = _fixture_job()
+    job["id"] = bad_id
+    with pytest.raises(ValueError, match="'id'"):
+        canary.map_job_to_discovered_job(
+            job, board_token="gitlab", company="GitLab", discovered_at=_DISCOVERED_AT
+        )
+
+
+@pytest.mark.parametrize(
+    "bad_url",
+    ["http://not-https.example/x", "/relative/path", "ftp://x/1", "", 12345],
+)
+def test_mapping_raises_on_a_non_absolute_https_url(bad_url: Any) -> None:
+    job = _fixture_job()
+    job["absolute_url"] = bad_url
+    with pytest.raises(ValueError, match="'absolute_url'"):
+        canary.map_job_to_discovered_job(
+            job, board_token="gitlab", company="GitLab", discovered_at=_DISCOVERED_AT
+        )
+
+
+@pytest.mark.parametrize(
+    "bad_first_published",
+    [
+        "2026-01-01T00:00:00",  # valid ISO-8601 but timezone-naive
+        "not-a-timestamp-at-all",
+        12345,
+    ],
+)
+def test_mapping_raises_on_a_malformed_or_naive_first_published(bad_first_published: Any) -> None:
+    job = _fixture_job()
+    job["first_published"] = bad_first_published
+    with pytest.raises(ValueError, match="first_published"):
+        canary.map_job_to_discovered_job(
+            job, board_token="gitlab", company="GitLab", discovered_at=_DISCOVERED_AT
+        )
+
+
 # --------------------------------------------------------------------------
 # build_sanitized_fixture — the allowlist is real, not decorative
 # --------------------------------------------------------------------------
@@ -385,3 +554,61 @@ def test_committed_fixture_file_itself_is_labeled_and_allowlisted() -> None:
     assert set(fixture["job"].keys()) <= set(canary.FIXTURE_ALLOWED_JOB_FIELDS)
     assert "content" not in fixture["job"]
     assert "description" not in fixture["job"]
+
+
+def test_committed_fixture_job_satisfies_the_stricter_required_mapping_shape() -> None:
+    """Regression: the stricter id/URL/timestamp validation added for this
+    correction pass must not invalidate the already-committed, previously
+    approved live sample. Preserving the fixture (rather than performing a
+    new live request) was authorized only on the condition that it remains
+    valid under the stricter validator — this test is that proof."""
+    job = _fixture_job()
+    assert canary._has_required_mapping_shape(job)
+    discovered = canary.map_job_to_discovered_job(
+        job, board_token="gitlab", company="GitLab", discovered_at=_DISCOVERED_AT
+    )
+    assert isinstance(discovered, DiscoveredJob)
+
+
+# --------------------------------------------------------------------------
+# _write_fixture_atomically — output constrained to one location, atomic
+# --------------------------------------------------------------------------
+
+
+def test_write_fixture_atomically_writes_valid_sorted_json(tmp_path: Path) -> None:
+    destination = tmp_path / "out.json"
+    canary._write_fixture_atomically({"b": 2, "a": 1}, destination)
+    assert (
+        destination.read_text(encoding="utf-8")
+        == json.dumps({"b": 2, "a": 1}, indent=2, sort_keys=True) + "\n"
+    )
+    assert list(tmp_path.iterdir()) == [destination]  # no leftover temp file
+
+
+def test_write_fixture_atomically_leaves_original_untouched_on_replace_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    destination = tmp_path / "out.json"
+    destination.write_text('{"original": true}\n', encoding="utf-8")
+
+    def _boom(*args: Any, **kwargs: Any) -> None:
+        raise OSError("simulated replace failure")
+
+    monkeypatch.setattr(canary.os, "replace", _boom)
+    with pytest.raises(OSError, match="simulated replace failure"):
+        canary._write_fixture_atomically({"a": 1}, destination)
+
+    assert destination.read_text(encoding="utf-8") == '{"original": true}\n'
+    assert list(tmp_path.iterdir()) == [destination]  # the failed temp file was cleaned up
+
+
+def test_parse_args_no_longer_accepts_a_caller_supplied_fixture_path() -> None:
+    with pytest.raises(SystemExit):
+        canary._parse_args(
+            ["--board-token", "acme", "--company", "Acme", "--fixture-out", "/tmp/x.json"]
+        )
+
+
+def test_parse_args_result_has_no_fixture_out_attribute() -> None:
+    args = canary._parse_args(["--board-token", "acme", "--company", "Acme"])
+    assert not hasattr(args, "fixture_out")

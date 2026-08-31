@@ -98,167 +98,6 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-08-30, Claude Code (Sonnet 5). Class H correction pass on
-  `tooling/workflow-v3-routine-verifier` for the three bounded findings in
-  review commit `103fbaa` (`6000658..103fbaa`). Base `6000658`. Addresses
-  exactly Findings 1-3 from Iteration 1's `Work review`; every
-  otherwise-accepted routine-verifier behavior (safety extraction, command
-  structure, direct repository-check step, focus validation, non-recursive
-  tests, database preflight/redaction, unique run directories, Workflow-v3
-  durable rules, Phase-2 status, result model) is unchanged.
-- Outcome, addressing each finding exactly:
-  1. **Medium — `git diff --check` now works in the Codex reviewer
-     environment.** `git_diff_check_command()` returns
-     `["git", "-c", f"safe.directory={REPO_ROOT.as_posix()}", "diff",
-     "--check"]` — command-local via `-c`, never global/user Git config.
-     `REPO_ROOT.as_posix()` (forward slashes) because Git's config-value
-     parser treats a bare backslash as an escape character, which a raw
-     Windows path would otherwise trip. Added
-     `test_git_diff_check_command_is_the_one_non_python_step`'s exact-argv
-     assertion (including a `no backslash` check) and reran the genuine
-     `python scripts/verify.py --level routine --focus tests/test_verify.py`
-     from both `backend/` and the repository root.
-  2. **Medium — temporary-directory cleanup now fails closed and is its own
-     reported step.** `safe_rmtree()` now refuses `path == must_be_under`
-     (a strict-child check, not merely `is_relative_to`, which is trivially
-     true of a path and itself) and never passes `ignore_errors=True` — its
-     new injectable `remove` parameter (default `shutil.rmtree`) lets a
-     deletion failure propagate to the caller instead of being swallowed.
-     New `cleanup_run_dir_step()` wraps it as a PASS/FAIL `StepResult`; new
-     `_execute_and_cleanup()` runs the step list, then *always* appends the
-     cleanup result in a `finally` — including after an earlier verification
-     failure — before returning. `main()` now builds its exit code from
-     *all* results, so a failed cleanup alone makes the run exit nonzero.
-     Added 8 tests: root-refusal, a genuinely-surfaced deletion failure (via
-     injected `remove`, since real filesystem permission failures are
-     unreliable to simulate portably), a nonexistent-child deletion now
-     correctly raising instead of silently succeeding, `cleanup_run_dir_step`
-     PASS/FAIL reporting, and — via `_execute_and_cleanup` — cleanup still
-     running and reported after an earlier step's failure, a surfaced
-     cleanup failure making the overall result set non-all-PASS, and
-     concurrent-run isolation (cleaning up one invocation's directory never
-     touches a second, still-active one).
-  3. **Low — corrected the remaining stale Phase-1 ROADMAP statements.**
-     `docs/ROADMAP.md`: "Phase 1: in progress (updated 2026-08-28)" ->
-     "Phase 1: complete (updated 2026-08-30)"; removed the closing claim that
-     "the rest of Phase 1's exit gate... remains to be independently
-     verified before declaring the phase complete", replaced with the
-     Git-verified basis for completion — all fifteen tables migrated, the
-     `phase-1/closure` slice merged (`bfdd56d`), and Phase 2 subsequently
-     authorized and three vertical slices merged, which
-     `PHASE_RISK_CHECKLIST.md`'s own phase-gating rule could not have
-     permitted had Phase 1's exit gate not already been satisfied. The
-     already-correct three-slice Phase-2 paragraph is untouched. Recorded
-     here, in this new entry — Iteration 1's historical `Work done`/
-     `Work review` text is left exactly as written.
-- Files changed: `backend/scripts/verify.py`; `backend/tests/test_verify.py`;
-  `docs/ROADMAP.md`; this handoff. No migration; no product code; no
-  `db_safety.py` change (Finding 1/2 are both `verify.py`-local).
-- Commands run and exact results:
-  - `ruff format .` / `ruff check .` -> clean.
-  - `mypy app tests scripts` -> clean, 76 source files.
-  - `python -m pytest tests/test_verify.py -q` -> **73 passed** (was 65;
-    net +8 for this pass's new/replaced cleanup and Git-argv tests).
-  - Full suite with a workspace-local `--basetemp` -> **1249 passed** (was
-    1241).
-  - `python -m scripts.check_repo` -> exit 0, zero findings (confirms the
-    ROADMAP.md edits introduced no broken links/anchors and no stale
-    migration-revision references — `bfdd56d` is a commit hash, not a
-    4-digit migration revision, so it does not trip that check).
-  - `git diff --check` -> clean (benign LF/CRLF notices only).
-  - **Genuine external verifier reruns** (never from inside pytest): both
-    `cd backend && python scripts/verify.py --level routine --focus
-    tests/test_verify.py` and the repository-root equivalent
-    (`python backend/scripts/verify.py --level routine --focus
-    tests/test_verify.py`) -> all **10** steps PASS in each run, including
-    the new `temporary-directory cleanup` step; `focused pytest` **73
-    passed**, `full pytest suite` **1249 passed**.
-  - `.verify-tmp/` confirmed to contain only the empty, gitignored root after
-    every run in this pass.
-- Adversarial self-review (fresh read of the corrected diff before this
-  entry): confirmed the strict-child check is evaluated *before*
-  `is_relative_to` specifically because `Path.is_relative_to` is trivially
-  true of a path compared to itself — without the explicit `resolved ==
-  root` branch, the prior code would have let `must_be_under` itself reach
-  `remove()`, exactly the defect Codex found. Confirmed `_execute_and_cleanup`
-  correctly appends the cleanup result even when `_run_steps` itself never
-  raises (the normal case, including the fail-fast/NOT-RUN path) and traced
-  that an unexpected exception escaping `_run_steps` would still run cleanup
-  via `finally` before re-propagating (a genuine crash, not a reported
-  result — outside this finding's scope, unchanged from before). Confirmed
-  `main()`'s `remove=` is never overridden from its real default in
-  production, only in tests. Found no further issues beyond the three
-  findings addressed above.
-- Deviations/known limitations: unchanged from Iteration 1 (no CI, markers,
-  `--level schema`/`--level high-risk`, status generator, metrics, or
-  handoff automation; `--level` choices remain `["routine"]` only). `main`
-  untouched throughout.
-- STOP — awaiting Codex re-review. Do not add CI, schema/high-risk levels,
-  markers, status automation, handoff automation, metrics, or resume product
-  work, or merge `main`.
-
-### Work review
-
-- Date/agent: 2026-08-30, Codex. Correction diff reviewed:
-  `103fbaa..1f54e20` on `tooling/workflow-v3-routine-verifier`.
-- All three findings from review commit `103fbaa` are closed:
-  1. The Git step now applies the script-derived repository path through a
-     command-local `-c safe.directory=...` with forward slashes, never global
-     configuration. It succeeds in the Codex reviewer environment that
-     reproduced the original failure.
-  2. Cleanup now requires a strict resolved child, refuses the temp root,
-     propagates removal failures into a reported cleanup result, always runs
-     after verification, and participates in the overall exit decision.
-  3. ROADMAP now marks Phase 1 complete and removes the stale outstanding-
-     exit-gate claim while preserving the correct three-slice Phase-2 status.
-- Independent verification used the new canonical command itself:
-  `python scripts/verify.py --level routine --focus tests/test_verify.py`.
-  All **10 steps passed**: Ruff format/check, mypy, repository checker, Git
-  diff check, database URL safety, real test-database reachability, focused
-  pytest **73 passed**, full suite **1249 passed**, and temporary-directory
-  cleanup. The `.verify-tmp` root was independently confirmed empty afterward;
-  working tree clean.
-- Findings: none.
-- **Verdict: approved.** The Workflow-v3 routine-verifier foundation and its
-  correction pass are accepted. STOP — do not merge this branch into `main`,
-  add schema/high-risk levels or CI/markers/status/handoff automation, or
-  resume Phase-2 product work until the user explicitly authorizes the next
-  action.
-
-**Merge record (appended, not a rewrite of the entry above):** Approved at review
-commit `0c9787b` (no findings). Per user authorization,
-`tooling/workflow-v3-routine-verifier` was merged into `main` with a normal merge
-commit (`257b6a5`; `--no-ff`, no squash/rebase/force-push) and pushed.
-`main`/`origin/main` are both now at `257b6a5`. Verified: feature branch was clean
-and pushed at `0c9787b` and `main`/`origin/main` were still at `adb6e62`
-immediately before the merge; `main` has zero content diff against the feature
-branch (`git diff main tooling/workflow-v3-routine-verifier --stat` empty);
-migration `0017` remains the sole Alembic head; the canonical
-`python scripts/verify.py --level routine` command itself was run against merged
-`main` and reported **all 9 steps PASS** (Ruff format/check, mypy, `check_repo.py`,
-`git diff --check`, database URL safety, real test-database reachability, full
-suite **1249 passed**, temporary-directory cleanup) in `117.52s`; `.verify-tmp`
-confirmed to contain no run directory afterward; development database reconfirmed
-at `0006`; working tree clean.
-
-**Rollback boundary:** reverting `257b6a5` (a single merge commit) restores `main`
-to `adb6e62` exactly — no schema/migration exists in this slice to downgrade, and
-no data migration accompanies it. This merges the Workflow v3 tooling program's
-first slice only (the routine-verifier foundation: `scripts/verify.py --level
-routine`, `scripts/db_safety.py`, the fail-closed temporary-directory cleanup
-reported as its own step, the reviewer-safe `git diff --check` invocation, the
-Phase-1-complete/three-slice-Phase-2 ROADMAP correction, and Workflow v3's durable
-process rules in `docs/LLM_WORKFLOW.md`) — it does **not** add CI, pytest markers,
-`--level schema`/`--level high-risk`, a canonical-status generator, handoff-
-structure automation, process/performance metrics, or any Phase 2 product change,
-all of which remain not started and are not authorized by this merge.
-
----
-
-## Iteration 2
-
-### Work done
-
 - Date/agent: 2026-08-30, Claude Code (Sonnet 5). Authorized slice: bounded
   read-only Greenhouse live ATS canary (Phase 4 prework) — Class H (external
   network access, per `LLM_WORKFLOW.md`'s risk table). Approved with 15
@@ -487,3 +326,110 @@ all of which remain not started and are not authorized by this merge.
 - STOP — do not merge `main`, implement the provider adapter or pipeline integration,
   add QueryPlanner/ProviderRegistry, resume Phase 2/3 product work, or perform another
   live Greenhouse request without separate user authorization.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-08-30, Claude Code (Sonnet 5). Class H correction pass on
+  `phase-4/greenhouse-canary` for the three bounded findings in review commit
+  `1eeb189` (`bbf3f64..1eeb189`). Base `bbf3f64`. Addresses exactly Findings
+  1-3 from Iteration 1's `Work review`; every otherwise-approved behavior
+  (identity labels, HTTP-boundary/validation/mapping separation, allowlisted
+  fixture, no database writes, no retries/pagination) is unchanged. No new
+  live Greenhouse request was made; the existing committed fixture was
+  preserved after confirming it satisfies the stricter validation added
+  below.
+- Outcome, addressing each finding exactly:
+  1. **Medium — the response is now genuinely streamed and capped, not
+     buffered then checked.** `fetch_greenhouse_jobs_raw` now uses
+     `client.stream("GET", url)` and `response.aiter_bytes()`, accumulating
+     chunks and breaking out of the loop the moment the cumulative byte
+     count exceeds `MAX_RESPONSE_BYTES` — the oversized remainder of the
+     body is never read. Still exactly one GET, no retries, no logging of
+     the body. The function now accepts an injectable `client:
+     httpx.AsyncClient | None` (production leaves it `None` and gets a real
+     single-use client); offline tests pass a client built on
+     `httpx.MockTransport` (an in-process fake transport, never a real
+     socket) with a body served by an async generator that records how many
+     chunks it was asked to produce. Added
+     `test_fetch_stops_consuming_bytes_once_the_cap_is_exceeded` (asserts
+     the generator produced far fewer than the chunks needed for the full
+     body), `test_fetch_makes_exactly_one_request_even_when_oversized`, and
+     `test_fetch_accepts_a_well_formed_streamed_response`.
+  2. **Medium — malformed present job fields are now rejected, not
+     silently degraded.** New pure predicates `_is_usable_job_id` (rejects
+     `bool`, non-`int`/`str`, and blank strings), `_is_absolute_https_url`
+     (requires `https` scheme and a non-empty host), and
+     `_is_valid_optional_first_published` (absent is valid; present must be
+     `datetime.fromisoformat`-parseable *and* timezone-aware) compose into
+     `_has_required_mapping_shape`. `select_representative_job` now filters
+     on this full shape (previously only checked `id is not None`) and
+     raises a sanitized `CanaryFetchError` naming the required shape, never
+     the raw job, when no candidate qualifies.
+     `map_job_to_discovered_job` uses the same predicates as defense in
+     depth and now raises `ValueError` (rather than silently mapping to
+     `None` or a naive datetime) for a present-but-malformed `id`,
+     `absolute_url`, or `first_published`. Added 10 new tests: 6
+     shape-exclusion cases at the selection boundary (bool id, blank id,
+     non-https/relative URL, naive/malformed `first_published`), one
+     proving a shaped job is still selected alongside a malformed one, one
+     accepting a valid aware timestamp, and 3 parametrized mapping-boundary
+     tests (bad id types, bad URLs, bad timestamps) covering the same
+     conditions directly against `map_job_to_discovered_job`. Added
+     `test_committed_fixture_job_satisfies_the_stricter_required_mapping_shape`
+     to prove the existing committed fixture remains valid under the
+     stricter validator — no new live request was needed.
+  3. **Low — fixture output is now constrained to one location and written
+     atomically.** Removed the `--fixture-out` CLI argument entirely;
+     `run_canary` always writes to `DEFAULT_FIXTURE_PATH`. New
+     `_write_fixture_atomically` writes to a sibling temporary file via
+     `tempfile.mkstemp` in the destination's own directory, then moves it
+     into place with `os.replace` (atomic on both POSIX and Windows for a
+     same-directory rename); any failure removes the temp file and
+     re-raises without touching the previously committed fixture. Added
+     `test_write_fixture_atomically_writes_valid_sorted_json`,
+     `test_write_fixture_atomically_leaves_original_untouched_on_replace_failure`
+     (injects a failing `os.replace`, asserts the original file's content
+     and the absence of any leftover temp file), and two tests confirming
+     `--fixture-out` is no longer accepted and the parsed args carry no
+     such attribute.
+- Files changed: `backend/scripts/canary_greenhouse.py`;
+  `backend/tests/test_canary_greenhouse_mapping.py`; this handoff. No
+  migration; no product code; the committed fixture
+  (`greenhouse_live_canary.json`) is unchanged — confirmed still valid
+  under the stricter validator rather than replaced.
+- Commands run and exact results:
+  - `ruff format .` / `ruff check .` -> clean.
+  - `mypy app tests scripts` -> clean, 78 source files.
+  - `python -m pytest tests/test_canary_greenhouse_mapping.py -q` ->
+    **76 passed** (was 45; net +31 for this pass's new streaming/shape/
+    atomic-write tests).
+  - Full suite with a workspace-local `--basetemp` -> **1325 passed** (was
+    1294).
+  - `python -m scripts.check_repo` -> exit 0, zero findings.
+  - `git diff --check` -> clean (benign LF/CRLF notices only).
+  - **Genuine external `python scripts/verify.py --level routine --focus
+    tests/test_canary_greenhouse_mapping.py`** -> all **10 steps PASS**
+    (Ruff format/check, mypy, `check_repo.py`, `git diff --check`, database
+    URL safety, real test-database reachability, focused pytest **76
+    passed**, full suite **1325 passed**, temporary-directory cleanup) in
+    `111.28s`.
+  - `.verify-tmp/` confirmed to contain no run directory afterward.
+  - No live Greenhouse request was performed in this pass; development
+    database untouched throughout.
+- Deviations/known limitations: unchanged from Iteration 1 — the follow-up
+  `DiscoveryProvider` adapter, pipeline integration,
+  `QueryPlanner`/`ProviderRegistry`, database writes, scheduling, and Phase
+  3 normalization remain explicitly out of scope. `main` untouched
+  throughout.
+- STOP — awaiting Codex re-review. Do not merge `main`, implement the
+  follow-up adapter, pipeline integration, QueryPlanner/ProviderRegistry,
+  resume Phase 2/3 product work, or perform another live Greenhouse request
+  without separate user authorization.
+
+### Work review
+
+_Pending._

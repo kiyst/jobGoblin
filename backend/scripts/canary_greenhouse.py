@@ -46,6 +46,20 @@ Safety properties enforced throughout this module (binding requirements):
 - **Exactly one request** — no retries, no pagination loop, no polling, no
   following a redirect to a different host (`follow_redirects=False`), no
   secondary per-job detail request.
+- **The response is streamed, not buffered, past `MAX_RESPONSE_BYTES`** —
+  `fetch_greenhouse_jobs_raw` reads the body incrementally and stops
+  consuming bytes as soon as the cumulative count exceeds the cap, so an
+  unexpectedly large upstream response is never fully read into memory
+  first.
+- **Only a job satisfying the required mapping shape is ever selected or
+  mapped** — a usable `id`, an absolute HTTPS `absolute_url`, and, when
+  present, a valid/timezone-aware `first_published`. A malformed present
+  value excludes a job rather than silently degrading to `None` or an
+  unstable/naive value.
+- **The sanitized fixture is written only to `DEFAULT_FIXTURE_PATH`, and
+  atomically** — there is no caller-supplied output path; a failed write
+  can never leave a truncated fixture in place of the previously committed
+  one.
 - **The committed fixture is an explicit allowlist**, never a raw dump —
   see `FIXTURE_ALLOWED_JOB_FIELDS` and `build_sanitized_fixture`.
 
@@ -56,14 +70,18 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import json
+import os
 import re
 import sys
+import tempfile
 import time
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -202,39 +220,120 @@ def validate_and_parse_response(
     return payload, metadata
 
 
-async def fetch_greenhouse_jobs_raw(board_token: str) -> tuple[dict[str, Any], FetchMetadata]:
+async def fetch_greenhouse_jobs_raw(
+    board_token: str, *, client: httpx.AsyncClient | None = None
+) -> tuple[dict[str, Any], FetchMetadata]:
     """The one real network call this script ever makes. No retries, no
     redirect-following (`follow_redirects=False`), no pagination, no
-    second request of any kind."""
+    second request of any kind. Streams the response body and stops
+    consuming bytes as soon as the cumulative count exceeds
+    `MAX_RESPONSE_BYTES`, so an oversized upstream response is never fully
+    buffered in memory before the size cap is enforced.
+
+    `client` is injectable so offline tests can exercise this function's
+    real streaming behavior against an in-process `httpx.MockTransport` —
+    never a real socket — and remain responsible for closing a client they
+    supplied themselves. Production code always leaves it `None`, in which
+    case this function opens and closes its own single-use client."""
     url = _build_url(board_token)
     start = time.monotonic()
-    try:
-        async with httpx.AsyncClient(
-            timeout=REQUEST_TIMEOUT_SECONDS, follow_redirects=False
-        ) as client:
-            response = await client.get(url)
-    except httpx.HTTPError as exc:
-        elapsed = time.monotonic() - start
-        raise CanaryFetchError(
-            f"request failed ({type(exc).__name__}) after {elapsed:.2f}s: board_token={board_token}"
-        ) from None
-    elapsed = time.monotonic() - start
-    raw = RawResponse(
-        status_code=response.status_code,
-        content_type=response.headers.get("content-type"),
-        body=response.content,
+    owns_client = client is None
+    active_client = (
+        client
+        if client is not None
+        else httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS, follow_redirects=False)
     )
+    try:
+        try:
+            async with active_client.stream("GET", url) as response:
+                status_code = response.status_code
+                content_type = response.headers.get("content-type")
+                chunks: list[bytes] = []
+                total_bytes = 0
+                async for chunk in response.aiter_bytes():
+                    total_bytes += len(chunk)
+                    chunks.append(chunk)
+                    if total_bytes > MAX_RESPONSE_BYTES:
+                        break
+                body = b"".join(chunks)
+        except httpx.HTTPError as exc:
+            elapsed = time.monotonic() - start
+            raise CanaryFetchError(
+                f"request failed ({type(exc).__name__}) after {elapsed:.2f}s: "
+                f"board_token={board_token}"
+            ) from None
+    finally:
+        if owns_client:
+            await active_client.aclose()
+    elapsed = time.monotonic() - start
+    raw = RawResponse(status_code=status_code, content_type=content_type, body=body)
     return validate_and_parse_response(raw, board_token=board_token, elapsed_seconds=elapsed)
 
 
+def _is_usable_job_id(value: Any) -> bool:
+    """A usable identifier: a non-blank `str` or an `int` — never `bool`
+    (a `bool` is an `int` subclass in Python but is never a real Greenhouse
+    identifier) and never any other type."""
+    if isinstance(value, bool) or not isinstance(value, int | str):
+        return False
+    return not (isinstance(value, str) and not value.strip())
+
+
+def _is_absolute_https_url(value: Any) -> bool:
+    """An absolute `https://` URL with a non-empty host — never a relative
+    path, a `javascript:`/`data:` scheme, or a bare string."""
+    if not isinstance(value, str) or not value:
+        return False
+    parsed = urlsplit(value)
+    return parsed.scheme == "https" and bool(parsed.netloc)
+
+
+def _is_valid_optional_first_published(value: Any) -> bool:
+    """`first_published` is optional: absent (`None`) is always valid.
+    When present, it must be a string parseable by `datetime.fromisoformat`
+    that carries an explicit timezone — a naive timestamp is ambiguous and
+    is rejected rather than silently accepted."""
+    if value is None:
+        return True
+    if not isinstance(value, str):
+        return False
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return False
+    return parsed.tzinfo is not None
+
+
+def _has_required_mapping_shape(job: Any) -> bool:
+    """The full shape `map_job_to_discovered_job` requires: a usable `id`,
+    an absolute HTTPS `absolute_url`, and — when present — a valid,
+    timezone-aware `first_published`. Used both to filter candidates in
+    `select_representative_job` and, redundantly, inside
+    `map_job_to_discovered_job` itself as defense in depth."""
+    return (
+        isinstance(job, dict)
+        and _is_usable_job_id(job.get("id"))
+        and _is_absolute_https_url(job.get("absolute_url"))
+        and _is_valid_optional_first_published(job.get("first_published"))
+    )
+
+
 def select_representative_job(jobs: list[dict[str, Any]]) -> dict[str, Any]:
-    """Deterministically selects one job: filters to jobs with a usable
-    `id`, sorts by that `id`'s stringified form ascending, and returns the
-    first. Never relies on the order Greenhouse's response happened to
-    arrive in (binding requirement)."""
-    valid_jobs = [job for job in jobs if isinstance(job, dict) and job.get("id") is not None]
+    """Deterministically selects one job: filters to jobs satisfying the
+    required mapping shape (usable `id`, absolute HTTPS `absolute_url`, and
+    a valid/aware `first_published` when present), sorts by that `id`'s
+    stringified form ascending, and returns the first. Never relies on the
+    order Greenhouse's response happened to arrive in (binding
+    requirement). A malformed present value (not merely a missing one)
+    excludes a job from selection rather than propagating an unstable
+    identity or invalid timestamp downstream."""
+    valid_jobs = [job for job in jobs if _has_required_mapping_shape(job)]
     if not valid_jobs:
-        raise CanaryFetchError("no job in the response has a usable 'id' field")
+        raise CanaryFetchError(
+            "no job in the response satisfies the required mapping shape "
+            "(usable id, absolute HTTPS absolute_url, and a valid/aware "
+            "first_published when present)"
+        )
     return sorted(valid_jobs, key=lambda job: str(job["id"]))[0]
 
 
@@ -260,11 +359,12 @@ def map_job_to_discovered_job(
     - `apply_url` stays `None` — the public Job Board API does not expose a
       distinct apply link separate from `absolute_url`; never invented by
       copying it (binding requirement).
-    - `posted_at` comes from `first_published` only when present and
-      string-shaped — a field name that is itself an explicit publish-time
-      claim, unlike `updated_at` (a last-modified time), which is never
-      used for this field (binding requirement). Absent that field,
-      `posted_at` stays `None`.
+    - `posted_at` comes from `first_published` only — a field name that is
+      itself an explicit publish-time claim, unlike `updated_at` (a
+      last-modified time), which is never used for this field (binding
+      requirement). Absent that field, `posted_at` stays `None`; a
+      *present* but malformed or timezone-naive value raises `ValueError`
+      rather than silently mapping to `None` or a naive datetime.
     - `description`/`compensation_text` stay `None` — this canary never
       requests `content=true`, so there is no HTML description or
       compensation text to map in the first place.
@@ -273,13 +373,14 @@ def map_job_to_discovered_job(
       real payload (binding requirement: company supplied externally).
     """
     job_id = job.get("id")
-    if job_id is None:
-        raise ValueError("job is missing required 'id' field")
+    if not _is_usable_job_id(job_id):
+        raise ValueError("job is missing a required, usable 'id' field")
     source_job_id = str(job_id)
 
     absolute_url = job.get("absolute_url")
-    if not isinstance(absolute_url, str) or not absolute_url:
-        raise ValueError("job is missing required 'absolute_url' field")
+    if not _is_absolute_https_url(absolute_url):
+        raise ValueError("job is missing a required absolute HTTPS 'absolute_url' field")
+    assert isinstance(absolute_url, str)
 
     title = job.get("title")
     title = title if isinstance(title, str) else None
@@ -293,13 +394,10 @@ def map_job_to_discovered_job(
     requisition_id = job.get("requisition_id")
     requisition_id_raw = str(requisition_id) if requisition_id is not None else None
 
-    posted_at: datetime | None = None
     first_published = job.get("first_published")
-    if isinstance(first_published, str):
-        try:
-            posted_at = datetime.fromisoformat(first_published)
-        except ValueError:
-            posted_at = None
+    if not _is_valid_optional_first_published(first_published):
+        raise ValueError("job has a malformed or timezone-naive 'first_published' field")
+    posted_at = datetime.fromisoformat(first_published) if first_published is not None else None
 
     return DiscoveredJob(
         provider=DISCOVERED_JOB_PROVIDER,
@@ -348,6 +446,31 @@ def build_sanitized_fixture(
     }
 
 
+def _write_fixture_atomically(fixture: dict[str, Any], destination: Path) -> None:
+    """Writes `fixture` as pretty-printed, sorted-key JSON to `destination`
+    atomically: the content is written to a sibling temporary file first,
+    then moved into place with `os.replace` (an atomic rename on both POSIX
+    and Windows for a same-directory move). A failed write or an
+    interrupted process therefore can never leave the previously committed
+    fixture truncated or partially overwritten — either the old content or
+    the fully-written new content is present, never a partial file. There
+    is deliberately no caller-supplied destination path (binding
+    requirement): repository writes are constrained to the one authorized
+    fixture location."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{destination.name}.", suffix=".tmp", dir=str(destination.parent)
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(fixture, indent=2, sort_keys=True) + "\n")
+        os.replace(tmp_name, destination)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.remove(tmp_name)
+        raise
+
+
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="canary_greenhouse.py",
@@ -361,11 +484,10 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         required=True,
         help="Human-readable company display name, supplied explicitly — never inferred.",
     )
-    parser.add_argument("--fixture-out", type=Path, default=DEFAULT_FIXTURE_PATH)
     return parser.parse_args(argv)
 
 
-async def run_canary(board_token: str, company: str, fixture_out: Path) -> None:
+async def run_canary(board_token: str, company: str) -> None:
     discovered_at = datetime.now(UTC)
     payload, metadata = await fetch_greenhouse_jobs_raw(board_token)
     print(
@@ -397,9 +519,8 @@ async def run_canary(board_token: str, company: str, fixture_out: Path) -> None:
         company=company,
         accessed_at=discovered_at.isoformat(),
     )
-    fixture_out.parent.mkdir(parents=True, exist_ok=True)
-    fixture_out.write_text(json.dumps(fixture, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    print(f"fixture written: {fixture_out}")
+    _write_fixture_atomically(fixture, DEFAULT_FIXTURE_PATH)
+    print(f"fixture written: {DEFAULT_FIXTURE_PATH}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -410,7 +531,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     try:
-        asyncio.run(run_canary(args.board_token, args.company, args.fixture_out))
+        asyncio.run(run_canary(args.board_token, args.company))
     except CanaryFetchError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
