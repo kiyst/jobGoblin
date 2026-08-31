@@ -432,4 +432,41 @@ that detail.
 
 ### Work review
 
-_Pending._
+- Date/agent: 2026-08-30, Codex. Correction diff reviewed:
+  `1eeb189..84aa4bc` on `phase-4/greenhouse-canary`.
+- Independent verification performed: inspected the complete correction diff and
+  re-derived each prior invariant from the executable path; confirmed the existing
+  sanitized fixture is byte-unchanged and satisfies the stricter mapping predicates;
+  confirmed no additional live request exists in this pass; ran the genuine external
+  `scripts/verify.py --level routine --focus
+  tests/test_canary_greenhouse_mapping.py` from `backend/` — all 10 steps PASS,
+  including Ruff, mypy, repository/diff checks, disposable-test-database safety and
+  reachability, **76 focused tests**, **1325 full-suite tests**, and temporary-directory
+  cleanup. Development data was not touched.
+- Prior-finding disposition:
+  1. **Closed — streamed size cap.** The real fetch path uses one
+     `client.stream("GET", ...)` request and stops iterating immediately after the
+     cumulative cap is exceeded. The injected `MockTransport` regression proves the
+     producer is not fully consumed, and a separate regression proves the oversized
+     path still makes exactly one request.
+  2. **Closed — fail-closed mapping shape.** Selection and direct mapping share the
+     same usable-ID, absolute-HTTPS-URL, and optional-aware-publication-time predicates.
+     Malformed entries cannot become `DiscoveredJob` values; selection failure is a
+     fixed, sanitized `CanaryFetchError` that contains no raw job evidence. The existing
+     real fixture passes the stricter boundary without being regenerated.
+  3. **Closed — constrained atomic output.** The caller-controlled output option is
+     gone; the executable path always targets `DEFAULT_FIXTURE_PATH`. The same-directory
+     temporary-file/`os.replace` implementation preserves the prior file on failure and
+     cleans the temporary file, proven offline.
+- Findings: **none**.
+- Missing/inconclusive checks: the external API call was intentionally not repeated;
+  this re-review accepts the previously recorded one-request observation and independently
+  verifies the resulting sanitized fixture and every offline correction invariant.
+  Greenhouse terms remain explicitly unreviewed, as disclosed.
+- Verdict: **Approved**. The bounded Greenhouse live-canary slice and its correction
+  pass are accepted at `84aa4bc`.
+- Exact requested corrections: none.
+- STOP — wait for the user's explicit authorization before merging
+  `phase-4/greenhouse-canary` into `main`. Do not begin the live-to-test-database
+  provider adapter, pipeline integration, QueryPlanner/ProviderRegistry, Phase 2/3
+  product work, scheduling, or another live Greenhouse request.
