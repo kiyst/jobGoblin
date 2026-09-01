@@ -308,4 +308,110 @@ change, all of which remain not started and are not authorized by this merge.
 
 ### Work review
 
-_Pending._
+- Date/agent: 2026-09-01, Claude Code (Sonnet 5), acting as independent reviewer of
+  `codex/tooling-safe-compaction`. Diff reviewed: `10b9432..c750762` (7 files: `CLAUDE.md`,
+  `.claude/settings.json`, `.claude/hooks/compact_checkpoint.py`, `.gitignore`,
+  `docs/LLM_WORKFLOW.md`, `backend/tests/test_compact_checkpoint.py`, this handoff).
+  Confirmed no product/schema/migration/provider/ingestion file changed.
+- Independent verification performed: read every changed file directly (not the Work
+  done summary alone); ran the genuine external
+  `python scripts/verify.py --level routine --focus tests/test_compact_checkpoint.py`
+  from `backend/` — all **10 steps PASS**, **9 focused tests**, **1379 full-suite tests**,
+  matching the claimed counts exactly. Dispatched a fresh-context documentation-verification
+  pass (no prior context on this diff) against Claude Code's own published hooks/memory
+  documentation to check the claims below rather than trusting either my own or the
+  implementer's assumptions about undocumented behavior.
+- Checks explicitly requested by the user, with results:
+  - **`PreCompact`/`SessionStart(compact)` hook registration**: confirmed both are real,
+    documented Claude Code hook events; `SessionStart`'s documented matcher values include
+    `compact`; matchers are regex, so `"manual|auto"` correctly matches either trigger.
+    `${CLAUDE_PROJECT_DIR}` is a real, documented substituted variable. (No literal `/hooks`
+    TUI view is reachable from this non-interactive harness; verified via direct
+    `.claude/settings.json` inspection plus external documentation confirmation instead.)
+  - **Root `CLAUDE.md` loading**: confirmed Claude Code auto-loads a root `CLAUDE.md` and
+    explicitly re-reads/re-injects it after `/compact` (no `/memory`/`/status` view
+    reachable from this harness either; confirmed via the file's presence at the documented
+    location plus external documentation).
+  - **`PreCompact` never blocks emergency auto-compaction**: verified by construction —
+    `main()`'s `"pre"` branch wraps `write_checkpoint()` in a bare `except Exception` and
+    always returns `0`; the function never writes anything to stdout in that mode. This
+    matches every documented Claude Code hook-blocking mechanism (nonzero exit; a stdout
+    `"decision"`-shaped field) with neither present. `PreCompact`'s own blocking mechanism
+    specifically is not independently documented in what the verification pass could reach,
+    so this is "non-blocking by construction," not "non-blocking per cited spec" — worth
+    recording as a residual documentation gap, not a code defect.
+  - **Checkpoint contains only credential-free Git metadata and doc pointers**: confirmed by
+    reading `render_checkpoint`/`capture_git_snapshot` — only branch/HEAD/main/origin-main/
+    upstream strings, a clean boolean, a classification/reason string, and the fixed
+    `RECOVERY_DOCS` path list. No `os.environ` access anywhere in the module.
+  - **Atomic replacement and temp-file cleanup**: `tempfile.mkstemp` + `os.replace` (atomic
+    and overwrite-safe on both POSIX and Windows) + `finally: unlink(missing_ok=True)`.
+    Confirmed no leftover `.tmp` file after a successful write via the existing test.
+  - **Clean synchronized `main` is the only OPTIMAL state**: confirmed — `optimal_checkpoint`
+    and its four fail-closed parametrized cases (dirty, wrong branch, stale `origin/main`,
+    stale `main`) are all correctly implemented and tested.
+  - **Dirty is unsafe; clean pushed feature branch is only recoverable**: confirmed via
+    `pushed_feature_checkpoint` and both corresponding tests.
+  - **Post-compaction restoration requires re-reading Git state and docs**: confirmed —
+    stated in both the injected checkpoint's own "Mandatory recovery" section and
+    independently in `CLAUDE.md` itself, doubly reinforced.
+  - **No transcript/summary/env value/DB URL/credential/source content stored**: confirmed
+    by code reading and the existing dedicated test (which also proves it even when a real
+    `DATABASE_URL`-shaped env var is present in the process environment).
+- Findings, by severity:
+  1. **Medium — the routine verifier never lints or type-checks the new hook script.**
+     `verify.py`'s `ruff_format_command()`/`ruff_check_command()` run against `.` with
+     `cwd=BACKEND_DIR`, and `mypy_command()` scans only `app tests scripts` — all scoped
+     inside `backend/`. `.claude/hooks/compact_checkpoint.py` lives at the repository root's
+     `.claude/` directory and is covered by neither. Confirmed by running `ruff format
+     --check`/`ruff check`/`mypy` directly against the file (all pass today), but nothing in
+     the standard verification workflow enforces this going forward, and the Work done
+     entry's "Ruff format/check, mypy ... PASS" phrasing does not make this scope gap
+     explicit. No fix applied — flagged for the user/Codex to decide whether expanding
+     `verify.py`'s scope is worth doing in a follow-up, since `verify.py` itself is
+     explicitly out of this slice's stated file list.
+  2. **Low-Medium — one of four checkpoint classifications is never asserted by name.**
+     `checkpoint_classification()`'s fourth branch ("RECOVERABLE WITH RECONCILIATION" — clean,
+     but neither an optimal main-sync nor a pushed-feature-equals-upstream state, e.g. clean
+     `main` lagging `origin/main`, or a clean branch with no configured upstream at all) is
+     reachable — one of the existing parametrized `test_optimal_checkpoint_fails_closed_when_main_state_differs`
+     cases (`{"origin_main_head": "older"}`) even produces a snapshot that would resolve to
+     it — but no test calls `checkpoint_classification()` on such a snapshot and asserts the
+     resulting label/reason; only the unrelated `optimal_checkpoint` boolean is checked for
+     those cases.
+  3. **Low — `restore_context()`'s call site is not exception-guarded, unlike
+     `write_checkpoint()`'s.** `main()`'s `"restore"` branch calls it directly; a present-but-
+     unreadable checkpoint file (encoding error, permission error) would raise uncaught,
+     exiting the `SessionStart(compact)` hook non-zero. The graceful fallback message only
+     covers the *missing*-file case. Lower stakes than `PreCompact` (a failing `SessionStart`
+     hook is not the emergency-compaction path this design is centrally protecting), but
+     inconsistent with the module's own stated non-blocking posture.
+  4. **Low — the temp-file cleanup path is proven only for the success case.**
+     `test_write_checkpoint_is_atomic_and_restore_prints_it` confirms no `.tmp` file remains
+     after a *successful* write; no test forces `os.fdopen`/`os.replace` to fail and confirms
+     the `finally` block's `unlink(missing_ok=True)` still fires. Low severity because
+     `main()`'s broad exception handling around `write_checkpoint()` already guarantees
+     non-blocking behavior regardless of whether cleanup itself succeeds.
+  5. **Informational — risk classification.** This slice is filed Class R; its central
+     invariant (credential/env-var exclusion from a persisted artifact) is explicitly one of
+     `LLM_WORKFLOW.md`'s own listed Class H triggers ("security/privacy"). Actual risk is low
+     (Git-derived metadata only), and the verification depth already applied (full offline
+     suite, genuine external routine-verifier run) matches Class H's own bar in practice — a
+     labeling point, not a verification gap.
+- Missing/inconclusive checks: no literal Claude Code `/hooks`, `/memory`, or `/status`
+  interactive view was reachable from this non-interactive review harness; those specific
+  checks were performed via direct file inspection plus an independent documentation-
+  verification pass instead, as noted above. `PreCompact`'s own stdin field name/blocking
+  mechanism is not independently confirmed against public documentation (see finding
+  discussion above) — the code's behavior was verified by construction instead.
+- Verdict: **Approved with binding clarifications** — the compaction-safety design,
+  credential-exclusion guarantee, and non-blocking behavior are all independently confirmed;
+  Findings 1-4 are bounded verification/robustness gaps, not design defects, and Finding 5 is
+  informational only.
+- Exact bounded correction, if the user authorizes one: address Findings 1-4 in
+  `.claude/hooks/compact_checkpoint.py`, `backend/tests/test_compact_checkpoint.py`, and (only
+  if the user separately authorizes expanding verification scope) `backend/scripts/verify.py`.
+  No change to `CLAUDE.md`, `.claude/settings.json`, `.gitignore`, or `docs/LLM_WORKFLOW.md`
+  is required by any finding above.
+- STOP — do not merge `main`, begin the `ambiguous_match` slice, or treat this review as
+  authorization for a correction pass until the user explicitly approves one.
