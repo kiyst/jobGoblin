@@ -176,14 +176,31 @@ implementation:
   occurrences already correctly attached to the same `Job` (e.g. two prior sources already
   merged) count as one candidate, not multiple — getting this wrong would make an
   already-correctly-merged `Job` spuriously ambiguous on its third and further occurrence.
-- **Multiple candidates fail closed** via a new `AmbiguousIdentityMatchError`, raised
-  before any mutation, uncaught in `pipeline.py` — a whole-run failure, not a
-  per-posting-isolated one. `ambiguous_match` persistence (the real `identity_conflicts`
-  row ADR 0007 defines for this case) remains a deliberately separate, later slice —
-  its `incoming_value` shape for `ambiguous_match` is not yet fully specified anywhere
-  (unlike `existing_value`, which DATA_MODEL.md already pins down as a JSON array of
-  candidate `job_id`s) and is exactly the kind of decision that slice should open with,
-  not one this slice should invent silently.
+- **Multiple candidates persist a genuine `ambiguous_match` conflict, never fail the
+  whole run (later slice).** The fast `<=2` probe (`_discover_candidates`) still
+  triggers ambiguity detection at both the pre-lock and post-lock-recheck sites in
+  `_attach_to_candidate`, but the persisted evidence is the complete, deterministically
+  sorted, distinct candidate set from an authoritative unbounded requery
+  (`_discover_all_candidates`), run under the same tier-specific advisory lock already
+  held — never the probe's own truncated result. If that authoritative requery
+  disagrees with the probe and resolves to fewer than two candidates, this is treated as
+  instability, not ambiguity: `CandidateResolutionUnstableError` is raised and nothing is
+  persisted. A genuine, stable ambiguity creates a standalone Job/JobOccurrence —
+  exactly as Tier 5's zero-candidate path already does — tagged `UpsertKind.AMBIGUOUS`,
+  and `persist_posting` records it as an `identity_conflicts` row
+  (`conflict_type='ambiguous_match'`): `existing_value` is the sorted array of every
+  candidate Job-ID string; `incoming_value` is a single-element array holding the new
+  JobOccurrence's own ID string — the two arrays intentionally hold different entity
+  types (Jobs vs. the one new JobOccurrence), not a symmetry bug. No candidate row is
+  ever mutated on this path, including at the post-lock site where the first
+  candidate's own Job row may already be locked `FOR UPDATE` — that lock is held, but
+  neither `_attach_to_candidate` nor its caller writes to it. Counted as `jobs_inserted`
+  in `pipeline.py` (a real, standalone Job was created), with the same `had_conflict`
+  flag and `ingestion_identity_conflict` log line (IDs only) the `QUARANTINED` outcome
+  already used, and an exhaustive, fail-closed dispatch over all five `UpsertKind`
+  values (any future unhandled value raises rather than silently miscounting). This
+  replaces the earlier `AmbiguousIdentityMatchError` design, which raised uncaught and
+  failed the whole ingestion run for any ambiguous posting.
 - **Candidate resolution is single-pass and fail-closed, never retried.** After the
   tier-specific advisory lock (a new `canonical_url_advisory_lock_key()`/
   `tenant_requisition_advisory_lock_key()` pair in `natural_key.py`, sharing
@@ -276,3 +293,31 @@ implementation:
   tuning once Phase 4/7 adapters see actual ATS/aggregator URLs; it's deliberately
   specified as "starts conservative, grows with evidence" rather than guessed exhaustively
   now.
+
+## Addendum (2026-08-30): the Greenhouse live-ingestion proof's identity labels
+
+The Greenhouse live-to-disposable-database ingestion proof
+(`backend/scripts/live_proof_greenhouse_ingestion.py`) is a diagnostic script that
+fetches one real posting directly over HTTP — it does not invoke the `ats-scrapers`
+dependency at all — yet it deliberately labels every row it produces
+`provider="ats_scrapers"`, `source="greenhouse"`, the same pair the (still purely
+diagnostic, non-shipped) Greenhouse canary already used. This is a narrow, explicit
+extension of this ADR's identity model, not a silent inheritance:
+
+- `provider`/`source` are this project's internal categorization labels for the
+  natural-key/identity domain (see `app/db/models/raw_job_ingestions.py`'s own
+  docstring), not a literal attribution of which Python dependency performed a fetch.
+  This ADR's own natural-key design exists specifically to make *the same real-world
+  posting* collide onto the same `(provider, source, tenant, job_id)` tuple regardless
+  of which code path observed it — a real `AtsScrapersProvider`-based Greenhouse
+  adapter, built later, must resolve to the same `Job`/`JobOccurrence` this diagnostic
+  script creates for a genuinely re-observed posting, not a duplicate one requiring a
+  future backfill migration to unify two label spaces.
+- **This does not authorize a production direct-HTTP Greenhouse adapter**, and it does
+  not redefine `provider="ats_scrapers"` to mean "any direct HTTP call to an ATS this
+  project happens to make." It authorizes exactly one diagnostic script's identity
+  labels, for the reason stated above. A future production adapter that fetches
+  Greenhouse directly (bypassing `ats-scrapers`) as a deliberate, permanent design —
+  rather than a one-off diagnostic proof — would need its own explicit identity-label
+  decision, made the same way this one was: stated, reasoned, and recorded here, not
+  inferred from this diagnostic script's precedent alone.

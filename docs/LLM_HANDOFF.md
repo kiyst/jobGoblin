@@ -98,208 +98,183 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-08-30, Claude Code (Sonnet 5). Authorized slice: Workflow v3
-  automation/tooling program, **first bounded slice — routine-verifier
-  foundation** — Class H (safety-relevant database-target logic; otherwise
-  Class R tooling). Base `main`@`adb6e62` -> branch
-  `tooling/workflow-v3-routine-verifier`. Implements exactly the approved
-  proposal's first slice with the 11 binding clarifications; no CI, markers,
-  `--level schema`/`--level high-risk`, status generator, metrics, or handoff
-  automation.
-- Outcome, per the binding clarifications:
-  1. **`backend/scripts/db_safety.py`** — `assert_is_disposable_test_database`,
-     its `_redact` helper (renamed `redact_database_url`, same body), and
-     `DEFAULT_TEST_DATABASE_URL` moved out of `tests/conftest.py` verbatim
-     (behavior/exception type/redaction/conservative name-only comparison all
-     unchanged — proven by `test_users.py`'s 9 existing assertions passing
-     unmodified against the new import path). New `resolve_test_database_url()`
-     factors out the `test_database_url or DEFAULT_TEST_DATABASE_URL` fallback
-     so `conftest.py`'s `db_engine` fixture and `verify.py` share one
-     expression, never two copies. Deliberately not under `app/db/` — tooling
-     only, never packaged (`pyproject.toml` ships only `app/`).
-  2. **`backend/scripts/verify.py --level routine`** — runs, in order: Ruff
-     format check, Ruff lint, mypy, `check_repo.py` (its own subprocess step,
-     `-m scripts.check_repo`, never assumed covered merely by
-     `test_check_repo.py`'s in-process function tests), `git diff --check`, a
-     pure URL-parsing disposable-test-database validation (dev DB need not be
-     reachable), a real test-database reachability preflight (must succeed
-     before pytest runs), optional focused pytest when `--focus` is given, then
-     the full suite. Every step reports PASS/FAIL/NOT RUN with a duration;
-     first failure blocks all later steps as NOT RUN rather than silently
-     omitting them. Every tool invocation is `[sys.executable, "-m", ...]`
-     (`git diff --check` is the one necessary exception) — identical on
-     Windows and Linux, confirmed by real runs from both `backend/` and the
-     repository root.
-  3. **`.verify-tmp/<unique-per-run>/`** — `create_run_dir()` uses
-     `tempfile.mkdtemp` under a gitignored `.verify-tmp/` root; `safe_rmtree()`
-     resolves both paths and refuses to delete anything not actually located
-     under that root (proven against a `.verify-tmp-evil` lookalike-prefix
-     attempt, not just a naive string check) before removing only that
-     invocation's own directory in `finally`.
-  4. **`--focus`** accepts file paths and `path::node_id` targets; each is
-     validated (no leading `-`; the pre-`::` portion must resolve to a real
-     file under `backend/tests`) before being passed to pytest as argv list
-     elements, never a shell string. Focused and full-suite results are
-     reported as separate steps; routine verification always runs the full
-     suite regardless of `--focus`.
-  5. **No recursive pytest invocation**: `test_verify.py`'s 65 tests inject a
-     fake subprocess runner and/or a fake connectivity check everywhere;
-     `verify.main()` is never called from any test (confirmed by grep). The
-     genuine end-to-end `python scripts/verify.py --level routine` command was
-     run for real, repeatedly, outside pytest — see Commands below.
-  6. **Pytest result parsing**: `parse_pytest_summary()` scans backward for
-     pytest 8.3.4's real summary line, handling both the framed and `-q`
-     unframed shapes and the optional parenthesized `(H:MM:SS)` suffix pytest
-     appends on longer runs. **Found and fixed during verification**: the
-     first version didn't anticipate that suffix, so a genuine full-suite run
-     ("1235 passed in 101.82s (0:01:41)") reported PASS but "counts
-     unavailable" — never a wrong or invented count, but not the intended
-     accurate report either. Fixed and reconfirmed against a real run.
-  7. **`docs/LLM_WORKFLOW.md`** now durably contains: a `Definition of Ready`
-     section; three named review verdicts (Approved / Approved with binding
-     clarifications / Redesign required); a concise-amendments-not-full-
-     rewrites rule; a two-round Class H revision limit with a joint-decision-
-     table fallback; a required-invariants-vs-recommended-mechanisms
-     distinction; a `Verification matrix` note pointing at `verify.py` as the
-     canonical way to run its "Python without schema" row once a level exists.
-     `docs/PHASE_RISK_CHECKLIST.md` was deliberately **not** touched — it
-     already contains a generic pointer to `LLM_WORKFLOW.md` for exactly this
-     content, so no additional pointer was needed.
-  8. **Corrected known-stale status now**: `README.md` no longer claims
-     "Phase 1 in progress, users-only"; `docs/ROADMAP.md` no longer claims
-     "two Phase 2 slices merged" / Tier-2/Tier-3 "not yet merged" — both now
-     state the Git-verified truth (three Phase 2 vertical slices merged
-     through `main`@`adb6e62`, confirmed via `git log --oneline --merges main`
-     before writing either correction). No status generator was built.
-     `README.md`'s Verification section now leads with
-     `python scripts/verify.py --level routine`; the prior manual chain
-     remains as an explicitly-labeled troubleshooting/reference fallback, now
-     also including `git diff --check` (missing from the original chain) so
-     it doesn't silently under-represent what the canonical command runs.
-  9. **Roadmap ordering correction recorded, not implemented**: routine
-     verifier (this slice) -> schema level -> minimal CI (routine/schema only)
-     -> high-risk level + incremental marker adoption -> canonical-status/
-     handoff validators -> mechanically-derived metrics. CI is explicitly not
-     gated behind complete marker adoption or high-risk orchestration.
-- Files changed: `backend/scripts/verify.py` (new), `backend/scripts/db_safety.py`
-  (new), `backend/tests/test_verify.py` (new, 65 tests), `backend/tests/conftest.py`,
-  `backend/tests/test_users.py`, `backend/app/config.py` (one-line comment fix,
-  found by adversarial review — see below), `.gitignore`, `README.md`,
-  `docs/LLM_WORKFLOW.md`, `docs/ROADMAP.md`, this handoff. `docs/PHASE_RISK_CHECKLIST.md`
-  deliberately not touched. No migration; no CI YAML; no product code changed.
+- Date/agent: 2026-09-01, Claude Code (Sonnet 5). Class H correction pass on
+  `codex/tooling-safe-compaction` for Findings 1-4 from review commit
+  `58995c1` (`c750762..58995c1`). Base `58995c1`. Reclassified Class H (not
+  the original Class R) because this pass directly touches
+  context-recovery and credential-exclusion behavior — matching Finding 5's
+  own observation in the review being corrected. No product code,
+  `CLAUDE.md`, `.claude/settings.json`, database code, providers,
+  ingestion, or the `ambiguous_match` proposal touched.
+- **Documentation correction to the prior review, not a rewrite of it**: my
+  own `58995c1` review stated `PreCompact`'s stdin `"trigger"` field and its
+  blocking mechanism were not independently confirmed against public
+  documentation (a fresh-context agent dispatch could not reach that
+  specific section). The user's authorization for this correction pass
+  states the full official `PreCompact` reference does document both: a
+  `trigger` field with `manual`/`auto` values, and that returning exit code
+  `2` or emitting `{"decision": "block"}` blocks compaction — with an
+  explicit warning that blocking a recovery compaction triggered by a
+  context-limit error would surface the original failure instead of
+  preventing it. Recording this per the user's instruction, as a correction
+  to the review's own residual uncertainty, not as newly independently
+  re-verified by this pass: `compact_checkpoint.py`'s existing exit-0/
+  no-decision-output behavior in `"pre"` mode is consistent with that
+  spec either way. Iteration 1's own historical text is left exactly as
+  written.
+- Outcome, addressing each finding exactly:
+  1. **Medium — the routine verifier now lints and type-checks the hook
+     script on every run.** Added `CLAUDE_HOOKS_DIR = REPO_ROOT / ".claude" /
+     "hooks"` to `scripts/verify.py`; `ruff_format_command()`/
+     `ruff_check_command()`/`mypy_command()` now include it alongside the
+     existing `backend/`-scoped targets. Confirmed empirically (`--show-settings`/
+     `--verbose`) that both tools resolve `backend/pyproject.toml`'s own
+     config for a path outside `backend/` when invoked with
+     `cwd=BACKEND_DIR`, exactly as the existing targets already do — no new
+     config file needed. The existing 10-step verifier structure is
+     unchanged; only the Ruff/mypy steps' own argument lists grew. Updated
+     `test_verify.py`'s three exact-command tests plus a new test proving
+     `CLAUDE_HOOKS_DIR` resolves to the real directory containing
+     `compact_checkpoint.py` (so the command tests aren't asserting
+     coverage of an empty path).
+  2. **Low-Medium — the "RECOVERABLE WITH RECONCILIATION" classification is
+     now asserted by name.** New parametrized test covers both a clean
+     `main` unsynchronized from `origin/main` and a clean feature branch
+     with no configured upstream at all (`upstream_head=""`, matching
+     `_git`'s own fail-safe for an unresolvable `@{upstream}`), asserting
+     both `optimal_checkpoint`/`pushed_feature_checkpoint` are `False` and
+     the classification/reason match exactly.
+  3. **Low — `restore_context()` now fails safely for a present-but-broken
+     checkpoint.** New `_read_checkpoint_safely()` catches `(OSError,
+     ValueError)` (the latter covers `UnicodeDecodeError`) around the
+     existence check and read, falling back to the exact same fixed,
+     pre-existing safe message — never exception text, never a path other
+     than the one already-named `CHECKPOINT_PATH` constant, never partial
+     file content. `main()`'s `"restore"` branch additionally wraps
+     `restore_context()` in a broad `except Exception`, mirroring the
+     `"pre"` branch's own established defense-in-depth pattern, so the
+     `SessionStart(compact)` hook cannot fail even from an unanticipated
+     future regression. Added three tests: an actually-invalid-UTF-8 file
+     on disk (no monkeypatching needed), an injected `Path.read_text`
+     failure scoped to only the checkpoint's own path (delegates to the
+     real method for anything else), and a forced `restore_context()`
+     failure proving `main(["restore"])` still emits the fallback and
+     returns `0`.
+  4. **Addressed — atomic-replacement failure now has dedicated failure-path
+     tests.** Two new tests inject an `os.replace` failure: one calls
+     `write_checkpoint()` directly and confirms (a) no `.tmp` file remains
+     in the runtime directory afterward and (b) a pre-existing, genuinely
+     different prior checkpoint file is byte-for-byte untouched; the other
+     calls the real `main(["pre"])` entry point under the same injected
+     failure and confirms it still returns `0` — the existing `finally:
+     temporary_path.unlink(missing_ok=True)` and the `"pre"` branch's
+     existing broad exception handling were already correct; these tests
+     newly prove it rather than leaving it implicit.
+- Files changed: `.claude/hooks/compact_checkpoint.py`; `backend/scripts/
+  verify.py`; `backend/tests/test_compact_checkpoint.py`; `backend/tests/
+  test_verify.py`; this handoff. `CLAUDE.md`, `.claude/settings.json`,
+  `.gitignore`, `docs/LLM_WORKFLOW.md` unchanged — confirmed by `git status`.
 - Commands run and exact results:
-  - `ruff format .` / `ruff check .` -> clean on all changed/new files.
-  - `mypy app tests scripts` -> clean, 76 source files (was 73).
-  - `python -m pytest tests/test_verify.py -q` -> **65 passed** (unit tests
-    only; never launches a real subprocess or calls `main()`).
-  - `python -m pytest tests/test_users.py -q` -> **26 passed**, unchanged,
-    proving the `db_safety.py` extraction is behavior-preserving.
-  - Full suite with a workspace-local `--basetemp` -> **1241 passed** (was
-    1176 on `main`; +65 new unit tests).
+  - Direct `ruff format`/`ruff check` against `backend/` and against
+    `.claude/hooks/compact_checkpoint.py` explicitly -> clean.
+  - `mypy app tests scripts` (now including `CLAUDE_HOOKS_DIR` via
+    `mypy_command()`) -> clean, 82 source files.
+  - `python -m pytest tests/test_compact_checkpoint.py tests/test_verify.py -q`
+    -> **90 passed** (was 83 combined pre-pass: 9 + 74; net +7 in
+    `test_compact_checkpoint.py`, +1 in `test_verify.py`).
+  - Full suite -> **1387 passed**.
   - `python -m scripts.check_repo` -> exit 0, zero findings.
-  - `git diff --check` -> clean (benign LF/CRLF notices only).
-  - **Genuine external `python scripts/verify.py --level routine`** (never
-    from inside pytest), run repeatedly across fixes: final run -> all 8
-    steps PASS, `1241 passed`, `108.33s` total; also run successfully from
-    the repository root (not just `backend/`) with identical behavior; also
-    run with `--focus tests/test_ingestion_hashing.py` -> focused (5 passed)
-    and full-suite steps both reported separately, both PASS.
-  - Adversarial external runs (real invocations, not just unit tests):
-    `TEST_DATABASE_URL` malformed -> `disposable test-database URL
-    validation` FAILs cleanly with `ArgumentError` (see finding below), no
-    crash, no credential leak, pytest steps NOT RUN; `TEST_DATABASE_URL`
-    equal to the dev database -> same step FAILs with the guard's own safe
-    message, pytest steps NOT RUN; `TEST_DATABASE_URL` safely-named but
-    unroutable (port 1) -> URL validation PASSes, reachability preflight
-    FAILs with `unreachable: ConnectionRefusedError` (type name only), full
-    suite correctly NOT RUN rather than silently skipped/passing; `--focus`
-    given a `-`-prefixed or path-outside-`backend/tests` target -> rejected
-    before any step runs, exit 2.
-  - Development database (`alembic current`, default `DATABASE_URL`) ->
-    `0006`, unchanged; no migration touched.
-  - `.verify-tmp/` confirmed empty (only the gitignored root itself remains)
-    after every genuine run, including the deliberately-failing adversarial
-    ones.
-- Adversarial self-review: dispatched a fresh subagent (no prior context on
-  this diff) to independently check all 11 binding requirements plus general
-  correctness against the actual repository. It found and I fixed **two Low
-  findings**, both documentation drift this slice's own refactor introduced:
-  `app/config.py`'s comment on `test_database_url` still named
-  `tests/conftest.py` as `DEFAULT_TEST_DATABASE_URL`'s home (now
-  `scripts/db_safety.py`); `README.md`'s "Dedicated test database" section
-  still named `tests/conftest.py::assert_is_disposable_test_database` as the
-  guard's defining location (now `scripts/db_safety.py`, re-imported by
-  `conftest.py`). Both fixed; full verification matrix rerun clean afterward.
-  Separately, I found and fixed the pytest-summary-parser gap under item 6
-  above by running the genuine full suite and noticing "counts unavailable"
-  where a count was expected — the pinned-shape assumption was incomplete,
-  not the parsing logic's fail-closed behavior, which worked exactly as
-  designed (reported unavailable, never invented zero). No other findings
-  from either pass.
-- Deviations/known limitations: `redact_database_url`'s em-dash character in
-  `assert_is_disposable_test_database`'s message can render as a mangled
-  glyph on a non-UTF-8 Windows console codepage when printed — a pre-existing
-  cosmetic property of the message string itself (moved verbatim, not
-  introduced by this slice), not a data-correctness issue. `--level schema`/
-  `--level high-risk`, CI, markers, the status generator, handoff-structure
-  validation, and process metrics remain explicitly out of scope, per the
-  recorded roadmap ordering. `main` untouched throughout.
-- STOP — awaiting Codex review. Do not add CI, resume Phase 2 product work,
-  begin `--level schema`/`high-risk`, markers, the status generator, metrics,
-  or handoff automation, or merge `main`.
+  - `git diff --check` -> clean.
+  - **Genuine external `python scripts/verify.py --level routine --focus
+    tests/test_compact_checkpoint.py tests/test_verify.py`** -> all **10
+    steps PASS** (Ruff format/check — now covering `.claude/hooks/` —,
+    mypy — same —, `check_repo.py`, `git diff --check`, database URL
+    safety, real test-database reachability, focused pytest **90 passed**,
+    full suite **1387 passed**, temporary-directory cleanup) in `125.14s`.
+  - No `/compact` was executed during this pass.
+- Adversarial self-review: confirmed (a) `_read_checkpoint_safely()`'s
+  `except (OSError, ValueError)` is reached before any partial content
+  could be printed, since the `try` block's `return` is the only path that
+  ever yields real file content; (b) the new `main()`-level `"restore"`
+  guard prints the exact same fixed fallback text as the primary guard,
+  never a different message that could itself leak something; (c) the
+  atomic-replacement tests exercise `write_checkpoint()` and `main(["pre"])`
+  through the real, unmodified code path — the injected failure is at
+  `os.replace` only, so the temp-file creation, write, and `finally`
+  cleanup are all genuinely exercised, not bypassed; (d) `CLAUDE_HOOKS_DIR`
+  is a directory, not the specific file, so any future file added under
+  `.claude/hooks/` is automatically covered without a further verifier
+  change. Found no further issues beyond the four findings addressed above.
+- Deviations/known limitations: none new. `main` untouched throughout; no
+  merge performed.
+- STOP — awaiting Codex re-review. Do not merge `main`, begin the
+  `ambiguous_match` slice, or execute `/compact`.
 
 ### Work review
 
-- Date/agent: 2026-08-30, Codex. Diff reviewed:
-  `adb6e62..6000658` on `tooling/workflow-v3-routine-verifier`.
-- Independent verification: repository checker exit 0; Ruff format/check
-  clean; mypy clean across **76 source files**; focused verifier/safety suite
-  **91 passed**; working tree clean after review cleanup. A genuine external
-  `python scripts/verify.py --level routine --focus tests/test_verify.py`
-  run did **not** pass: its first four steps passed, then `git diff --check`
-  failed with exit 129 because the subprocess did not apply this repository's
-  required command-local `safe.directory`; all database/pytest steps were
-  correctly reported `NOT RUN`.
-- Findings:
-  1. **Medium — the canonical verifier is not usable by the Codex reviewer
-     environment it is explicitly intended to unify with Claude/local/CI.**
-     `git_diff_check_command()` returns bare `git diff --check`; this checkout
-     requires `-c safe.directory=C:/Users/Throw/Desktop/gitProjects/jobGoblin`
-     for Git commands under the reviewer SID, so the advertised identical
-     external invocation fails before pytest. Build the Git command with the
-     script-derived, absolute `REPO_ROOT` as command-local
-     `git -c safe.directory=<REPO_ROOT> diff --check` (never mutate global Git
-     configuration), unit-test the exact argv, and rerun the genuine verifier
-     from both repository root and `backend/` in the reviewer-compatible
-     environment.
-  2. **Medium — temporary-directory cleanup fails open and is absent from the
-     result summary.** `safe_rmtree()` uses `ignore_errors=True`; `main()`
-     prints/returns a successful summary before cleanup in `finally`. A
-     permission failure can therefore leave `.verify-tmp/run-*` behind while
-     the canonical verifier reports all checks passed, reproducing the exact
-     stale-directory problem this slice is meant to eliminate. Require a
-     strict child (`resolved != root` as well as `is_relative_to(root)`), do
-     not ignore deletion errors, execute cleanup on every path, and include a
-     `temporary-directory cleanup` PASS/FAIL result before printing the final
-     summary/choosing the exit code. Add tests for refusing the root itself,
-     surfaced deletion failure/nonzero outcome, cleanup after an earlier
-     verification failure, and successful concurrent-run isolation.
-  3. **Low — the known Phase-1 status correction is incomplete and the new
-     handoff overclaims it.** `README.md` says Phase 1 is complete, but
-     `docs/ROADMAP.md:134` still begins “Phase 1: in progress,” and its closing
-     Phase-1 paragraph still says the exit gate remains to be verified before
-     declaring completion. Phase 1's closure was already merged. Correct both
-     stale ROADMAP statements to the Git-verified completed state; keep the
-     already-correct three-slice Phase-2 update. Record the correction in a
-     new `Work done` entry rather than rewriting historical ledger text.
-- **Verdict: changes requested.** The safety extraction, command structure,
-  direct repository-check step, focus validation, non-recursive tests,
-  database preflight/redaction, unique run directories, Workflow-v3 durable
-  rules, Phase-2 status, and routine-verifier result model are otherwise
-  accepted. Make only the three bounded corrections above, run the genuine
-  verifier end to end plus focused/static checks, append concise `Work done`,
-  commit and push, then stop for re-review. Do not add CI/schema/high-risk
-  levels or resume product work.
+- Date/agent: 2026-09-01, Codex. Final correction diff reviewed:
+  `58995c1..87f65d7` on `codex/tooling-safe-compaction`.
+- Independent verification performed: inspected all five changed files and traced the
+  verifier command construction, every checkpoint classification, safe-read/fallback
+  flow, atomic replacement failure, prior-checkpoint preservation, and both hook entry
+  points. Ran the genuine external routine verifier focused on
+  `tests/test_compact_checkpoint.py` and `tests/test_verify.py`: all **10 steps PASS**,
+  including **90 focused tests** and **1387 full-suite tests**. No `/compact`, network
+  request, product operation, or database mutation was performed.
+- Prior-finding disposition:
+  1. **Medium finding closed.** The canonical verifier's existing Ruff format/lint and
+     mypy steps now include the real repository-root `.claude/hooks/` directory. Exact
+     argv and path existence are tested without adding a parallel or silently skipped
+     verification path.
+  2. **Low-Medium finding closed.** Both clean-but-unsynchronized state shapes assert
+     `RECOVERABLE WITH RECONCILIATION` and its reason explicitly.
+  3. **Low restore finding closed.** Missing, unreadable, invalidly encoded, and
+     unexpectedly failing restore paths emit only the fixed recovery fallback and
+     return success; exception text, checkpoint contents, and alternate paths are not
+     exposed.
+  4. **Low cleanup finding closed.** Injected atomic-replacement failure proves the
+     temporary file is removed, the prior checkpoint remains byte-for-byte unchanged,
+     and the real `pre` entry point returns zero.
+  5. **Informational classification disposition accepted.** The correction was treated
+     as Class H and received Class-H-equivalent verification depth; no historical entry
+     was rewritten.
+- Documentation clarification checked: the current official `PreCompact` reference
+  documents the `trigger` values and blocking behavior. The hook returns success without
+  a block decision and therefore leaves emergency automatic compaction unblocked.
+- Adversarial cases checked: an unsynchronized clean tree cannot become optimal; an
+  upstream-less feature branch cannot become pushed/recoverable; malformed checkpoint
+  bytes and read failures cannot enter injected context; replacement failure cannot
+  destroy the last valid checkpoint or leave its temporary candidate behind; future
+  Python hooks placed in `.claude/hooks/` enter routine static analysis automatically.
+  No further findings.
+- Missing/inconclusive checks: a real interactive `/compact` was intentionally deferred
+  to the optimal post-merge clean-`main` acceptance checkpoint. This review validates
+  the offline hook boundaries and canonical verifier, not Claude Code's interactive UI.
+- Verdict: **Approved**. The safe-compaction tooling and correction pass are accepted;
+  no further correction is required.
+- Exact requested corrections: none.
+- STOP — do not merge to `main`, execute `/compact`, or begin `ambiguous_match` or any
+  other product slice until the user explicitly authorizes the next action.
+
+**Merge record (appended, not a rewrite of the entry above):** Approved at review
+commit `3af3b28` (no findings). Per user authorization, `codex/tooling-safe-compaction`
+was merged into `main` with a normal merge commit (`8920a4e`; `--no-ff`, no
+squash/rebase/force-push) and pushed. `main`/`origin/main` are both now at `8920a4e`.
+Verified: feature branch was clean and pushed at `3af3b28`, and `main`/`origin/main`
+were still at `10b9432` immediately before the merge; `main` has zero content diff
+against the feature branch (`git diff main codex/tooling-safe-compaction --stat`
+empty); migration `0017` remains the sole Alembic head; `python -m scripts.check_repo`
+exited `0`; `git diff --check` was clean; working tree clean throughout. No `/compact`,
+network request, or database mutation was performed during the merge.
+
+**Rollback boundary:** reverting `8920a4e` (a single merge commit) restores `main` to
+`10b9432` exactly — no schema/migration exists in this slice to downgrade, and no data
+migration accompanies it. This merges the safe-compaction tooling only (root
+`CLAUDE.md`, `.claude/settings.json`, `.claude/hooks/compact_checkpoint.py`, the
+canonical verifier's expanded Ruff/mypy scope over `.claude/hooks/`, and their tests) —
+it does **not** touch product code, schema, migrations, providers, ingestion, or the
+`ambiguous_match` proposal, all of which remain not started and are not authorized by
+this merge.
 
 ---
 
@@ -307,105 +282,97 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-08-30, Claude Code (Sonnet 5). Class H correction pass on
-  `tooling/workflow-v3-routine-verifier` for the three bounded findings in
-  review commit `103fbaa` (`6000658..103fbaa`). Base `6000658`. Addresses
-  exactly Findings 1-3 from Iteration 1's `Work review`; every
-  otherwise-accepted routine-verifier behavior (safety extraction, command
-  structure, direct repository-check step, focus validation, non-recursive
-  tests, database preflight/redaction, unique run directories, Workflow-v3
-  durable rules, Phase-2 status, result model) is unchanged.
-- Outcome, addressing each finding exactly:
-  1. **Medium — `git diff --check` now works in the Codex reviewer
-     environment.** `git_diff_check_command()` returns
-     `["git", "-c", f"safe.directory={REPO_ROOT.as_posix()}", "diff",
-     "--check"]` — command-local via `-c`, never global/user Git config.
-     `REPO_ROOT.as_posix()` (forward slashes) because Git's config-value
-     parser treats a bare backslash as an escape character, which a raw
-     Windows path would otherwise trip. Added
-     `test_git_diff_check_command_is_the_one_non_python_step`'s exact-argv
-     assertion (including a `no backslash` check) and reran the genuine
-     `python scripts/verify.py --level routine --focus tests/test_verify.py`
-     from both `backend/` and the repository root.
-  2. **Medium — temporary-directory cleanup now fails closed and is its own
-     reported step.** `safe_rmtree()` now refuses `path == must_be_under`
-     (a strict-child check, not merely `is_relative_to`, which is trivially
-     true of a path and itself) and never passes `ignore_errors=True` — its
-     new injectable `remove` parameter (default `shutil.rmtree`) lets a
-     deletion failure propagate to the caller instead of being swallowed.
-     New `cleanup_run_dir_step()` wraps it as a PASS/FAIL `StepResult`; new
-     `_execute_and_cleanup()` runs the step list, then *always* appends the
-     cleanup result in a `finally` — including after an earlier verification
-     failure — before returning. `main()` now builds its exit code from
-     *all* results, so a failed cleanup alone makes the run exit nonzero.
-     Added 8 tests: root-refusal, a genuinely-surfaced deletion failure (via
-     injected `remove`, since real filesystem permission failures are
-     unreliable to simulate portably), a nonexistent-child deletion now
-     correctly raising instead of silently succeeding, `cleanup_run_dir_step`
-     PASS/FAIL reporting, and — via `_execute_and_cleanup` — cleanup still
-     running and reported after an earlier step's failure, a surfaced
-     cleanup failure making the overall result set non-all-PASS, and
-     concurrent-run isolation (cleaning up one invocation's directory never
-     touches a second, still-active one).
-  3. **Low — corrected the remaining stale Phase-1 ROADMAP statements.**
-     `docs/ROADMAP.md`: "Phase 1: in progress (updated 2026-08-28)" ->
-     "Phase 1: complete (updated 2026-08-30)"; removed the closing claim that
-     "the rest of Phase 1's exit gate... remains to be independently
-     verified before declaring the phase complete", replaced with the
-     Git-verified basis for completion — all fifteen tables migrated, the
-     `phase-1/closure` slice merged (`bfdd56d`), and Phase 2 subsequently
-     authorized and three vertical slices merged, which
-     `PHASE_RISK_CHECKLIST.md`'s own phase-gating rule could not have
-     permitted had Phase 1's exit gate not already been satisfied. The
-     already-correct three-slice Phase-2 paragraph is untouched. Recorded
-     here, in this new entry — Iteration 1's historical `Work done`/
-     `Work review` text is left exactly as written.
-- Files changed: `backend/scripts/verify.py`; `backend/tests/test_verify.py`;
-  `docs/ROADMAP.md`; this handoff. No migration; no product code; no
-  `db_safety.py` change (Finding 1/2 are both `verify.py`-local).
-- Commands run and exact results:
-  - `ruff format .` / `ruff check .` -> clean.
-  - `mypy app tests scripts` -> clean, 76 source files.
-  - `python -m pytest tests/test_verify.py -q` -> **73 passed** (was 65;
-    net +8 for this pass's new/replaced cleanup and Git-argv tests).
-  - Full suite with a workspace-local `--basetemp` -> **1249 passed** (was
-    1241).
-  - `python -m scripts.check_repo` -> exit 0, zero findings (confirms the
-    ROADMAP.md edits introduced no broken links/anchors and no stale
-    migration-revision references — `bfdd56d` is a commit hash, not a
-    4-digit migration revision, so it does not trip that check).
-  - `git diff --check` -> clean (benign LF/CRLF notices only).
-  - **Genuine external verifier reruns** (never from inside pytest): both
-    `cd backend && python scripts/verify.py --level routine --focus
-    tests/test_verify.py` and the repository-root equivalent
-    (`python backend/scripts/verify.py --level routine --focus
-    tests/test_verify.py`) -> all **10** steps PASS in each run, including
-    the new `temporary-directory cleanup` step; `focused pytest` **73
-    passed**, `full pytest suite` **1249 passed**.
-  - `.verify-tmp/` confirmed to contain only the empty, gitignored root after
-    every run in this pass.
-- Adversarial self-review (fresh read of the corrected diff before this
-  entry): confirmed the strict-child check is evaluated *before*
-  `is_relative_to` specifically because `Path.is_relative_to` is trivially
-  true of a path compared to itself — without the explicit `resolved ==
-  root` branch, the prior code would have let `must_be_under` itself reach
-  `remove()`, exactly the defect Codex found. Confirmed `_execute_and_cleanup`
-  correctly appends the cleanup result even when `_run_steps` itself never
-  raises (the normal case, including the fail-fast/NOT-RUN path) and traced
-  that an unexpected exception escaping `_run_steps` would still run cleanup
-  via `finally` before re-propagating (a genuine crash, not a reported
-  result — outside this finding's scope, unchanged from before). Confirmed
-  `main()`'s `remove=` is never overridden from its real default in
-  production, only in tests. Found no further issues beyond the three
-  findings addressed above.
-- Deviations/known limitations: unchanged from Iteration 1 (no CI, markers,
-  `--level schema`/`--level high-risk`, status generator, metrics, or
-  handoff automation; `--level` choices remain `["routine"]` only). `main`
-  untouched throughout.
-- STOP — awaiting Codex re-review. Do not add CI, schema/high-risk levels,
-  markers, status automation, handoff automation, metrics, or resume product
-  work, or merge `main`.
-
-### Work review
-
-_Pending._
+- Date/agent: 2026-09-01, Claude Code (Sonnet 5). Class H implementation of the
+  approved `ambiguous_match` identity-conflict persistence slice on
+  `phase-2/ambiguous-match-persistence`, based on clean `main@e18b2b3`.
+- Outcome: Tier 2/3 finding more than one distinct candidate Job no longer raises
+  `AmbiguousIdentityMatchError` (a whole-run failure). It now creates a standalone
+  Job/JobOccurrence, exactly like a clean insert, and persists an ADR-0007
+  `ambiguous_match` `identity_conflicts` row, isolated per posting. No schema or
+  migration change — the existing Phase-1 `identity_conflicts` table and its
+  `ambiguous_match` array-shape `CHECK` already supported this shape.
+- Binding decisions applied exactly as authorized:
+  1. `_discover_candidates()`'s `<=2` probe remains the ambiguity *trigger* at both
+     `_attach_to_candidate` sites (pre-lock, post-lock recheck); a new
+     `_discover_all_candidates()` (unlocked, unbounded, sorted by UUID) supplies the
+     *persisted* evidence. If that authoritative requery resolves to fewer than two
+     candidates, `CandidateResolutionUnstableError` is raised and nothing is
+     persisted — new tests cover both the pre-lock and post-lock-recheck
+     disagreement cases, plus a 3-candidate case proving the full set (not just the
+     probe's two) is what gets persisted.
+  2. `UpsertOutcome.__post_init__` enforces the invariants at construction:
+     `AMBIGUOUS` requires >=2 distinct, sorted candidate IDs; every other kind must
+     carry none. Four direct unit tests cover missing/singleton/duplicate/unsorted
+     tuples and cross-kind rejection.
+  3. `existing_value` = sorted candidate Job-ID strings; `incoming_value` =
+     single-element array with the new JobOccurrence's ID string — documented
+     explicitly (code and all three touched decision/architecture docs) as
+     intentionally different entity types, not a symmetry bug.
+  4. New `_after_ambiguous_flush()` test seam mirrors `_after_quarantine_flush`/
+     `_after_attach_flush`; a forced post-flush failure proves the new Job, new
+     JobOccurrence, `IdentityConflict`, and raw terminal update all roll back
+     together. A separate test proves reprocessing the same terminal raw row is
+     rejected by `_validate_raw_association`'s existing `processing_status` check,
+     with no second conflict row and no further mutation.
+  5. `pipeline.py`'s counter dispatch is now an exhaustive if/elif over all five
+     `UpsertKind` values (`QUARANTINED` moved out of the trailing `else`); a final
+     `else: raise AssertionError(...)` fails closed for any future unrecognized
+     kind. `AMBIGUOUS` buckets `jobs_inserted` (a real Job was created) and sets
+     `had_conflict`; a dedicated test forces a fake outcome kind to prove the
+     fail-closed branch and confirms no falsely successful counters.
+  6. `AmbiguousIdentityMatchError` deleted; every surviving reference updated —
+     `UpsertKind`/`_attach_to_candidate`/`upsert_job_occurrence`/`persist_posting`
+     docstrings, `CandidateResolutionUnstableError`'s own docstring, ADR 0004, ADR
+     0007 (new "Phase 2 implementation notes" section), ARCHITECTURE.md §8/§11,
+     DATA_MODEL.md's `identity_conflicts` row notes, ROADMAP.md.
+  - Preserved unchanged: standalone-Job creation (no guessing among candidates);
+    zero candidate mutation on either ambiguity site, documented precisely per-site
+    (pre-lock touches nothing; post-lock recheck may already hold one candidate's
+    `FOR UPDATE` lock but never writes to it); one atomic transaction;
+    `completed_with_errors` run status / `completed` attempt status; sanitized
+    IDs-only logging; `CandidateResolutionUnstableError` untouched and fail-closed.
+  - ROADMAP.md rewritten to be merge-state-neutral per the user's explicit
+    correction: dropped the fixed "three merged slices" count (would go stale on
+    the next merge), and the new `ambiguous_match` capability is described as
+    "implemented, not yet merged — on branch `phase-2/ambiguous-match-persistence`,
+    awaiting review and merge authorization."
+- Files changed: `backend/app/ingestion/persistence.py`, `backend/app/ingestion/
+  pipeline.py`, `backend/tests/test_ingestion_pipeline.py` (11 new tests, 3
+  rewritten to persist instead of raise; `test_candidate_changes_after_lock_is_
+  detected_not_retried` left unchanged — a genuinely different code path);
+  `docs/DECISIONS/0004-scoped-deterministic-identity.md`, `docs/DECISIONS/
+  0007-identity-conflict-quarantine.md`, `docs/ARCHITECTURE.md`,
+  `docs/DATA_MODEL.md`, `docs/ROADMAP.md`; this handoff entry. No schema,
+  migration, provider, or network file touched.
+- Verification: genuine external `python scripts/verify.py --level routine --focus
+  tests/test_ingestion_pipeline.py` — all **10 steps PASS**: Ruff format/check,
+  mypy (82 source files), `check_repo.py`, `git diff --check`, database-URL
+  safety, real test-database reachability, **49 focused tests**, **1398
+  full-suite tests** (was 1387; net +11), temp-directory cleanup, in ~160s.
+  `alembic heads` confirms `0017` remains the sole head (no migration added; `git
+  diff --stat migrations/` is empty). `alembic current` against the configured
+  dev database (`jobgoblin`) shows it pre-existingly stamped at `0006`, far behind
+  head — a condition that predates this branch (this slice adds zero migrations)
+  and was **not** remediated: no `alembic upgrade` was run against it; a direct
+  before/after `alembic current` check confirms it stayed at `0006` throughout.
+  All schema/database work in this slice ran only against the disposable
+  `jobgoblin_test` database.
+- Adversarial self-review: dispatched a fresh-context subagent against the actual
+  diff (not this summary). It confirmed correct control flow (no candidate
+  mutation on either ambiguity path), correct `INSERTED`-vs-`AMBIGUOUS` tagging,
+  airtight `UpsertOutcome` validation, correct evidence shape against
+  DATA_MODEL.md's own `CHECK`, exhaustive/unreachable-else pipeline dispatch, and
+  zero leftover `AmbiguousIdentityMatchError` references. It found one real defect
+  class (Medium-High): six new tests captured cleanup IDs
+  (`job_ids.append(...)`/preexisting-set-diff) *after* assertions that could fail,
+  risking a leaked row in the disposable test database on a genuine regression.
+  Fixed in all six by moving the capture to immediately follow the mutating call,
+  before any assertion — reverified by rerunning the full suite (still 1398
+  passed).
+- Deviations/known limitations: `alembic check` itself could not be exercised
+  end-to-end because of the pre-existing stale dev database described above;
+  substituted with `alembic heads` (single, unchanged head) plus an empty
+  `migrations/` diff, which together give the equivalent no-schema-drift guarantee
+  for a no-migration slice without touching the dev database.
+- STOP — awaiting Codex review. Do not merge, start Tier 4, add schema changes,
+  contact live providers, or expand this slice.

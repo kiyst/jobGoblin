@@ -96,3 +96,56 @@ def resolve_test_database_url(test_database_url: str | None) -> str:
     this module's only dependency the already-required `sqlalchemy`.
     """
     return test_database_url or DEFAULT_TEST_DATABASE_URL
+
+
+# Hosts a genuinely local-only destructive lifecycle may target. Deliberately
+# narrow (no wildcard/subnet matching) — see
+# `assert_safe_for_local_destructive_lifecycle` below.
+_LOCAL_DESTRUCTIVE_LIFECYCLE_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def assert_safe_for_local_destructive_lifecycle(
+    candidate_url: str, development_url: str, *, app_env: str
+) -> None:
+    """A second, narrower guard for the *one* use case in this project that
+    actually issues `CREATE DATABASE`/`DROP DATABASE` at runtime
+    (`scripts/live_proof_greenhouse_ingestion.py`) — never called by the
+    ordinary test suite or `scripts/verify.py`, both of which only ever
+    connect to an already-existing disposable database and never create or
+    drop one. This function composes with, and never replaces,
+    `assert_is_disposable_test_database`: every existing caller's behavior
+    is unchanged, since neither the test suite nor the verifier ever calls
+    this new function.
+
+    Fails closed (`RuntimeError`) if:
+    - `assert_is_disposable_test_database(candidate_url, development_url)`
+      itself would fail — called first, verbatim, not reimplemented.
+    - `app_env == "production"` — a destructive create/drop lifecycle must
+      never run from a production-configured process, regardless of which
+      database name it targets.
+    - `candidate_url`'s host is not exactly one of `localhost`, `127.0.0.1`,
+      or `::1` (case-insensitive) — including when the host is missing
+      entirely. A remote or unspecified host is refused rather than
+      trusted: `CREATE DATABASE`/`DROP DATABASE` against a real shared
+      server is exactly the failure mode this guard exists to prevent.
+
+    Never includes credentials in any raised message — only
+    `redact_database_url`'s already-safe form.
+    """
+    assert_is_disposable_test_database(candidate_url, development_url)
+
+    if app_env == "production":
+        raise RuntimeError(
+            "Refusing a local destructive database lifecycle (CREATE DATABASE / "
+            "DROP DATABASE) while APP_ENV=production."
+        )
+
+    parsed = make_url(candidate_url)
+    host = (parsed.host or "").lower()
+    if host not in _LOCAL_DESTRUCTIVE_LIFECYCLE_HOSTS:
+        raise RuntimeError(
+            "Refusing a local destructive database lifecycle against "
+            f"{redact_database_url(parsed)}: host must be one of "
+            f"{sorted(_LOCAL_DESTRUCTIVE_LIFECYCLE_HOSTS)}, never a missing or "
+            "remote host."
+        )

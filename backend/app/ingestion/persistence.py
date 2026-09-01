@@ -24,27 +24,57 @@ from app.schemas.discovered_job import DiscoveredJob
 
 
 class UpsertKind(Enum):
-    """The four outcomes `persist_posting`/`upsert_job_occurrence` can
+    """The five outcomes `persist_posting`/`upsert_job_occurrence` can
     reach for one posting. `QUARANTINED` replaces the earlier
     `DeferredIdentityConflictError` design: a canonical-URL evidence
     mismatch is now a real ADR-0007 quarantine transition, not a failure
     that aborts the enclosing run. `ATTACHED` is a new `JobOccurrence`
     created under an *existing* Job found via Tier 2/3 cross-occurrence
     matching — distinct from `INSERTED` (a brand-new Job) because no new
-    Job was created here; see `pipeline.py`'s counter bucketing."""
+    Job was created here; see `pipeline.py`'s counter bucketing.
+    `AMBIGUOUS` replaces the earlier `AmbiguousIdentityMatchError`
+    whole-run-failure design: Tier 2/3 finding more than one distinct
+    candidate Job now creates a standalone Job/JobOccurrence (like
+    `INSERTED`, and counted the same way) rather than aborting the run,
+    and records the complete candidate set as an ADR-0007 `ambiguous_match`
+    `identity_conflicts` row — see `UpsertOutcome.
+    ambiguous_candidate_job_ids`."""
 
     INSERTED = "inserted"
     UPDATED = "updated"
     QUARANTINED = "quarantined"
     ATTACHED = "attached"
+    AMBIGUOUS = "ambiguous"
 
 
 @dataclass(frozen=True, slots=True)
 class UpsertOutcome:
+    """`ambiguous_candidate_job_ids` is populated if and only if
+    `kind is UpsertKind.AMBIGUOUS` — enforced by `__post_init__` below,
+    not merely by convention, since an outcome that disagreed with its own
+    `kind` here would silently corrupt whichever caller trusts `kind` alone
+    (`pipeline.py`'s counter dispatch, `persist_posting`'s conflict-row
+    construction). When present, it is the complete, deterministically
+    sorted, distinct tuple of every candidate Job matched — never the
+    `<=2` fast ambiguity probe's own truncated result."""
+
     job_id: uuid.UUID
     occurrence_id: uuid.UUID
     kind: UpsertKind
     conflict_id: uuid.UUID | None = None
+    ambiguous_candidate_job_ids: tuple[uuid.UUID, ...] | None = None
+
+    def __post_init__(self) -> None:
+        if self.kind is UpsertKind.AMBIGUOUS:
+            ids = self.ambiguous_candidate_job_ids
+            if ids is None or len(ids) < 2:
+                raise ValueError("an AMBIGUOUS outcome must carry at least two candidate Job IDs")
+            if len(set(ids)) != len(ids):
+                raise ValueError("an AMBIGUOUS outcome's candidate Job IDs must be distinct")
+            if tuple(sorted(ids)) != ids:
+                raise ValueError("an AMBIGUOUS outcome's candidate Job IDs must be sorted")
+        elif self.ambiguous_candidate_job_ids is not None:
+            raise ValueError("only an AMBIGUOUS outcome may carry ambiguous_candidate_job_ids")
 
 
 class InvalidRawIngestionAssociationError(RuntimeError):
@@ -87,23 +117,6 @@ class InvalidRawIngestionAssociationError(RuntimeError):
     """
 
 
-class AmbiguousIdentityMatchError(RuntimeError):
-    """More than one distinct Job matched an exact-match cross-occurrence
-    signal (Tier 2 canonical URL, or Tier 3 tenant-scoped requisition).
-    Raised before any mutation. Never routed to `identity_conflict`
-    (ADR-0007 `ambiguous_match` persistence — including its evidence
-    shape — is a deliberately separate, later slice) and never
-    `parse_error` (the payload parsed and resolved fine; this is an
-    identity ambiguity, not a parse failure). Uncaught in `pipeline.py` —
-    it propagates through the existing outer failure boundary exactly
-    like any other unexpected exception: a whole-run failure, not a
-    per-posting-isolated one. This is a disclosed, temporary limitation of
-    this slice, not an oversight — per-posting isolation requires the
-    same safe, non-committing terminal state that real `ambiguous_match`
-    persistence would introduce anyway.
-    """
-
-
 class CandidateResolutionUnstableError(RuntimeError):
     """A single existing/candidate row found by an unlocked discovery query
     could not be stably confirmed after acquiring its row lock(s) — either
@@ -112,12 +125,21 @@ class CandidateResolutionUnstableError(RuntimeError):
     under the lock. Raised by both Tier 1's own found-branch revalidation
     (`upsert_job_occurrence`) and Tier 2/3's `_attach_to_candidate`.
 
-    Distinct from `AmbiguousIdentityMatchError`: this means the candidate
-    set was *unstable* under concurrent modification, not that a genuine,
-    stable ambiguity exists. Should be unreachable given correct locking
-    discipline by every writer that touches `job_occurrences`/`jobs`
-    identity evidence — exists as a defensive bound, never as an expected
-    code path in normal operation.
+    Also raised by `_attach_to_candidate` when its fast `<=2` ambiguity
+    probe (`_discover_candidates`) disagrees with the authoritative,
+    unbounded candidate requery (`_discover_all_candidates`) run once the
+    probe reports more than one candidate: if that authoritative requery
+    resolves to fewer than two candidates, this is instability between two
+    queries, not a genuine, stable ambiguity, and nothing is persisted.
+
+    Distinct from a genuine, stable `UpsertKind.AMBIGUOUS` outcome: that
+    means the authoritative requery confirmed two or more real, currently
+    existing candidates; this exception means the candidate set could not
+    be stably confirmed at all — under concurrent modification, or via a
+    disagreement between the fast probe and the authoritative requery.
+    Should be unreachable given correct locking discipline by every writer
+    that touches `job_occurrences`/`jobs` identity evidence — exists as a
+    defensive bound, never as an expected code path in normal operation.
 
     Never retried within the same transaction. Both call sites fail closed
     on the first sign of instability rather than looping: retrying while
@@ -219,6 +241,31 @@ async def _discover_candidates(
     )
 
 
+async def _discover_all_candidates(
+    session: AsyncSession, filter_clause: ColumnElement[bool]
+) -> tuple[uuid.UUID, ...]:
+    """The complete, deterministically sorted, distinct `job_id` set
+    matching `filter_clause` — unlike `_discover_candidates`'s `LIMIT 2`
+    fast ambiguity probe, this performs no `LIMIT` and is only ever called
+    once that probe (at either the pre-lock or post-lock recheck site in
+    `_attach_to_candidate`) has already reported more than one candidate.
+
+    Deliberately a plain, unlocked scalar query, never `.with_for_update()`
+    on any candidate: the tier-specific advisory lock the caller already
+    holds by the time either call site can reach this already serializes
+    every other writer for this signal, so no per-candidate row lock is
+    needed to make this result stable, and this function never mutates
+    anything. Sorted using `uuid.UUID`'s own total ordering (by integer
+    value) for a deterministic, reproducible persisted evidence array —
+    never the order PostgreSQL happens to return rows in."""
+    candidates = (
+        (await session.execute(select(JobOccurrence.job_id).where(filter_clause).distinct()))
+        .scalars()
+        .all()
+    )
+    return tuple(sorted(candidates))
+
+
 async def _before_candidate_lock() -> None:
     """Test seam only — a no-op in production. Tests monkeypatch this to
     pause execution (e.g. awaiting an `asyncio.Event`) between initial
@@ -246,18 +293,42 @@ async def _attach_to_candidate(
     natural_key: NaturalKey,
     job: DiscoveredJob,
     observed_at: datetime,
-) -> UpsertOutcome | None:
+) -> UpsertOutcome | tuple[uuid.UUID, ...] | None:
     """Single-pass, fail-closed candidate resolution under the caller's
     already-held tier-specific advisory lock (Tier 2's canonical-URL lock,
     or Tier 3's tenant-requisition lock — never both for the same posting,
     since Tiers 2/3 are mutually exclusive per `upsert_job_occurrence`).
 
-    Returns `None` when no candidate exists at all — the caller falls
-    through to the next tier (ultimately Tier 5). Never retries while
-    holding a lock on a stale candidate: any instability discovered after
-    the parent Job's row lock is acquired fails this transaction closed
-    via `CandidateResolutionUnstableError` rather than looping (see that
+    Three possible return shapes:
+    - `None` — no candidate exists at all; the caller falls through to
+      Tier 5 (create a standalone Job/JobOccurrence, `UpsertKind.INSERTED`).
+    - `UpsertOutcome` (`kind=UpsertKind.ATTACHED`) — exactly one stable
+      candidate was found, locked, and attached to.
+    - `tuple[uuid.UUID, ...]` (length >= 2) — a genuine, stable ambiguity:
+      the authoritative, unbounded requery (`_discover_all_candidates`)
+      confirms more than one distinct candidate Job. Touches no candidate
+      row. The caller (`upsert_job_occurrence`) falls through to the same
+      Tier 5 creation code used for `None`, but tags the result
+      `UpsertKind.AMBIGUOUS` with this tuple attached; `persist_posting`
+      then records it as an ADR-0007 `ambiguous_match` `identity_conflicts`
+      row.
+
+    Never retries while holding a lock on a stale candidate: any
+    instability discovered after the parent Job's row lock is acquired —
+    including the fast `<=2` probe disagreeing with the authoritative,
+    unbounded requery once it is run — fails this transaction closed via
+    `CandidateResolutionUnstableError` rather than looping (see that
     exception's own docstring for why).
+
+    Candidate-locking state at the two points ambiguity can be detected is
+    never uniform, and is documented precisely here rather than implied:
+    the **pre-lock** site (before `_before_candidate_lock()`/any
+    `FOR UPDATE`) touches no candidate row at all. The **post-lock
+    recheck** site runs after the first candidate's own Job row is already
+    locked `FOR UPDATE` — that lock is held, but neither this function nor
+    its caller ever mutates that row or any other candidate's row on this
+    path; only a new, standalone Job/JobOccurrence is created, exactly as
+    the `None` (zero-candidate) case already does.
 
     Lock order: the tier-specific advisory lock (held by the caller before
     this function runs) is acquired before this function's own Job
@@ -266,7 +337,10 @@ async def _attach_to_candidate(
     with `jobs` -> `job_occurrences` `ON DELETE CASCADE`. Once the Job's
     row lock is held, no concurrent `DELETE FROM jobs WHERE id = ...` can
     proceed on that row until this transaction ends, so the child insert
-    that follows is race-free by construction.
+    that follows is race-free by construction. `_discover_all_candidates`
+    is a plain, unlocked scalar query — it never acquires a `FOR UPDATE`
+    lock on any candidate; the advisory lock already held for this signal
+    is what makes its result stable, not a row lock.
 
     Writer-discipline this guarantee depends on: every current ingestion
     write path treats `job_occurrences`/`jobs` identity evidence
@@ -288,9 +362,13 @@ async def _attach_to_candidate(
     if not candidates:
         return None
     if len(candidates) > 1:
-        raise AmbiguousIdentityMatchError(
-            "more than one distinct Job matched an exact-match cross-occurrence signal"
-        )
+        all_candidates = await _discover_all_candidates(session, filter_clause)
+        if len(all_candidates) < 2:
+            raise CandidateResolutionUnstableError(
+                "ambiguity probe reported multiple candidates but the authoritative "
+                "unbounded requery resolved to fewer than two"
+            )
+        return all_candidates
     candidate_job_id = candidates[0]
 
     await _before_candidate_lock()
@@ -309,10 +387,14 @@ async def _attach_to_candidate(
     # before mutating anything.
     recheck = await _discover_candidates(session, filter_clause)
     if len(recheck) > 1:
-        raise AmbiguousIdentityMatchError(
-            "more than one distinct Job matched an exact-match cross-occurrence signal "
-            "after acquiring the candidate's row lock"
-        )
+        all_candidates = await _discover_all_candidates(session, filter_clause)
+        if len(all_candidates) < 2:
+            raise CandidateResolutionUnstableError(
+                "ambiguity probe reported multiple candidates after acquiring the "
+                "candidate's row lock but the authoritative unbounded requery "
+                "resolved to fewer than two"
+            )
+        return all_candidates
     if recheck != [candidate_job_id]:
         raise CandidateResolutionUnstableError(
             "candidate job identity changed after its lock was acquired"
@@ -427,6 +509,16 @@ async def upsert_job_occurrence(
     would risk a false merge (two postings with genuinely different
     canonical URLs, sharing only a tenant/requisition value) being treated
     as more damaging than the duplicate-Job outcome it would prevent.
+    When `_attach_to_candidate` reports a genuine, stable ambiguity (more
+    than one distinct candidate Job) rather than `None` or a single
+    `ATTACHED` outcome, this function falls through to the same Tier 5
+    creation code used for the zero-candidate case — a standalone
+    Job/JobOccurrence is created exactly as `INSERTED` would create one —
+    but tags the resulting outcome `UpsertKind.AMBIGUOUS` and attaches the
+    complete candidate tuple, so `persist_posting` can record it as an
+    ADR-0007 `ambiguous_match` `identity_conflicts` row instead of
+    guessing which candidate the posting actually belongs to.
+
     Tier 4 (company-scoped requisition, fallback-only) remains deferred:
     `DiscoveredJob.company` is raw text, and no company-resolution
     capability (raw text -> `companies.id`) exists in the ingestion
@@ -489,6 +581,8 @@ async def upsert_job_occurrence(
         kind = UpsertKind.QUARANTINED if is_conflict else UpsertKind.UPDATED
         return UpsertOutcome(job_id=occurrence.job_id, occurrence_id=occurrence.id, kind=kind)
 
+    ambiguous_candidate_job_ids: tuple[uuid.UUID, ...] | None = None
+
     if incoming_canonical_url is not None:
         canonical_lock_key = canonical_url_advisory_lock_key(incoming_canonical_url)
         await session.execute(
@@ -501,10 +595,12 @@ async def upsert_job_occurrence(
             job,
             observed_at,
         )
-        if attach_outcome is not None:
+        if isinstance(attach_outcome, UpsertOutcome):
             return attach_outcome
-        # Tier 2 found zero candidates -> Tier 5 directly. Tier 3 is never
-        # attempted for this posting (see docstring above).
+        # `None` (zero candidates) or a genuine ambiguity tuple -> Tier 5
+        # below, either as a plain INSERTED or tagged AMBIGUOUS. Tier 3 is
+        # never attempted for this posting either way (see docstring above).
+        ambiguous_candidate_job_ids = attach_outcome
     else:
         tenant_c = canonicalize_nullable_text(job.source_tenant_id)
         requisition_c = canonicalize_nullable_text(job.requisition_id_raw)
@@ -527,8 +623,9 @@ async def upsert_job_occurrence(
                 job,
                 observed_at,
             )
-            if attach_outcome is not None:
+            if isinstance(attach_outcome, UpsertOutcome):
                 return attach_outcome
+            ambiguous_candidate_job_ids = attach_outcome
 
     new_job = Job(
         title=job.title,
@@ -560,8 +657,12 @@ async def upsert_job_occurrence(
     )
     session.add(new_occurrence)
     await session.flush()
+    kind = UpsertKind.AMBIGUOUS if ambiguous_candidate_job_ids is not None else UpsertKind.INSERTED
     return UpsertOutcome(
-        job_id=new_job_id, occurrence_id=new_occurrence.id, kind=UpsertKind.INSERTED
+        job_id=new_job_id,
+        occurrence_id=new_occurrence.id,
+        kind=kind,
+        ambiguous_candidate_job_ids=ambiguous_candidate_job_ids,
     )
 
 
@@ -644,6 +745,20 @@ async def _after_attach_flush() -> None:
     return None
 
 
+async def _after_ambiguous_flush() -> None:
+    """Test seam only — a no-op in production. Tests monkeypatch this to
+    simulate a failure after the new Job, new JobOccurrence (both flushed
+    inside `upsert_job_occurrence`'s Tier-5 fallthrough), the
+    `IdentityConflict` insert, and the raw row's terminal update (both
+    flushed here in `persist_posting`) have all been sent to PostgreSQL,
+    but before `persist_posting`'s transaction commits — proving rollback
+    discards all four effects together, not just some. Never a public
+    parameter; only reachable via
+    `monkeypatch.setattr(persistence, "_after_ambiguous_flush", ...)`.
+    """
+    return None
+
+
 async def persist_posting(
     engine: AsyncEngine,
     natural_key: NaturalKey,
@@ -653,11 +768,11 @@ async def persist_posting(
 ) -> UpsertOutcome:
     """Owns the one transaction that validates `raw_id`'s association with
     `job`, resolves/mutates the `Job`/`JobOccurrence` pair, and (for a
-    quarantine outcome) records the `IdentityConflict` row and reroutes the
-    raw row to `processing_status='identity_conflict'` — or, for a clean
-    insert/update/attach, to `processing_status='normalized'`. Any
-    exception here — including from `_validate_raw_association` or
-    `upsert_job_occurrence` (which includes `AmbiguousIdentityMatchError`/
+    quarantine or ambiguous-match outcome) records the `IdentityConflict`
+    row and reroutes the raw row to `processing_status='identity_conflict'`
+    — or, for a clean insert/update/attach, to `processing_status=
+    'normalized'`. Any exception here — including from
+    `_validate_raw_association` or `upsert_job_occurrence` (which includes
     `CandidateResolutionUnstableError`) — is not caught: it propagates out
     of this function, `session.begin()` rolls back everything this
     transaction touched, and the row `_validate_raw_association` locked is
@@ -669,7 +784,7 @@ async def persist_posting(
     what makes "one `IdentityConflict` per distinct new `RawJobIngestion`"
     a structural guarantee rather than an application-level convention:
     a raw row already turned `identity_conflict`/`normalized` can never
-    reach the quarantine branch again.
+    reach the quarantine or ambiguous-match branch again.
     """
     async with AsyncSession(bind=engine) as session, session.begin():
         raw = await _select_raw_for_association(session, raw_id)
@@ -698,6 +813,29 @@ async def persist_posting(
                 occurrence_id=resolution.occurrence_id,
                 kind=UpsertKind.QUARANTINED,
                 conflict_id=conflict.id,
+            )
+
+        if resolution.kind is UpsertKind.AMBIGUOUS:
+            assert resolution.ambiguous_candidate_job_ids is not None
+            conflict = IdentityConflict(
+                existing_job_occurrence_id=None,
+                incoming_raw_job_ingestion_id=raw_id,
+                conflict_type="ambiguous_match",
+                existing_value=[str(job_id) for job_id in resolution.ambiguous_candidate_job_ids],
+                incoming_value=[str(resolution.occurrence_id)],
+                status="open",
+            )
+            session.add(conflict)
+            raw.processing_status = "identity_conflict"
+            raw.job_occurrence_id = resolution.occurrence_id
+            await session.flush()
+            await _after_ambiguous_flush()
+            return UpsertOutcome(
+                job_id=resolution.job_id,
+                occurrence_id=resolution.occurrence_id,
+                kind=UpsertKind.AMBIGUOUS,
+                conflict_id=conflict.id,
+                ambiguous_candidate_job_ids=resolution.ambiguous_candidate_job_ids,
             )
 
         raw.processing_status = "normalized"

@@ -1,0 +1,21 @@
+{
+  "_accessed_at": "2026-08-30T23:21:24.662684+00:00",
+  "_fixture_kind": "sanitized_derived_sample",
+  "_note": "This is a sanitized, explicit-allowlist derived sample of one real Greenhouse Job Board API response job entry \u2014 NOT a byte- or structure-preserved raw payload. See backend/scripts/canary_greenhouse.py::FIXTURE_ALLOWED_JOB_FIELDS for the exact allowlist. HTML description/content was never requested for this canary and is not present anywhere in this file.",
+  "_source_api": "https://boards-api.greenhouse.io/v1/boards/{board_token}/jobs",
+  "_source_docs": "https://developers.greenhouse.io/job-board.html",
+  "board_token": "gitlab",
+  "company": "GitLab",
+  "job": {
+    "absolute_url": "https://job-boards.greenhouse.io/gitlab/jobs/8396674002",
+    "company_name": "GitLab",
+    "first_published": "2026-03-06T14:25:31-05:00",
+    "id": 8396674002,
+    "location": {
+      "name": "Remote, US"
+    },
+    "requisition_id": "5899",
+    "title": "Manager, Solutions Architects - San Francisco ",
+    "updated_at": "2026-08-29T16:08:37-04:00"
+  }
+}

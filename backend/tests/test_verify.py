@@ -29,15 +29,47 @@ from scripts import verify
 
 
 def test_ruff_format_command_uses_sys_executable_module_invocation() -> None:
-    assert verify.ruff_format_command() == [sys.executable, "-m", "ruff", "format", "--check", "."]
+    assert verify.ruff_format_command() == [
+        sys.executable,
+        "-m",
+        "ruff",
+        "format",
+        "--check",
+        ".",
+        str(verify.CLAUDE_HOOKS_DIR),
+    ]
 
 
 def test_ruff_check_command_uses_sys_executable_module_invocation() -> None:
-    assert verify.ruff_check_command() == [sys.executable, "-m", "ruff", "check", "."]
+    assert verify.ruff_check_command() == [
+        sys.executable,
+        "-m",
+        "ruff",
+        "check",
+        ".",
+        str(verify.CLAUDE_HOOKS_DIR),
+    ]
 
 
-def test_mypy_command_covers_app_tests_and_scripts() -> None:
-    assert verify.mypy_command() == [sys.executable, "-m", "mypy", "app", "tests", "scripts"]
+def test_mypy_command_covers_app_tests_scripts_and_claude_hooks() -> None:
+    assert verify.mypy_command() == [
+        sys.executable,
+        "-m",
+        "mypy",
+        "app",
+        "tests",
+        "scripts",
+        str(verify.CLAUDE_HOOKS_DIR),
+    ]
+
+
+def test_claude_hooks_dir_resolves_to_the_real_repository_hooks_directory() -> None:
+    """Not a placeholder path — it must actually exist and actually contain
+    the hook this coverage exists for, or the command-construction tests
+    above would be asserting coverage of a directory with nothing in it."""
+    assert verify.CLAUDE_HOOKS_DIR == verify.REPO_ROOT / ".claude" / "hooks"
+    assert verify.CLAUDE_HOOKS_DIR.is_dir()
+    assert (verify.CLAUDE_HOOKS_DIR / "compact_checkpoint.py").is_file()
 
 
 def test_check_repo_command_uses_module_invocation_not_a_direct_path() -> None:
