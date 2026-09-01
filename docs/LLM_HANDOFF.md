@@ -419,3 +419,27 @@ this merge.
 - Exact requested corrections: none.
 - STOP — do not merge to `main`, begin Tier 4, contact a provider, or start another
   slice until the user explicitly authorizes it.
+
+**Merge record (appended, not a rewrite of the entry above):** Approved at review
+commit `fd690d5` (no executable findings; two mechanical documentation corrections
+recorded in that same review). Per user authorization,
+`phase-2/ambiguous-match-persistence` was merged into `main` with a normal merge
+commit (`9ab1342`; `--no-ff`, no squash/rebase/force-push) and pushed. `main`/
+`origin/main` are both now at `9ab1342`. Verified: the feature branch was clean and
+pushed at `fd690d5`, and `main`/`origin/main` were still at `e18b2b3` immediately
+before the merge; `main` has zero content diff against the feature branch
+(`git diff main phase-2/ambiguous-match-persistence --stat` empty); migration `0017`
+remains the sole Alembic head; `python -m scripts.check_repo` exited `0`;
+`git diff --check` was clean; working tree clean throughout. No `/compact`, network
+request, or database mutation was performed during the merge.
+
+**Rollback boundary:** reverting `9ab1342` (a single merge commit) restores `main` to
+`e18b2b3` exactly — no schema/migration exists in this slice to downgrade, and no
+data migration accompanies it (the existing Phase-1 `identity_conflicts` table and
+its `ambiguous_match` array-shape `CHECK` already supported this shape without any
+schema change). This merges the `ambiguous_match` conflict-persistence slice only
+(`backend/app/ingestion/persistence.py`, `backend/app/ingestion/pipeline.py`, their
+tests, and the five documentation files listed in the `Work done` entry above) — it
+does **not** touch Tier 4, `QueryPlanner`, `ProviderRegistry`, any live provider, or
+any other Phase 2 work, all of which remain not started and are not authorized by
+this merge.
