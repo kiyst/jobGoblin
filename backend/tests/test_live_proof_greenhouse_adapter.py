@@ -58,10 +58,31 @@ def _load_fixture() -> dict[str, Any]:
     return data
 
 
-def _mapped_job(discovered_at: datetime) -> DiscoveredJob:
+def _mapped_job(discovered_at: datetime, *, unique_suffix: str) -> DiscoveredJob:
+    """Builds a `DiscoveredJob` from the committed fixture's descriptive
+    fields, but with a synthetic, test-unique `id`/`absolute_url` derived
+    from `unique_suffix` — never the real fixture's own stable identifiers
+    — so a database-touching test can never collide with the committed
+    sample's identity, with another test's identity, or with stale
+    leftover data sharing the real fixture's id. The job dict is mutated
+    *before* mapping, so `DiscoveredJob.raw`, `source_job_id`, and
+    `canonical_url` all derive from the same synthetic values
+    automatically: `raw` is exactly this mutated dict, so
+    `canonical_json_hash(job.raw)` is already internally consistent with
+    `source_job_id`/the URL fields with no separate bookkeeping required.
+    Callers that re-observe the *same* synthetic posting twice (e.g. an
+    insert then a re-observation) must reuse the same `unique_suffix`;
+    callers representing a logically different test must use a distinct
+    one."""
     fixture = _load_fixture()
+    job_dict = dict(fixture["job"])
+    synthetic_id = f"test-{unique_suffix}"
+    job_dict["id"] = synthetic_id
+    job_dict["absolute_url"] = (
+        f"https://boards.greenhouse.io/test-{unique_suffix}/jobs/{synthetic_id}"
+    )
     return canary.map_job_to_discovered_job(
-        dict(fixture["job"]),
+        job_dict,
         board_token=fixture["board_token"],
         company=fixture["company"],
         discovered_at=discovered_at,
@@ -118,7 +139,7 @@ def test_quote_identifier_rejects_anything_not_matching_the_generated_grammar(
 
 
 async def test_replay_provider_accepts_the_exact_matching_query() -> None:
-    job = _mapped_job(datetime(2026, 1, 1, tzinfo=UTC))
+    job = _mapped_job(datetime(2026, 1, 1, tzinfo=UTC), unique_suffix="replay-accepts")
     provider = live_proof._SingleJobReplayProvider(
         job, source="greenhouse", called_at=job.discovered_at
     )
@@ -136,7 +157,7 @@ async def test_replay_provider_accepts_the_exact_matching_query() -> None:
 
 @pytest.mark.parametrize("bad_sources", [["indeed"], ["greenhouse", "lever"], [], ["Greenhouse"]])
 async def test_replay_provider_rejects_any_non_matching_query(bad_sources: list[str]) -> None:
-    job = _mapped_job(datetime(2026, 1, 1, tzinfo=UTC))
+    job = _mapped_job(datetime(2026, 1, 1, tzinfo=UTC), unique_suffix="replay-rejects")
     provider = live_proof._SingleJobReplayProvider(
         job, source="greenhouse", called_at=job.discovered_at
     )
@@ -146,21 +167,21 @@ async def test_replay_provider_rejects_any_non_matching_query(bad_sources: list[
 
 
 def test_replay_provider_construction_rejects_a_job_provider_mismatch() -> None:
-    job = _mapped_job(datetime(2026, 1, 1, tzinfo=UTC)).model_copy(
-        update={"provider": "something_else"}
-    )
+    job = _mapped_job(
+        datetime(2026, 1, 1, tzinfo=UTC), unique_suffix="replay-provider-mismatch"
+    ).model_copy(update={"provider": "something_else"})
     with pytest.raises(ValueError, match="job.provider"):
         live_proof._SingleJobReplayProvider(job, source="greenhouse", called_at=job.discovered_at)
 
 
 def test_replay_provider_construction_rejects_a_job_source_mismatch() -> None:
-    job = _mapped_job(datetime(2026, 1, 1, tzinfo=UTC))
+    job = _mapped_job(datetime(2026, 1, 1, tzinfo=UTC), unique_suffix="replay-source-mismatch")
     with pytest.raises(ValueError, match="job.source"):
         live_proof._SingleJobReplayProvider(job, source="lever", called_at=job.discovered_at)
 
 
 async def test_replay_provider_capabilities_and_health() -> None:
-    job = _mapped_job(datetime(2026, 1, 1, tzinfo=UTC))
+    job = _mapped_job(datetime(2026, 1, 1, tzinfo=UTC), unique_suffix="replay-caps-health")
     provider = live_proof._SingleJobReplayProvider(
         job, source="greenhouse", called_at=job.discovered_at
     )
@@ -412,6 +433,8 @@ async def _capture_identity_scope(
         occurrence_rows = (
             await session.execute(
                 select(JobOccurrence.id, JobOccurrence.job_id).where(
+                    JobOccurrence.provider == "ats_scrapers",
+                    JobOccurrence.source == "greenhouse",
                     JobOccurrence.source_tenant_id == board_token,
                     JobOccurrence.source_job_id == source_job_id,
                 )
@@ -487,7 +510,7 @@ async def _delete_new_rows(
 async def test_two_pipeline_runs_insert_then_update_without_duplication(
     db_engine: AsyncEngine,
 ) -> None:
-    job = _mapped_job(datetime(2026, 1, 1, tzinfo=UTC))
+    job = _mapped_job(datetime(2026, 1, 1, tzinfo=UTC), unique_suffix="two-runs-insert-update")
     board_token = job.source_tenant_id
     query = SourceQuery(sources=["greenhouse"])
     t1 = job.discovered_at
@@ -534,6 +557,8 @@ async def test_two_pipeline_runs_insert_then_update_without_duplication(
             occurrence = (
                 await session.execute(
                     select(JobOccurrence).where(
+                        JobOccurrence.provider == "ats_scrapers",
+                        JobOccurrence.source == "greenhouse",
                         JobOccurrence.source_tenant_id == board_token,
                         JobOccurrence.source_job_id == job.source_job_id,
                     )
@@ -544,6 +569,15 @@ async def test_two_pipeline_runs_insert_then_update_without_duplication(
             assert occurrence.first_seen_at == t1
             assert occurrence.last_seen_at == t1
             assert occurrence.is_active is True
+
+            job_row_after_run1 = await session.get(Job, job_id)
+            assert job_row_after_run1 is not None
+            assert job_row_after_run1.title == live_proof._as_stored(job.title)
+            assert job_row_after_run1.location_raw == live_proof._as_stored(job.location)
+            assert job_row_after_run1.compensation_text == live_proof._as_stored(
+                job.compensation_text
+            )
+            assert job_row_after_run1.canonical_url == live_proof._as_stored(job.canonical_url)
 
             raw_rows = (
                 (
@@ -611,6 +645,8 @@ async def test_two_pipeline_runs_insert_then_update_without_duplication(
                 (
                     await session.execute(
                         select(JobOccurrence).where(
+                            JobOccurrence.provider == "ats_scrapers",
+                            JobOccurrence.source == "greenhouse",
                             JobOccurrence.source_tenant_id == board_token,
                             JobOccurrence.source_job_id == job.source_job_id,
                         )
@@ -655,7 +691,10 @@ async def test_two_pipeline_runs_insert_then_update_without_duplication(
 
             job_row = await session.get(Job, job_id)
             assert job_row is not None
-            assert job_row.canonical_url == job.canonical_url
+            assert job_row.title == live_proof._as_stored(job.title)
+            assert job_row.location_raw == live_proof._as_stored(job.location)
+            assert job_row.compensation_text == live_proof._as_stored(job.compensation_text)
+            assert job_row.canonical_url == live_proof._as_stored(job.canonical_url)
             assert job_row.first_seen_at == t1
             assert job_row.last_seen_at == t2
 
@@ -690,7 +729,9 @@ async def test_cleanup_removes_every_row_even_when_an_assertion_fails_afterward(
     """Deliberately fails after run 1 to prove cleanup still runs, then
     re-queries through a *fresh* session/connection to prove nothing was
     left behind — not merely that cleanup was *called*."""
-    job = _mapped_job(datetime(2026, 1, 2, tzinfo=UTC))
+    job = _mapped_job(
+        datetime(2026, 1, 2, tzinfo=UTC), unique_suffix="cleanup-after-assertion-failure"
+    )
     board_token = job.source_tenant_id
     query = SourceQuery(sources=["greenhouse"])
     t1 = job.discovered_at
@@ -728,7 +769,9 @@ async def test_cleanup_recovers_rows_left_by_a_pipeline_run_that_raises_mid_tran
     `pipeline.persist_posting` to raise reproduces exactly that gap, and
     proves the before/after snapshot approach (not a return-value-derived
     id list) recovers every row regardless."""
-    job = _mapped_job(datetime(2026, 1, 4, tzinfo=UTC))
+    job = _mapped_job(
+        datetime(2026, 1, 4, tzinfo=UTC), unique_suffix="cleanup-mid-transaction-failure"
+    )
     board_token = job.source_tenant_id
     query = SourceQuery(sources=["greenhouse"])
     t1 = job.discovered_at

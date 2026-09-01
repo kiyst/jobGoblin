@@ -349,6 +349,21 @@ async def _reachability_preflight(database_url: str) -> _StepResult:
     )
 
 
+def _as_stored(value: str | None) -> str | None:
+    """`Job`'s own `_normalize_nullable_text` validator trims
+    `title`/`location_raw`/`compensation_text`/`canonical_url` (space, tab,
+    newline, CR) and collapses a whitespace-only value to `None` — the
+    persisted row is never a byte-identical copy of `DiscoveredJob`'s own
+    field. The real committed fixture's own `title` has a genuine trailing
+    space (an upstream Greenhouse data-quality artifact, not a mapping
+    defect), so comparing against the persisted value requires applying
+    this exact same transform to the expected side first."""
+    if value is None:
+        return None
+    trimmed = value.strip(" \t\n\r")
+    return trimmed or None
+
+
 async def _assert_state_after_run_one(
     engine: AsyncEngine, *, run_id: Any, job: DiscoveredJob, board_token: str, observed_at: datetime
 ) -> tuple[Any, Any, datetime]:
@@ -386,7 +401,10 @@ async def _assert_state_after_run_one(
         jobs = (await session.execute(select(Job))).scalars().all()
         assert len(jobs) == 1, f"expected 1 Job, found {len(jobs)}"
         job_row = jobs[0]
-        assert job_row.canonical_url == job.canonical_url
+        assert job_row.title == _as_stored(job.title)
+        assert job_row.location_raw == _as_stored(job.location)
+        assert job_row.compensation_text == _as_stored(job.compensation_text)
+        assert job_row.canonical_url == _as_stored(job.canonical_url)
         assert job_row.first_seen_at == observed_at
         assert job_row.last_seen_at == observed_at
 
@@ -465,7 +483,10 @@ async def _assert_state_after_run_two(
         jobs = (await session.execute(select(Job))).scalars().all()
         assert len(jobs) == 1, f"expected still exactly 1 Job, found {len(jobs)}"
         assert jobs[0].id == prior_job_id
-        assert jobs[0].canonical_url == job.canonical_url
+        assert jobs[0].title == _as_stored(job.title)
+        assert jobs[0].location_raw == _as_stored(job.location)
+        assert jobs[0].compensation_text == _as_stored(job.compensation_text)
+        assert jobs[0].canonical_url == _as_stored(job.canonical_url)
         assert jobs[0].first_seen_at == prior_first_seen_at
         assert jobs[0].last_seen_at == observed_at_2
 
@@ -552,10 +573,16 @@ def _print_summary(results: list[_StepResult]) -> bool:
 
 
 async def _run_proof(board_token: str, company: str) -> bool:
-    """Fail-fast sequence, `results` accumulated throughout; cleanup always
-    runs in `finally` regardless of where the sequence stopped, and exactly
-    one summary is printed at the very end — never before cleanup and the
-    leak check have both had a chance to run and be recorded."""
+    """Fail-fast sequence, `results` accumulated throughout. Cleanup is
+    guaranteed to run in `finally` after any *authorized* creation attempt
+    — including an ambiguous creation failure — but is intentionally
+    skipped entirely when the destructive-lifecycle safety guard itself
+    rejects the target (see `cleanup_authorized` below): a rejected target
+    must never open an admin connection at all, let alone issue
+    `DROP DATABASE` or query `pg_database` against it. Exactly one summary
+    is printed at the very end — never before cleanup and the leak check
+    have both had a chance to run and be recorded, whenever cleanup was
+    authorized in the first place."""
     results: list[_StepResult] = []
     settings = get_settings()
 
