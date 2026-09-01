@@ -49,4 +49,3 @@ verification, an active database/network/destructive lifecycle, an incomplete ha
 entry, unresolved review corrections, or an unanswered decision that affects the current
 implementation. Claude Code's built-in emergency auto-compaction must not be blocked;
 the project hook snapshots recovery metadata before either automatic or manual compaction.
-
