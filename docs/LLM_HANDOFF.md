@@ -421,3 +421,25 @@ that detail.
 - STOP — do not merge `main`, contact Greenhouse, execute the live proof, begin an
   adapter/provider integration, or start another slice until the user explicitly
   authorizes that action.
+
+**Merge record (appended, not a rewrite of the entry above):** Approved at review
+commit `5f65ec0` (no findings). Per user authorization, `phase-4/greenhouse-live-proof`
+was merged into `main` with a normal merge commit (`907b3f0`; `--no-ff`, no
+squash/rebase/force-push) and pushed. `main`/`origin/main` are both now at `907b3f0`.
+Verified: feature branch was clean and pushed at `5f65ec0`, and `main`/`origin/main`
+were still at `4cb8492` immediately before the merge; `main` has zero content diff
+against the feature branch (`git diff main phase-4/greenhouse-live-proof --stat`
+empty); migration `0017` remains the sole Alembic head; `python -m scripts.check_repo`
+exited `0`; `git diff --check` was clean; working tree clean throughout. No Greenhouse
+request and no real `CREATE`/`DROP DATABASE` invocation were made during the merge.
+
+**Rollback boundary:** reverting `907b3f0` (a single merge commit) restores `main` to
+`4cb8492` exactly — no schema/migration exists in this slice to downgrade, and no data
+migration accompanies it. This merges the Greenhouse live-to-disposable-database
+ingestion proof only (`backend/scripts/live_proof_greenhouse_ingestion.py`, its offline
+test file, `backend/tests/test_db_safety.py`, the narrow
+`assert_safe_for_local_destructive_lifecycle` addition to
+`backend/scripts/db_safety.py`, and the ADR 0004 identity-label addendum) — it does
+**not** add a production `DiscoveryProvider` adapter, `QueryPlanner`/`ProviderRegistry`
+integration, database writes, scheduling, Phase 3 normalization, or any other product
+change, all of which remain not started and are not authorized by this merge.
