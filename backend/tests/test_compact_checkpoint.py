@@ -67,6 +67,31 @@ def test_clean_feature_equal_to_upstream_is_recoverable_not_optimal() -> None:
     assert hook.checkpoint_classification(snapshot)[0] == "RECOVERABLE"
 
 
+@pytest.mark.parametrize(
+    "snapshot",
+    [
+        # Clean main, but not synchronized with origin/main.
+        _snapshot(origin_main_head="older"),
+        # Clean feature branch with no configured upstream at all — `_git`'s
+        # own fail-safe returns "" when `@{upstream}` doesn't resolve (e.g.
+        # never pushed), so `head == upstream_head` can never hold here.
+        _snapshot(branch="phase-2/example", upstream_head=""),
+    ],
+)
+def test_clean_unsynchronized_state_is_recoverable_with_reconciliation(snapshot: Any) -> None:
+    """Neither the optimal main-sync boundary nor a pushed-feature-equals-
+    upstream boundary — a clean tree alone is not sufficient for either
+    classification. This is the one classification branch the prior review
+    found reachable but never asserted by name."""
+    assert snapshot.optimal_checkpoint is False
+    assert snapshot.pushed_feature_checkpoint is False
+
+    classification, reason = hook.checkpoint_classification(snapshot)
+
+    assert classification == "RECOVERABLE WITH RECONCILIATION"
+    assert "not an optimal recorded boundary" in reason
+
+
 def test_dirty_tree_is_classified_unsafe_for_proactive_compaction() -> None:
     snapshot = _snapshot(clean=False)
 
@@ -105,4 +130,120 @@ def test_write_checkpoint_is_atomic_and_restore_prints_it(
     assert checkpoint_path.exists()
     assert "Classification: **OPTIMAL**" in output
     assert "Trigger: manual" in output
+    assert list(runtime_dir.glob("*.tmp")) == []
+
+
+# --------------------------------------------------------------------------
+# restore_context() fail-safe behavior — a present-but-broken checkpoint
+# must never raise, and must never leak exception text, an alternate path,
+# or file content into the printed fallback.
+# --------------------------------------------------------------------------
+
+
+def test_restore_context_falls_back_safely_for_an_invalidly_encoded_checkpoint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    checkpoint_path = tmp_path / "compact-checkpoint.md"
+    checkpoint_path.write_bytes(b"\xff\xfe\x00\x01 not valid utf-8")
+    monkeypatch.setattr(hook, "CHECKPOINT_PATH", checkpoint_path)
+
+    hook.restore_context()
+
+    output = capsys.readouterr().out
+    assert hook._FALLBACK_CHECKPOINT in output
+
+
+def test_restore_context_falls_back_safely_when_the_checkpoint_read_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    checkpoint_path = tmp_path / "compact-checkpoint.md"
+    checkpoint_path.write_text("SENSITIVE PRIOR CHECKPOINT CONTENT", encoding="utf-8")
+    monkeypatch.setattr(hook, "CHECKPOINT_PATH", checkpoint_path)
+
+    original_read_text = Path.read_text
+
+    def _flaky_read_text(self: Path, encoding: str | None = None, errors: str | None = None) -> str:
+        if self == checkpoint_path:
+            raise OSError("simulated unreadable checkpoint")
+        return original_read_text(self, encoding=encoding, errors=errors)
+
+    monkeypatch.setattr(Path, "read_text", _flaky_read_text)
+
+    hook.restore_context()
+
+    output = capsys.readouterr().out
+    assert hook._FALLBACK_CHECKPOINT in output
+    assert "SENSITIVE PRIOR CHECKPOINT CONTENT" not in output
+    assert "simulated unreadable checkpoint" not in output
+    assert str(checkpoint_path) not in output
+
+
+def test_main_restore_mode_never_raises_even_if_restore_context_itself_fails(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Defense in depth beyond `_read_checkpoint_safely()`'s own guard —
+    `main()`'s `"restore"` branch must still emit the safe fallback and
+    return `0` even if `restore_context()` itself somehow raised."""
+
+    def _boom() -> None:
+        raise RuntimeError("simulated unexpected restore failure")
+
+    monkeypatch.setattr(hook, "restore_context", _boom)
+
+    exit_code = hook.main(["restore"])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert hook._FALLBACK_CHECKPOINT in output
+    assert "simulated unexpected restore failure" not in output
+
+
+# --------------------------------------------------------------------------
+# write_checkpoint() atomic-replacement failure — no temp file left behind,
+# a prior valid checkpoint is untouched, and the PreCompact entry point
+# still reports success so emergency compaction is never blocked.
+# --------------------------------------------------------------------------
+
+
+def test_write_checkpoint_replace_failure_leaves_no_temp_file_and_preserves_prior_checkpoint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime_dir = tmp_path / "runtime"
+    runtime_dir.mkdir()
+    checkpoint_path = runtime_dir / "compact-checkpoint.md"
+    checkpoint_path.write_text("PRIOR VALID CHECKPOINT CONTENT", encoding="utf-8")
+
+    monkeypatch.setattr(hook, "RUNTIME_DIR", runtime_dir)
+    monkeypatch.setattr(hook, "CHECKPOINT_PATH", checkpoint_path)
+    monkeypatch.setattr(hook, "capture_git_snapshot", lambda: _snapshot())
+
+    def _boom(*args: object, **kwargs: object) -> None:
+        raise OSError("simulated atomic replace failure")
+
+    monkeypatch.setattr(hook.os, "replace", _boom)
+
+    with pytest.raises(OSError, match="simulated atomic replace failure"):
+        hook.write_checkpoint(trigger="manual")
+
+    assert list(runtime_dir.glob("*.tmp")) == []
+    assert checkpoint_path.read_text(encoding="utf-8") == "PRIOR VALID CHECKPOINT CONTENT"
+
+
+def test_main_pre_mode_still_returns_success_when_replace_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime_dir = tmp_path / "runtime"
+    monkeypatch.setattr(hook, "RUNTIME_DIR", runtime_dir)
+    monkeypatch.setattr(hook, "CHECKPOINT_PATH", runtime_dir / "compact-checkpoint.md")
+    monkeypatch.setattr(hook, "capture_git_snapshot", lambda: _snapshot())
+    monkeypatch.setattr(hook, "_read_hook_input", lambda: {"trigger": "auto"})
+
+    def _boom(*args: object, **kwargs: object) -> None:
+        raise OSError("simulated atomic replace failure")
+
+    monkeypatch.setattr(hook.os, "replace", _boom)
+
+    exit_code = hook.main(["pre"])
+
+    assert exit_code == 0
     assert list(runtime_dir.glob("*.tmp")) == []

@@ -165,16 +165,30 @@ def write_checkpoint(*, trigger: str) -> None:
         temporary_path.unlink(missing_ok=True)
 
 
+_FALLBACK_CHECKPOINT = (
+    "No PreCompact checkpoint was available. Read current Git state, "
+    "CLAUDE.md, docs/LLM_WORKFLOW.md, and docs/LLM_HANDOFF.md before acting."
+)
+
+
+def _read_checkpoint_safely() -> str:
+    """Never raises. A checkpoint file that is missing, unreadable
+    (permissions, I/O error), or invalidly encoded all fall back to the
+    exact same fixed, safe message a genuinely missing file already used —
+    never the exception's own text, never any path other than the one
+    fixed `CHECKPOINT_PATH` constant that message already names, and never
+    partial/corrupted file content."""
+    try:
+        if CHECKPOINT_PATH.is_file():
+            return CHECKPOINT_PATH.read_text(encoding="utf-8")
+    except (OSError, ValueError):  # ValueError covers UnicodeDecodeError
+        pass
+    return _FALLBACK_CHECKPOINT
+
+
 def restore_context() -> None:
-    if CHECKPOINT_PATH.exists():
-        checkpoint = CHECKPOINT_PATH.read_text(encoding="utf-8")
-    else:
-        checkpoint = (
-            "No PreCompact checkpoint was available. Read current Git state, "
-            "CLAUDE.md, docs/LLM_WORKFLOW.md, and docs/LLM_HANDOFF.md before acting."
-        )
     print("COMPACTION RECOVERY CONTEXT (repository state remains authoritative):")
-    print(checkpoint)
+    print(_read_checkpoint_safely())
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -193,7 +207,11 @@ def main(argv: list[str] | None = None) -> int:
             )
         return 0
     if mode == "restore":
-        restore_context()
+        try:
+            restore_context()
+        except Exception:  # SessionStart(compact) must never fail the session
+            print("COMPACTION RECOVERY CONTEXT (repository state remains authoritative):")
+            print(_FALLBACK_CHECKPOINT)
         return 0
 
     print("usage: compact_checkpoint.py {pre|restore}", file=sys.stderr)

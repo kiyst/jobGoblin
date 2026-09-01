@@ -98,171 +98,6 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-08-31, Claude Code (Sonnet 5). Class H correction pass on
-  `phase-4/greenhouse-live-proof` for the three remaining bounded findings in
-  review commit `68c6c12` (`19581f7..68c6c12`). Base `19581f7`. Addresses
-  exactly the remaining Medium/Low findings; the four prior findings' own
-  dispositions (cleanup-authorization gate, snapshot-diff cleanup,
-  timestamp/attempt/raw assertions, no-further-live-request) are unchanged
-  and untouched. No network request and no real `CREATE`/`DROP DATABASE`
-  were performed during this pass.
-- Outcome, addressing each remaining finding exactly:
-  1. **Medium — the shared-test identity scope now covers the full natural
-     key.** Added `provider == "ats_scrapers"`/`source == "greenhouse"`
-     predicates to `_capture_identity_scope`'s `JobOccurrence` query and to
-     both remaining occurrence lookups in
-     `test_two_pipeline_runs_insert_then_update_without_duplication`
-     (previously filtered only by `source_tenant_id`/`source_job_id`, which
-     could in principle select a row from a different, unrelated identity
-     namespace sharing the same tenant/job-id pair). `_mapped_job()` now
-     requires an explicit `unique_suffix` keyword and mutates a fresh copy
-     of the fixture's job dict — `id` and `absolute_url` become
-     `test-{suffix}`-derived synthetic values — *before* mapping, so
-     `DiscoveredJob.raw`, `source_job_id`, and `canonical_url` all derive
-     from the same synthetic values automatically; `canonical_json_hash
-     (job.raw)` stays internally consistent with no separate bookkeeping.
-     Every call site now passes a distinct, self-documenting suffix (e.g.
-     `"two-runs-insert-update"`, `"cleanup-mid-transaction-failure"`) so no
-     database-touching test's identity can collide with another test's, the
-     real committed fixture's own stable id, or stale/concurrent data.
-  2. **Low — all four mapped parent-`Job` fields are now asserted, both
-     after insertion and after re-observation, in both the live assertion
-     helpers and the offline pipeline test.** Added `title`/`location_raw`/
-     `compensation_text` (alongside the already-present `canonical_url`) to
-     `_assert_state_after_run_one`/`_assert_state_after_run_two` in the live
-     proof script and to both `Job` checks in
-     `test_two_pipeline_runs_insert_then_update_without_duplication`. New
-     `_as_stored()` helper (script) mirrors `Job`'s own
-     `_normalize_nullable_text` validator (trim `" \t\n\r"`, blank collapses
-     to `None`) — the real committed fixture's own `title` has a genuine
-     trailing space (an upstream Greenhouse data-quality artifact, already
-     noted and left as-is in an earlier slice), so comparing the persisted
-     row against the raw `DiscoveredJob` field requires applying the same
-     transform to the expected side first; a raw equality assertion added
-     without this failed immediately against real fixture data, was caught
-     before commit, and is exactly why this helper exists rather than a
-     bare `==`. The offline test imports and reuses the same
-     `live_proof._as_stored()`, not a second copy.
-  3. **Low — `_run_proof()`'s docstring no longer contradicts its own
-     code.** Rewritten to state cleanup is guaranteed only after an
-     *authorized* creation attempt (including an ambiguous creation
-     failure), and is intentionally skipped entirely when the
-     destructive-lifecycle safety guard itself rejects the target —
-     matching `cleanup_authorized`'s actual behavior from the prior
-     correction pass exactly.
-- Files changed: `backend/scripts/live_proof_greenhouse_ingestion.py`;
-  `backend/tests/test_live_proof_greenhouse_adapter.py`; this handoff.
-  `backend/scripts/db_safety.py`, the ADR 0004 addendum, the canary, its
-  fixture, the application pipeline, schema, and migrations are all
-  unchanged — confirmed by `git status`/`git diff --check`.
-- Commands run and exact results:
-  - `ruff format .` / `ruff check .` -> clean, whole repo.
-  - `mypy app tests scripts` -> clean, 81 source files.
-  - `python -m pytest tests/test_live_proof_greenhouse_adapter.py
-    tests/test_db_safety.py -q` -> **45 passed** (same count as before —
-    no tests added or removed this pass, only corrected), offline only.
-  - Full suite -> **1370 passed** (unchanged).
-  - `python -m scripts.check_repo` -> exit 0, zero findings.
-  - `git diff --check` -> clean.
-  - **Genuine external `python scripts/verify.py --level routine --focus
-    tests/test_live_proof_greenhouse_adapter.py tests/test_db_safety.py`**
-    -> all **10 steps PASS** (Ruff format/check, mypy, `check_repo.py`,
-    `git diff --check`, database URL safety, real test-database
-    reachability, focused pytest **45 passed**, full suite **1370
-    passed**, temporary-directory cleanup) in `110.12s`.
-  - No live Greenhouse request and no real `CREATE`/`DROP DATABASE` were
-    performed during this correction pass — development (`jobgoblin`) and
-    shared test (`jobgoblin_test`) databases were the only ones touched.
-- Adversarial self-review: re-read the corrected diff before this entry.
-  Confirmed (a) every `JobOccurrence` query touching shared
-  `jobgoblin_test` state now carries all four natural-key predicates,
-  grepped to verify no remaining bare `source_tenant_id`/`source_job_id`-
-  only filter exists anywhere in the test file; (b) `_mapped_job`'s
-  synthetic-identity mutation happens on a dict copy *before*
-  `map_job_to_discovered_job` is called, so `raw`/`source_job_id`/
-  `canonical_url` cannot drift out of sync with each other by
-  construction, not by convention; (c) every one of the eight `_mapped_job`
-  call sites was updated with a distinct suffix — grepped for any
-  remaining bare `_mapped_job(datetime(...))` call missing the keyword,
-  found none; (d) `_as_stored` is defined once, in the script, and the
-  offline test calls that same function rather than duplicating the trim
-  logic. Found no further issues beyond the three findings addressed
-  above.
-- Deviations/known limitations: unchanged from Iteration 1. `main`
-  untouched throughout. No further live request was made, consistent with
-  Iteration 1's disposition on that point.
-- STOP — awaiting Codex re-review. Do not merge `main`, contact Greenhouse,
-  execute the live proof, modify shared safety/ADR/canary/application/
-  schema files, or begin another slice.
-
-### Work review
-
-- Date/agent: 2026-08-31, Codex. Final correction diff reviewed:
-  `68c6c12..ae02d22` on `phase-4/greenhouse-live-proof`.
-- Independent verification performed: inspected the complete bounded diff and traced
-  every affected identity lookup, synthetic fixture construction, persisted-field
-  assertion, and cleanup-authorization statement. Ran the genuine external routine
-  verifier focused on `tests/test_live_proof_greenhouse_adapter.py` and
-  `tests/test_db_safety.py`: all **10 steps PASS**, including **45 focused tests** and
-  **1370 full-suite tests**. No Greenhouse request and no real disposable-database
-  create/drop invocation was performed during this review.
-- Prior-finding disposition:
-  1. **Medium finding closed.** `_capture_identity_scope()` and both occurrence
-     lookups use the complete fixed identity domain `(provider="ats_scrapers",
-     source="greenhouse", source_tenant_id, source_job_id)`. `_mapped_job()` requires
-     a distinct explicit suffix at every call site and mutates a fresh fixture-dict
-     copy before mapping, keeping `raw`, `source_job_id`, `canonical_url`, and their
-     hash mutually consistent.
-  2. **Low assertion finding closed.** The live assertion helpers and offline pipeline
-     test now verify `title`, `location_raw`, `compensation_text`, and `canonical_url`
-     after both insertion and re-observation. `_as_stored()` matches the `Job` model's
-     exact covered-whitespace trim and blank-to-`None` behavior.
-  3. **Low documentation finding closed.** `_run_proof()` now distinguishes guaranteed
-     cleanup after an authorized creation attempt from intentional zero-contact
-     behavior when the safety guard rejects the target.
-- Adversarial cases checked: cross-provider/source key reuse can no longer enter this
-  test scope; synthetic fixture identities cannot collide silently or drift from their
-  raw payload; upstream trailing covered whitespace is compared using the actual
-  persistence normalization; rejected targets remain outside cleanup authorization.
-  No further findings.
-- Missing/inconclusive checks: the external proof was intentionally not repeated. The
-  accepted historical live result remains the evidence for real Greenhouse transport;
-  this final pass verifies the corrected offline invariants only.
-- Verdict: **Approved**. The `greenhouse-live-proof` slice and its correction passes are
-  accepted; no further correction is required.
-- Exact requested corrections: none.
-- STOP — do not merge `main`, contact Greenhouse, execute the live proof, begin an
-  adapter/provider integration, or start another slice until the user explicitly
-  authorizes that action.
-
-**Merge record (appended, not a rewrite of the entry above):** Approved at review
-commit `5f65ec0` (no findings). Per user authorization, `phase-4/greenhouse-live-proof`
-was merged into `main` with a normal merge commit (`907b3f0`; `--no-ff`, no
-squash/rebase/force-push) and pushed. `main`/`origin/main` are both now at `907b3f0`.
-Verified: feature branch was clean and pushed at `5f65ec0`, and `main`/`origin/main`
-were still at `4cb8492` immediately before the merge; `main` has zero content diff
-against the feature branch (`git diff main phase-4/greenhouse-live-proof --stat`
-empty); migration `0017` remains the sole Alembic head; `python -m scripts.check_repo`
-exited `0`; `git diff --check` was clean; working tree clean throughout. No Greenhouse
-request and no real `CREATE`/`DROP DATABASE` invocation were made during the merge.
-
-**Rollback boundary:** reverting `907b3f0` (a single merge commit) restores `main` to
-`4cb8492` exactly — no schema/migration exists in this slice to downgrade, and no data
-migration accompanies it. This merges the Greenhouse live-to-disposable-database
-ingestion proof only (`backend/scripts/live_proof_greenhouse_ingestion.py`, its offline
-test file, `backend/tests/test_db_safety.py`, the narrow
-`assert_safe_for_local_destructive_lifecycle` addition to
-`backend/scripts/db_safety.py`, and the ADR 0004 identity-label addendum) — it does
-**not** add a production `DiscoveryProvider` adapter, `QueryPlanner`/`ProviderRegistry`
-integration, database writes, scheduling, Phase 3 normalization, or any other product
-change, all of which remain not started and are not authorized by this merge.
-
----
-
-## Iteration 2
-
-### Work done
-
 - Date/agent: 2026-08-31, Codex acting as the user-authorized implementer. Class R
   tooling slice on `codex/tooling-safe-compaction`, based on clean
   `main@10b9432`. Outcome: safe Claude Code compaction policy plus automatic,
@@ -415,3 +250,125 @@ change, all of which remain not started and are not authorized by this merge.
   is required by any finding above.
 - STOP — do not merge `main`, begin the `ambiguous_match` slice, or treat this review as
   authorization for a correction pass until the user explicitly approves one.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-09-01, Claude Code (Sonnet 5). Class H correction pass on
+  `codex/tooling-safe-compaction` for Findings 1-4 from review commit
+  `58995c1` (`c750762..58995c1`). Base `58995c1`. Reclassified Class H (not
+  the original Class R) because this pass directly touches
+  context-recovery and credential-exclusion behavior — matching Finding 5's
+  own observation in the review being corrected. No product code,
+  `CLAUDE.md`, `.claude/settings.json`, database code, providers,
+  ingestion, or the `ambiguous_match` proposal touched.
+- **Documentation correction to the prior review, not a rewrite of it**: my
+  own `58995c1` review stated `PreCompact`'s stdin `"trigger"` field and its
+  blocking mechanism were not independently confirmed against public
+  documentation (a fresh-context agent dispatch could not reach that
+  specific section). The user's authorization for this correction pass
+  states the full official `PreCompact` reference does document both: a
+  `trigger` field with `manual`/`auto` values, and that returning exit code
+  `2` or emitting `{"decision": "block"}` blocks compaction — with an
+  explicit warning that blocking a recovery compaction triggered by a
+  context-limit error would surface the original failure instead of
+  preventing it. Recording this per the user's instruction, as a correction
+  to the review's own residual uncertainty, not as newly independently
+  re-verified by this pass: `compact_checkpoint.py`'s existing exit-0/
+  no-decision-output behavior in `"pre"` mode is consistent with that
+  spec either way. Iteration 1's own historical text is left exactly as
+  written.
+- Outcome, addressing each finding exactly:
+  1. **Medium — the routine verifier now lints and type-checks the hook
+     script on every run.** Added `CLAUDE_HOOKS_DIR = REPO_ROOT / ".claude" /
+     "hooks"` to `scripts/verify.py`; `ruff_format_command()`/
+     `ruff_check_command()`/`mypy_command()` now include it alongside the
+     existing `backend/`-scoped targets. Confirmed empirically (`--show-settings`/
+     `--verbose`) that both tools resolve `backend/pyproject.toml`'s own
+     config for a path outside `backend/` when invoked with
+     `cwd=BACKEND_DIR`, exactly as the existing targets already do — no new
+     config file needed. The existing 10-step verifier structure is
+     unchanged; only the Ruff/mypy steps' own argument lists grew. Updated
+     `test_verify.py`'s three exact-command tests plus a new test proving
+     `CLAUDE_HOOKS_DIR` resolves to the real directory containing
+     `compact_checkpoint.py` (so the command tests aren't asserting
+     coverage of an empty path).
+  2. **Low-Medium — the "RECOVERABLE WITH RECONCILIATION" classification is
+     now asserted by name.** New parametrized test covers both a clean
+     `main` unsynchronized from `origin/main` and a clean feature branch
+     with no configured upstream at all (`upstream_head=""`, matching
+     `_git`'s own fail-safe for an unresolvable `@{upstream}`), asserting
+     both `optimal_checkpoint`/`pushed_feature_checkpoint` are `False` and
+     the classification/reason match exactly.
+  3. **Low — `restore_context()` now fails safely for a present-but-broken
+     checkpoint.** New `_read_checkpoint_safely()` catches `(OSError,
+     ValueError)` (the latter covers `UnicodeDecodeError`) around the
+     existence check and read, falling back to the exact same fixed,
+     pre-existing safe message — never exception text, never a path other
+     than the one already-named `CHECKPOINT_PATH` constant, never partial
+     file content. `main()`'s `"restore"` branch additionally wraps
+     `restore_context()` in a broad `except Exception`, mirroring the
+     `"pre"` branch's own established defense-in-depth pattern, so the
+     `SessionStart(compact)` hook cannot fail even from an unanticipated
+     future regression. Added three tests: an actually-invalid-UTF-8 file
+     on disk (no monkeypatching needed), an injected `Path.read_text`
+     failure scoped to only the checkpoint's own path (delegates to the
+     real method for anything else), and a forced `restore_context()`
+     failure proving `main(["restore"])` still emits the fallback and
+     returns `0`.
+  4. **Addressed — atomic-replacement failure now has dedicated failure-path
+     tests.** Two new tests inject an `os.replace` failure: one calls
+     `write_checkpoint()` directly and confirms (a) no `.tmp` file remains
+     in the runtime directory afterward and (b) a pre-existing, genuinely
+     different prior checkpoint file is byte-for-byte untouched; the other
+     calls the real `main(["pre"])` entry point under the same injected
+     failure and confirms it still returns `0` — the existing `finally:
+     temporary_path.unlink(missing_ok=True)` and the `"pre"` branch's
+     existing broad exception handling were already correct; these tests
+     newly prove it rather than leaving it implicit.
+- Files changed: `.claude/hooks/compact_checkpoint.py`; `backend/scripts/
+  verify.py`; `backend/tests/test_compact_checkpoint.py`; `backend/tests/
+  test_verify.py`; this handoff. `CLAUDE.md`, `.claude/settings.json`,
+  `.gitignore`, `docs/LLM_WORKFLOW.md` unchanged — confirmed by `git status`.
+- Commands run and exact results:
+  - Direct `ruff format`/`ruff check` against `backend/` and against
+    `.claude/hooks/compact_checkpoint.py` explicitly -> clean.
+  - `mypy app tests scripts` (now including `CLAUDE_HOOKS_DIR` via
+    `mypy_command()`) -> clean, 82 source files.
+  - `python -m pytest tests/test_compact_checkpoint.py tests/test_verify.py -q`
+    -> **90 passed** (was 83 combined pre-pass: 9 + 74; net +7 in
+    `test_compact_checkpoint.py`, +1 in `test_verify.py`).
+  - Full suite -> **1387 passed** (was 1379).
+  - `python -m scripts.check_repo` -> exit 0, zero findings.
+  - `git diff --check` -> clean.
+  - **Genuine external `python scripts/verify.py --level routine --focus
+    tests/test_compact_checkpoint.py tests/test_verify.py`** -> all **10
+    steps PASS** (Ruff format/check — now covering `.claude/hooks/` —,
+    mypy — same —, `check_repo.py`, `git diff --check`, database URL
+    safety, real test-database reachability, focused pytest **90 passed**,
+    full suite **1387 passed**, temporary-directory cleanup) in `125.14s`.
+  - No `/compact` was executed during this pass.
+- Adversarial self-review: confirmed (a) `_read_checkpoint_safely()`'s
+  `except (OSError, ValueError)` is reached before any partial content
+  could be printed, since the `try` block's `return` is the only path that
+  ever yields real file content; (b) the new `main()`-level `"restore"`
+  guard prints the exact same fixed fallback text as the primary guard,
+  never a different message that could itself leak something; (c) the
+  atomic-replacement tests exercise `write_checkpoint()` and `main(["pre"])`
+  through the real, unmodified code path — the injected failure is at
+  `os.replace` only, so the temp-file creation, write, and `finally`
+  cleanup are all genuinely exercised, not bypassed; (d) `CLAUDE_HOOKS_DIR`
+  is a directory, not the specific file, so any future file added under
+  `.claude/hooks/` is automatically covered without a further verifier
+  change. Found no further issues beyond the four findings addressed above.
+- Deviations/known limitations: none new. `main` untouched throughout; no
+  merge performed.
+- STOP — awaiting Codex re-review. Do not merge `main`, begin the
+  `ambiguous_match` slice, or execute `/compact`.
+
+### Work review
+
+_Pending._
