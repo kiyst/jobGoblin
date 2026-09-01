@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.db.models import (
@@ -25,7 +25,6 @@ from app.ingestion.clock import FixedClock
 from app.ingestion.identity import resolve_identity
 from app.ingestion.natural_key import NaturalKey, NaturalKeyDomain
 from app.ingestion.persistence import (
-    AmbiguousIdentityMatchError,
     CandidateResolutionUnstableError,
     InvalidRawIngestionAssociationError,
     UpsertKind,
@@ -2299,13 +2298,14 @@ async def test_usable_canonical_url_miss_does_not_fall_back_to_tier3(
         )
 
 
-async def test_tier2_multiple_candidates_fails_closed(db_engine: AsyncEngine) -> None:
+async def test_tier2_multiple_candidates_persists_ambiguous_match(db_engine: AsyncEngine) -> None:
     """Two independently pre-existing Jobs that already share a canonical
     URL (a pre-existing anomaly this slice's own code cannot itself
     produce, since its own advisory lock serializes every attach attempt
     for a given URL) — a third posting sharing that URL under a new
-    natural key must raise `AmbiguousIdentityMatchError` before any
-    mutation, never guessing which one to attach to."""
+    natural key must create a standalone Job/JobOccurrence and persist an
+    `ambiguous_match` `identity_conflicts` row naming both candidates,
+    never guessing which one to attach to and never raising."""
     t0 = datetime(2026, 3, 14, tzinfo=UTC)
     t1 = t0 + timedelta(hours=1)
     shared_url = "https://ambiguous.example.com/jobs/shared"
@@ -2336,33 +2336,65 @@ async def test_tier2_multiple_candidates_fails_closed(db_engine: AsyncEngine) ->
     job_ids: list[uuid.UUID] = []
     raw_ids: list[uuid.UUID] = []
     try:
-        job_ids.append(
-            await _create_job_and_occurrence_directly(
-                db_engine, job_x, observed_at=t0, canonical_url_normalized=shared_url
-            )
+        job_x_id = await _create_job_and_occurrence_directly(
+            db_engine, job_x, observed_at=t0, canonical_url_normalized=shared_url
         )
-        job_ids.append(
-            await _create_job_and_occurrence_directly(
-                db_engine, job_y, observed_at=t0, canonical_url_normalized=shared_url
-            )
+        job_y_id = await _create_job_and_occurrence_directly(
+            db_engine, job_y, observed_at=t0, canonical_url_normalized=shared_url
         )
+        job_ids.extend([job_x_id, job_y_id])
 
         natural_key_z = resolve_identity(job_z)
         raw_id_z = await pipeline._write_fetched_row(db_engine, job_z, job_z.discovered_at)
         raw_ids.append(raw_id_z)
 
-        with pytest.raises(AmbiguousIdentityMatchError):
-            await persist_posting(db_engine, natural_key_z, job_z, t1, raw_id_z)
+        outcome = await persist_posting(db_engine, natural_key_z, job_z, t1, raw_id_z)
+        job_ids.append(outcome.job_id)  # the new standalone Job, captured before any assertion
+
+        assert outcome.kind is UpsertKind.AMBIGUOUS
+        assert outcome.ambiguous_candidate_job_ids == tuple(sorted([job_x_id, job_y_id]))
+        assert outcome.conflict_id is not None
 
         async with AsyncSession(bind=db_engine) as session:
             assert (
                 await session.execute(select(func.count()).select_from(Job))
-            ).scalar_one() == 2  # no third Job created
+            ).scalar_one() == 3  # job_x, job_y, and the new standalone Job
+
+            new_occurrence = await session.get(JobOccurrence, outcome.occurrence_id)
+            assert new_occurrence is not None
+            assert new_occurrence.job_id == outcome.job_id
+            assert new_occurrence.job_id not in (job_x_id, job_y_id)
+
+            # Neither candidate was mutated or given a second occurrence.
+            job_x_row = await session.get(Job, job_x_id)
+            assert job_x_row is not None
+            assert job_x_row.last_seen_at == t0
+            job_y_row = await session.get(Job, job_y_id)
+            assert job_y_row is not None
+            assert job_y_row.last_seen_at == t0
+            for candidate_id in (job_x_id, job_y_id):
+                occurrence_count = (
+                    await session.execute(
+                        select(func.count())
+                        .select_from(JobOccurrence)
+                        .where(JobOccurrence.job_id == candidate_id)
+                    )
+                ).scalar_one()
+                assert occurrence_count == 1
+
+            conflict = await session.get(IdentityConflict, outcome.conflict_id)
+            assert conflict is not None
+            assert conflict.conflict_type == "ambiguous_match"
+            assert conflict.status == "open"
+            assert conflict.existing_job_occurrence_id is None
+            assert conflict.incoming_raw_job_ingestion_id == raw_id_z
+            assert conflict.existing_value == sorted([str(job_x_id), str(job_y_id)])
+            assert conflict.incoming_value == [str(outcome.occurrence_id)]
 
             raw_z = await session.get(RawJobIngestion, raw_id_z)
             assert raw_z is not None
-            assert raw_z.processing_status == "fetched"
-            assert raw_z.job_occurrence_id is None
+            assert raw_z.processing_status == "identity_conflict"
+            assert raw_z.job_occurrence_id == outcome.occurrence_id
     finally:
         await _cleanup(
             db_engine,
@@ -2373,12 +2405,13 @@ async def test_tier2_multiple_candidates_fails_closed(db_engine: AsyncEngine) ->
         )
 
 
-async def test_tier3_multiple_candidates_fails_closed(db_engine: AsyncEngine) -> None:
+async def test_tier3_multiple_candidates_persists_ambiguous_match(db_engine: AsyncEngine) -> None:
     """The Tier-3 analog of the above: two independently pre-existing Jobs
     already sharing a `(provider, source, source_tenant_id,
     requisition_id_raw)` combination — a third, no-canonical-URL posting
-    with a new natural key sharing that combination must raise
-    `AmbiguousIdentityMatchError` before any mutation."""
+    with a new natural key sharing that combination must create a
+    standalone Job/JobOccurrence and persist an `ambiguous_match` row
+    naming both candidates, never raising."""
     t0 = datetime(2026, 3, 15, tzinfo=UTC)
     t1 = t0 + timedelta(hours=1)
 
@@ -2390,23 +2423,247 @@ async def test_tier3_multiple_candidates_fails_closed(db_engine: AsyncEngine) ->
     job_ids: list[uuid.UUID] = []
     raw_ids: list[uuid.UUID] = []
     try:
-        job_ids.append(await _create_job_and_occurrence_directly(db_engine, job_x, observed_at=t0))
-        job_ids.append(await _create_job_and_occurrence_directly(db_engine, job_y, observed_at=t0))
+        job_x_id = await _create_job_and_occurrence_directly(db_engine, job_x, observed_at=t0)
+        job_y_id = await _create_job_and_occurrence_directly(db_engine, job_y, observed_at=t0)
+        job_ids.extend([job_x_id, job_y_id])
 
         natural_key_z = resolve_identity(job_z)
         raw_id_z = await pipeline._write_fetched_row(db_engine, job_z, job_z.discovered_at)
         raw_ids.append(raw_id_z)
 
-        with pytest.raises(AmbiguousIdentityMatchError):
-            await persist_posting(db_engine, natural_key_z, job_z, t1, raw_id_z)
+        outcome = await persist_posting(db_engine, natural_key_z, job_z, t1, raw_id_z)
+        job_ids.append(outcome.job_id)  # captured before any assertion
+
+        assert outcome.kind is UpsertKind.AMBIGUOUS
+        assert outcome.ambiguous_candidate_job_ids == tuple(sorted([job_x_id, job_y_id]))
+        assert outcome.conflict_id is not None
 
         async with AsyncSession(bind=db_engine) as session:
-            assert (await session.execute(select(func.count()).select_from(Job))).scalar_one() == 2
+            assert (await session.execute(select(func.count()).select_from(Job))).scalar_one() == 3
+
+            new_occurrence = await session.get(JobOccurrence, outcome.occurrence_id)
+            assert new_occurrence is not None
+            assert new_occurrence.job_id == outcome.job_id
+
+            job_x_row = await session.get(Job, job_x_id)
+            assert job_x_row is not None
+            assert job_x_row.last_seen_at == t0
+            job_y_row = await session.get(Job, job_y_id)
+            assert job_y_row is not None
+            assert job_y_row.last_seen_at == t0
+
+            conflict = await session.get(IdentityConflict, outcome.conflict_id)
+            assert conflict is not None
+            assert conflict.conflict_type == "ambiguous_match"
+            assert conflict.existing_job_occurrence_id is None
+            assert conflict.existing_value == sorted([str(job_x_id), str(job_y_id)])
+            assert conflict.incoming_value == [str(outcome.occurrence_id)]
 
             raw_z = await session.get(RawJobIngestion, raw_id_z)
             assert raw_z is not None
-            assert raw_z.processing_status == "fetched"
-            assert raw_z.job_occurrence_id is None
+            assert raw_z.processing_status == "identity_conflict"
+            assert raw_z.job_occurrence_id == outcome.occurrence_id
+    finally:
+        await _cleanup(
+            db_engine,
+            user_ids=[],
+            job_ids=job_ids,
+            collection_run_ids=[],
+            raw_ingestion_ids=raw_ids,
+        )
+
+
+async def test_tier2_three_or_more_candidates_persists_full_candidate_set(
+    db_engine: AsyncEngine,
+) -> None:
+    """The fast `<=2` ambiguity probe only ever sees two of the candidates,
+    but the persisted `existing_value` must name every distinct candidate
+    Job — proving `_discover_all_candidates` (not the probe) is what gets
+    persisted. Three independently pre-existing Jobs share one canonical
+    URL; a fourth posting under a new natural key sharing that URL must
+    produce an `ambiguous_match` row listing all three, sorted."""
+    t0 = datetime(2026, 3, 16, 12, tzinfo=UTC)
+    t1 = t0 + timedelta(hours=1)
+    shared_url = "https://ambiguous.example.com/jobs/three-way-shared"
+
+    base = _load_fixture("canonical_url_match_primary")
+    job_x = base.model_copy(
+        update={
+            "source_tenant_id": "tenant-x3",
+            "source_job_id": "AMB3-X",
+            "canonical_url": shared_url,
+        }
+    )
+    job_y = base.model_copy(
+        update={
+            "source_tenant_id": "tenant-y3",
+            "source_job_id": "AMB3-Y",
+            "canonical_url": shared_url,
+        }
+    )
+    job_w = base.model_copy(
+        update={
+            "source_tenant_id": "tenant-w3",
+            "source_job_id": "AMB3-W",
+            "canonical_url": shared_url,
+        }
+    )
+    job_z = base.model_copy(
+        update={
+            "source_tenant_id": "tenant-z3",
+            "source_job_id": "AMB3-Z",
+            "canonical_url": shared_url,
+        }
+    )
+
+    job_ids: list[uuid.UUID] = []
+    raw_ids: list[uuid.UUID] = []
+    try:
+        job_x_id = await _create_job_and_occurrence_directly(
+            db_engine, job_x, observed_at=t0, canonical_url_normalized=shared_url
+        )
+        job_y_id = await _create_job_and_occurrence_directly(
+            db_engine, job_y, observed_at=t0, canonical_url_normalized=shared_url
+        )
+        job_w_id = await _create_job_and_occurrence_directly(
+            db_engine, job_w, observed_at=t0, canonical_url_normalized=shared_url
+        )
+        job_ids.extend([job_x_id, job_y_id, job_w_id])
+
+        natural_key_z = resolve_identity(job_z)
+        raw_id_z = await pipeline._write_fetched_row(db_engine, job_z, job_z.discovered_at)
+        raw_ids.append(raw_id_z)
+
+        outcome = await persist_posting(db_engine, natural_key_z, job_z, t1, raw_id_z)
+        job_ids.append(outcome.job_id)  # captured before any assertion
+
+        assert outcome.kind is UpsertKind.AMBIGUOUS
+        expected = tuple(sorted([job_x_id, job_y_id, job_w_id]))
+        assert outcome.ambiguous_candidate_job_ids == expected
+        assert len(outcome.ambiguous_candidate_job_ids) == 3
+
+        async with AsyncSession(bind=db_engine) as session:
+            conflict = await session.get(IdentityConflict, outcome.conflict_id)
+            assert conflict is not None
+            assert conflict.existing_value == sorted(str(job_id) for job_id in expected)
+            assert len(conflict.existing_value) == 3
+            assert conflict.incoming_value == [str(outcome.occurrence_id)]
+    finally:
+        await _cleanup(
+            db_engine,
+            user_ids=[],
+            job_ids=job_ids,
+            collection_run_ids=[],
+            raw_ingestion_ids=raw_ids,
+        )
+
+
+async def test_pre_lock_ambiguity_probe_disagreement_fails_closed(
+    db_engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """If the fast `<=2` probe reports ambiguity before any candidate lock
+    is attempted, but the authoritative unbounded requery
+    (`_discover_all_candidates`) resolves to fewer than two real
+    candidates, this is a disagreement between two queries, not a genuine
+    ambiguity — fail closed with `CandidateResolutionUnstableError` and
+    persist nothing, never trust the disagreeing fast probe. Touches no
+    candidate at all, since this is detected before any lock attempt."""
+    t1 = datetime(2026, 3, 20, tzinfo=UTC)
+    job = _load_fixture("canonical_url_match_primary").model_copy(
+        update={"source_job_id": "PRELOCK-DISAGREE"}
+    )
+
+    async def _fake_discover(session: AsyncSession, filter_clause: object) -> list[uuid.UUID]:
+        return [uuid.uuid4(), uuid.uuid4()]  # unconditionally "ambiguous", never real
+
+    monkeypatch.setattr(persistence, "_discover_candidates", _fake_discover)
+
+    natural_key = resolve_identity(job)
+    raw_id = await pipeline._write_fetched_row(db_engine, job, job.discovered_at)
+
+    raw_ids = [raw_id]
+    try:
+        with pytest.raises(CandidateResolutionUnstableError):
+            await persist_posting(db_engine, natural_key, job, t1, raw_id)
+
+        async with AsyncSession(bind=db_engine) as session:
+            assert (
+                await session.execute(select(func.count()).select_from(Job))
+            ).scalar_one() == 0  # nothing created at all
+
+            raw_row = await session.get(RawJobIngestion, raw_id)
+            assert raw_row is not None
+            assert raw_row.processing_status == "fetched"
+            assert raw_row.job_occurrence_id is None
+    finally:
+        await _cleanup(
+            db_engine, user_ids=[], job_ids=[], collection_run_ids=[], raw_ingestion_ids=raw_ids
+        )
+
+
+async def test_post_lock_recheck_ambiguity_probe_disagreement_fails_closed(
+    db_engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The post-lock analog of the above: the fast probe's post-lock
+    recheck reports ambiguity, but the authoritative unbounded requery
+    resolves to only the one real candidate already locked — fail closed
+    with `CandidateResolutionUnstableError`, never trust the disagreeing
+    recheck, and mutate nothing."""
+    t0 = datetime(2026, 3, 21, tzinfo=UTC)
+    t1 = t0 + timedelta(hours=1)
+    job = _load_fixture("canonical_url_match_primary").model_copy(
+        update={"source_job_id": "POSTLOCK-DISAGREE"}
+    )
+    existing_variant = job.model_copy(update={"source_job_id": "POSTLOCK-DISAGREE-EXISTING"})
+
+    existing_job_id = await _create_job_and_occurrence_directly(
+        db_engine, existing_variant, observed_at=t0, canonical_url_normalized=job.canonical_url
+    )
+    fake_other_job_id = uuid.uuid4()  # never created
+
+    real_discover = persistence._discover_candidates
+    call_count = 0
+
+    async def _fake_discover(
+        session: AsyncSession, filter_clause: ColumnElement[bool]
+    ) -> list[uuid.UUID]:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return await real_discover(session, filter_clause)  # real: [existing_job_id]
+        return [existing_job_id, fake_other_job_id]  # fake ambiguous recheck
+
+    monkeypatch.setattr(persistence, "_discover_candidates", _fake_discover)
+
+    natural_key = resolve_identity(job)
+    raw_id = await pipeline._write_fetched_row(db_engine, job, job.discovered_at)
+
+    job_ids = [existing_job_id]
+    raw_ids = [raw_id]
+    try:
+        with pytest.raises(CandidateResolutionUnstableError):
+            await persist_posting(db_engine, natural_key, job, t1, raw_id)
+
+        assert call_count == 2
+
+        async with AsyncSession(bind=db_engine) as session:
+            job_row = await session.get(Job, existing_job_id)
+            assert job_row is not None
+            assert job_row.last_seen_at == t0  # untouched
+
+            occurrence_count = (
+                await session.execute(
+                    select(func.count())
+                    .select_from(JobOccurrence)
+                    .where(JobOccurrence.job_id == existing_job_id)
+                )
+            ).scalar_one()
+            assert occurrence_count == 1  # no second occurrence created
+
+            raw_row = await session.get(RawJobIngestion, raw_id)
+            assert raw_row is not None
+            assert raw_row.processing_status == "fetched"
+            assert raw_row.job_occurrence_id is None
     finally:
         await _cleanup(
             db_engine,
@@ -2488,27 +2745,37 @@ async def test_candidate_changes_after_lock_is_detected_not_retried(
 async def test_candidate_becomes_ambiguous_after_lock_is_detected_not_retried(
     db_engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """If the post-lock recheck resolves to *more than one* Job, fail
-    closed with `AmbiguousIdentityMatchError` — proving this branch is
-    reachable even when the ambiguity only appears after the lock, not
-    merely at initial discovery."""
+    """If the post-lock recheck resolves to *more than one* real Job (both
+    confirmed by the authoritative unbounded requery, unlike the
+    disagreement tests above), persist a genuine `ambiguous_match` outcome
+    instead of attaching — proving this branch is reachable even when the
+    ambiguity only appears after the first candidate's lock is already
+    held, not merely at initial discovery, and that the first candidate's
+    lock is never used to mutate it."""
     t0 = datetime(2026, 3, 17, tzinfo=UTC)
     t1 = t0 + timedelta(hours=1)
     job = _load_fixture("canonical_url_match_primary").model_copy(
         update={"source_job_id": "AMBIGUOUS-RECHECK"}
     )
     existing_variant = job.model_copy(update={"source_job_id": "AMBIGUOUS-RECHECK-EXISTING"})
+    other_variant = job.model_copy(update={"source_job_id": "AMBIGUOUS-RECHECK-OTHER"})
 
     existing_job_id = await _create_job_and_occurrence_directly(
         db_engine, existing_variant, observed_at=t0, canonical_url_normalized=job.canonical_url
     )
-    other_job_id = uuid.uuid4()
+    other_job_id = await _create_job_and_occurrence_directly(
+        db_engine, other_variant, observed_at=t0, canonical_url_normalized=job.canonical_url
+    )
 
     call_count = 0
 
     async def _fake_discover(session: AsyncSession, filter_clause: object) -> list[uuid.UUID]:
         nonlocal call_count
         call_count += 1
+        # The fast probe only ever "sees" one candidate on the first call
+        # (as if the other row weren't visible yet), then both on recheck —
+        # the authoritative `_discover_all_candidates` requery is never
+        # mocked, so it always sees both real rows regardless.
         return [existing_job_id] if call_count == 1 else [existing_job_id, other_job_id]
 
     monkeypatch.setattr(persistence, "_discover_candidates", _fake_discover)
@@ -2516,22 +2783,39 @@ async def test_candidate_becomes_ambiguous_after_lock_is_detected_not_retried(
     natural_key = resolve_identity(job)
     raw_id = await pipeline._write_fetched_row(db_engine, job, job.discovered_at)
 
-    job_ids = [existing_job_id]
+    job_ids = [existing_job_id, other_job_id]
     raw_ids = [raw_id]
     try:
-        with pytest.raises(AmbiguousIdentityMatchError):
-            await persist_posting(db_engine, natural_key, job, t1, raw_id)
+        outcome = await persist_posting(db_engine, natural_key, job, t1, raw_id)
+        job_ids.append(outcome.job_id)  # captured before any assertion
 
-        assert call_count == 2
+        assert call_count == 2  # discovered once, rechecked once — never retried
+        assert outcome.kind is UpsertKind.AMBIGUOUS
+        assert outcome.ambiguous_candidate_job_ids == tuple(sorted([existing_job_id, other_job_id]))
 
         async with AsyncSession(bind=db_engine) as session:
+            # The candidate whose lock was already held is never mutated.
             job_row = await session.get(Job, existing_job_id)
             assert job_row is not None
             assert job_row.last_seen_at == t0
+            other_row = await session.get(Job, other_job_id)
+            assert other_row is not None
+            assert other_row.last_seen_at == t0
+
+            for candidate_id in (existing_job_id, other_job_id):
+                occurrence_count = (
+                    await session.execute(
+                        select(func.count())
+                        .select_from(JobOccurrence)
+                        .where(JobOccurrence.job_id == candidate_id)
+                    )
+                ).scalar_one()
+                assert occurrence_count == 1  # no second occurrence on either candidate
 
             raw_row = await session.get(RawJobIngestion, raw_id)
             assert raw_row is not None
-            assert raw_row.processing_status == "fetched"
+            assert raw_row.processing_status == "identity_conflict"
+            assert raw_row.job_occurrence_id == outcome.occurrence_id
     finally:
         await _cleanup(
             db_engine,
@@ -2539,6 +2823,531 @@ async def test_candidate_becomes_ambiguous_after_lock_is_detected_not_retried(
             job_ids=job_ids,
             collection_run_ids=[],
             raw_ingestion_ids=raw_ids,
+        )
+
+
+def test_upsert_outcome_ambiguous_requires_at_least_two_candidates() -> None:
+    """`UpsertOutcome.__post_init__` is the validation boundary for
+    `AMBIGUOUS`'s invariants — fail closed at construction time rather
+    than trusting every caller to only ever build a valid one."""
+    with pytest.raises(ValueError, match="at least two candidate Job IDs"):
+        UpsertOutcome(
+            job_id=uuid.uuid4(),
+            occurrence_id=uuid.uuid4(),
+            kind=UpsertKind.AMBIGUOUS,
+            ambiguous_candidate_job_ids=None,
+        )
+    with pytest.raises(ValueError, match="at least two candidate Job IDs"):
+        UpsertOutcome(
+            job_id=uuid.uuid4(),
+            occurrence_id=uuid.uuid4(),
+            kind=UpsertKind.AMBIGUOUS,
+            ambiguous_candidate_job_ids=(uuid.uuid4(),),
+        )
+
+
+def test_upsert_outcome_ambiguous_requires_distinct_candidates() -> None:
+    duplicate_id = uuid.uuid4()
+    with pytest.raises(ValueError, match="must be distinct"):
+        UpsertOutcome(
+            job_id=uuid.uuid4(),
+            occurrence_id=uuid.uuid4(),
+            kind=UpsertKind.AMBIGUOUS,
+            ambiguous_candidate_job_ids=(duplicate_id, duplicate_id),
+        )
+
+
+def test_upsert_outcome_ambiguous_requires_sorted_candidates() -> None:
+    ids = sorted([uuid.uuid4(), uuid.uuid4()])
+    unsorted = tuple(reversed(ids))
+    assert unsorted[0] > unsorted[1]  # confirm the fixture is genuinely unsorted
+    with pytest.raises(ValueError, match="must be sorted"):
+        UpsertOutcome(
+            job_id=uuid.uuid4(),
+            occurrence_id=uuid.uuid4(),
+            kind=UpsertKind.AMBIGUOUS,
+            ambiguous_candidate_job_ids=unsorted,
+        )
+
+
+def test_upsert_outcome_non_ambiguous_rejects_candidate_ids() -> None:
+    """A non-AMBIGUOUS outcome carrying `ambiguous_candidate_job_ids` would
+    silently corrupt any caller that trusts `kind` alone (`pipeline.py`'s
+    counter dispatch, `persist_posting`'s conflict-row construction) —
+    reject it at construction, for every non-AMBIGUOUS kind, not just
+    one."""
+    for kind in (
+        UpsertKind.INSERTED,
+        UpsertKind.UPDATED,
+        UpsertKind.QUARANTINED,
+        UpsertKind.ATTACHED,
+    ):
+        with pytest.raises(ValueError, match="only an AMBIGUOUS outcome"):
+            UpsertOutcome(
+                job_id=uuid.uuid4(),
+                occurrence_id=uuid.uuid4(),
+                kind=kind,
+                ambiguous_candidate_job_ids=(uuid.uuid4(), uuid.uuid4()),
+            )
+
+
+async def test_ambiguous_match_rollback_discards_all_effects_and_marks_run_failed(
+    db_engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failure injected via the private `persistence._after_ambiguous_flush`
+    seam — after the new Job, new JobOccurrence, `IdentityConflict` insert,
+    and raw terminal update have all been flushed inside `persist_posting`'s
+    own transaction, but before that transaction commits — must roll back
+    all four effects together. Run through `pipeline.run()` so run/attempt
+    failure counters can be checked too, mirroring the quarantine slice's
+    own rollback-test pattern."""
+    t0 = datetime(2026, 3, 22, tzinfo=UTC)
+    t2 = t0 + timedelta(hours=2)
+    shared_url = "https://ambiguous.example.com/jobs/rollback-shared"
+    query = SourceQuery(sources=["fixture_ats"])
+
+    base = _load_fixture("canonical_url_match_primary")
+    job_x = base.model_copy(
+        update={
+            "source_tenant_id": "rb-tenant-x",
+            "source_job_id": "RB-AMB-X",
+            "canonical_url": shared_url,
+        }
+    )
+    job_y = base.model_copy(
+        update={
+            "source_tenant_id": "rb-tenant-y",
+            "source_job_id": "RB-AMB-Y",
+            "canonical_url": shared_url,
+        }
+    )
+    job_z = base.model_copy(
+        update={
+            "source_tenant_id": "rb-tenant-z",
+            "source_job_id": "RB-AMB-Z",
+            "canonical_url": shared_url,
+            "discovered_at": t2,
+        }
+    )
+    unrelated = _load_fixture("missing_salary_no_tenant").model_copy(update={"discovered_at": t2})
+
+    job_ids: list[uuid.UUID] = []
+    run_ids: list[uuid.UUID] = []
+    raw_ids: list[uuid.UUID] = []
+    async with AsyncSession(bind=db_engine) as session:
+        preexisting_job_ids = set((await session.execute(select(Job.id))).scalars().all())
+    try:
+        job_x_id = await _create_job_and_occurrence_directly(
+            db_engine, job_x, observed_at=t0, canonical_url_normalized=shared_url
+        )
+        job_y_id = await _create_job_and_occurrence_directly(
+            db_engine, job_y, observed_at=t0, canonical_url_normalized=shared_url
+        )
+        job_ids.extend([job_x_id, job_y_id])  # captured before any assertion
+
+        async def _raise() -> None:
+            raise RuntimeError("simulated ambiguous rollback trigger")
+
+        monkeypatch.setattr(persistence, "_after_ambiguous_flush", _raise)
+
+        with pytest.raises(RuntimeError, match="simulated ambiguous rollback trigger"):
+            await pipeline.run(
+                db_engine,
+                # `unrelated` processed first (succeeds, commits its own
+                # transaction) before `job_z` fails mid-transaction.
+                FixtureProvider([unrelated, job_z], called_at=t2),
+                query,
+                observed_at=t2,
+                clock=FixedClock(t2),
+            )
+
+        # `unrelated`'s own committed insert must also be tracked for
+        # cleanup regardless of whether the assertions below all pass.
+        async with AsyncSession(bind=db_engine) as session:
+            current_job_ids = set((await session.execute(select(Job.id))).scalars().all())
+        job_ids = list(set(job_ids) | (current_job_ids - preexisting_job_ids))
+
+        async with AsyncSession(bind=db_engine) as session:
+            runs = (await session.execute(select(CollectionRun))).scalars().all()
+            assert len(runs) == 1
+            failed_run = runs[0]
+            run_ids.append(failed_run.id)
+            assert failed_run.status == "failed"
+            assert failed_run.jobs_discovered == 2
+            assert failed_run.jobs_inserted == 1  # unrelated's already-committed insert
+            assert failed_run.jobs_updated == 0  # ambiguous attempt fully rolled back
+
+            attempts = (
+                (
+                    await session.execute(
+                        select(CollectionRunProviderAttempt).where(
+                            CollectionRunProviderAttempt.collection_run_id == failed_run.id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert len(attempts) == 1
+            assert attempts[0].status == "failed"
+            assert attempts[0].jobs_inserted == 1
+            assert attempts[0].jobs_updated == 0
+
+            job_x_row = await session.get(Job, job_x_id)
+            assert job_x_row is not None
+            assert job_x_row.last_seen_at == t0  # unchanged — rolled back
+            job_y_row = await session.get(Job, job_y_id)
+            assert job_y_row is not None
+            assert job_y_row.last_seen_at == t0
+            for candidate_id in (job_x_id, job_y_id):
+                occurrence_count = (
+                    await session.execute(
+                        select(func.count())
+                        .select_from(JobOccurrence)
+                        .where(JobOccurrence.job_id == candidate_id)
+                    )
+                ).scalar_one()
+                assert occurrence_count == 1  # no second occurrence survived
+
+            conflicts = (await session.execute(select(IdentityConflict))).scalars().all()
+            assert conflicts == []  # no ambiguous_match conflict row survives the rollback
+
+            raw_rows = (await session.execute(select(RawJobIngestion))).scalars().all()
+            raw_ids.extend(row.id for row in raw_rows)
+            assert sorted(row.processing_status for row in raw_rows) == ["fetched", "normalized"]
+            fetched_row = next(row for row in raw_rows if row.processing_status == "fetched")
+            assert fetched_row.job_occurrence_id is None
+            assert fetched_row.source_identifier == "RB-AMB-Z"
+
+        # Only job_x, job_y, and unrelated's own new Job survive — the
+        # standalone ambiguous Job for job_z was never committed.
+        assert len(job_ids) == 3
+    finally:
+        await _cleanup(
+            db_engine,
+            user_ids=[],
+            job_ids=job_ids,
+            collection_run_ids=run_ids,
+            raw_ingestion_ids=raw_ids,
+        )
+
+
+async def test_reprocessing_terminal_ambiguous_raw_row_is_rejected(db_engine: AsyncEngine) -> None:
+    """Once a raw row has transitioned to `identity_conflict` via an
+    `ambiguous_match` outcome, reprocessing the same `raw_id` again must
+    fail at `_validate_raw_association`'s `processing_status != 'fetched'`
+    check before any mutation — never creating a second conflict row or
+    touching the standalone Job/JobOccurrence already created."""
+    t0 = datetime(2026, 3, 23, tzinfo=UTC)
+    t1 = t0 + timedelta(hours=1)
+    shared_url = "https://ambiguous.example.com/jobs/reprocess-shared"
+
+    base = _load_fixture("canonical_url_match_primary")
+    job_x = base.model_copy(
+        update={
+            "source_tenant_id": "rp-tenant-x",
+            "source_job_id": "RP-AMB-X",
+            "canonical_url": shared_url,
+        }
+    )
+    job_y = base.model_copy(
+        update={
+            "source_tenant_id": "rp-tenant-y",
+            "source_job_id": "RP-AMB-Y",
+            "canonical_url": shared_url,
+        }
+    )
+    job_z = base.model_copy(
+        update={
+            "source_tenant_id": "rp-tenant-z",
+            "source_job_id": "RP-AMB-Z",
+            "canonical_url": shared_url,
+        }
+    )
+
+    job_ids: list[uuid.UUID] = []
+    raw_ids: list[uuid.UUID] = []
+    try:
+        job_x_id = await _create_job_and_occurrence_directly(
+            db_engine, job_x, observed_at=t0, canonical_url_normalized=shared_url
+        )
+        job_y_id = await _create_job_and_occurrence_directly(
+            db_engine, job_y, observed_at=t0, canonical_url_normalized=shared_url
+        )
+        job_ids.extend([job_x_id, job_y_id])
+
+        natural_key_z = resolve_identity(job_z)
+        raw_id_z = await pipeline._write_fetched_row(db_engine, job_z, job_z.discovered_at)
+        raw_ids.append(raw_id_z)
+
+        first = await persist_posting(db_engine, natural_key_z, job_z, t1, raw_id_z)
+        job_ids.append(first.job_id)  # captured before any assertion
+        assert first.kind is UpsertKind.AMBIGUOUS
+
+        with pytest.raises(InvalidRawIngestionAssociationError):
+            await persist_posting(db_engine, natural_key_z, job_z, t1, raw_id_z)
+
+        async with AsyncSession(bind=db_engine) as session:
+            conflicts = (
+                (
+                    await session.execute(
+                        select(IdentityConflict).where(
+                            IdentityConflict.incoming_raw_job_ingestion_id == raw_id_z
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert len(conflicts) == 1  # never a second conflict row
+
+            occurrence_count = (
+                await session.execute(
+                    select(func.count())
+                    .select_from(JobOccurrence)
+                    .where(JobOccurrence.job_id == first.job_id)
+                )
+            ).scalar_one()
+            assert occurrence_count == 1  # no second occurrence created
+
+            raw_row = await session.get(RawJobIngestion, raw_id_z)
+            assert raw_row is not None
+            assert raw_row.processing_status == "identity_conflict"  # unchanged
+            assert raw_row.job_occurrence_id == first.occurrence_id
+    finally:
+        await _cleanup(
+            db_engine,
+            user_ids=[],
+            job_ids=job_ids,
+            collection_run_ids=[],
+            raw_ingestion_ids=raw_ids,
+        )
+
+
+async def test_pipeline_persists_ambiguous_match_alongside_clean_posting_in_same_batch(
+    db_engine: AsyncEngine, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Batch isolation: one ambiguous posting and one clean posting in the
+    same provider batch — the ambiguous posting must be quarantined
+    (standalone Job + `ambiguous_match` conflict) while the clean posting
+    completes normally, with exact counters, raw states/links, conflict
+    contents, and sanitized log events."""
+    t0 = datetime(2026, 3, 24, tzinfo=UTC)
+    t1 = t0 + timedelta(hours=1)
+    shared_url = "https://ambiguous.example.com/jobs/batch-shared"
+    query = SourceQuery(sources=["fixture_ats"])
+    caplog.set_level(logging.INFO, logger="app.ingestion.pipeline")
+
+    base = _load_fixture("canonical_url_match_primary")
+    job_x = base.model_copy(
+        update={
+            "source_tenant_id": "batch-tenant-x",
+            "source_job_id": "BATCH-AMB-X",
+            "canonical_url": shared_url,
+        }
+    )
+    job_y = base.model_copy(
+        update={
+            "source_tenant_id": "batch-tenant-y",
+            "source_job_id": "BATCH-AMB-Y",
+            "canonical_url": shared_url,
+        }
+    )
+    job_z = base.model_copy(
+        update={
+            "source_tenant_id": "batch-tenant-z",
+            "source_job_id": "BATCH-AMB-Z",
+            "canonical_url": shared_url,
+            "discovered_at": t1,
+        }
+    )
+    clean = _load_fixture("missing_salary_no_tenant").model_copy(update={"discovered_at": t1})
+
+    job_ids: list[uuid.UUID] = []
+    collection_run_ids: list[uuid.UUID] = []
+    raw_ingestion_ids: list[uuid.UUID] = []
+    async with AsyncSession(bind=db_engine) as session:
+        preexisting_job_ids = set((await session.execute(select(Job.id))).scalars().all())
+    try:
+        job_x_id = await _create_job_and_occurrence_directly(
+            db_engine, job_x, observed_at=t0, canonical_url_normalized=shared_url
+        )
+        job_y_id = await _create_job_and_occurrence_directly(
+            db_engine, job_y, observed_at=t0, canonical_url_normalized=shared_url
+        )
+
+        run_id = await pipeline.run(
+            db_engine,
+            FixtureProvider([job_z, clean], called_at=t1),
+            query,
+            observed_at=t1,
+            clock=FixedClock(t1),
+        )
+        collection_run_ids.append(run_id)
+
+        # Captured immediately once the run has committed — before any of
+        # the assertions below, which must not gate whether the Jobs this
+        # run actually created (the standalone ambiguous Job and the clean
+        # insert) get cleaned up if one of them fails.
+        async with AsyncSession(bind=db_engine) as session:
+            current_job_ids = set((await session.execute(select(Job.id))).scalars().all())
+        job_ids = list(current_job_ids - preexisting_job_ids)
+
+        conflict_id: uuid.UUID
+        ambiguous_raw_id: uuid.UUID
+        ambiguous_occurrence_id: uuid.UUID
+
+        async with AsyncSession(bind=db_engine) as session:
+            run = await session.get(CollectionRun, run_id)
+            assert run is not None
+            assert run.status == "completed_with_errors"
+            assert run.jobs_discovered == 2
+            assert run.jobs_inserted == 2  # ambiguous standalone Job + clean insert
+            assert run.jobs_updated == 0
+
+            attempts = (
+                (
+                    await session.execute(
+                        select(CollectionRunProviderAttempt).where(
+                            CollectionRunProviderAttempt.collection_run_id == run_id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert len(attempts) == 1
+            assert attempts[0].status == "completed"  # never "completed_with_errors"
+            assert attempts[0].jobs_discovered == 2
+            assert attempts[0].jobs_inserted == 2
+            assert attempts[0].jobs_updated == 0
+
+            raw_rows = (await session.execute(select(RawJobIngestion))).scalars().all()
+            raw_ingestion_ids.extend(row.id for row in raw_rows)
+            assert sorted(row.processing_status for row in raw_rows) == [
+                "identity_conflict",
+                "normalized",
+            ]
+
+            ambiguous_raw = next(
+                row for row in raw_rows if row.processing_status == "identity_conflict"
+            )
+            clean_raw = next(row for row in raw_rows if row.processing_status == "normalized")
+            ambiguous_raw_id = ambiguous_raw.id
+            assert ambiguous_raw.job_occurrence_id is not None
+            ambiguous_occurrence_id = ambiguous_raw.job_occurrence_id
+
+            conflicts = (await session.execute(select(IdentityConflict))).scalars().all()
+            assert len(conflicts) == 1
+            conflict = conflicts[0]
+            conflict_id = conflict.id
+            assert conflict.conflict_type == "ambiguous_match"
+            assert conflict.existing_job_occurrence_id is None
+            assert conflict.incoming_raw_job_ingestion_id == ambiguous_raw_id
+            assert conflict.existing_value == sorted([str(job_x_id), str(job_y_id)])
+            assert conflict.incoming_value == [str(ambiguous_occurrence_id)]
+
+            ambiguous_occurrence = await session.get(JobOccurrence, ambiguous_occurrence_id)
+            assert ambiguous_occurrence is not None
+            assert ambiguous_occurrence.job_id not in (job_x_id, job_y_id)
+
+            clean_occurrence = await _occurrence_by_job_id(db_engine, "987654321")
+            assert clean_raw.job_occurrence_id == clean_occurrence.id
+
+            job_x_row = await session.get(Job, job_x_id)
+            assert job_x_row is not None
+            assert job_x_row.last_seen_at == t0  # untouched by the batch
+            job_y_row = await session.get(Job, job_y_id)
+            assert job_y_row is not None
+            assert job_y_row.last_seen_at == t0
+
+        messages = [record.getMessage() for record in caplog.records]
+        assert any("ingestion_run_started" in message for message in messages)
+        assert any("ingestion_identity_conflict" in message for message in messages)
+        assert any("ingestion_run_completed" in message for message in messages)
+        warning_messages = [
+            record.getMessage() for record in caplog.records if record.levelno == logging.WARNING
+        ]
+        assert warning_messages == [
+            f"ingestion_identity_conflict raw_ingestion_id={ambiguous_raw_id} "
+            f"identity_conflict_id={conflict_id} job_occurrence_id={ambiguous_occurrence_id}"
+        ]
+        # No candidate evidence content ever appears in logs.
+        joined_messages = "".join(messages)
+        assert str(job_x_id) not in joined_messages
+        assert str(job_y_id) not in joined_messages
+    finally:
+        await _cleanup(
+            db_engine,
+            user_ids=[],
+            job_ids=job_ids,
+            collection_run_ids=collection_run_ids,
+            raw_ingestion_ids=raw_ingestion_ids,
+        )
+
+
+async def test_pipeline_fails_closed_for_unhandled_upsert_kind(
+    db_engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pipeline's counter-dispatch chain must fail closed, not silently
+    miscount, if `persist_posting` ever returns an outcome whose `kind`
+    isn't one of the five real `UpsertKind` values — proving the final
+    `else: raise AssertionError(...)` branch is reachable and that the
+    run/attempt are still marked failed with no falsely successful
+    counters, exactly like any other unexpected mid-run exception."""
+    t1 = datetime(2026, 3, 25, tzinfo=UTC)
+    job = _load_fixture("clean_tenant_scoped")
+    provider = FixtureProvider([job], called_at=t1)
+    query = SourceQuery(sources=["fixture_ats"])
+
+    class _FakeOutcome:
+        kind = object()  # matches none of UpsertKind's five members
+        job_id = uuid.uuid4()
+        occurrence_id = uuid.uuid4()
+        conflict_id = None
+
+    async def _fake_persist_posting(*args: object, **kwargs: object) -> object:
+        return _FakeOutcome()
+
+    monkeypatch.setattr(pipeline, "persist_posting", _fake_persist_posting)
+
+    collection_run_ids: list[uuid.UUID] = []
+    raw_ingestion_ids: list[uuid.UUID] = []
+    try:
+        with pytest.raises(AssertionError, match="unhandled UpsertKind"):
+            await pipeline.run(db_engine, provider, query, observed_at=t1, clock=FixedClock(t1))
+
+        async with AsyncSession(bind=db_engine) as session:
+            run = (await session.execute(select(CollectionRun))).scalar_one()
+            collection_run_ids.append(run.id)
+            assert run.status == "failed"
+            assert run.jobs_discovered == 1
+            assert run.jobs_inserted == 0  # never falsely counted as inserted
+            assert run.jobs_updated == 0
+
+            attempt = (
+                await session.execute(
+                    select(CollectionRunProviderAttempt).where(
+                        CollectionRunProviderAttempt.collection_run_id == run.id
+                    )
+                )
+            ).scalar_one()
+            assert attempt.status == "failed"
+            assert attempt.jobs_inserted == 0
+            assert attempt.jobs_updated == 0
+
+            raw_rows = (await session.execute(select(RawJobIngestion))).scalars().all()
+            raw_ingestion_ids.extend(row.id for row in raw_rows)
+            assert len(raw_rows) == 1
+            # Never reached persist_posting's own real terminal update.
+            assert raw_rows[0].processing_status == "fetched"
+    finally:
+        await _cleanup(
+            db_engine,
+            user_ids=[],
+            job_ids=[],
+            collection_run_ids=collection_run_ids,
+            raw_ingestion_ids=raw_ingestion_ids,
         )
 
 

@@ -98,165 +98,6 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-08-31, Codex acting as the user-authorized implementer. Class R
-  tooling slice on `codex/tooling-safe-compaction`, based on clean
-  `main@10b9432`. Outcome: safe Claude Code compaction policy plus automatic,
-  credential-free recovery snapshots around built-in manual/auto compaction.
-- Added root `CLAUDE.md` with durable compact instructions: preserve current
-  authorization, Git state, active slice/verdict, unresolved decisions, safety
-  invariants, verification, external side effects, rollback boundaries, and recovery
-  document pointers; discard superseded conversation detail recoverable from Git.
-- Added project hooks in `.claude/settings.json` and
-  `.claude/hooks/compact_checkpoint.py`:
-  - `PreCompact(manual|auto)` atomically snapshots only Git refs/cleanliness,
-    trigger, classification, and documentation pointers under ignored
-    `.claude/runtime/`.
-  - `SessionStart(compact)` injects that checkpoint after compaction and requires
-    reconciliation against current Git/docs before any state-changing action.
-  - Hooks never store transcript content, compacted summaries, environment values,
-    database URLs, credentials, or source-file contents; they perform no network or
-    database operation and never block emergency auto-compaction.
-- Safe-moment policy: clean synchronized `main` after a verified merge-record commit
-  is optimal; a clean pushed feature branch stopped at committed `Work done`/
-  `Work review` is secondary/recoverable. Proactive manual compaction is not requested
-  amid uncommitted work, running verification, external/destructive activity,
-  incomplete handoff writing, or unresolved corrections. Claude Code exposes no safe
-  project hook to force `/compact` at a semantic milestone, so this slice deliberately
-  does not launch a nested Claude process or lower the automatic threshold.
-- Added nine offline tests for optimal/fail-closed classification, pushed-feature and
-  dirty-tree states, credential/transcript exclusion, atomic write/cleanup, and restore
-  output. A real hook simulation correctly classified this dirty implementation branch
-  as unsafe for proactive compaction and restored the snapshot; no secret or external
-  state was accessed.
-- Verification: genuine external
-  `python scripts/verify.py --level routine --focus tests/test_compact_checkpoint.py`
-  completed all **10 steps PASS**: Ruff format/check, mypy, repository checker,
-  `git diff --check`, database URL safety/reachability, **9 focused tests**, **1379
-  full-suite tests**, and temporary-directory cleanup in 129.86s. Settings JSON parsed
-  successfully; direct pre/restore hook simulation succeeded.
-- Files changed: `CLAUDE.md`, `.claude/settings.json`,
-  `.claude/hooks/compact_checkpoint.py`, `.gitignore`, `docs/LLM_WORKFLOW.md`,
-  `backend/tests/test_compact_checkpoint.py`, and this handoff entry. No product,
-  schema, migration, provider, ingestion, database, or network behavior changed.
-- STOP — awaiting independent review. Do not merge to `main`, begin another product
-  slice, or treat a compacted summary as new authorization.
-
-### Work review
-
-- Date/agent: 2026-09-01, Claude Code (Sonnet 5), acting as independent reviewer of
-  `codex/tooling-safe-compaction`. Diff reviewed: `10b9432..c750762` (7 files: `CLAUDE.md`,
-  `.claude/settings.json`, `.claude/hooks/compact_checkpoint.py`, `.gitignore`,
-  `docs/LLM_WORKFLOW.md`, `backend/tests/test_compact_checkpoint.py`, this handoff).
-  Confirmed no product/schema/migration/provider/ingestion file changed.
-- Independent verification performed: read every changed file directly (not the Work
-  done summary alone); ran the genuine external
-  `python scripts/verify.py --level routine --focus tests/test_compact_checkpoint.py`
-  from `backend/` — all **10 steps PASS**, **9 focused tests**, **1379 full-suite tests**,
-  matching the claimed counts exactly. Dispatched a fresh-context documentation-verification
-  pass (no prior context on this diff) against Claude Code's own published hooks/memory
-  documentation to check the claims below rather than trusting either my own or the
-  implementer's assumptions about undocumented behavior.
-- Checks explicitly requested by the user, with results:
-  - **`PreCompact`/`SessionStart(compact)` hook registration**: confirmed both are real,
-    documented Claude Code hook events; `SessionStart`'s documented matcher values include
-    `compact`; matchers are regex, so `"manual|auto"` correctly matches either trigger.
-    `${CLAUDE_PROJECT_DIR}` is a real, documented substituted variable. (No literal `/hooks`
-    TUI view is reachable from this non-interactive harness; verified via direct
-    `.claude/settings.json` inspection plus external documentation confirmation instead.)
-  - **Root `CLAUDE.md` loading**: confirmed Claude Code auto-loads a root `CLAUDE.md` and
-    explicitly re-reads/re-injects it after `/compact` (no `/memory`/`/status` view
-    reachable from this harness either; confirmed via the file's presence at the documented
-    location plus external documentation).
-  - **`PreCompact` never blocks emergency auto-compaction**: verified by construction —
-    `main()`'s `"pre"` branch wraps `write_checkpoint()` in a bare `except Exception` and
-    always returns `0`; the function never writes anything to stdout in that mode. This
-    matches every documented Claude Code hook-blocking mechanism (nonzero exit; a stdout
-    `"decision"`-shaped field) with neither present. `PreCompact`'s own blocking mechanism
-    specifically is not independently documented in what the verification pass could reach,
-    so this is "non-blocking by construction," not "non-blocking per cited spec" — worth
-    recording as a residual documentation gap, not a code defect.
-  - **Checkpoint contains only credential-free Git metadata and doc pointers**: confirmed by
-    reading `render_checkpoint`/`capture_git_snapshot` — only branch/HEAD/main/origin-main/
-    upstream strings, a clean boolean, a classification/reason string, and the fixed
-    `RECOVERY_DOCS` path list. No `os.environ` access anywhere in the module.
-  - **Atomic replacement and temp-file cleanup**: `tempfile.mkstemp` + `os.replace` (atomic
-    and overwrite-safe on both POSIX and Windows) + `finally: unlink(missing_ok=True)`.
-    Confirmed no leftover `.tmp` file after a successful write via the existing test.
-  - **Clean synchronized `main` is the only OPTIMAL state**: confirmed — `optimal_checkpoint`
-    and its four fail-closed parametrized cases (dirty, wrong branch, stale `origin/main`,
-    stale `main`) are all correctly implemented and tested.
-  - **Dirty is unsafe; clean pushed feature branch is only recoverable**: confirmed via
-    `pushed_feature_checkpoint` and both corresponding tests.
-  - **Post-compaction restoration requires re-reading Git state and docs**: confirmed —
-    stated in both the injected checkpoint's own "Mandatory recovery" section and
-    independently in `CLAUDE.md` itself, doubly reinforced.
-  - **No transcript/summary/env value/DB URL/credential/source content stored**: confirmed
-    by code reading and the existing dedicated test (which also proves it even when a real
-    `DATABASE_URL`-shaped env var is present in the process environment).
-- Findings, by severity:
-  1. **Medium — the routine verifier never lints or type-checks the new hook script.**
-     `verify.py`'s `ruff_format_command()`/`ruff_check_command()` run against `.` with
-     `cwd=BACKEND_DIR`, and `mypy_command()` scans only `app tests scripts` — all scoped
-     inside `backend/`. `.claude/hooks/compact_checkpoint.py` lives at the repository root's
-     `.claude/` directory and is covered by neither. Confirmed by running `ruff format
-     --check`/`ruff check`/`mypy` directly against the file (all pass today), but nothing in
-     the standard verification workflow enforces this going forward, and the Work done
-     entry's "Ruff format/check, mypy ... PASS" phrasing does not make this scope gap
-     explicit. No fix applied — flagged for the user/Codex to decide whether expanding
-     `verify.py`'s scope is worth doing in a follow-up, since `verify.py` itself is
-     explicitly out of this slice's stated file list.
-  2. **Low-Medium — one of four checkpoint classifications is never asserted by name.**
-     `checkpoint_classification()`'s fourth branch ("RECOVERABLE WITH RECONCILIATION" — clean,
-     but neither an optimal main-sync nor a pushed-feature-equals-upstream state, e.g. clean
-     `main` lagging `origin/main`, or a clean branch with no configured upstream at all) is
-     reachable — one of the existing parametrized `test_optimal_checkpoint_fails_closed_when_main_state_differs`
-     cases (`{"origin_main_head": "older"}`) even produces a snapshot that would resolve to
-     it — but no test calls `checkpoint_classification()` on such a snapshot and asserts the
-     resulting label/reason; only the unrelated `optimal_checkpoint` boolean is checked for
-     those cases.
-  3. **Low — `restore_context()`'s call site is not exception-guarded, unlike
-     `write_checkpoint()`'s.** `main()`'s `"restore"` branch calls it directly; a present-but-
-     unreadable checkpoint file (encoding error, permission error) would raise uncaught,
-     exiting the `SessionStart(compact)` hook non-zero. The graceful fallback message only
-     covers the *missing*-file case. Lower stakes than `PreCompact` (a failing `SessionStart`
-     hook is not the emergency-compaction path this design is centrally protecting), but
-     inconsistent with the module's own stated non-blocking posture.
-  4. **Low — the temp-file cleanup path is proven only for the success case.**
-     `test_write_checkpoint_is_atomic_and_restore_prints_it` confirms no `.tmp` file remains
-     after a *successful* write; no test forces `os.fdopen`/`os.replace` to fail and confirms
-     the `finally` block's `unlink(missing_ok=True)` still fires. Low severity because
-     `main()`'s broad exception handling around `write_checkpoint()` already guarantees
-     non-blocking behavior regardless of whether cleanup itself succeeds.
-  5. **Informational — risk classification.** This slice is filed Class R; its central
-     invariant (credential/env-var exclusion from a persisted artifact) is explicitly one of
-     `LLM_WORKFLOW.md`'s own listed Class H triggers ("security/privacy"). Actual risk is low
-     (Git-derived metadata only), and the verification depth already applied (full offline
-     suite, genuine external routine-verifier run) matches Class H's own bar in practice — a
-     labeling point, not a verification gap.
-- Missing/inconclusive checks: no literal Claude Code `/hooks`, `/memory`, or `/status`
-  interactive view was reachable from this non-interactive review harness; those specific
-  checks were performed via direct file inspection plus an independent documentation-
-  verification pass instead, as noted above. `PreCompact`'s own stdin field name/blocking
-  mechanism is not independently confirmed against public documentation (see finding
-  discussion above) — the code's behavior was verified by construction instead.
-- Verdict: **Approved with binding clarifications** — the compaction-safety design,
-  credential-exclusion guarantee, and non-blocking behavior are all independently confirmed;
-  Findings 1-4 are bounded verification/robustness gaps, not design defects, and Finding 5 is
-  informational only.
-- Exact bounded correction, if the user authorizes one: address Findings 1-4 in
-  `.claude/hooks/compact_checkpoint.py`, `backend/tests/test_compact_checkpoint.py`, and (only
-  if the user separately authorizes expanding verification scope) `backend/scripts/verify.py`.
-  No change to `CLAUDE.md`, `.claude/settings.json`, `.gitignore`, or `docs/LLM_WORKFLOW.md`
-  is required by any finding above.
-- STOP — do not merge `main`, begin the `ambiguous_match` slice, or treat this review as
-  authorization for a correction pass until the user explicitly approves one.
-
----
-
-## Iteration 2
-
-### Work done
-
 - Date/agent: 2026-09-01, Claude Code (Sonnet 5). Class H correction pass on
   `codex/tooling-safe-compaction` for Findings 1-4 from review commit
   `58995c1` (`c750762..58995c1`). Base `58995c1`. Reclassified Class H (not
@@ -341,7 +182,7 @@ that detail.
   - `python -m pytest tests/test_compact_checkpoint.py tests/test_verify.py -q`
     -> **90 passed** (was 83 combined pre-pass: 9 + 74; net +7 in
     `test_compact_checkpoint.py`, +1 in `test_verify.py`).
-  - Full suite -> **1387 passed** (was 1379).
+  - Full suite -> **1387 passed**.
   - `python -m scripts.check_repo` -> exit 0, zero findings.
   - `git diff --check` -> clean.
   - **Genuine external `python scripts/verify.py --level routine --focus
@@ -434,3 +275,104 @@ canonical verifier's expanded Ruff/mypy scope over `.claude/hooks/`, and their t
 it does **not** touch product code, schema, migrations, providers, ingestion, or the
 `ambiguous_match` proposal, all of which remain not started and are not authorized by
 this merge.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-09-01, Claude Code (Sonnet 5). Class H implementation of the
+  approved `ambiguous_match` identity-conflict persistence slice on
+  `phase-2/ambiguous-match-persistence`, based on clean `main@e18b2b3`.
+- Outcome: Tier 2/3 finding more than one distinct candidate Job no longer raises
+  `AmbiguousIdentityMatchError` (a whole-run failure). It now creates a standalone
+  Job/JobOccurrence, exactly like a clean insert, and persists an ADR-0007
+  `ambiguous_match` `identity_conflicts` row, isolated per posting. No schema or
+  migration change — the existing Phase-1 `identity_conflicts` table and its
+  `ambiguous_match` array-shape `CHECK` already supported this shape.
+- Binding decisions applied exactly as authorized:
+  1. `_discover_candidates()`'s `<=2` probe remains the ambiguity *trigger* at both
+     `_attach_to_candidate` sites (pre-lock, post-lock recheck); a new
+     `_discover_all_candidates()` (unlocked, unbounded, sorted by UUID) supplies the
+     *persisted* evidence. If that authoritative requery resolves to fewer than two
+     candidates, `CandidateResolutionUnstableError` is raised and nothing is
+     persisted — new tests cover both the pre-lock and post-lock-recheck
+     disagreement cases, plus a 3-candidate case proving the full set (not just the
+     probe's two) is what gets persisted.
+  2. `UpsertOutcome.__post_init__` enforces the invariants at construction:
+     `AMBIGUOUS` requires >=2 distinct, sorted candidate IDs; every other kind must
+     carry none. Four direct unit tests cover missing/singleton/duplicate/unsorted
+     tuples and cross-kind rejection.
+  3. `existing_value` = sorted candidate Job-ID strings; `incoming_value` =
+     single-element array with the new JobOccurrence's ID string — documented
+     explicitly (code and all three touched decision/architecture docs) as
+     intentionally different entity types, not a symmetry bug.
+  4. New `_after_ambiguous_flush()` test seam mirrors `_after_quarantine_flush`/
+     `_after_attach_flush`; a forced post-flush failure proves the new Job, new
+     JobOccurrence, `IdentityConflict`, and raw terminal update all roll back
+     together. A separate test proves reprocessing the same terminal raw row is
+     rejected by `_validate_raw_association`'s existing `processing_status` check,
+     with no second conflict row and no further mutation.
+  5. `pipeline.py`'s counter dispatch is now an exhaustive if/elif over all five
+     `UpsertKind` values (`QUARANTINED` moved out of the trailing `else`); a final
+     `else: raise AssertionError(...)` fails closed for any future unrecognized
+     kind. `AMBIGUOUS` buckets `jobs_inserted` (a real Job was created) and sets
+     `had_conflict`; a dedicated test forces a fake outcome kind to prove the
+     fail-closed branch and confirms no falsely successful counters.
+  6. `AmbiguousIdentityMatchError` deleted; every surviving reference updated —
+     `UpsertKind`/`_attach_to_candidate`/`upsert_job_occurrence`/`persist_posting`
+     docstrings, `CandidateResolutionUnstableError`'s own docstring, ADR 0004, ADR
+     0007 (new "Phase 2 implementation notes" section), ARCHITECTURE.md §8/§11,
+     DATA_MODEL.md's `identity_conflicts` row notes, ROADMAP.md.
+  - Preserved unchanged: standalone-Job creation (no guessing among candidates);
+    zero candidate mutation on either ambiguity site, documented precisely per-site
+    (pre-lock touches nothing; post-lock recheck may already hold one candidate's
+    `FOR UPDATE` lock but never writes to it); one atomic transaction;
+    `completed_with_errors` run status / `completed` attempt status; sanitized
+    IDs-only logging; `CandidateResolutionUnstableError` untouched and fail-closed.
+  - ROADMAP.md rewritten to be merge-state-neutral per the user's explicit
+    correction: dropped the fixed "three merged slices" count (would go stale on
+    the next merge), and the new `ambiguous_match` capability is described as
+    "implemented, not yet merged — on branch `phase-2/ambiguous-match-persistence`,
+    awaiting review and merge authorization."
+- Files changed: `backend/app/ingestion/persistence.py`, `backend/app/ingestion/
+  pipeline.py`, `backend/tests/test_ingestion_pipeline.py` (11 new tests, 3
+  rewritten to persist instead of raise; `test_candidate_changes_after_lock_is_
+  detected_not_retried` left unchanged — a genuinely different code path);
+  `docs/DECISIONS/0004-scoped-deterministic-identity.md`, `docs/DECISIONS/
+  0007-identity-conflict-quarantine.md`, `docs/ARCHITECTURE.md`,
+  `docs/DATA_MODEL.md`, `docs/ROADMAP.md`; this handoff entry. No schema,
+  migration, provider, or network file touched.
+- Verification: genuine external `python scripts/verify.py --level routine --focus
+  tests/test_ingestion_pipeline.py` — all **10 steps PASS**: Ruff format/check,
+  mypy (82 source files), `check_repo.py`, `git diff --check`, database-URL
+  safety, real test-database reachability, **49 focused tests**, **1398
+  full-suite tests** (was 1387; net +11), temp-directory cleanup, in ~160s.
+  `alembic heads` confirms `0017` remains the sole head (no migration added; `git
+  diff --stat migrations/` is empty). `alembic current` against the configured
+  dev database (`jobgoblin`) shows it pre-existingly stamped at `0006`, far behind
+  head — a condition that predates this branch (this slice adds zero migrations)
+  and was **not** remediated: no `alembic upgrade` was run against it; a direct
+  before/after `alembic current` check confirms it stayed at `0006` throughout.
+  All schema/database work in this slice ran only against the disposable
+  `jobgoblin_test` database.
+- Adversarial self-review: dispatched a fresh-context subagent against the actual
+  diff (not this summary). It confirmed correct control flow (no candidate
+  mutation on either ambiguity path), correct `INSERTED`-vs-`AMBIGUOUS` tagging,
+  airtight `UpsertOutcome` validation, correct evidence shape against
+  DATA_MODEL.md's own `CHECK`, exhaustive/unreachable-else pipeline dispatch, and
+  zero leftover `AmbiguousIdentityMatchError` references. It found one real defect
+  class (Medium-High): six new tests captured cleanup IDs
+  (`job_ids.append(...)`/preexisting-set-diff) *after* assertions that could fail,
+  risking a leaked row in the disposable test database on a genuine regression.
+  Fixed in all six by moving the capture to immediately follow the mutating call,
+  before any assertion — reverified by rerunning the full suite (still 1398
+  passed).
+- Deviations/known limitations: `alembic check` itself could not be exercised
+  end-to-end because of the pre-existing stale dev database described above;
+  substituted with `alembic heads` (single, unchanged head) plus an empty
+  `migrations/` diff, which together give the equivalent no-schema-drift guarantee
+  for a no-migration slice without touching the dev database.
+- STOP — awaiting Codex review. Do not merge, start Tier 4, add schema changes,
+  contact live providers, or expand this slice.

@@ -176,14 +176,31 @@ implementation:
   occurrences already correctly attached to the same `Job` (e.g. two prior sources already
   merged) count as one candidate, not multiple — getting this wrong would make an
   already-correctly-merged `Job` spuriously ambiguous on its third and further occurrence.
-- **Multiple candidates fail closed** via a new `AmbiguousIdentityMatchError`, raised
-  before any mutation, uncaught in `pipeline.py` — a whole-run failure, not a
-  per-posting-isolated one. `ambiguous_match` persistence (the real `identity_conflicts`
-  row ADR 0007 defines for this case) remains a deliberately separate, later slice —
-  its `incoming_value` shape for `ambiguous_match` is not yet fully specified anywhere
-  (unlike `existing_value`, which DATA_MODEL.md already pins down as a JSON array of
-  candidate `job_id`s) and is exactly the kind of decision that slice should open with,
-  not one this slice should invent silently.
+- **Multiple candidates persist a genuine `ambiguous_match` conflict, never fail the
+  whole run (later slice).** The fast `<=2` probe (`_discover_candidates`) still
+  triggers ambiguity detection at both the pre-lock and post-lock-recheck sites in
+  `_attach_to_candidate`, but the persisted evidence is the complete, deterministically
+  sorted, distinct candidate set from an authoritative unbounded requery
+  (`_discover_all_candidates`), run under the same tier-specific advisory lock already
+  held — never the probe's own truncated result. If that authoritative requery
+  disagrees with the probe and resolves to fewer than two candidates, this is treated as
+  instability, not ambiguity: `CandidateResolutionUnstableError` is raised and nothing is
+  persisted. A genuine, stable ambiguity creates a standalone Job/JobOccurrence —
+  exactly as Tier 5's zero-candidate path already does — tagged `UpsertKind.AMBIGUOUS`,
+  and `persist_posting` records it as an `identity_conflicts` row
+  (`conflict_type='ambiguous_match'`): `existing_value` is the sorted array of every
+  candidate Job-ID string; `incoming_value` is a single-element array holding the new
+  JobOccurrence's own ID string — the two arrays intentionally hold different entity
+  types (Jobs vs. the one new JobOccurrence), not a symmetry bug. No candidate row is
+  ever mutated on this path, including at the post-lock site where the first
+  candidate's own Job row may already be locked `FOR UPDATE` — that lock is held, but
+  neither `_attach_to_candidate` nor its caller writes to it. Counted as `jobs_inserted`
+  in `pipeline.py` (a real, standalone Job was created), with the same `had_conflict`
+  flag and `ingestion_identity_conflict` log line (IDs only) the `QUARANTINED` outcome
+  already used, and an exhaustive, fail-closed dispatch over all five `UpsertKind`
+  values (any future unhandled value raises rather than silently miscounting). This
+  replaces the earlier `AmbiguousIdentityMatchError` design, which raised uncaught and
+  failed the whole ingestion run for any ambiguous posting.
 - **Candidate resolution is single-pass and fail-closed, never retried.** After the
   tier-specific advisory lock (a new `canonical_url_advisory_lock_key()`/
   `tenant_requisition_advisory_lock_key()` pair in `natural_key.py`, sharing
