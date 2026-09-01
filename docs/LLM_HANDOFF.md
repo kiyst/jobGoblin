@@ -489,4 +489,65 @@ that detail.
 
 ### Work review
 
-_Pending._
+- Date/agent: 2026-08-31, Codex. Correction diff reviewed:
+  `d1d1e69..19581f7` on `phase-4/greenhouse-live-proof`.
+- Independent verification performed: inspected the complete correction diff and
+  traced guard rejection, authorized creation, cleanup authorization, snapshot/diff
+  cleanup, and persisted assertions; ran the genuine external routine verifier focused
+  on both changed offline test files — all 10 steps PASS, **45 focused tests** and
+  **1370 full-suite tests** pass. No Greenhouse request and no real disposable-database
+  create/drop invocation was performed during re-review.
+- Prior-finding disposition:
+  1. **High finding closed.** `cleanup_authorized` remains false on every guard
+     rejection and becomes true only after the destructive-lifecycle guard succeeds,
+     before creation is attempted. The production/remote orchestration tests invoke the
+     real `_run_proof()` with every DB/network/pipeline boundary instrumented and prove
+     none is touched on rejection.
+  2. **Medium finding substantially closed, with one remaining scoping defect below.**
+     Before/after snapshots now recover run/raw rows even when `pipeline.run()` raises
+     after committed sub-transactions; the regression genuinely injects that failure
+     and proves a fresh final snapshot equals the initial state.
+  3. **Low assertion finding substantially closed, with one remaining descriptive-field
+     gap below.** Timestamp ordering, run-two attempt identity/status, raw linkage/hash/
+     source identifier, and first-seen preservation are now asserted.
+  4. **Process disposition honored.** No additional external call/live proof occurred.
+- Remaining findings:
+  1. **Medium — the shared-test identity scope still omits half of the natural key.**
+     `_capture_identity_scope()` at
+     `backend/tests/test_live_proof_greenhouse_adapter.py:397-454`, plus occurrence
+     lookups at lines 415, 537, and 614, filter only by
+     `(source_tenant_id, source_job_id)`. The requested scope was the full
+     `(provider, source, tenant, source_job_id)` domain; two providers/sources may
+     legitimately reuse the same tenant/job-id pair. As written, a pre-existing or
+     future row in another identity namespace can be selected, included in snapshots,
+     or used to derive a Job id. Add the fixed `provider='ats_scrapers'` and
+     `source='greenhouse'` predicates everywhere this offline identity is located, and
+     construct a unique synthetic offline identity/URL per test so the committed real
+     fixture's stable ID cannot collide with stale or concurrently prepared data. Keep
+     raw payload/source identifier/hash internally consistent with that synthetic copy.
+  2. **Low — “parent Job descriptive fields” remains under-asserted.** The correction
+     checks only `canonical_url` and observation timestamps at
+     `backend/scripts/live_proof_greenhouse_ingestion.py:389-391,468-470` and the
+     corresponding offline assertions. The mapped fields actually written to `Job` are
+     `title`, `location_raw`, `compensation_text`, and `canonical_url`. Assert all four
+     after insertion and again after re-observation, in both the live assertion helper
+     and offline pipeline test.
+  3. **Low documentation drift — `_run_proof()`'s docstring is now false.** Lines
+     555-556 still say cleanup “always runs ... regardless of where the sequence
+     stopped,” while the safety fix correctly skips every cleanup/admin operation when
+     the guard rejects the target. Rewrite it to say cleanup always runs after an
+     authorized creation attempt, including an ambiguous creation failure, and is
+     intentionally skipped before authorization.
+- Missing/inconclusive checks: the external proof was intentionally not repeated; this
+  pass verifies only the accepted historical live result and the corrected offline
+  invariants.
+- Verdict: **Approved with binding clarifications** — the destructive cleanup bug and
+  intermediate-commit leak are resolved. Apply only the three narrow remaining items
+  above; no design or product change is required.
+- Exact bounded correction: modify only
+  `backend/scripts/live_proof_greenhouse_ingestion.py`,
+  `backend/tests/test_live_proof_greenhouse_adapter.py`, and the new `Work done` entry.
+  Run the focused offline tests and routine verifier, record actual counts, commit/push,
+  and stop for final re-review. Make no network request and no real create/drop run.
+- STOP — do not merge `main`, contact Greenhouse, execute the live proof, modify shared
+  safety/ADR/canary/application/schema files, or begin another slice.
