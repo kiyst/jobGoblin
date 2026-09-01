@@ -13,6 +13,10 @@ selection, then the full pytest suite — and, finally, this invocation's own
 temporary-directory cleanup, itself reported as a PASS/FAIL step rather than
 performed silently outside the result set (see `cleanup_run_dir_step`).
 
+Ruff format/lint and mypy also cover `.claude/hooks/` (see
+`CLAUDE_HOOKS_DIR`) — real, type-annotated Python this project owns, even
+though it lives outside `backend/` and outside the shipped `app` package.
+
     cd backend && python scripts/verify.py --level routine
     cd backend && python scripts/verify.py --level routine --focus tests/test_x.py::test_y
 
@@ -59,6 +63,16 @@ BACKEND_DIR = SCRIPTS_DIR.parent
 REPO_ROOT = BACKEND_DIR.parent
 TESTS_DIR = BACKEND_DIR / "tests"
 VERIFY_TMP_ROOT = BACKEND_DIR / ".verify-tmp"
+
+# Outside `backend/` entirely (repository-root Claude Code tooling, not part
+# of the shipped application), but still real, type-annotated Python this
+# project owns — Ruff/mypy must cover it too, not just `app`/`tests`/
+# `scripts`. Confirmed empirically that both tools resolve `backend/
+# pyproject.toml`'s own config (line length, target version, mypy strictness)
+# for a path outside `backend/` when invoked with `cwd=BACKEND_DIR`, exactly
+# as they already do for every in-tree target below — no separate config
+# file is needed at the repository root.
+CLAUDE_HOOKS_DIR = REPO_ROOT / ".claude" / "hooks"
 
 # This file is documented and invoked as a direct script
 # (`python scripts/verify.py`), not as `python -m scripts.verify` — a direct
@@ -120,15 +134,15 @@ def _default_runner(command: list[str], cwd: Path) -> subprocess.CompletedProces
 
 
 def ruff_format_command() -> list[str]:
-    return [sys.executable, "-m", "ruff", "format", "--check", "."]
+    return [sys.executable, "-m", "ruff", "format", "--check", ".", str(CLAUDE_HOOKS_DIR)]
 
 
 def ruff_check_command() -> list[str]:
-    return [sys.executable, "-m", "ruff", "check", "."]
+    return [sys.executable, "-m", "ruff", "check", ".", str(CLAUDE_HOOKS_DIR)]
 
 
 def mypy_command() -> list[str]:
-    return [sys.executable, "-m", "mypy", "app", "tests", "scripts"]
+    return [sys.executable, "-m", "mypy", "app", "tests", "scripts", str(CLAUDE_HOOKS_DIR)]
 
 
 def check_repo_command() -> list[str]:
