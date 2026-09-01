@@ -279,22 +279,25 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   first production CRUD writer (see `docs/DATA_MODEL.md`). All fifteen Phase 1
   domain tables (ADR 0003) are migrated, and Phase 1's own closure slice
   (`phase-1/closure`, merge commit `bfdd56d`) is merged into `main`. Phase 2 was
-  subsequently authorized and three of its vertical slices are merged (below) —
+  subsequently authorized and is in progress (below) —
   under [PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md)'s own phase-gating rule
   ("confirm the previous phase's exit gate is complete" before starting the next
   phase), that would not have been authorized had Phase 1's exit gate not already
   been satisfied.
-- **Phase 2: in progress (updated 2026-08-30).** Three bounded, Class H vertical slices
-  merged into `main` so far. The **natural-key ingestion spine** (offline,
-  fixture-driven, no live provider) — `DiscoveredJob`/`DiscoveryResult`/`ProviderError`/
-  `SourceRunStats` schemas, `DiscoveryProvider` protocol, `FixtureProvider`,
-  `ingestion/clock.py`, `ingestion/hashing.py::canonical_json_hash()`,
+- **Phase 2: in progress (updated 2026-09-01).** Several bounded, Class H vertical
+  slices are merged into `main`; Git history and
+  [docs/LLM_HANDOFF.md](LLM_HANDOFF.md) remain authoritative for the exact, current
+  list rather than a fixed count restated here (a count would go stale as soon as the
+  next slice merges). Merged capabilities include the **natural-key ingestion spine**
+  (offline, fixture-driven, no live provider) — `DiscoveredJob`/`DiscoveryResult`/
+  `ProviderError`/`SourceRunStats` schemas, `DiscoveryProvider` protocol,
+  `FixtureProvider`, `ingestion/clock.py`, `ingestion/hashing.py::canonical_json_hash()`,
   `ingestion/natural_key.py`'s versioned/domain-tagged/SHA-256 advisory-lock encoding,
   `ingestion/identity.py::resolve_identity()`, and `ingestion/pipeline.py::run()`'s
   per-`CollectionRun` orchestration (Transaction A_i/B_i/C_i pattern, durable run-init,
   per-source counter rollups, sanitized failure telemetry) — proves Fixture →
   `RawJobIngestion` → identity resolution → `Job` → `JobOccurrence` end-to-end across
-  all three natural-key domains plus the genuinely unkeyable (`parse_error`) case.
+  all three natural-key domains plus the genuinely unkeyable (`parse_error`) case;
   **Tier-1 `evidence_mismatch` conflict persistence**
   ([DECISIONS/0007](DECISIONS/0007-identity-conflict-quarantine.md)) —
   `ingestion/persistence.py::persist_posting()` replaces the spine's original
@@ -303,24 +306,27 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   fields only, inserts one `identity_conflicts` row per distinct new `RawJobIngestion`,
   and reroutes that raw row to `processing_status='identity_conflict'`, all validated
   against a `SELECT ... FOR UPDATE`-locked `raw_id` and a re-resolved `natural_key`
-  before any mutation.
-  A third slice, **Tier-2/3 cross-occurrence attachment**
+  before any mutation; and **Tier-2/3 cross-occurrence attachment**
   ([DECISIONS/0004](DECISIONS/0004-scoped-deterministic-identity.md)'s "Phase 2
-  implementation notes"), is merged into `main`:
-  `upsert_job_occurrence()` now attempts normalized-canonical-URL matching (Tier 2, only
-  when a usable canonical URL exists) or tenant-scoped requisition matching (Tier 3, only
-  when no usable canonical URL exists — the two are mutually exclusive per posting, never
-  a sequential fallback), attaching a new `JobOccurrence` to an existing `Job` (a new
-  `UpsertKind.ATTACHED` outcome, counted as `jobs_updated`) rather than creating a
-  duplicate. Candidate resolution is single-pass and fail-closed under a tier-specific
-  advisory lock (new `canonical_url_advisory_lock_key()`/
-  `tenant_requisition_advisory_lock_key()`): more than one candidate raises
-  `AmbiguousIdentityMatchError`; a candidate that disappears or changes between discovery
-  and its `FOR UPDATE` lock raises `CandidateResolutionUnstableError`, never a retry. Still
-  deferred: Tier 4 (blocked on a company-text-to-`company_id` resolution capability that
-  does not exist yet, not merely unimplemented), `ambiguous_match` persistence and its
-  evidence shape, `QueryPlanner`, `ProviderRegistry`, multi-source partial-success
-  handling, live providers.
+  implementation notes"): `upsert_job_occurrence()` attempts normalized-canonical-URL
+  matching (Tier 2, only when a usable canonical URL exists) or tenant-scoped
+  requisition matching (Tier 3, only when no usable canonical URL exists — the two are
+  mutually exclusive per posting, never a sequential fallback), attaching a new
+  `JobOccurrence` to an existing `Job` (a new `UpsertKind.ATTACHED` outcome, counted as
+  `jobs_updated`) rather than creating a duplicate; a candidate that disappears or
+  changes between discovery and its `FOR UPDATE` lock raises
+  `CandidateResolutionUnstableError`, never a retry.
+  **Ambiguous-match conflict persistence**
+  ([DECISIONS/0004](DECISIONS/0004-scoped-deterministic-identity.md),
+  [DECISIONS/0007](DECISIONS/0007-identity-conflict-quarantine.md)) — Tier 2/3 finding
+  more than one distinct candidate Job now creates a standalone Job/JobOccurrence and
+  records the complete, sorted candidate set as an `identity_conflicts` row
+  (`ambiguous_match`) instead of failing the whole run; a new `UpsertKind.AMBIGUOUS`
+  outcome counts as `jobs_inserted`, and `pipeline.py`'s counter dispatch is now
+  exhaustive over all five `UpsertKind` values, fail-closed for any future unrecognized
+  one. Still deferred: Tier 4 (blocked on a company-text-to-`company_id` resolution
+  capability that does not exist yet, not merely unimplemented), `QueryPlanner`,
+  `ProviderRegistry`, multi-source partial-success handling, live providers.
 - **Phases 3-14: not started.** Begin each phase only after completing its preflight in
   [PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md) and receiving approval for the next
   smallest slice.

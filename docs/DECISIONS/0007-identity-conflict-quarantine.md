@@ -175,6 +175,52 @@ verbatim, with these decisions resolved during implementation:
   `identity_conflict`/`normalized` fails the `processing_status` check before it could
   ever produce a second conflict row.
 
+## Phase 2 implementation notes (ambiguous_match conflict persistence slice)
+
+`ingestion/persistence.py`'s `_attach_to_candidate()`/`upsert_job_occurrence()`/
+`persist_posting()` implement this conflict kind's full persistence, with these
+decisions resolved during implementation:
+
+- **Complete candidate set, not the fast ambiguity probe.** `_discover_candidates()`'s
+  `<=2` `LIMIT` probe remains the trigger for ambiguity detection at both the pre-lock
+  and post-lock-recheck sites in `_attach_to_candidate`, but the persisted
+  `existing_value` is the complete, deterministically sorted, distinct candidate set
+  from a separate, unbounded, unlocked requery (`_discover_all_candidates`) run under
+  the same tier-specific advisory lock domain the caller already holds. If that
+  authoritative requery ever disagrees with the probe and resolves to fewer than two
+  candidates, this is instability between two queries, not a genuine ambiguity:
+  `CandidateResolutionUnstableError` is raised and nothing is persisted.
+- **Evidence shape (the asymmetry is deliberate).** `existing_value` is a JSON array of
+  every candidate Job's UUID, as a string, sorted; `incoming_value` is a single-element
+  JSON array holding the one newly created JobOccurrence's UUID, as a string. The two
+  arrays intentionally enumerate different entity types — `existing_value` names the
+  ambiguity being reported (candidate Jobs); `incoming_value` names the one concrete
+  thing this posting actually created (a JobOccurrence) — not a copy/paste symmetry bug.
+  `existing_job_occurrence_id` stays `NULL` (already required by the `ambiguous_match`
+  `CHECK` constraint) since there is no single existing occurrence in dispute.
+- **No candidate is ever mutated.** At the pre-lock site, ambiguity is detected before
+  any row lock is attempted. At the post-lock-recheck site, the first candidate's own
+  Job row may already be locked `FOR UPDATE` — but neither this code path nor its caller
+  writes to it; only a new, standalone Job/JobOccurrence is created, exactly as the
+  zero-candidate path already does.
+- **Counter bucket**: an ambiguous posting increments `jobs_inserted` (both
+  `collection_runs` and `collection_run_provider_attempts`), never `jobs_updated` — a
+  real, new Job was created, even though it isn't attached to any of the candidates
+  that triggered the conflict. `pipeline.py`'s dispatch over `UpsertKind` is exhaustive
+  and fail-closed: an unrecognized future kind raises rather than silently miscounting.
+- **Evidence sensitivity and logging**: identical posture to `evidence_mismatch` — the
+  one `ingestion_identity_conflict` `WARNING` log line carries only
+  `raw_ingestion_id`/`identity_conflict_id`/`job_occurrence_id`, never the candidate
+  Job IDs or any other evidence.
+- **Reprocessing the same raw_id** fails at `_validate_raw_association`'s
+  `processing_status != 'fetched'` check before any mutation, the same structural
+  guarantee `evidence_mismatch` already relies on — a raw row already turned
+  `identity_conflict` can never produce a second conflict row for the same posting.
+- **`AmbiguousIdentityMatchError` is removed.** The earlier design (ADR 0004's original
+  Phase 2 note) raised this exception uncaught, failing the whole ingestion run for any
+  ambiguous posting. This slice replaces it with the persistence behavior above —
+  per-posting isolated, matching every other conflict outcome in this table.
+
 ## Consequences
 - The natural-key unique index is never at risk of violation by conflict handling —
   every write path that could hit a conflict either `UPDATE`s an existing row or

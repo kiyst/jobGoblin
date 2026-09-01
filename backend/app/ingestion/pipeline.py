@@ -188,7 +188,7 @@ async def run(
                 # this counts as an update to that Job, not an insertion
                 # of one.
                 per_source_updated[job.source] = per_source_updated.get(job.source, 0) + 1
-            else:
+            elif outcome.kind is UpsertKind.QUARANTINED:
                 # Quarantined: descriptive/canonical fields never applied,
                 # but observational state did advance — bucketed with the
                 # other partial-write outcome, not with a clean insert.
@@ -201,6 +201,24 @@ async def run(
                     outcome.conflict_id,
                     outcome.occurrence_id,
                 )
+            elif outcome.kind is UpsertKind.AMBIGUOUS:
+                # A new, standalone Job was created (like INSERTED) rather
+                # than guessed into one of several candidates — counts as
+                # an insertion, not an update, since a real new Job exists;
+                # flagged the same way QUARANTINED is.
+                per_source_inserted[job.source] = per_source_inserted.get(job.source, 0) + 1
+                had_conflict = True
+                logger.warning(
+                    "ingestion_identity_conflict raw_ingestion_id=%s "
+                    "identity_conflict_id=%s job_occurrence_id=%s",
+                    raw_id,
+                    outcome.conflict_id,
+                    outcome.occurrence_id,
+                )
+            else:
+                # Fail closed for any future UpsertKind this dispatch does
+                # not yet know how to bucket, rather than silently miscounting.
+                raise AssertionError(f"unhandled UpsertKind: {outcome.kind!r}")
 
         jobs_discovered = sum(per_source_discovered.values())
         inserted = sum(per_source_inserted.values())

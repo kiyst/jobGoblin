@@ -1005,8 +1005,11 @@ detailed in [ADR 0007](DECISIONS/0007-identity-conflict-quarantine.md):
 - **`ambiguous_match`** (Tiers 2–4): a matching tier finds **more than one** distinct
   candidate `Job` to attach to. This *is* a genuinely new occurrence (no natural-key row
   exists for it yet), so creating a new, standalone `Job` for it remains valid — it's
-  flagged via an `identity_conflicts` row (holding the list of candidate occurrences) for
-  human review, rather than guessed into one of them.
+  flagged via an `identity_conflicts` row for human review, rather than guessed into one
+  of them. `existing_value` holds the complete, sorted array of every candidate Job's
+  ID; `incoming_value` holds a single-element array with the one new JobOccurrence's own
+  ID — the two arrays intentionally name different entity types (candidate Jobs vs. the
+  one JobOccurrence actually created), not a symmetry bug.
 
 Both route to the new `identity_conflicts` table (§9, [ADR 0007](DECISIONS/0007-identity-conflict-quarantine.md))
 — **not** `duplicate_groups`. `duplicate_groups` (Phase 6,
@@ -1197,8 +1200,8 @@ exists.
      advanced (proves §8's Rev 3 conflict-handling redesign, [ADR 0007](DECISIONS/0007-identity-conflict-quarantine.md));
    - an **`ambiguous_match` case**: a payload whose company-scoped requisition fallback
      (tier 4) matches two distinct existing `Job`s — must create a new, standalone `Job`
-     plus an `identity_conflicts` row (`conflict_type = 'ambiguous_match'`) listing both
-     candidates, never guessing which one it belongs to;
+     plus an `identity_conflicts` row (`conflict_type = 'ambiguous_match'`) listing every
+     candidate, never guessing which one it belongs to;
    - a malformed/partial payload (produces a `RawJobIngestion` with
      `processing_status = 'parse_error'` and no `JobOccurrence`);
    - a simulated partial-provider-failure case, driven by an explicit
