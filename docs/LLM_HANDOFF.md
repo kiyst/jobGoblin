@@ -414,3 +414,23 @@ that detail.
 - Exact requested corrections: none.
 - STOP — do not merge to `main`, execute `/compact`, or begin `ambiguous_match` or any
   other product slice until the user explicitly authorizes the next action.
+
+**Merge record (appended, not a rewrite of the entry above):** Approved at review
+commit `3af3b28` (no findings). Per user authorization, `codex/tooling-safe-compaction`
+was merged into `main` with a normal merge commit (`8920a4e`; `--no-ff`, no
+squash/rebase/force-push) and pushed. `main`/`origin/main` are both now at `8920a4e`.
+Verified: feature branch was clean and pushed at `3af3b28`, and `main`/`origin/main`
+were still at `10b9432` immediately before the merge; `main` has zero content diff
+against the feature branch (`git diff main codex/tooling-safe-compaction --stat`
+empty); migration `0017` remains the sole Alembic head; `python -m scripts.check_repo`
+exited `0`; `git diff --check` was clean; working tree clean throughout. No `/compact`,
+network request, or database mutation was performed during the merge.
+
+**Rollback boundary:** reverting `8920a4e` (a single merge commit) restores `main` to
+`10b9432` exactly — no schema/migration exists in this slice to downgrade, and no data
+migration accompanies it. This merges the safe-compaction tooling only (root
+`CLAUDE.md`, `.claude/settings.json`, `.claude/hooks/compact_checkpoint.py`, the
+canonical verifier's expanded Ruff/mypy scope over `.claude/hooks/`, and their tests) —
+it does **not** touch product code, schema, migrations, providers, ingestion, or the
+`ambiguous_match` proposal, all of which remain not started and are not authorized by
+this merge.
