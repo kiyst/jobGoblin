@@ -149,6 +149,34 @@ When uncertain, use the higher-risk class. A phase boundary never expands author
 8. **Merge checkpoint.** Only the user authorizes merging to `main`. After merge, verify
    branch/main state and propose—but do not start—the next slice.
 
+## Context compaction and recovery
+
+Claude Code's built-in auto-compaction remains enabled and must not be blocked: its
+`PreCompact` hook can run after a context-limit error, where blocking would fail the
+current request rather than protect it. The project instead uses three complementary
+controls:
+
+1. Root `CLAUDE.md` supplies durable compaction instructions and is re-injected after
+   compaction. It tells the summarizer what authorization, invariants, verification, and
+   recovery pointers must survive.
+2. `.claude/hooks/compact_checkpoint.py` runs before manual or automatic compaction and
+   atomically records a credential-free Git recovery snapshot under ignored
+   `.claude/runtime/`. A `SessionStart(compact)` hook injects that snapshot after
+   compaction. It never stores the transcript, compacted summary, environment variables,
+   database URLs, or file contents.
+3. Agents recommend proactive `/compact` only at a durable boundary. The optimal moment
+   is clean, pushed `main` immediately after the verified merge-record commit and before
+   a new slice starts. A clean, pushed feature branch stopped after committed `Work done`
+   or `Work review` is recoverable but secondary. Never proactively compact amid
+   uncommitted changes, running verification, external/destructive activity, incomplete
+   handoff writing, or unresolved corrections.
+
+Claude Code currently exposes automatic threshold compaction and compaction lifecycle
+hooks, but no project hook that safely forces `/compact` at an arbitrary semantic
+milestone. Do not simulate one by launching a nested Claude process. The safe automation
+here is automatic snapshot/recovery around built-in compaction, paired with a manual
+`/compact` recommendation at the optimal merge boundary.
+
 ## Adversarial implementer self-review
 
 Before committing implementation or writing `Work done`, use a fresh Claude subagent or

@@ -12,6 +12,7 @@ venv/
 .ruff_cache/
 .pytest_cache/
 .verify-tmp/
+.claude/runtime/
 htmlcov/
 .coverage
 
