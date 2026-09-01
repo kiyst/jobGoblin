@@ -384,4 +384,40 @@ that detail.
 
 ### Work review
 
-_Pending._
+- Date/agent: 2026-08-31, Codex. Final correction diff reviewed:
+  `68c6c12..ae02d22` on `phase-4/greenhouse-live-proof`.
+- Independent verification performed: inspected the complete bounded diff and traced
+  every affected identity lookup, synthetic fixture construction, persisted-field
+  assertion, and cleanup-authorization statement. Ran the genuine external routine
+  verifier focused on `tests/test_live_proof_greenhouse_adapter.py` and
+  `tests/test_db_safety.py`: all **10 steps PASS**, including **45 focused tests** and
+  **1370 full-suite tests**. No Greenhouse request and no real disposable-database
+  create/drop invocation was performed during this review.
+- Prior-finding disposition:
+  1. **Medium finding closed.** `_capture_identity_scope()` and both occurrence
+     lookups use the complete fixed identity domain `(provider="ats_scrapers",
+     source="greenhouse", source_tenant_id, source_job_id)`. `_mapped_job()` requires
+     a distinct explicit suffix at every call site and mutates a fresh fixture-dict
+     copy before mapping, keeping `raw`, `source_job_id`, `canonical_url`, and their
+     hash mutually consistent.
+  2. **Low assertion finding closed.** The live assertion helpers and offline pipeline
+     test now verify `title`, `location_raw`, `compensation_text`, and `canonical_url`
+     after both insertion and re-observation. `_as_stored()` matches the `Job` model's
+     exact covered-whitespace trim and blank-to-`None` behavior.
+  3. **Low documentation finding closed.** `_run_proof()` now distinguishes guaranteed
+     cleanup after an authorized creation attempt from intentional zero-contact
+     behavior when the safety guard rejects the target.
+- Adversarial cases checked: cross-provider/source key reuse can no longer enter this
+  test scope; synthetic fixture identities cannot collide silently or drift from their
+  raw payload; upstream trailing covered whitespace is compared using the actual
+  persistence normalization; rejected targets remain outside cleanup authorization.
+  No further findings.
+- Missing/inconclusive checks: the external proof was intentionally not repeated. The
+  accepted historical live result remains the evidence for real Greenhouse transport;
+  this final pass verifies the corrected offline invariants only.
+- Verdict: **Approved**. The `greenhouse-live-proof` slice and its correction passes are
+  accepted; no further correction is required.
+- Exact requested corrections: none.
+- STOP — do not merge `main`, contact Greenhouse, execute the live proof, begin an
+  adapter/provider integration, or start another slice until the user explicitly
+  authorizes that action.
