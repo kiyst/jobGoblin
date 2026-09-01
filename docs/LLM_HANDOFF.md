@@ -371,4 +371,46 @@ that detail.
 
 ### Work review
 
-_Pending._
+- Date/agent: 2026-09-01, Codex. Final correction diff reviewed:
+  `58995c1..87f65d7` on `codex/tooling-safe-compaction`.
+- Independent verification performed: inspected all five changed files and traced the
+  verifier command construction, every checkpoint classification, safe-read/fallback
+  flow, atomic replacement failure, prior-checkpoint preservation, and both hook entry
+  points. Ran the genuine external routine verifier focused on
+  `tests/test_compact_checkpoint.py` and `tests/test_verify.py`: all **10 steps PASS**,
+  including **90 focused tests** and **1387 full-suite tests**. No `/compact`, network
+  request, product operation, or database mutation was performed.
+- Prior-finding disposition:
+  1. **Medium finding closed.** The canonical verifier's existing Ruff format/lint and
+     mypy steps now include the real repository-root `.claude/hooks/` directory. Exact
+     argv and path existence are tested without adding a parallel or silently skipped
+     verification path.
+  2. **Low-Medium finding closed.** Both clean-but-unsynchronized state shapes assert
+     `RECOVERABLE WITH RECONCILIATION` and its reason explicitly.
+  3. **Low restore finding closed.** Missing, unreadable, invalidly encoded, and
+     unexpectedly failing restore paths emit only the fixed recovery fallback and
+     return success; exception text, checkpoint contents, and alternate paths are not
+     exposed.
+  4. **Low cleanup finding closed.** Injected atomic-replacement failure proves the
+     temporary file is removed, the prior checkpoint remains byte-for-byte unchanged,
+     and the real `pre` entry point returns zero.
+  5. **Informational classification disposition accepted.** The correction was treated
+     as Class H and received Class-H-equivalent verification depth; no historical entry
+     was rewritten.
+- Documentation clarification checked: the current official `PreCompact` reference
+  documents the `trigger` values and blocking behavior. The hook returns success without
+  a block decision and therefore leaves emergency automatic compaction unblocked.
+- Adversarial cases checked: an unsynchronized clean tree cannot become optimal; an
+  upstream-less feature branch cannot become pushed/recoverable; malformed checkpoint
+  bytes and read failures cannot enter injected context; replacement failure cannot
+  destroy the last valid checkpoint or leave its temporary candidate behind; future
+  Python hooks placed in `.claude/hooks/` enter routine static analysis automatically.
+  No further findings.
+- Missing/inconclusive checks: a real interactive `/compact` was intentionally deferred
+  to the optimal post-merge clean-`main` acceptance checkpoint. This review validates
+  the offline hook boundaries and canonical verifier, not Claude Code's interactive UI.
+- Verdict: **Approved**. The safe-compaction tooling and correction pass are accepted;
+  no further correction is required.
+- Exact requested corrections: none.
+- STOP — do not merge to `main`, execute `/compact`, or begin `ambiguous_match` or any
+  other product slice until the user explicitly authorizes the next action.
