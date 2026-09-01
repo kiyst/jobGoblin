@@ -376,3 +376,46 @@ this merge.
   for a no-migration slice without touching the dev database.
 - STOP — awaiting Codex review. Do not merge, start Tier 4, add schema changes,
   contact live providers, or expand this slice.
+
+### Work review
+
+- Date/agent: 2026-09-01, Codex. Implementation diff reviewed:
+  `e18b2b3..ddfc1f8` on `phase-2/ambiguous-match-persistence`.
+- Independent verification: inspected the persistence and pipeline control flow, all
+  changed product documentation, and the new/rewritten tests. Ran the genuine external
+  canonical verifier focused on `tests/test_ingestion_pipeline.py`: all **10 steps
+  PASS**, including Ruff format/check, mypy, repository and whitespace checks,
+  disposable-database safety/reachability, **49 focused tests**, **1398 full-suite
+  tests**, and temporary-directory cleanup. Independently confirmed Alembic `0017`
+  remains the sole head and the working tree was clean before this review.
+- Required-invariant disposition:
+  1. The bounded probe never supplies persisted evidence; the authoritative unbounded
+     query supplies the complete sorted distinct candidate set and disagreements fail
+     closed at both ambiguity sites.
+  2. `UpsertOutcome` rejects missing, singleton, duplicate, unsorted, and cross-kind
+     candidate tuples at construction.
+  3. A stable ambiguity creates a standalone Job/JobOccurrence, records the deliberate
+     candidate-Job/new-JobOccurrence evidence asymmetry, links the raw row, and mutates
+     no candidate data.
+  4. Injected post-flush failure proves atomic rollback of the new Job, occurrence,
+     conflict, and raw terminal transition; terminal-row reprocessing is rejected.
+  5. A mixed batch proves posting isolation, exact run `completed_with_errors` / attempt
+     `completed` states, insertion/update counters, raw links, and IDs-only telemetry.
+  6. Pipeline dispatch explicitly handles all five current outcomes; an unknown outcome
+     fails the run with exact failed telemetry and no falsely successful counters.
+- Documentation-only findings corrected directly under `LLM_WORKFLOW.md`'s mechanical
+  rule: ADR 0004 had one current-behavior sentence still naming the deleted
+  `AmbiguousIdentityMatchError`; ROADMAP retained a fixed three-slice count and called
+  the feature explicitly "not yet merged," despite the binding requirement for
+  merge-state-neutral wording. Replaced those statements with the implemented
+  `AMBIGUOUS`/instability behavior and timeless capability wording. No executable,
+  schema, test, scope, or architectural decision changed.
+- Adversarial cases checked: probe/full-query disagreement before and after a candidate
+  lock, three-candidate evidence completeness, candidate non-mutation, rollback after
+  every ambiguity effect is flushed, repeated raw processing, clean work beside an
+  ambiguity in one batch, and a future unhandled outcome. No executable findings.
+- Verdict: **Approved** after the mechanical documentation corrections above. The
+  `ambiguous_match` persistence slice is accepted; no Claude correction pass is needed.
+- Exact requested corrections: none.
+- STOP — do not merge to `main`, begin Tier 4, contact a provider, or start another
+  slice until the user explicitly authorizes it.

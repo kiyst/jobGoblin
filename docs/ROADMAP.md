@@ -279,7 +279,7 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   first production CRUD writer (see `docs/DATA_MODEL.md`). All fifteen Phase 1
   domain tables (ADR 0003) are migrated, and Phase 1's own closure slice
   (`phase-1/closure`, merge commit `bfdd56d`) is merged into `main`. Phase 2 was
-  subsequently authorized and three of its vertical slices are merged (below) —
+  subsequently authorized and is in progress (below) —
   under [PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md)'s own phase-gating rule
   ("confirm the previous phase's exit gate is complete" before starting the next
   phase), that would not have been authorized had Phase 1's exit gate not already
@@ -316,8 +316,7 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   `jobs_updated`) rather than creating a duplicate; a candidate that disappears or
   changes between discovery and its `FOR UPDATE` lock raises
   `CandidateResolutionUnstableError`, never a retry.
-  **Implemented, not yet merged** — on branch `phase-2/ambiguous-match-persistence`,
-  awaiting review and merge authorization: `ambiguous_match` conflict persistence
+  **Ambiguous-match conflict persistence**
   ([DECISIONS/0004](DECISIONS/0004-scoped-deterministic-identity.md),
   [DECISIONS/0007](DECISIONS/0007-identity-conflict-quarantine.md)) — Tier 2/3 finding
   more than one distinct candidate Job now creates a standalone Job/JobOccurrence and
