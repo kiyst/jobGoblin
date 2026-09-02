@@ -330,3 +330,29 @@ that detail.
 - Exact requested corrections: none.
 - STOP — do not merge to `main`, begin another Phase 2 slice, contact providers, or
   perform the Phase 2 exit-gate audit until the user explicitly authorizes it.
+
+**Merge record (appended, not a rewrite of the entry above):** Approved at review
+commit `9441ee2` (no findings, after the whitespace-normalization correction recorded
+earlier in this same review cycle). Per user authorization,
+`phase-2/partial-success-handling` was merged into `main` with a normal merge commit
+(`002b7f8`; `--no-ff`, no squash/rebase/force-push) and pushed. `main`/`origin/main`
+are both now at `002b7f8`. Verified: the feature branch was clean and pushed at
+`9441ee2`, and `main`/`origin/main` were still at `02ef086` immediately before the
+merge; `main` has zero content diff against the feature branch (`git diff main
+phase-2/partial-success-handling --stat` empty); migration `0017` remains the sole
+Alembic head; `python -m scripts.check_repo` exited `0`; `git diff --check` was
+clean; working tree clean throughout. No `/compact`, network request, or database
+mutation was performed during the merge.
+
+**Rollback boundary:** reverting `002b7f8` (a single merge commit) restores `main` to
+`02ef086` exactly — no schema/migration exists in this slice to downgrade, and no
+data migration accompanies it (every column this slice populates —
+`collection_run_provider_attempts.status='partial'`/`error_category`/`error_message`/
+`retry_count`/`rate_limited`/`incomplete_results`, `collection_runs.failures` — already
+existed from Phase 1). This merges the multi-source partial-success handling slice
+only (`backend/app/ingestion/pipeline.py`, `backend/app/db/models/
+collection_run_provider_attempt.py`'s `COVERED_WHITESPACE` promotion, their tests, and
+the documentation files listed in the `Work done` entries above) — it does **not**
+touch Tier 4, `QueryPlanner`, `ProviderRegistry`, any live provider, the Phase 2
+exit-gate audit, or any other Phase 2 work, all of which remain not started and are
+not authorized by this merge.
