@@ -324,9 +324,26 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   (`ambiguous_match`) instead of failing the whole run; a new `UpsertKind.AMBIGUOUS`
   outcome counts as `jobs_inserted`, and `pipeline.py`'s counter dispatch is now
   exhaustive over all five `UpsertKind` values, fail-closed for any future unrecognized
-  one. Still deferred: Tier 4 (blocked on a company-text-to-`company_id` resolution
+  one.
+  Multi-source partial-success handling
+  ([ARCHITECTURE.md §6.3](ARCHITECTURE.md#63-discoveryresult--what-a-provider-call-actually-returns-rev-2-revised-rev-3)/
+  [§9](ARCHITECTURE.md#9-raw-ingestion-vs-provider-attempt-telemetry)/
+  [§11](ARCHITECTURE.md#11-fixture-driven-end-to-end-ingestion-proof-phase-2-target))
+  addresses `PHASE_RISK_CHECKLIST.md`'s exit-gate item for successful partial results: a
+  source-level failure or partial result no longer aborts the whole run.
+  `ingestion/pipeline.py::run()` first validates `DiscoveryResult`'s own internal
+  consistency before writing any raw row (declared `jobs_found` against actual
+  `DiscoveredJob` counts per source; `completed=False` can carry neither actual jobs nor
+  `incomplete_results=True` — each a whole-run `UnsupportedDiscoveryResultError`, never a
+  graceful per-source outcome), then persists every other source's jobs normally while
+  each source's own `collection_run_provider_attempts` row records its independent
+  outcome (`status` precedence `failed`/`partial`/`completed`; `error_category`/
+  `error_message` from that source's chronologically latest `ProviderError`; `retry_count`;
+  `rate_limited`; `incomplete_results`) — every `ProviderError` is still retained
+  individually in `collection_runs.failures`, never collapsed to the one selected per
+  source. Still deferred: Tier 4 (blocked on a company-text-to-`company_id` resolution
   capability that does not exist yet, not merely unimplemented), `QueryPlanner`,
-  `ProviderRegistry`, multi-source partial-success handling, live providers.
+  `ProviderRegistry`, live providers.
 - **Phases 3-14: not started.** Begin each phase only after completing its preflight in
   [PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md) and receiving approval for the next
   smallest slice.

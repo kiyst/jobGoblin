@@ -1069,7 +1069,7 @@ below.
 | jobs_discovered | int, not null, server default 0 | run-level rollup; authoritative per-provider/source detail lives in `collection_run_provider_attempts`; `CHECK (jobs_discovered >= 0)` |
 | jobs_inserted | int, not null, server default 0 | run-level rollup; `CHECK (jobs_inserted >= 0)` |
 | jobs_updated | int, not null, server default 0 | run-level rollup; `CHECK (jobs_updated >= 0)` |
-| failures | jsonb, not null, server default `'[]'` | run-level summary rollup of `{provider, source, error}` — **Rev 2 note**: this is now a denormalized convenience copy; the authoritative per-attempt error detail (category, retryable, retry_count, rate_limited) lives in `collection_run_provider_attempts`, not here; can accumulate at both planning time (no attempt row exists) and execution time, potentially across more than one write; `CHECK` requires a top-level JSON array; `MutableList`-wrapped for top-level append tracking — nested mutation within an already-appended entry is not tracked, correcting an entry requires replacing the whole list; no `CHECK` ties `failures` or the three job counters to `status` — `completed_with_errors` may legitimately show accurate non-zero rollups alongside a non-empty `failures` array |
+| failures | jsonb, not null, server default `'[]'` | one entry per `ProviderError`, in `{provider, source, error}` shape — **Rev 23 note (Phase 2's multi-source partial-success handling slice)**: `failures` is the complete, authoritative retention of every error a run's providers reported, never collapsed or deduplicated; `collection_run_provider_attempts.error_category`/`.error_message` hold only that one source's own single chronologically-latest error as a one-column-pair *summary* (ties broken by later position in `DiscoveryResult.errors`) — `failures` is not a mere denormalized convenience copy of that summary, it is the only place multiple errors for the same source all survive individually. Exact `error` object shape: `{category, retryable, detail, occurred_at}` — an ISO-8601 string for `occurred_at`, mirroring `ProviderError`'s own fields exactly; can accumulate at both planning time (no attempt row exists yet) and execution time, potentially across more than one write; `CHECK` requires a top-level JSON array; `MutableList`-wrapped for top-level append tracking — nested mutation within an already-appended entry is not tracked, correcting an entry requires replacing the whole list; no `CHECK` ties `failures` or the three job counters to `status` — `completed_with_errors` may legitimately show accurate non-zero rollups alongside a non-empty `failures` array |
 | duration_ms | int, nullable | `CHECK (duration_ms IS NULL OR duration_ms >= 0)` |
 | created_at | timestamptz, not null, server_default `now()` | added in Rev 19 despite this table's own earlier column list omitting it, per the established global convention |
 | updated_at | timestamptz, not null, server_default `now()`, ORM `onupdate=func.now()` | added in Rev 19, same global convention |
@@ -1115,6 +1115,25 @@ approval before migration `0014` was written, in addition to the columns/notes a
 - **No uniqueness constraint of any kind in this slice** — the two indexes are lookup
   support only; the Phase 9 scheduler-level overlapping-run-prevention strategy is an
   explicitly separate, not-yet-designed invariant.
+
+**Rev 23 changes** (Phase 2's multi-source partial-success handling slice, Class H per
+docs/LLM_WORKFLOW.md — first real writer of `failures` and of every
+`collection_run_provider_attempts` column beyond a hardcoded `'completed'`/`'failed'`;
+no schema or migration change, since every column this slice populates already existed):
+- **`failures`'s exact `error` object shape and full-retention behavior are now pinned
+  down** (see the column's own row above) — previously documented only as
+  `{provider, source, error}` with `error`'s own internal shape left unspecified.
+- **`collection_run_provider_attempts.status` precedence, application-level**: `'failed'`
+  when that source's `SourceRunStats.completed=False`; otherwise `'partial'` when
+  `incomplete_results=True`; otherwise `'completed'`. A `ProviderError` alone never
+  changes this — it can attach `error_category`/`error_message` to an otherwise-
+  `'completed'` source (e.g. "succeeded after a retry") without downgrading its status,
+  while still making the parent `CollectionRun.status` `'completed_with_errors'`.
+- **The chronologically-latest-error-per-source selection rule** (ties broken by later
+  position in `DiscoveryResult.errors`) is an application-level convention, not a
+  database `CHECK` — the schema has no way to express "pick the max by a JSON field,"
+  and doesn't need to, since `failures` already retains every error for any deeper
+  inspection.
 
 ### `collection_run_provider_attempts`
 **Implemented** (`backend/app/db/models/collection_run_provider_attempt.py`; migration

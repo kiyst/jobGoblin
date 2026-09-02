@@ -8,7 +8,10 @@ from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.db.models.collection_run import CollectionRun
-from app.db.models.collection_run_provider_attempt import CollectionRunProviderAttempt
+from app.db.models.collection_run_provider_attempt import (
+    COVERED_WHITESPACE,
+    CollectionRunProviderAttempt,
+)
 from app.db.models.raw_job_ingestion import RawJobIngestion
 from app.ingestion.clock import Clock
 from app.ingestion.hashing import canonical_json_hash
@@ -19,14 +22,24 @@ from app.ingestion.identity import (
 )
 from app.ingestion.persistence import UpsertKind, persist_posting
 from app.providers.base import DiscoveryProvider
-from app.schemas.discovered_job import DiscoveredJob
+from app.schemas.discovered_job import DiscoveredJob, ProviderError
 from app.schemas.provider import SourceQuery
 
 logger = logging.getLogger(__name__)
 
 
 class UnsupportedDiscoveryResultError(RuntimeError):
-    """The provider returned a state deferred beyond this bounded slice."""
+    """The provider returned a malformed or internally inconsistent result —
+    a genuine adapter-contract violation, never a legitimate per-source
+    failure. A source reporting `completed=False`/`incomplete_results=True`,
+    or a `ProviderError`, is a *valid*, expected shape handled gracefully
+    (see `run()`'s own docstring) — this exception is reserved for a result
+    whose own claims about itself don't add up (provider/source name
+    mismatches, or a `jobs_found`/actual-`DiscoveredJob`-count
+    disagreement that `DiscoveryResult`'s own pydantic validator cannot
+    catch, since it has no way to distinguish a truthful zero from a lying
+    or buggy adapter). Raised, and the whole run aborted, before any raw
+    row is written."""
 
 
 async def _write_fetched_row(
@@ -86,6 +99,20 @@ async def run(
     (docs binding decision, point 6) — never used for run/attempt
     lifecycle timestamps, which come from `clock` instead, kept
     deliberately independent.
+
+    A source-level failure never discards a sibling source's successful
+    results (docs/ARCHITECTURE.md §6.3/§9/§11, docs/PHASE_RISK_CHECKLIST.md's
+    cross-cutting non-negotiable): `SourceRunStats.completed=False` or
+    `incomplete_results=True`, and any `ProviderError`, are all handled
+    gracefully — jobs from every other source still persist normally, and
+    each source's own `CollectionRunProviderAttempt` row records its own
+    outcome independently (`status`, `error_category`/`error_message`,
+    `retry_count`, `rate_limited`, `incomplete_results`). `CollectionRun.
+    status` becomes `'completed_with_errors'` (never `'failed'`) whenever
+    any source failed, was incomplete, or reported an error, alongside the
+    existing per-posting `had_parse_error`/`had_conflict` triggers.
+    `'failed'` remains reserved for the exception path below — a genuine
+    crash, never a source telling the pipeline plainly that it failed.
 
     Only `UnresolvableIdentityError` is ever caught and reclassified as
     `parse_error`. Every other exception — including
@@ -148,10 +175,65 @@ async def run(
             raise UnsupportedDiscoveryResultError(
                 "DiscoveredJob.provider does not match DiscoveryResult.provider"
             )
-        if result.possibly_incomplete:
-            raise UnsupportedDiscoveryResultError(
-                "partial or failed provider results are deferred to a later Phase 2 slice"
-            )
+
+        # `DiscoveryResult`'s own pydantic validator cannot check these — it
+        # has no way to tell a truthful zero from a lying/buggy adapter.
+        # Checked here, before any raw row is written: each is a whole-run
+        # contract violation, never a legitimate per-source failure (that is
+        # `completed=False`/`incomplete_results=True`/`ProviderError`,
+        # handled gracefully below).
+        actual_job_counts: dict[str, int] = {}
+        for job in result.jobs:
+            actual_job_counts[job.source] = actual_job_counts.get(job.source, 0) + 1
+        for stat in result.source_stats:
+            actual_count = actual_job_counts.get(stat.source, 0)
+            if not stat.completed and actual_count > 0:
+                raise UnsupportedDiscoveryResultError(
+                    f"source {stat.source!r} reports completed=False but "
+                    f"{actual_count} DiscoveredJob entries are attributed to it"
+                )
+            if not stat.completed and stat.incomplete_results:
+                raise UnsupportedDiscoveryResultError(
+                    f"source {stat.source!r} reports completed=False and "
+                    "incomplete_results=True, which is not a valid combination"
+                )
+            if stat.jobs_found != actual_count:
+                raise UnsupportedDiscoveryResultError(
+                    f"source {stat.source!r} declared jobs_found={stat.jobs_found} but "
+                    f"{actual_count} DiscoveredJob entries are attributed to it"
+                )
+
+        stats_by_source = {stat.source: stat for stat in result.source_stats}
+
+        # The chronologically latest error per source (ties broken by later
+        # position in `result.errors`) becomes that source's single
+        # attempt-level `error_category`/`error_message` — but every error is
+        # still preserved individually in `collection_runs.failures` below,
+        # never collapsed. A `ProviderError` alone never changes a
+        # `completed=True` source's own `status` (docs binding decision).
+        latest_error_by_source: dict[str, ProviderError] = {}
+        for error in result.errors:
+            current = latest_error_by_source.get(error.source)
+            if current is None or error.occurred_at >= current.occurred_at:
+                latest_error_by_source[error.source] = error
+
+        # One entry per `ProviderError`, in `result.errors` order — never
+        # deduplicated or collapsed to the single selected error above.
+        # `detail` is never logged (only ever written to this column and to
+        # the corresponding attempt row's own `error_message`).
+        failures = [
+            {
+                "provider": result.provider,
+                "source": error.source,
+                "error": {
+                    "category": error.category.value,
+                    "retryable": error.retryable,
+                    "detail": error.detail,
+                    "occurred_at": error.occurred_at.isoformat(),
+                },
+            }
+            for error in result.errors
+        ]
 
         for job in result.jobs:
             per_source_discovered[job.source] = per_source_discovered.get(job.source, 0) + 1
@@ -223,7 +305,12 @@ async def run(
         jobs_discovered = sum(per_source_discovered.values())
         inserted = sum(per_source_inserted.values())
         updated = sum(per_source_updated.values())
-        run_status = "completed_with_errors" if had_parse_error or had_conflict else "completed"
+        had_source_issue = result.possibly_incomplete
+        run_status = (
+            "completed_with_errors"
+            if had_parse_error or had_conflict or had_source_issue
+            else "completed"
+        )
         completed_at = clock.now()
         duration_ms = int((completed_at - run_started_at).total_seconds() * 1000)
 
@@ -238,18 +325,50 @@ async def run(
                     jobs_discovered=jobs_discovered,
                     jobs_inserted=inserted,
                     jobs_updated=updated,
+                    failures=failures,
                 )
             )
             for source, attempt_id in attempt_ids.items():
+                stat = stats_by_source[source]
+                if not stat.completed:
+                    attempt_status = "failed"
+                elif stat.incomplete_results:
+                    attempt_status = "partial"
+                else:
+                    attempt_status = "completed"
+                selected_error = latest_error_by_source.get(source)
+                # `update()` is a Core statement — it bypasses the model's
+                # own `@validates("error_message")` trim/blank-to-`None`
+                # normalization, which only fires on ORM attribute
+                # assignment. Applied manually here, against the model's own
+                # `COVERED_WHITESPACE` constant (never Python's broader
+                # default `str.strip()` whitespace set) so this Core-update
+                # path normalizes identically to what ORM-path assignment of
+                # the same value would do — an adapter-supplied
+                # covered-whitespace-only `detail` still collapses to `None`
+                # rather than violate `error_message`'s own non-empty
+                # `CHECK`, but non-covered Unicode whitespace (e.g. U+00A0)
+                # is left byte-for-byte intact, exactly as the ORM validator
+                # would leave it.
+                error_message = None
+                if selected_error is not None and selected_error.detail is not None:
+                    error_message = selected_error.detail.strip(COVERED_WHITESPACE) or None
                 await session.execute(
                     update(CollectionRunProviderAttempt)
                     .where(CollectionRunProviderAttempt.id == attempt_id)
                     .values(
-                        status="completed",
+                        status=attempt_status,
                         completed_at=completed_at,
                         jobs_discovered=per_source_discovered.get(source, 0),
                         jobs_inserted=per_source_inserted.get(source, 0),
                         jobs_updated=per_source_updated.get(source, 0),
+                        retry_count=stat.retry_count,
+                        rate_limited=stat.rate_limited,
+                        incomplete_results=stat.incomplete_results,
+                        error_category=(
+                            selected_error.category.value if selected_error is not None else None
+                        ),
+                        error_message=error_message,
                     )
                 )
         logger.info(
