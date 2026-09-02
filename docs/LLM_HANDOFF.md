@@ -99,174 +99,6 @@ that detail.
 ### Work done
 
 - Date/agent: 2026-09-01, Claude Code (Sonnet 5). Class H implementation of the
-  approved `ambiguous_match` identity-conflict persistence slice on
-  `phase-2/ambiguous-match-persistence`, based on clean `main@e18b2b3`.
-- Outcome: Tier 2/3 finding more than one distinct candidate Job no longer raises
-  `AmbiguousIdentityMatchError` (a whole-run failure). It now creates a standalone
-  Job/JobOccurrence, exactly like a clean insert, and persists an ADR-0007
-  `ambiguous_match` `identity_conflicts` row, isolated per posting. No schema or
-  migration change — the existing Phase-1 `identity_conflicts` table and its
-  `ambiguous_match` array-shape `CHECK` already supported this shape.
-- Binding decisions applied exactly as authorized:
-  1. `_discover_candidates()`'s `<=2` probe remains the ambiguity *trigger* at both
-     `_attach_to_candidate` sites (pre-lock, post-lock recheck); a new
-     `_discover_all_candidates()` (unlocked, unbounded, sorted by UUID) supplies the
-     *persisted* evidence. If that authoritative requery resolves to fewer than two
-     candidates, `CandidateResolutionUnstableError` is raised and nothing is
-     persisted — new tests cover both the pre-lock and post-lock-recheck
-     disagreement cases, plus a 3-candidate case proving the full set (not just the
-     probe's two) is what gets persisted.
-  2. `UpsertOutcome.__post_init__` enforces the invariants at construction:
-     `AMBIGUOUS` requires >=2 distinct, sorted candidate IDs; every other kind must
-     carry none. Four direct unit tests cover missing/singleton/duplicate/unsorted
-     tuples and cross-kind rejection.
-  3. `existing_value` = sorted candidate Job-ID strings; `incoming_value` =
-     single-element array with the new JobOccurrence's ID string — documented
-     explicitly (code and all three touched decision/architecture docs) as
-     intentionally different entity types, not a symmetry bug.
-  4. New `_after_ambiguous_flush()` test seam mirrors `_after_quarantine_flush`/
-     `_after_attach_flush`; a forced post-flush failure proves the new Job, new
-     JobOccurrence, `IdentityConflict`, and raw terminal update all roll back
-     together. A separate test proves reprocessing the same terminal raw row is
-     rejected by `_validate_raw_association`'s existing `processing_status` check,
-     with no second conflict row and no further mutation.
-  5. `pipeline.py`'s counter dispatch is now an exhaustive if/elif over all five
-     `UpsertKind` values (`QUARANTINED` moved out of the trailing `else`); a final
-     `else: raise AssertionError(...)` fails closed for any future unrecognized
-     kind. `AMBIGUOUS` buckets `jobs_inserted` (a real Job was created) and sets
-     `had_conflict`; a dedicated test forces a fake outcome kind to prove the
-     fail-closed branch and confirms no falsely successful counters.
-  6. `AmbiguousIdentityMatchError` deleted; every surviving reference updated —
-     `UpsertKind`/`_attach_to_candidate`/`upsert_job_occurrence`/`persist_posting`
-     docstrings, `CandidateResolutionUnstableError`'s own docstring, ADR 0004, ADR
-     0007 (new "Phase 2 implementation notes" section), ARCHITECTURE.md §8/§11,
-     DATA_MODEL.md's `identity_conflicts` row notes, ROADMAP.md.
-  - Preserved unchanged: standalone-Job creation (no guessing among candidates);
-    zero candidate mutation on either ambiguity site, documented precisely per-site
-    (pre-lock touches nothing; post-lock recheck may already hold one candidate's
-    `FOR UPDATE` lock but never writes to it); one atomic transaction;
-    `completed_with_errors` run status / `completed` attempt status; sanitized
-    IDs-only logging; `CandidateResolutionUnstableError` untouched and fail-closed.
-  - ROADMAP.md rewritten to be merge-state-neutral per the user's explicit
-    correction: dropped the fixed "three merged slices" count (would go stale on
-    the next merge), and the new `ambiguous_match` capability is described as
-    "implemented, not yet merged — on branch `phase-2/ambiguous-match-persistence`,
-    awaiting review and merge authorization."
-- Files changed: `backend/app/ingestion/persistence.py`, `backend/app/ingestion/
-  pipeline.py`, `backend/tests/test_ingestion_pipeline.py` (11 new tests, 3
-  rewritten to persist instead of raise; `test_candidate_changes_after_lock_is_
-  detected_not_retried` left unchanged — a genuinely different code path);
-  `docs/DECISIONS/0004-scoped-deterministic-identity.md`, `docs/DECISIONS/
-  0007-identity-conflict-quarantine.md`, `docs/ARCHITECTURE.md`,
-  `docs/DATA_MODEL.md`, `docs/ROADMAP.md`; this handoff entry. No schema,
-  migration, provider, or network file touched.
-- Verification: genuine external `python scripts/verify.py --level routine --focus
-  tests/test_ingestion_pipeline.py` — all **10 steps PASS**: Ruff format/check,
-  mypy (82 source files), `check_repo.py`, `git diff --check`, database-URL
-  safety, real test-database reachability, **49 focused tests**, **1398
-  full-suite tests** (was 1387; net +11), temp-directory cleanup, in ~160s.
-  `alembic heads` confirms `0017` remains the sole head (no migration added; `git
-  diff --stat migrations/` is empty). `alembic current` against the configured
-  dev database (`jobgoblin`) shows it pre-existingly stamped at `0006`, far behind
-  head — a condition that predates this branch (this slice adds zero migrations)
-  and was **not** remediated: no `alembic upgrade` was run against it; a direct
-  before/after `alembic current` check confirms it stayed at `0006` throughout.
-  All schema/database work in this slice ran only against the disposable
-  `jobgoblin_test` database.
-- Adversarial self-review: dispatched a fresh-context subagent against the actual
-  diff (not this summary). It confirmed correct control flow (no candidate
-  mutation on either ambiguity path), correct `INSERTED`-vs-`AMBIGUOUS` tagging,
-  airtight `UpsertOutcome` validation, correct evidence shape against
-  DATA_MODEL.md's own `CHECK`, exhaustive/unreachable-else pipeline dispatch, and
-  zero leftover `AmbiguousIdentityMatchError` references. It found one real defect
-  class (Medium-High): six new tests captured cleanup IDs
-  (`job_ids.append(...)`/preexisting-set-diff) *after* assertions that could fail,
-  risking a leaked row in the disposable test database on a genuine regression.
-  Fixed in all six by moving the capture to immediately follow the mutating call,
-  before any assertion — reverified by rerunning the full suite (still 1398
-  passed).
-- Deviations/known limitations: `alembic check` itself could not be exercised
-  end-to-end because of the pre-existing stale dev database described above;
-  substituted with `alembic heads` (single, unchanged head) plus an empty
-  `migrations/` diff, which together give the equivalent no-schema-drift guarantee
-  for a no-migration slice without touching the dev database.
-- STOP — awaiting Codex review. Do not merge, start Tier 4, add schema changes,
-  contact live providers, or expand this slice.
-
-### Work review
-
-- Date/agent: 2026-09-01, Codex. Implementation diff reviewed:
-  `e18b2b3..ddfc1f8` on `phase-2/ambiguous-match-persistence`.
-- Independent verification: inspected the persistence and pipeline control flow, all
-  changed product documentation, and the new/rewritten tests. Ran the genuine external
-  canonical verifier focused on `tests/test_ingestion_pipeline.py`: all **10 steps
-  PASS**, including Ruff format/check, mypy, repository and whitespace checks,
-  disposable-database safety/reachability, **49 focused tests**, **1398 full-suite
-  tests**, and temporary-directory cleanup. Independently confirmed Alembic `0017`
-  remains the sole head and the working tree was clean before this review.
-- Required-invariant disposition:
-  1. The bounded probe never supplies persisted evidence; the authoritative unbounded
-     query supplies the complete sorted distinct candidate set and disagreements fail
-     closed at both ambiguity sites.
-  2. `UpsertOutcome` rejects missing, singleton, duplicate, unsorted, and cross-kind
-     candidate tuples at construction.
-  3. A stable ambiguity creates a standalone Job/JobOccurrence, records the deliberate
-     candidate-Job/new-JobOccurrence evidence asymmetry, links the raw row, and mutates
-     no candidate data.
-  4. Injected post-flush failure proves atomic rollback of the new Job, occurrence,
-     conflict, and raw terminal transition; terminal-row reprocessing is rejected.
-  5. A mixed batch proves posting isolation, exact run `completed_with_errors` / attempt
-     `completed` states, insertion/update counters, raw links, and IDs-only telemetry.
-  6. Pipeline dispatch explicitly handles all five current outcomes; an unknown outcome
-     fails the run with exact failed telemetry and no falsely successful counters.
-- Documentation-only findings corrected directly under `LLM_WORKFLOW.md`'s mechanical
-  rule: ADR 0004 had one current-behavior sentence still naming the deleted
-  `AmbiguousIdentityMatchError`; ROADMAP retained a fixed three-slice count and called
-  the feature explicitly "not yet merged," despite the binding requirement for
-  merge-state-neutral wording. Replaced those statements with the implemented
-  `AMBIGUOUS`/instability behavior and timeless capability wording. No executable,
-  schema, test, scope, or architectural decision changed.
-- Adversarial cases checked: probe/full-query disagreement before and after a candidate
-  lock, three-candidate evidence completeness, candidate non-mutation, rollback after
-  every ambiguity effect is flushed, repeated raw processing, clean work beside an
-  ambiguity in one batch, and a future unhandled outcome. No executable findings.
-- Verdict: **Approved** after the mechanical documentation corrections above. The
-  `ambiguous_match` persistence slice is accepted; no Claude correction pass is needed.
-- Exact requested corrections: none.
-- STOP — do not merge to `main`, begin Tier 4, contact a provider, or start another
-  slice until the user explicitly authorizes it.
-
-**Merge record (appended, not a rewrite of the entry above):** Approved at review
-commit `fd690d5` (no executable findings; two mechanical documentation corrections
-recorded in that same review). Per user authorization,
-`phase-2/ambiguous-match-persistence` was merged into `main` with a normal merge
-commit (`9ab1342`; `--no-ff`, no squash/rebase/force-push) and pushed. `main`/
-`origin/main` are both now at `9ab1342`. Verified: the feature branch was clean and
-pushed at `fd690d5`, and `main`/`origin/main` were still at `e18b2b3` immediately
-before the merge; `main` has zero content diff against the feature branch
-(`git diff main phase-2/ambiguous-match-persistence --stat` empty); migration `0017`
-remains the sole Alembic head; `python -m scripts.check_repo` exited `0`;
-`git diff --check` was clean; working tree clean throughout. No `/compact`, network
-request, or database mutation was performed during the merge.
-
-**Rollback boundary:** reverting `9ab1342` (a single merge commit) restores `main` to
-`e18b2b3` exactly — no schema/migration exists in this slice to downgrade, and no
-data migration accompanies it (the existing Phase-1 `identity_conflicts` table and
-its `ambiguous_match` array-shape `CHECK` already supported this shape without any
-schema change). This merges the `ambiguous_match` conflict-persistence slice only
-(`backend/app/ingestion/persistence.py`, `backend/app/ingestion/pipeline.py`, their
-tests, and the five documentation files listed in the `Work done` entry above) — it
-does **not** touch Tier 4, `QueryPlanner`, `ProviderRegistry`, any live provider, or
-any other Phase 2 work, all of which remain not started and are not authorized by
-this merge.
-
----
-
-## Iteration 2
-
-### Work done
-
-- Date/agent: 2026-09-01, Claude Code (Sonnet 5). Class H implementation of the
   approved multi-source partial-success handling slice on
   `phase-2/partial-success-handling`, based on clean `main@02ef086`.
 - Outcome: `ingestion/pipeline.py::run()` no longer aborts the entire run when a
@@ -406,3 +238,67 @@ this merge.
 - STOP — do not merge, begin another Phase 2 slice, or make unrelated changes. The user
   must authorize this correction; then Codex re-reviews only the correction and affected
   normalization invariant.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-09-01, Claude Code (Sonnet 5). Class H correction pass on
+  `phase-2/partial-success-handling` for the single finding from review commit
+  `d5acc3a`. Base `d5acc3a`. No product code beyond the exact bounded scope
+  requested: schema, migrations, statuses, error-selection logic, aggregation,
+  `failures` shape, and logging are all untouched.
+- Outcome, addressing the finding exactly: the Core-update `error_message`
+  normalization now trims the identical four-character set
+  (`COVERED_WHITESPACE = " \t\n\r"`) as `CollectionRunProviderAttempt`'s own ORM
+  `@validates` and its database `CHECK`s, instead of Python's broader default
+  `str.strip()` whitespace set.
+  1. Promoted `collection_run_provider_attempt.py`'s existing private
+     `_COVERED_WHITESPACE` to a public `COVERED_WHITESPACE` (both `@validates`
+     methods updated to the new name; confirmed zero remaining references to the
+     old private name anywhere in that file via direct grep).
+  2. `pipeline.py` now imports `COVERED_WHITESPACE` from that same module and
+     calls `selected_error.detail.strip(COVERED_WHITESPACE) or None` — one
+     shared constant, not a second, independently-drifting literal.
+  3. `CollectionRun.failures[*].error.detail` construction is untouched — it
+     still reads `error.detail` directly (never `error_message`), confirmed by
+     direct inspection and by the new test's own assertion that `failures`
+     always reflects the exact original `ProviderError.detail`.
+- New regression test (`test_pipeline_normalizes_error_message_with_the_shared_
+  covered_whitespace_set`) proves, in one run across four sources: covered outer
+  whitespace (space/tab/LF/CR) is trimmed from `error_message`; genuine non-covered
+  Unicode whitespace (real U+00A0 non-breaking-space characters — confirmed via a
+  direct byte-level `repr()` check during adversarial review, not merely visual
+  inspection, since a terminal/editor cannot visually distinguish U+00A0 from an
+  ASCII space) survives byte-for-byte; a covered-whitespace-only detail collapses
+  `error_message` to `NULL`; a non-covered-whitespace-only detail stays non-`NULL`;
+  and `CollectionRun.failures[*].error.detail` is the exact untouched original
+  value in all four cases simultaneously.
+- Files changed: `backend/app/db/models/collection_run_provider_attempt.py`
+  (constant rename only — no column, `CHECK`, or migration change);
+  `backend/app/ingestion/pipeline.py` (import + one normalization line);
+  `backend/tests/test_ingestion_pipeline.py` (one new test); this handoff entry.
+- Verification: genuine external `python scripts/verify.py --level routine
+  --focus tests/test_ingestion_pipeline.py` — all **10 steps PASS**: Ruff
+  format/check, mypy (82 source files), `check_repo.py`, `git diff --check`,
+  database-URL safety, real test-database reachability, **56 focused tests**
+  (was 55; +1), **1405 full-suite tests** (was 1404; +1), temp-directory
+  cleanup. `alembic heads` confirms `0017` remains the sole head; `git diff
+  --stat -- backend/migrations/` is empty — no schema/migration touched, as
+  required.
+- Adversarial self-review: dispatched a fresh-context subagent against the
+  actual diff. It confirmed the rename left no dangling `_COVERED_WHITESPACE`
+  reference; `pipeline.py` imports and uses the shared constant rather than a
+  duplicated literal; the new test's "non-covered whitespace" literals are
+  genuinely non-ASCII U+00A0 (verified at the byte level, not just visually —
+  called out explicitly as exactly the trap this kind of test can fall into);
+  all five required behaviors are proven in one test; no other module imports
+  `_COVERED_WHITESPACE` from this specific file (the same private-constant name
+  is reused independently, unrelated, in several other model files, none of
+  which reference this one); and the diff's scope is exactly the three files
+  above, touching nothing else. No findings.
+- Deviations/known limitations: none new.
+- STOP — awaiting Codex re-review. Do not merge, begin another Phase 2 slice, or
+  make any unrelated change.

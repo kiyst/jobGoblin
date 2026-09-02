@@ -1851,6 +1851,95 @@ async def test_pipeline_populates_retry_count_and_rate_limited_from_source_stats
         )
 
 
+async def test_pipeline_normalizes_error_message_with_the_shared_covered_whitespace_set(
+    db_engine: AsyncEngine,
+) -> None:
+    """The Core-update `error_message` normalization must match
+    `CollectionRunProviderAttempt`'s own ORM validator and database `CHECK`
+    exactly: trim only `COVERED_WHITESPACE` (space/tab/LF/CR), never
+    Python's broader default `str.strip()` whitespace set. Covered outer
+    whitespace is trimmed; non-covered Unicode whitespace (e.g. U+00A0) is
+    left byte-for-byte intact; a covered-whitespace-only detail collapses
+    to `NULL`; a non-covered-whitespace-only detail stays non-`NULL`.
+    `CollectionRun.failures[*].error.detail` never inherits any of this —
+    it is always the exact original `ProviderError.detail`."""
+    called_at = datetime(2026, 10, 11, tzinfo=UTC)
+    covered_outer = "  \t\n\r  mixed covered outer whitespace  \t\n\r  "
+    non_covered_preserved = " non-breaking spaces preserved "
+    covered_only = "   \t\n\r   "
+    non_covered_only = "   "
+
+    sources = ["covered-outer", "non-covered-preserved", "covered-only", "non-covered-only"]
+    details = {
+        "covered-outer": covered_outer,
+        "non-covered-preserved": non_covered_preserved,
+        "covered-only": covered_only,
+        "non-covered-only": non_covered_only,
+    }
+    result = DiscoveryResult(
+        provider="fixture_provider",
+        jobs=[],
+        source_stats=[
+            SourceRunStats(source=source, completed=True, jobs_found=0) for source in sources
+        ],
+        errors=[
+            ProviderError(
+                source=source,
+                category=ProviderErrorCategory.UNKNOWN,
+                retryable=False,
+                detail=detail,
+                occurred_at=called_at,
+            )
+            for source, detail in details.items()
+        ],
+        started_at=called_at,
+        completed_at=called_at,
+    )
+    provider: DiscoveryProvider = _StaticResultProvider(result)
+    query = SourceQuery(sources=sources)
+
+    collection_run_ids: list[uuid.UUID] = []
+    try:
+        run_id = await pipeline.run(
+            db_engine, provider, query, observed_at=called_at, clock=FixedClock(called_at)
+        )
+        collection_run_ids.append(run_id)
+
+        async with AsyncSession(bind=db_engine) as session:
+            run = await session.get(CollectionRun, run_id)
+            assert run is not None
+            failures = cast(list[dict[str, Any]], run.failures)
+            failures_by_source = {f["source"]: f["error"]["detail"] for f in failures}
+            # `failures` never inherits attempt-message normalization —
+            # always the exact original ProviderError.detail, for every case.
+            assert failures_by_source == details
+
+            attempts = (
+                (
+                    await session.execute(
+                        select(CollectionRunProviderAttempt).where(
+                            CollectionRunProviderAttempt.collection_run_id == run_id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            by_source = {a.source: a for a in attempts}
+            assert by_source["covered-outer"].error_message == "mixed covered outer whitespace"
+            assert by_source["non-covered-preserved"].error_message == non_covered_preserved
+            assert by_source["covered-only"].error_message is None
+            assert by_source["non-covered-only"].error_message == non_covered_only
+    finally:
+        await _cleanup(
+            db_engine,
+            user_ids=[],
+            job_ids=[],
+            collection_run_ids=collection_run_ids,
+            raw_ingestion_ids=[],
+        )
+
+
 def _user_job_snapshot(user_job: UserJob) -> dict[str, object]:
     """Every persisted column except `id` (the identity itself, compared
     separately by `session.get()` on the same id) — used to prove a

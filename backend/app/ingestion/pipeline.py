@@ -8,7 +8,10 @@ from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.db.models.collection_run import CollectionRun
-from app.db.models.collection_run_provider_attempt import CollectionRunProviderAttempt
+from app.db.models.collection_run_provider_attempt import (
+    COVERED_WHITESPACE,
+    CollectionRunProviderAttempt,
+)
 from app.db.models.raw_job_ingestion import RawJobIngestion
 from app.ingestion.clock import Clock
 from app.ingestion.hashing import canonical_json_hash
@@ -337,13 +340,19 @@ async def run(
                 # `update()` is a Core statement — it bypasses the model's
                 # own `@validates("error_message")` trim/blank-to-`None`
                 # normalization, which only fires on ORM attribute
-                # assignment. Applied manually here so an adapter-supplied
-                # empty/whitespace-only `detail` can never reach the
-                # database and violate `error_message`'s own non-empty
-                # `CHECK`.
+                # assignment. Applied manually here, against the model's own
+                # `COVERED_WHITESPACE` constant (never Python's broader
+                # default `str.strip()` whitespace set) so this Core-update
+                # path normalizes identically to what ORM-path assignment of
+                # the same value would do — an adapter-supplied
+                # covered-whitespace-only `detail` still collapses to `None`
+                # rather than violate `error_message`'s own non-empty
+                # `CHECK`, but non-covered Unicode whitespace (e.g. U+00A0)
+                # is left byte-for-byte intact, exactly as the ORM validator
+                # would leave it.
                 error_message = None
                 if selected_error is not None and selected_error.detail is not None:
-                    error_message = selected_error.detail.strip() or None
+                    error_message = selected_error.detail.strip(COVERED_WHITESPACE) or None
                 await session.execute(
                     update(CollectionRunProviderAttempt)
                     .where(CollectionRunProviderAttempt.id == attempt_id)
