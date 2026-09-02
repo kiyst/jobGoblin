@@ -5,6 +5,7 @@ import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 from sqlalchemy import ColumnElement, func, select
@@ -1129,19 +1130,20 @@ class _StaticResultProvider:
     [
         "result_provider_mismatch",
         "job_provider_mismatch",
-        "provider_error",
-        "source_not_completed",
-        "incomplete_results",
     ],
 )
-async def test_pipeline_fails_closed_for_unsupported_provider_result_states(
+async def test_pipeline_fails_closed_for_malformed_provider_result_states(
     db_engine: AsyncEngine,
     case: str,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Until the later partial-success slice owns these states, the spine
-    must report failure before writing any posting rather than claiming a
-    fully completed collection."""
+    """A `DiscoveryResult` whose own claims about itself don't add up (a
+    provider/source name mismatch) is a genuine adapter-contract
+    violation — always a whole-run failure before any posting is
+    written, never a graceful per-source outcome. A source legitimately
+    failing/partially succeeding is a *different*, now gracefully handled
+    case — see `test_pipeline_persists_healthy_source_jobs_while_sibling_
+    source_fails` and its neighbors below."""
     called_at = datetime(2026, 10, 1, tzinfo=UTC)
     job = _load_fixture("clean_tenant_scoped")
     provider_name = "wrong_provider" if case == "result_provider_mismatch" else "fixture_provider"
@@ -1153,28 +1155,13 @@ async def test_pipeline_fails_closed_for_unsupported_provider_result_states(
 
     stat = SourceRunStats(
         source="fixture_ats",
-        completed=case != "source_not_completed",
+        completed=True,
         jobs_found=len(result_jobs),
-        incomplete_results=case == "incomplete_results",
-    )
-    errors = (
-        [
-            ProviderError(
-                source="fixture_ats",
-                category=ProviderErrorCategory.TIMEOUT,
-                retryable=True,
-                detail="SECRET_PROVIDER_DETAIL",
-                occurred_at=called_at,
-            )
-        ]
-        if case == "provider_error"
-        else []
     )
     result = DiscoveryResult(
         provider=provider_name,
         jobs=result_jobs,
         source_stats=[stat],
-        errors=errors,
         started_at=called_at,
         completed_at=called_at,
     )
@@ -1216,7 +1203,6 @@ async def test_pipeline_fails_closed_for_unsupported_provider_result_states(
 
         messages = [record.getMessage() for record in caplog.records]
         assert any("ingestion_run_failed" in message for message in messages)
-        assert all("SECRET_PROVIDER_DETAIL" not in message for message in messages)
     finally:
         async with AsyncSession(bind=db_engine) as session:
             current_run_ids = set((await session.execute(select(CollectionRun.id))).scalars().all())
@@ -1226,6 +1212,641 @@ async def test_pipeline_fails_closed_for_unsupported_provider_result_states(
             user_ids=[],
             job_ids=[],
             collection_run_ids=run_ids,
+            raw_ingestion_ids=[],
+        )
+
+
+async def test_pipeline_fails_closed_when_jobs_found_does_not_match_actual_count(
+    db_engine: AsyncEngine,
+) -> None:
+    """`DiscoveryResult`'s own pydantic validator cannot check this — a
+    source claiming `jobs_found` that disagrees with the actual number of
+    `DiscoveredJob` entries attributed to it is a whole-run contract
+    violation, checked before any raw row is written."""
+    called_at = datetime(2026, 10, 2, tzinfo=UTC)
+    job = _load_fixture("clean_tenant_scoped").model_copy(
+        update={"provider": "fixture_provider", "source": "fixture_ats"}
+    )
+    result = DiscoveryResult(
+        provider="fixture_provider",
+        jobs=[job],
+        # Declares 5 jobs but only 1 DiscoveredJob is actually attributed
+        # to this source.
+        source_stats=[SourceRunStats(source="fixture_ats", completed=True, jobs_found=5)],
+        started_at=called_at,
+        completed_at=called_at,
+    )
+    provider: DiscoveryProvider = _StaticResultProvider(result)
+    query = SourceQuery(sources=["fixture_ats"])
+
+    run_ids: list[uuid.UUID] = []
+    async with AsyncSession(bind=db_engine) as session:
+        preexisting_run_ids = set((await session.execute(select(CollectionRun.id))).scalars().all())
+    try:
+        with pytest.raises(pipeline.UnsupportedDiscoveryResultError, match="jobs_found"):
+            await pipeline.run(
+                db_engine, provider, query, observed_at=called_at, clock=FixedClock(called_at)
+            )
+
+        async with AsyncSession(bind=db_engine) as session:
+            run = (await session.execute(select(CollectionRun))).scalar_one()
+            run_ids.append(run.id)
+            assert run.status == "failed"
+            attempt = (
+                await session.execute(
+                    select(CollectionRunProviderAttempt).where(
+                        CollectionRunProviderAttempt.collection_run_id == run.id
+                    )
+                )
+            ).scalar_one()
+            assert attempt.status == "failed"
+            assert (
+                await session.execute(select(func.count()).select_from(RawJobIngestion))
+            ).scalar_one() == 0
+            assert (await session.execute(select(func.count()).select_from(Job))).scalar_one() == 0
+            assert (
+                await session.execute(select(func.count()).select_from(JobOccurrence))
+            ).scalar_one() == 0
+    finally:
+        async with AsyncSession(bind=db_engine) as session:
+            current_run_ids = set((await session.execute(select(CollectionRun.id))).scalars().all())
+        run_ids = list(current_run_ids - preexisting_run_ids)
+        await _cleanup(
+            db_engine, user_ids=[], job_ids=[], collection_run_ids=run_ids, raw_ingestion_ids=[]
+        )
+
+
+async def test_pipeline_fails_closed_when_completed_false_source_has_actual_jobs(
+    db_engine: AsyncEngine,
+) -> None:
+    """A source reporting `completed=False` (with the `jobs_found=0` its
+    own pydantic validator already requires) but that nonetheless has a
+    real `DiscoveredJob` attributed to it — a case only reachable via a
+    buggy/dishonest adapter, since `DiscoveryResult`'s own validator only
+    checks `jobs_found`, never cross-references actual job attribution
+    against `completed`. Must fail the whole run, never silently persist
+    or silently drop that job."""
+    called_at = datetime(2026, 10, 3, tzinfo=UTC)
+    job = _load_fixture("clean_tenant_scoped").model_copy(
+        update={"provider": "fixture_provider", "source": "fixture_ats"}
+    )
+    result = DiscoveryResult(
+        provider="fixture_provider",
+        jobs=[job],
+        source_stats=[
+            SourceRunStats(source="fixture_ats", completed=False, jobs_found=0),
+        ],
+        started_at=called_at,
+        completed_at=called_at,
+    )
+    provider: DiscoveryProvider = _StaticResultProvider(result)
+    query = SourceQuery(sources=["fixture_ats"])
+
+    run_ids: list[uuid.UUID] = []
+    async with AsyncSession(bind=db_engine) as session:
+        preexisting_run_ids = set((await session.execute(select(CollectionRun.id))).scalars().all())
+    try:
+        with pytest.raises(pipeline.UnsupportedDiscoveryResultError, match="completed=False"):
+            await pipeline.run(
+                db_engine, provider, query, observed_at=called_at, clock=FixedClock(called_at)
+            )
+
+        async with AsyncSession(bind=db_engine) as session:
+            run = (await session.execute(select(CollectionRun))).scalar_one()
+            run_ids.append(run.id)
+            assert run.status == "failed"
+            assert (
+                await session.execute(select(func.count()).select_from(RawJobIngestion))
+            ).scalar_one() == 0
+            assert (await session.execute(select(func.count()).select_from(Job))).scalar_one() == 0
+    finally:
+        async with AsyncSession(bind=db_engine) as session:
+            current_run_ids = set((await session.execute(select(CollectionRun.id))).scalars().all())
+        run_ids = list(current_run_ids - preexisting_run_ids)
+        await _cleanup(
+            db_engine, user_ids=[], job_ids=[], collection_run_ids=run_ids, raw_ingestion_ids=[]
+        )
+
+
+async def test_pipeline_fails_closed_when_completed_false_source_reports_incomplete_results(
+    db_engine: AsyncEngine,
+) -> None:
+    """`completed=False, incomplete_results=True` is not a valid
+    combination — a source either failed outright (`completed=False`) or
+    partially succeeded (`completed=True, incomplete_results=True`);
+    nothing about "incomplete" makes sense for a source that produced
+    nothing at all."""
+    called_at = datetime(2026, 10, 4, tzinfo=UTC)
+    result = DiscoveryResult(
+        provider="fixture_provider",
+        jobs=[],
+        source_stats=[
+            SourceRunStats(
+                source="fixture_ats", completed=False, jobs_found=0, incomplete_results=True
+            ),
+        ],
+        started_at=called_at,
+        completed_at=called_at,
+    )
+    provider: DiscoveryProvider = _StaticResultProvider(result)
+    query = SourceQuery(sources=["fixture_ats"])
+
+    run_ids: list[uuid.UUID] = []
+    async with AsyncSession(bind=db_engine) as session:
+        preexisting_run_ids = set((await session.execute(select(CollectionRun.id))).scalars().all())
+    try:
+        with pytest.raises(
+            pipeline.UnsupportedDiscoveryResultError, match="not a valid combination"
+        ):
+            await pipeline.run(
+                db_engine, provider, query, observed_at=called_at, clock=FixedClock(called_at)
+            )
+
+        async with AsyncSession(bind=db_engine) as session:
+            run = (await session.execute(select(CollectionRun))).scalar_one()
+            run_ids.append(run.id)
+            assert run.status == "failed"
+            assert (
+                await session.execute(select(func.count()).select_from(RawJobIngestion))
+            ).scalar_one() == 0
+    finally:
+        async with AsyncSession(bind=db_engine) as session:
+            current_run_ids = set((await session.execute(select(CollectionRun.id))).scalars().all())
+        run_ids = list(current_run_ids - preexisting_run_ids)
+        await _cleanup(
+            db_engine, user_ids=[], job_ids=[], collection_run_ids=run_ids, raw_ingestion_ids=[]
+        )
+
+
+async def test_pipeline_persists_healthy_source_jobs_while_sibling_source_fails(
+    db_engine: AsyncEngine, caplog: pytest.LogCaptureFixture
+) -> None:
+    """ARCHITECTURE.md §11's required partial-failure fixture case: one
+    source succeeds while a sibling fails within the same run — the
+    healthy source's job must still be fully persisted, and the failed
+    source's own attempt row must independently record its own outcome,
+    never contaminating or discarding the healthy source's telemetry."""
+    called_at = datetime(2026, 10, 5, tzinfo=UTC)
+    healthy_job = _load_fixture("clean_tenant_scoped").model_copy(
+        update={"provider": "fixture_provider", "source": "healthy_source"}
+    )
+    result = DiscoveryResult(
+        provider="fixture_provider",
+        jobs=[healthy_job],
+        source_stats=[
+            SourceRunStats(source="healthy_source", completed=True, jobs_found=1),
+            SourceRunStats(source="broken_source", completed=False, jobs_found=0),
+        ],
+        errors=[
+            ProviderError(
+                source="broken_source",
+                category=ProviderErrorCategory.TIMEOUT,
+                retryable=True,
+                detail="SECRET_PROVIDER_DETAIL",
+                occurred_at=called_at,
+            )
+        ],
+        started_at=called_at,
+        completed_at=called_at,
+    )
+    provider: DiscoveryProvider = _StaticResultProvider(result)
+    query = SourceQuery(sources=["healthy_source", "broken_source"])
+    caplog.set_level(logging.INFO, logger="app.ingestion.pipeline")
+
+    job_ids: list[uuid.UUID] = []
+    collection_run_ids: list[uuid.UUID] = []
+    raw_ingestion_ids: list[uuid.UUID] = []
+    try:
+        run_id = await pipeline.run(
+            db_engine, provider, query, observed_at=called_at, clock=FixedClock(called_at)
+        )
+        collection_run_ids.append(run_id)
+
+        # Captured before any assertion below, so a later assertion
+        # failure still leaves cleanup able to find these rows.
+        assert healthy_job.source_job_id is not None
+        occurrence = await _occurrence_by_job_id(db_engine, healthy_job.source_job_id)
+        job_ids.append(occurrence.job_id)
+        async with AsyncSession(bind=db_engine) as session:
+            raw_rows = (await session.execute(select(RawJobIngestion))).scalars().all()
+            raw_ingestion_ids.extend(row.id for row in raw_rows)
+
+        async with AsyncSession(bind=db_engine) as session:
+            run = await session.get(CollectionRun, run_id)
+            assert run is not None
+            assert run.status == "completed_with_errors"
+            assert run.jobs_discovered == 1
+            assert run.jobs_inserted == 1
+            assert run.jobs_updated == 0
+            assert run.failures == [
+                {
+                    "provider": "fixture_provider",
+                    "source": "broken_source",
+                    "error": {
+                        "category": "timeout",
+                        "retryable": True,
+                        "detail": "SECRET_PROVIDER_DETAIL",
+                        "occurred_at": called_at.isoformat(),
+                    },
+                }
+            ]
+
+            attempts = (
+                (
+                    await session.execute(
+                        select(CollectionRunProviderAttempt).where(
+                            CollectionRunProviderAttempt.collection_run_id == run_id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            by_source = {a.source: a for a in attempts}
+            assert len(by_source) == 2
+            assert by_source["healthy_source"].status == "completed"
+            assert by_source["healthy_source"].jobs_discovered == 1
+            assert by_source["healthy_source"].jobs_inserted == 1
+            assert by_source["healthy_source"].error_category is None
+            assert by_source["healthy_source"].error_message is None
+            assert by_source["broken_source"].status == "failed"
+            assert by_source["broken_source"].jobs_discovered == 0
+            assert by_source["broken_source"].jobs_inserted == 0
+            assert by_source["broken_source"].error_category == "timeout"
+            assert by_source["broken_source"].error_message == "SECRET_PROVIDER_DETAIL"
+
+            assert len(raw_rows) == 1  # only the healthy source's job was ever fetched
+            assert raw_rows[0].processing_status == "normalized"
+
+        messages = [record.getMessage() for record in caplog.records]
+        assert any("ingestion_run_completed" in message for message in messages)
+        assert all("SECRET_PROVIDER_DETAIL" not in message for message in messages)
+    finally:
+        await _cleanup(
+            db_engine,
+            user_ids=[],
+            job_ids=job_ids,
+            collection_run_ids=collection_run_ids,
+            raw_ingestion_ids=raw_ingestion_ids,
+        )
+
+
+async def test_pipeline_marks_source_partial_without_provider_error(
+    db_engine: AsyncEngine,
+) -> None:
+    """A source that partially succeeded (`completed=True,
+    incomplete_results=True`) with no accompanying `ProviderError` at all
+    — a clean, truncated-but-successful pagination result is not an error
+    condition (per the model's own docstring). `status='partial'`, error
+    fields stay `NULL`, and no fabricated `failures` entry is invented."""
+    called_at = datetime(2026, 10, 6, tzinfo=UTC)
+    job_a = _load_fixture("clean_tenant_scoped").model_copy(
+        update={"provider": "fixture_provider", "source": "fixture_ats"}
+    )
+    job_b = _load_fixture("missing_salary_no_tenant").model_copy(
+        update={"provider": "fixture_provider", "source": "fixture_ats"}
+    )
+    result = DiscoveryResult(
+        provider="fixture_provider",
+        jobs=[job_a, job_b],
+        source_stats=[
+            SourceRunStats(
+                source="fixture_ats", completed=True, jobs_found=2, incomplete_results=True
+            )
+        ],
+        started_at=called_at,
+        completed_at=called_at,
+    )
+    provider: DiscoveryProvider = _StaticResultProvider(result)
+    query = SourceQuery(sources=["fixture_ats"])
+
+    job_ids: list[uuid.UUID] = []
+    collection_run_ids: list[uuid.UUID] = []
+    raw_ingestion_ids: list[uuid.UUID] = []
+    try:
+        run_id = await pipeline.run(
+            db_engine, provider, query, observed_at=called_at, clock=FixedClock(called_at)
+        )
+        collection_run_ids.append(run_id)
+
+        # Captured before any assertion below, so a later assertion
+        # failure still leaves cleanup able to find these rows.
+        assert job_a.source_job_id is not None
+        occ_a = await _occurrence_by_job_id(db_engine, job_a.source_job_id)
+        job_ids.append(occ_a.job_id)
+        assert job_b.source_job_id is not None
+        occ_b = await _occurrence_by_job_id(db_engine, job_b.source_job_id)
+        job_ids.append(occ_b.job_id)
+        async with AsyncSession(bind=db_engine) as session:
+            raw_rows = (await session.execute(select(RawJobIngestion))).scalars().all()
+            raw_ingestion_ids.extend(row.id for row in raw_rows)
+
+        async with AsyncSession(bind=db_engine) as session:
+            run = await session.get(CollectionRun, run_id)
+            assert run is not None
+            assert run.status == "completed_with_errors"
+            assert run.failures == []
+
+            attempt = (
+                await session.execute(
+                    select(CollectionRunProviderAttempt).where(
+                        CollectionRunProviderAttempt.collection_run_id == run_id
+                    )
+                )
+            ).scalar_one()
+            assert attempt.status == "partial"
+            assert attempt.incomplete_results is True
+            assert attempt.error_category is None
+            assert attempt.error_message is None
+            assert attempt.jobs_discovered == 2
+            assert attempt.jobs_inserted == 2
+    finally:
+        await _cleanup(
+            db_engine,
+            user_ids=[],
+            job_ids=job_ids,
+            collection_run_ids=collection_run_ids,
+            raw_ingestion_ids=raw_ingestion_ids,
+        )
+
+
+async def test_pipeline_keeps_completed_source_status_despite_nonfatal_provider_error(
+    db_engine: AsyncEngine,
+) -> None:
+    """A `ProviderError` alone never changes a `completed=True,
+    incomplete_results=False` source's own `status` — it stays
+    `'completed'`, even though the parent run still becomes
+    `completed_with_errors` and the error is still fully recorded."""
+    called_at = datetime(2026, 10, 7, tzinfo=UTC)
+    job = _load_fixture("clean_tenant_scoped").model_copy(
+        update={"provider": "fixture_provider", "source": "fixture_ats"}
+    )
+    result = DiscoveryResult(
+        provider="fixture_provider",
+        jobs=[job],
+        source_stats=[SourceRunStats(source="fixture_ats", completed=True, jobs_found=1)],
+        errors=[
+            ProviderError(
+                source="fixture_ats",
+                category=ProviderErrorCategory.RATE_LIMITED,
+                retryable=True,
+                detail="succeeded after one retry",
+                occurred_at=called_at,
+            )
+        ],
+        started_at=called_at,
+        completed_at=called_at,
+    )
+    provider: DiscoveryProvider = _StaticResultProvider(result)
+    query = SourceQuery(sources=["fixture_ats"])
+
+    job_ids: list[uuid.UUID] = []
+    collection_run_ids: list[uuid.UUID] = []
+    raw_ingestion_ids: list[uuid.UUID] = []
+    try:
+        run_id = await pipeline.run(
+            db_engine, provider, query, observed_at=called_at, clock=FixedClock(called_at)
+        )
+        collection_run_ids.append(run_id)
+
+        # Captured before any assertion below, so a later assertion
+        # failure still leaves cleanup able to find these rows.
+        assert job.source_job_id is not None
+        occurrence = await _occurrence_by_job_id(db_engine, job.source_job_id)
+        job_ids.append(occurrence.job_id)
+        async with AsyncSession(bind=db_engine) as session:
+            raw_rows = (await session.execute(select(RawJobIngestion))).scalars().all()
+            raw_ingestion_ids.extend(row.id for row in raw_rows)
+
+        async with AsyncSession(bind=db_engine) as session:
+            run = await session.get(CollectionRun, run_id)
+            assert run is not None
+            assert run.status == "completed_with_errors"
+            assert len(run.failures) == 1
+
+            attempt = (
+                await session.execute(
+                    select(CollectionRunProviderAttempt).where(
+                        CollectionRunProviderAttempt.collection_run_id == run_id
+                    )
+                )
+            ).scalar_one()
+            assert attempt.status == "completed"  # never downgraded by the error alone
+            assert attempt.error_category == "rate_limited"
+            assert attempt.error_message == "succeeded after one retry"
+    finally:
+        await _cleanup(
+            db_engine,
+            user_ids=[],
+            job_ids=job_ids,
+            collection_run_ids=collection_run_ids,
+            raw_ingestion_ids=raw_ingestion_ids,
+        )
+
+
+async def test_pipeline_marks_fully_failed_source_without_provider_error(
+    db_engine: AsyncEngine,
+) -> None:
+    """A source that fully failed (`completed=False`) but with no
+    accompanying `ProviderError` at all — `status='failed'`, error fields
+    stay `NULL` (no `CHECK` ties them together), and no fabricated
+    `failures` entry is invented from thin air."""
+    called_at = datetime(2026, 10, 8, tzinfo=UTC)
+    result = DiscoveryResult(
+        provider="fixture_provider",
+        jobs=[],
+        source_stats=[SourceRunStats(source="fixture_ats", completed=False, jobs_found=0)],
+        started_at=called_at,
+        completed_at=called_at,
+    )
+    provider: DiscoveryProvider = _StaticResultProvider(result)
+    query = SourceQuery(sources=["fixture_ats"])
+
+    collection_run_ids: list[uuid.UUID] = []
+    try:
+        run_id = await pipeline.run(
+            db_engine, provider, query, observed_at=called_at, clock=FixedClock(called_at)
+        )
+        collection_run_ids.append(run_id)
+
+        async with AsyncSession(bind=db_engine) as session:
+            run = await session.get(CollectionRun, run_id)
+            assert run is not None
+            assert run.status == "completed_with_errors"
+            assert run.failures == []
+
+            attempt = (
+                await session.execute(
+                    select(CollectionRunProviderAttempt).where(
+                        CollectionRunProviderAttempt.collection_run_id == run_id
+                    )
+                )
+            ).scalar_one()
+            assert attempt.status == "failed"
+            assert attempt.error_category is None
+            assert attempt.error_message is None
+            assert attempt.jobs_discovered == 0
+    finally:
+        await _cleanup(
+            db_engine,
+            user_ids=[],
+            job_ids=[],
+            collection_run_ids=collection_run_ids,
+            raw_ingestion_ids=[],
+        )
+
+
+async def test_pipeline_selects_latest_provider_error_per_source_and_retains_all(
+    db_engine: AsyncEngine,
+) -> None:
+    """Multiple `ProviderError`s for one source are valid and must not
+    discard anything: every error survives individually in
+    `CollectionRun.failures`, in `result.errors` order, while each
+    source's own attempt-level `error_category`/`error_message` reflects
+    only the chronologically latest one — ties broken by later list
+    position."""
+    t1 = datetime(2026, 10, 9, tzinfo=UTC)
+    t2 = t1 + timedelta(hours=1)
+
+    result = DiscoveryResult(
+        provider="fixture_provider",
+        jobs=[],
+        source_stats=[
+            SourceRunStats(source="multi_error_source", completed=False, jobs_found=0),
+            SourceRunStats(source="tie_source", completed=False, jobs_found=0),
+        ],
+        errors=[
+            ProviderError(
+                source="multi_error_source",
+                category=ProviderErrorCategory.TIMEOUT,
+                retryable=True,
+                detail="first, earlier timestamp",
+                occurred_at=t1,
+            ),
+            ProviderError(
+                source="multi_error_source",
+                category=ProviderErrorCategory.RATE_LIMITED,
+                retryable=True,
+                detail="second, later timestamp — must win",
+                occurred_at=t2,
+            ),
+            ProviderError(
+                source="tie_source",
+                category=ProviderErrorCategory.AUTH_ERROR,
+                retryable=False,
+                detail="tie, earlier position",
+                occurred_at=t1,
+            ),
+            ProviderError(
+                source="tie_source",
+                category=ProviderErrorCategory.BLOCKED,
+                retryable=False,
+                detail="tie, later position — must win",
+                occurred_at=t1,
+            ),
+        ],
+        started_at=t1,
+        completed_at=t1,
+    )
+    provider: DiscoveryProvider = _StaticResultProvider(result)
+    query = SourceQuery(sources=["multi_error_source", "tie_source"])
+
+    collection_run_ids: list[uuid.UUID] = []
+    try:
+        run_id = await pipeline.run(
+            db_engine, provider, query, observed_at=t1, clock=FixedClock(t1)
+        )
+        collection_run_ids.append(run_id)
+
+        async with AsyncSession(bind=db_engine) as session:
+            run = await session.get(CollectionRun, run_id)
+            assert run is not None
+            failures = cast(list[dict[str, Any]], run.failures)
+            assert len(failures) == 4  # every error retained, none collapsed
+            assert [f["error"]["detail"] for f in failures] == [
+                "first, earlier timestamp",
+                "second, later timestamp — must win",
+                "tie, earlier position",
+                "tie, later position — must win",
+            ]
+
+            attempts = (
+                (
+                    await session.execute(
+                        select(CollectionRunProviderAttempt).where(
+                            CollectionRunProviderAttempt.collection_run_id == run_id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            by_source = {a.source: a for a in attempts}
+            assert by_source["multi_error_source"].error_category == "rate_limited"
+            assert (
+                by_source["multi_error_source"].error_message
+                == "second, later timestamp — must win"
+            )
+            assert by_source["tie_source"].error_category == "blocked"
+            assert by_source["tie_source"].error_message == "tie, later position — must win"
+    finally:
+        await _cleanup(
+            db_engine,
+            user_ids=[],
+            job_ids=[],
+            collection_run_ids=collection_run_ids,
+            raw_ingestion_ids=[],
+        )
+
+
+async def test_pipeline_populates_retry_count_and_rate_limited_from_source_stats(
+    db_engine: AsyncEngine,
+) -> None:
+    """`SourceRunStats.retry_count`/`.rate_limited` must reach the attempt
+    row exactly — previously always left at their `0`/`False` defaults
+    regardless of what the provider actually reported."""
+    called_at = datetime(2026, 10, 10, tzinfo=UTC)
+    result = DiscoveryResult(
+        provider="fixture_provider",
+        jobs=[],
+        source_stats=[
+            SourceRunStats(
+                source="fixture_ats",
+                completed=False,
+                jobs_found=0,
+                retry_count=3,
+                rate_limited=True,
+            )
+        ],
+        started_at=called_at,
+        completed_at=called_at,
+    )
+    provider: DiscoveryProvider = _StaticResultProvider(result)
+    query = SourceQuery(sources=["fixture_ats"])
+
+    collection_run_ids: list[uuid.UUID] = []
+    try:
+        run_id = await pipeline.run(
+            db_engine, provider, query, observed_at=called_at, clock=FixedClock(called_at)
+        )
+        collection_run_ids.append(run_id)
+
+        async with AsyncSession(bind=db_engine) as session:
+            attempt = (
+                await session.execute(
+                    select(CollectionRunProviderAttempt).where(
+                        CollectionRunProviderAttempt.collection_run_id == run_id
+                    )
+                )
+            ).scalar_one()
+            assert attempt.retry_count == 3
+            assert attempt.rate_limited is True
+    finally:
+        await _cleanup(
+            db_engine,
+            user_ids=[],
+            job_ids=[],
+            collection_run_ids=collection_run_ids,
             raw_ingestion_ids=[],
         )
 
