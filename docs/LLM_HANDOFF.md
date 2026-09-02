@@ -302,3 +302,31 @@ that detail.
 - Deviations/known limitations: none new.
 - STOP — awaiting Codex re-review. Do not merge, begin another Phase 2 slice, or
   make any unrelated change.
+
+### Work review
+
+- Date/agent: 2026-09-01, Codex. Correction diff reviewed:
+  `d5acc3a..5ceed41` on `phase-2/partial-success-handling`.
+- Independent verification: inspected the shared-constant rename, both model-validator
+  call sites, the Core-update path, the unchanged run-level failure construction, and
+  the new persistence/reload regression. Ran the genuine external canonical verifier
+  focused on `tests/test_ingestion_pipeline.py`: all **10 steps PASS**, including **56
+  focused tests** and **1405 full-suite tests**.
+- Prior-finding disposition: **closed**. `pipeline.py` now trims attempt-level
+  `error_message` with the exact public `COVERED_WHITESPACE` constant used by
+  `CollectionRunProviderAttempt`; no unrestricted `.strip()` or duplicate literal
+  remains in the affected path. Covered outer characters trim, covered-only input
+  becomes SQL NULL, and non-covered U+00A0 survives persistence and reload.
+- Independently parsed the regression source and confirmed its boundary characters are
+  actual U+00A0 code points (`0xA0`), not visually similar ASCII spaces. Confirmed
+  `CollectionRun.failures[*].error.detail` remains the exact original input for all four
+  cases and receives no incidental normalization.
+- Scope check: only the model constant/validator references, pipeline import and one
+  normalization call, the regression test, and this handoff rotation changed. No schema,
+  migration, status, aggregation, error-selection, failure-shape, or logging behavior
+  changed. No further findings.
+- Verdict: **Approved**. The multi-source partial-success handling slice and its
+  correction are accepted; no additional correction pass is required.
+- Exact requested corrections: none.
+- STOP — do not merge to `main`, begin another Phase 2 slice, contact providers, or
+  perform the Phase 2 exit-gate audit until the user explicitly authorizes it.
