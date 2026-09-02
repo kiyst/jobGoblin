@@ -366,3 +366,43 @@ this merge.
   slice. Per instruction, Phase 2's exit gate is not declared satisfied here — a
   separate audit is required after merge, since Tier 4 remains deferred and the
   documented fixture requirements must be reconciled explicitly.
+
+### Work review
+
+- Date/agent: 2026-09-01, Codex. Implementation diff reviewed:
+  `02ef086..a6196db` on `phase-2/partial-success-handling`.
+- Independent verification: inspected the pipeline control flow, all changed tests,
+  and the architecture/data-model/roadmap updates. Ran the genuine external canonical
+  verifier focused on `tests/test_ingestion_pipeline.py`: all **10 steps PASS**, including
+  Ruff format/check, mypy, repository and whitespace checks, disposable-database
+  safety/reachability, **55 focused tests**, **1404 full-suite tests**, and temporary-
+  directory cleanup.
+- Confirmed behavior: malformed result consistency is rejected before raw writes;
+  healthy work survives a sibling source failure; failed/partial/completed attempt
+  precedence is exact; completed sources can retain nonfatal errors; every provider
+  error survives in ordered run-level evidence while the latest per source supplies the
+  attempt summary; retry/rate-limit fields persist; job-level issues OR correctly with
+  source issues; unexpected exceptions still mark the run and all attempts failed.
+- **Medium — Core-path error-message normalization exceeds the database/ORM contract.**
+  `backend/app/ingestion/pipeline.py:346` uses unrestricted
+  `selected_error.detail.strip()`, which removes Python's full Unicode whitespace set.
+  The authoritative model and PostgreSQL checks intentionally trim only the established
+  four-character set (`" \\t\\n\\r"`; `collection_run_provider_attempt.py:41,255-263`).
+  Therefore an adapter detail such as `"\\u00a0detail\\u00a0"` is silently changed to
+  `"detail"` by this Core-update path, while assigning the same value through the ORM
+  preserves the non-breaking spaces. A detail containing only non-covered whitespace is
+  similarly collapsed to SQL NULL only through this path. This repeats the exact class
+  of application/database normalization divergence the project guards against.
+- Exact requested correction: normalize the Core-update value with the same explicit
+  four-character set as the model (prefer one shared/import-safe helper or constant over
+  independently drifting literals). Add a regression that persists and reloads a
+  `ProviderError.detail` wrapped in non-covered Unicode whitespace and proves it is
+  preserved, while covered outer space/tab/LF/CR are still trimmed and a covered-only
+  value becomes NULL. The run-level `failures[*].error.detail` remains the exact
+  ProviderError value specified by this slice and must not be normalized incidentally.
+  No schema, migration, status, aggregation, or logging change is requested.
+- Verdict: **Approved with binding clarification** — one bounded executable correction
+  is required before merge; the slice's design and all other behavior are accepted.
+- STOP — do not merge, begin another Phase 2 slice, or make unrelated changes. The user
+  must authorize this correction; then Codex re-reviews only the correction and affected
+  normalization invariant.
