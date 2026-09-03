@@ -435,10 +435,13 @@ class SourceQuery(BaseModel):
     local_enforcement: dict[str, set[str]] = Field(default_factory=dict)
 ```
 
-`QueryPlanner.plan(saved_search, provider_capabilities) -> SourceQuery` translates a
-`SavedSearch` into one `SourceQuery` per enabled provider. Full validation, expansion, and
-per-source enforcement rules are in [§6.6](#66-queryplanner-behavior-rev-4); summary of
-what `sources` participates in:
+`QueryPlanner.plan(saved_search, provider_capabilities, *, titles, locations) ->
+SourceQuery | None` translates a `SavedSearch` into one `SourceQuery` per enabled
+provider — `None` for a legitimate empty selection, never for a failed one (§6.6's own
+implementation notes explain why `titles`/`locations` are supplied parameters rather than
+read off `saved_search` directly, and the exact `None`-vs-raise boundary). Full
+validation, expansion, and per-source enforcement rules are in
+[§6.6](#66-queryplanner-behavior-rev-4); summary of what `sources` participates in:
 - **Query planning** — set here, by `QueryPlanner`, validated against
   `ProviderCapabilities.sources` (§6.4).
 - **Cache fingerprinting** (master spec §39, detailed in §6.6) — the fingerprint key
@@ -768,26 +771,43 @@ at planning time (§6.6):
 
 ### 6.6 `QueryPlanner` behavior (Rev 4)
 
-`QueryPlanner.plan(saved_search, provider_capabilities) -> SourceQuery` is called once
-per provider present in `saved_search.enabled_providers`. Its behavior, precisely:
+`QueryPlanner.plan(saved_search, provider_capabilities, *, titles, locations) ->
+SourceQuery | None` is called once per provider present in
+`saved_search.enabled_providers`. Its behavior, precisely:
 
 1. **Resolve source selection.** Look up `saved_search.enabled_sources[provider]`
    (§6.5). If the key is absent, the resolved source list is *every* source in
    `provider_capabilities.sources` (expand to all configured/enabled sources for that
-   provider). If the key is present, the resolved source list is exactly that list
-   (including the empty-list case, resolved to zero sources).
+   provider), sorted for determinism. If the key is present, its value is validated at
+   runtime (a list of strings, no duplicates — `enabled_sources`' own `CHECK` only
+   guarantees a top-level JSON object, nothing about a given key's value) and the
+   resolved source list is exactly that list, in the caller's given order (including the
+   empty-list case, resolved to zero sources).
 2. **Validate.** Every name in the resolved source list must be a key in
-   `provider_capabilities.sources`. An unknown name fails validation for that provider
-   **before** `discover()` is ever called — `ingestion/pipeline.py` records this as a
+   `provider_capabilities.sources`. An unknown name **raises before any `SourceQuery` is
+   constructed** — it is never silently dropped — failing validation for that provider
+   entirely, before `discover()` is ever called. **This is a future
+   ProviderRegistry/multi-provider orchestrator responsibility, not something the
+   current pipeline does**: that orchestrator (not yet implemented — see this section's
+   own "Phase 2 implementation notes" below) must catch this and record it as a
    planning-time failure on the `CollectionRun` (not a `collection_run_provider_attempts`
-   row, since no provider call was attempted for that source) and continues with
-   whatever other providers/sources in the run remain valid.
-3. **Empty resolved list → no execution.** If, after steps 1–2, the resolved list for a
-   provider is empty (either because `enabled_sources[provider] == []` explicitly, or —
-   degenerately — because every listed source failed validation), `QueryPlanner`
-   produces no `SourceQuery` for that provider at all, and `ingestion/pipeline.py` never
-   calls that provider's `discover()`. This is different from "the provider errored" —
-   it's simply not part of this run.
+   row, since no provider call was attempted for that source), then continue with
+   whatever other providers/sources in the run remain valid. `ingestion/pipeline.py`'s
+   current `run()` neither calls `QueryPlanner.plan()` nor performs any of this — its
+   `query` parameter is a required, already-constructed `SourceQuery` supplied directly
+   by its caller.
+3. **Empty resolved list → no execution.** `QueryPlanner` returns `None` for exactly two
+   *legitimate* empty selections: an explicit `enabled_sources[provider] == []`, or an
+   absent key expanding against a `provider_capabilities.sources` that itself advertises
+   zero sources. **"Every listed source failed validation" is not a third path to this
+   outcome** — step 2 already raises on the *first* unknown name, before the list could
+   ever be filtered down to empty; an explicit list containing any unknown name always
+   raises, never resolves to an empty selection. Returning `None` is different from "the
+   provider errored" — it's simply not part of this run. **Handling `None` is likewise a
+   future orchestrator responsibility**: it must skip calling that provider's
+   `discover()` entirely for a `None` result, never treating `None` itself as an error.
+   `ingestion/pipeline.py`'s current `run()` does not accept a `None` query at all — its
+   `query` parameter is a required `SourceQuery`, not `SourceQuery | None`.
 4. **Build one `SourceQuery` per provider.** `sources` is set to the validated,
    non-empty source list from steps 1–3.
 5. **Determine local vs. remote enforcement per source.** For each source in `sources`,
@@ -816,12 +836,110 @@ field still share a cache entry). A request for `sources=["linkedin"]` and
   currently-configured source for that provider is used.
 - *Explicit empty source list* (`enabled_sources[provider] == []`) → that provider runs
   with zero sources this cycle — no `discover()` call at all.
-- *Unknown source name* → validation failure for that provider, recorded on the
-  `CollectionRun`, before any provider call; other valid providers/sources in the same
-  run are unaffected.
+- *Unknown source name* → `QueryPlanner` raises before any provider call; recording it on
+  the `CollectionRun` and continuing with other valid providers/sources in the same run
+  is the future orchestrator's responsibility (see this section's own "Phase 2
+  implementation notes" below) — the current `ingestion/pipeline.py::run()` does not
+  call `QueryPlanner.plan()` at all.
 - *Two sources with different filter capabilities* (e.g. one supports salary filtering,
   one doesn't) → they end up with different `local_enforcement` entries in the same
   `SourceQuery`, even though both belong to the same provider and the same planning call.
+
+**Phase 2 implementation notes (QueryPlanner fixture-integration slice):**
+`app/discovery/query_planner.py::QueryPlanner.plan()` implements the behavior above as a
+`@staticmethod` — stateless, no database access, no network access, never calling a
+provider's `discover()` — with these decisions resolved during implementation:
+
+- **`titles`/`locations` are supplied parameters, not read off `saved_search` directly.**
+  `SavedSearchTitle`/`SavedSearchLocation` are separate child tables with no ORM
+  relationship wired to `SavedSearch`, and `QueryPlanner` performs no database I/O of its
+  own — it cannot load them itself. The caller (the future ProviderRegistry/orchestration
+  slice) loads these rows and supplies plain `Sequence[str]` values. Neither table has an
+  ordering column today (no `position`/`sort_order` on either) — `QueryPlanner` does not
+  define what "deterministic order" means; it treats both sequences as opaque and
+  preserves whatever order it is given, verbatim, never sorting, deduplicating, or
+  reordering either one. A bare `str`/`bytes` value for either parameter is rejected
+  (`QueryPlanValidationError`) rather than silently iterated character-by-character, and
+  every element must itself be a `str`.
+- **`enabled_sources` runtime validation.** Its own `CHECK` only guarantees a top-level
+  JSON object — nothing about a given provider key's value. `QueryPlanner` validates at
+  runtime that a present key's value is a list, every element is a string, and there are
+  no duplicate names — any violation raises `QueryPlanValidationError` before any
+  `SourceQuery` is constructed.
+- **Capability consistency, validated first.** Before any source-selection logic runs,
+  `provider_capabilities.provider`, every `ProviderCapabilities.sources` mapping key, and
+  every embedded `SourceCapabilities.source` must match the same canonical lowercase
+  ASCII-slug grammar already enforced by every `provider`/`source` database `CHECK` in
+  this schema (`^[a-z0-9][a-z0-9._-]*$`) — malformed identifiers are rejected, never
+  silently normalized. Every mapping key must also equal its own embedded
+  `SourceCapabilities.source`; a mismatch fails closed before the capabilities object is
+  used for anything.
+- **All `QueryPlanValidationError` messages are fixed, categorical strings** — never an
+  f-string interpolating a provider name, source name, capabilities-mapping key, embedded
+  `SourceCapabilities.source`, or `enabled_sources` JSON value. None of that is trusted
+  merely because it originates from a `ProviderCapabilities` object rather than raw
+  JSON — a provider adapter can be buggy, `enabled_sources` is written through ordinary
+  application code, and every message is written to be safe to log or persist verbatim.
+- **Complete `SavedSearch` -> `SourceQuery` field mapping:**
+
+  | `SourceQuery` field | Source | Notes |
+  |---|---|---|
+  | `titles` | supplied `titles` parameter | verbatim, order preserved |
+  | `excluded_titles` | `saved_search.excluded_titles` | direct |
+  | `locations` | supplied `locations` parameter | verbatim, order preserved |
+  | `radius_miles` | `saved_search.radius_miles` | `Decimal -> float`; copied whenever set, independent of whether `locations` is also populated — no "radius requires location" invariant is invented |
+  | `salary_floor` | `saved_search.salary_floor` | direct |
+  | `employment_types` | `saved_search.employment_types` | direct |
+  | `seniority` | `saved_search.seniority` | direct |
+  | `posted_within_hours` | `saved_search.recency_limit_hours` | renamed |
+  | `company_filter` | `saved_search.preferred_companies` | renamed — not deferred |
+  | `excluded_companies` | `saved_search.excluded_companies` | direct |
+  | `remote_ok` | `saved_search.remote_rules` | see below |
+  | `max_results` | *(no counterpart)* | always `None` |
+
+- **`remote_rules` -> `remote_ok` mapping**: `remote_only -> True`; `hybrid_ok`,
+  `onsite_ok`, `any -> None`. A tri-state boolean cannot losslessly express four rules,
+  and `onsite_ok -> False` would incorrectly assert "remote is forbidden" to a provider —
+  a claim `onsite_ok` doesn't make. Only `remote_only` is an unambiguous,
+  provider-enforceable requirement. The `hybrid_ok`/`onsite_ok`/`any` distinction is
+  retained on `SavedSearch.remote_rules` itself (never mutated) for a later phase's local
+  matching to consume — `QueryPlanner` has no channel to express it to a provider today.
+- **Fields with no counterpart, explicitly** (never silently ignored): `preferred_salary`,
+  `industries`, `must_have_skills`, `preferred_skills`, `excluded_keywords` — scoring/
+  matching signals (Phase 5), no `SourceQuery` filter field exists for them.
+  `polling_schedule`, `scoring_weights`, `enabled_providers`, `is_active` — scheduler/
+  orchestration/scoring concerns, out of `plan()`'s single-provider-planning scope.
+  `SourceQuery.max_results` has no `SavedSearch` counterpart at all. **A genuine schema
+  gap, not fixed here:** `SavedSearchLocation.radius_miles_override`/`.latitude`/
+  `.longitude` cannot be represented — `SourceQuery.radius_miles` is one global scalar,
+  and the `locations` parameter is plain `Sequence[str]` text with no structural room for
+  a per-location override or coordinates. `SourceQuery.radius_miles` reflects only the
+  global `saved_search.radius_miles`; it is never claimed to represent per-location
+  overrides. Representing them would require extending `SourceQuery`'s own schema — a
+  separate, later decision.
+- **`local_enforcement`, precisely.** Exactly one key per resolved source, always — even
+  a fully-capable source gets an explicit empty set, never an omitted key. 4 fields
+  (`salary_floor`; `locations`/`radius_miles` together, one shared capability;
+  `remote_ok`; `posted_within_hours`) are governed exclusively by their own dedicated
+  `SourceCapabilities` boolean; the remaining 6 mapped fields (`titles`,
+  `excluded_titles`, `employment_types`, `seniority`, `company_filter`,
+  `excluded_companies`) are governed by exact-name membership in
+  `supported_query_fields`. No contradiction between the two is possible by
+  construction — they cover disjoint field-name sets, so if a caller's
+  `supported_query_fields` happens to also name a dedicated field, it is simply never
+  consulted for that field; the dedicated boolean alone decides it, silently, every time.
+- **Multi-provider concerns are absent by design.** `plan()` never consults
+  `saved_search.enabled_providers` — deciding *which* providers to plan for is the
+  ProviderRegistry/orchestration slice's responsibility; trusting the caller to invoke
+  `plan()` only for already-selected providers is a documented boundary, not an
+  oversight.
+- **Not yet wired into `ingestion/pipeline.py`.** This slice does not call `plan()` from
+  inside `pipeline.run()`, and does not persist planning failures onto `CollectionRun` or
+  populate `collection_runs.providers_enforced_locally` — both require the orchestration
+  loop (create the `CollectionRun`, iterate providers, catch `QueryPlanValidationError`,
+  write the failure) that doesn't exist without `ProviderRegistry`. The fixture-driven
+  integration test instead calls `plan()` externally and feeds its real output into the
+  existing, unmodified `pipeline.run()`, proving the two are already compatible.
 
 ### 6.7 `MatchResult`
 

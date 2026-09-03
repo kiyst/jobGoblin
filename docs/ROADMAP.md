@@ -341,9 +341,29 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   `error_message` from that source's chronologically latest `ProviderError`; `retry_count`;
   `rate_limited`; `incomplete_results`) — every `ProviderError` is still retained
   individually in `collection_runs.failures`, never collapsed to the one selected per
-  source. Still deferred: Tier 4 (blocked on a company-text-to-`company_id` resolution
-  capability that does not exist yet, not merely unimplemented), `QueryPlanner`,
-  `ProviderRegistry`, live providers.
+  source.
+  `QueryPlanner` ([ARCHITECTURE.md §6.5–6.6](ARCHITECTURE.md#66-queryplanner-behavior-rev-4)) —
+  `discovery/query_planner.py::QueryPlanner.plan()` is a stateless, I/O-free
+  `@staticmethod` translating one `SavedSearch` plus one provider's
+  `ProviderCapabilities` into a `SourceQuery | None`: absent source preference expands to
+  every advertised source (sorted); an explicit empty selection or a capabilities object
+  advertising zero sources returns `None`; an unknown requested source name always raises
+  before any query is built, never silently dropped; `enabled_sources`' own shape is
+  validated at runtime (list of strings, no duplicates) since its `CHECK` alone doesn't
+  guarantee that; provider/source identifiers are validated against the same canonical
+  slug grammar every other `provider`/`source` column in this schema already enforces;
+  every current `SourceQuery` filter field is mapped from `SavedSearch` explicitly, with
+  every unrepresentable field named rather than silently dropped; `local_enforcement` is
+  computed per source from dedicated capability booleans (4 fields) plus
+  `supported_query_fields` (the rest), never contradicting each other by construction.
+  Proven by a fixture-driven integration test feeding its real output into the existing,
+  unmodified `ingestion/pipeline.py::run()`. Not yet wired into the pipeline
+  automatically, and does not persist planning failures or
+  `collection_runs.providers_enforced_locally` — both require the orchestration loop the
+  next slice adds.
+  Still deferred: Tier 4 (blocked on a company-text-to-`company_id` resolution capability
+  that does not exist yet, not merely unimplemented), `ProviderRegistry`,
+  multi-provider orchestration, live providers.
 - **Phases 3-14: not started.** Begin each phase only after completing its preflight in
   [PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md) and receiving approval for the next
   smallest slice.
