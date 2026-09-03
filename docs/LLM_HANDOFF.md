@@ -369,3 +369,35 @@ that detail.
 - STOP — awaiting Codex re-review. Do not merge, begin `ProviderRegistry`/
   multi-provider orchestration, add schema changes, contact live providers, wire
   `QueryPlanner` into `pipeline.run()`, or start any other slice.
+
+### Work review
+
+- Date/agent: 2026-09-02, Codex. Correction diff reviewed:
+  `d7cb03c..15ce73c` on `phase-2/query-planner`.
+- Independent verification: inspected every changed executable/test/documentation file;
+  directly ran the eight focused newline/finiteness cases (**8 passed**); then ran the
+  genuine external canonical verifier focused on `tests/test_query_planner.py`: all
+  **10 steps PASS**, including Ruff, mypy, repository/diff checks, disposable-database
+  safety/reachability, **41 focused tests**, **1446 full-suite tests**, and temporary-
+  directory cleanup.
+- Prior-finding disposition: **closed**. Canonical provider/source identifiers now use
+  true full-string matching on all three paths, including isolated trailing-LF/CRLF
+  coverage. `radius_miles` conversion now rejects non-finite float output with a fixed,
+  sanitized error while preserving valid finite fractional values. No database bound,
+  schema change, or migration was introduced.
+- Documentation disposition: **closed**. ARCHITECTURE §6.6 now assigns planning-failure
+  persistence, continuation, and `None` handling to the future orchestrator and states
+  accurately that current `pipeline.run()` accepts only an already-built `SourceQuery`.
+  `schemas/provider.py` now distinguishes the implemented planner from its deferred
+  automatic wiring without changing schema behavior.
+- Scope/adversarial-fix check: the additional test correction only isolates the
+  capability-map-key cases by keeping the embedded source valid; it changes no product
+  behavior and makes the intended branch provable. No ProviderRegistry, orchestration,
+  pipeline wiring, provider contact, migration, or unrelated product work entered the
+  diff. No further findings.
+- Verdict: **Approved**. The QueryPlanner fixture-integration slice and bounded
+  correction pass are accepted; no additional correction is required.
+- Exact requested corrections: none.
+- STOP — do not merge to `main` or begin ProviderRegistry/multi-provider orchestration,
+  Tier 4, provider contact, Phase 3, or any other slice until the user explicitly
+  authorizes the next action.
