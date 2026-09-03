@@ -1053,7 +1053,16 @@ exist to hold that status. **Rev 3 (item 5)** finishes the separation:
   some jobs but hit a cap/rate-limit mid-pagination is `status = 'partial'` with
   `incomplete_results = true` and **no error required** — `error_category`/
   `error_message` stay `NULL` for a clean partial result, since truncated pagination
-  isn't itself a hard error. **Cardinality note:** this is one *aggregate* row per source
+  isn't itself a hard error. A `ProviderError` alone never changes a `completed=True`
+  source's own `status` — only `completed=False`/`incomplete_results=True` do; the
+  error is still fully recorded (see below), and it still makes the parent
+  `CollectionRun.status` `'completed_with_errors'`. **Multiple `ProviderError`s for one
+  source are valid and none are discarded**: every one is preserved as its own
+  `collection_runs.failures` entry (Phase 2's multi-source partial-success handling
+  slice; exact JSON shape in [DATA_MODEL.md](DATA_MODEL.md)), while this row's own
+  singular `error_category`/`error_message` reflects only the chronologically latest
+  one (ties broken by later position in `DiscoveryResult.errors`) — a one-column-pair
+  *summary*, never a claim that only one error ever occurred. **Cardinality note:** this is one *aggregate* row per source
   execution, not one row per individual HTTP request/retry — `retry_count` *summarizes*
   how many retries happened within that one source's execution for this run. If
   individual per-request attempt history is ever needed (e.g. for detailed

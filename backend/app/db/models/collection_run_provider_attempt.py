@@ -37,8 +37,13 @@ ERROR_CATEGORIES = (
 )
 
 # Same four-character whitespace set as every other trim-only column in this
-# project: space, tab, line feed, carriage return.
-_COVERED_WHITESPACE = " \t\n\r"
+# project: space, tab, line feed, carriage return. Public (no leading
+# underscore) and imported directly by `ingestion/pipeline.py`, which must
+# normalize a Core-update `error_message` value identically to this model's
+# own ORM validator and the database's `error_message_normalized`/
+# `error_message_not_empty` CHECKs below — a private, module-local constant
+# would invite a second, independently-drifting literal at that call site.
+COVERED_WHITESPACE = " \t\n\r"
 
 
 class CollectionRunProviderAttempt(Base):
@@ -247,19 +252,19 @@ class CollectionRunProviderAttempt(Base):
 
     @validates("provider", "source")
     def _normalize_canonical_identifier(self, _key: str, value: str) -> str:
-        """Trims `_COVERED_WHITESPACE` and lowercases — same canonical-
+        """Trims `COVERED_WHITESPACE` and lowercases — same canonical-
         identifier treatment as `job_occurrences`/`raw_job_ingestions`."""
-        return value.strip(_COVERED_WHITESPACE).lower()
+        return value.strip(COVERED_WHITESPACE).lower()
 
     @validates("error_message")
     def _normalize_nullable_text(self, _key: str, value: str | None) -> str | None:
-        """Trims `_COVERED_WHITESPACE` and converts a covered-whitespace-
+        """Trims `COVERED_WHITESPACE` and converts a covered-whitespace-
         only value to `None` rather than failing ingestion. Case preserved
         — sanitization against secrets/tokens is a separate, application-
         level responsibility, not performed here."""
         if value is None:
             return None
-        trimmed = value.strip(_COVERED_WHITESPACE)
+        trimmed = value.strip(COVERED_WHITESPACE)
         return trimmed or None
 
 

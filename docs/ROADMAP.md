@@ -279,7 +279,7 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   first production CRUD writer (see `docs/DATA_MODEL.md`). All fifteen Phase 1
   domain tables (ADR 0003) are migrated, and Phase 1's own closure slice
   (`phase-1/closure`, merge commit `bfdd56d`) is merged into `main`. Phase 2 was
-  subsequently authorized and three of its vertical slices are merged (below) —
+  subsequently authorized and is in progress (below) —
   under [PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md)'s own phase-gating rule
   ("confirm the previous phase's exit gate is complete" before starting the next
   phase), that would not have been authorized had Phase 1's exit gate not already
@@ -316,8 +316,7 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   `jobs_updated`) rather than creating a duplicate; a candidate that disappears or
   changes between discovery and its `FOR UPDATE` lock raises
   `CandidateResolutionUnstableError`, never a retry.
-  **Implemented, not yet merged** — on branch `phase-2/ambiguous-match-persistence`,
-  awaiting review and merge authorization: `ambiguous_match` conflict persistence
+  **Ambiguous-match conflict persistence**
   ([DECISIONS/0004](DECISIONS/0004-scoped-deterministic-identity.md),
   [DECISIONS/0007](DECISIONS/0007-identity-conflict-quarantine.md)) — Tier 2/3 finding
   more than one distinct candidate Job now creates a standalone Job/JobOccurrence and
@@ -325,9 +324,26 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   (`ambiguous_match`) instead of failing the whole run; a new `UpsertKind.AMBIGUOUS`
   outcome counts as `jobs_inserted`, and `pipeline.py`'s counter dispatch is now
   exhaustive over all five `UpsertKind` values, fail-closed for any future unrecognized
-  one. Still deferred: Tier 4 (blocked on a company-text-to-`company_id` resolution
+  one.
+  Multi-source partial-success handling
+  ([ARCHITECTURE.md §6.3](ARCHITECTURE.md#63-discoveryresult--what-a-provider-call-actually-returns-rev-2-revised-rev-3)/
+  [§9](ARCHITECTURE.md#9-raw-ingestion-vs-provider-attempt-telemetry)/
+  [§11](ARCHITECTURE.md#11-fixture-driven-end-to-end-ingestion-proof-phase-2-target))
+  addresses `PHASE_RISK_CHECKLIST.md`'s exit-gate item for successful partial results: a
+  source-level failure or partial result no longer aborts the whole run.
+  `ingestion/pipeline.py::run()` first validates `DiscoveryResult`'s own internal
+  consistency before writing any raw row (declared `jobs_found` against actual
+  `DiscoveredJob` counts per source; `completed=False` can carry neither actual jobs nor
+  `incomplete_results=True` — each a whole-run `UnsupportedDiscoveryResultError`, never a
+  graceful per-source outcome), then persists every other source's jobs normally while
+  each source's own `collection_run_provider_attempts` row records its independent
+  outcome (`status` precedence `failed`/`partial`/`completed`; `error_category`/
+  `error_message` from that source's chronologically latest `ProviderError`; `retry_count`;
+  `rate_limited`; `incomplete_results`) — every `ProviderError` is still retained
+  individually in `collection_runs.failures`, never collapsed to the one selected per
+  source. Still deferred: Tier 4 (blocked on a company-text-to-`company_id` resolution
   capability that does not exist yet, not merely unimplemented), `QueryPlanner`,
-  `ProviderRegistry`, multi-source partial-success handling, live providers.
+  `ProviderRegistry`, live providers.
 - **Phases 3-14: not started.** Begin each phase only after completing its preflight in
   [PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md) and receiving approval for the next
   smallest slice.

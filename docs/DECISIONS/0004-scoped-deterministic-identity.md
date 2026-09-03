@@ -209,12 +209,15 @@ implementation:
   `source_job_id` and `requisition_id_raw` can coincidentally share a value), a candidate
   Job is locked `FOR UPDATE` and the same candidate query is re-run once under that lock.
   If the candidate disappeared (deleted concurrently) or the recheck resolves to a
-  different single Job or more than one Job, `persist_posting` fails closed with
-  `CandidateResolutionUnstableError`/`AmbiguousIdentityMatchError` rather than retrying —
-  retrying while holding a lock on a stale candidate risks accumulating locks in
-  inconsistent order across concurrent transactions, a deadlock surface strictly worse
-  than one safe failure. Lock order is always parent (`Job`) before child
-  (`JobOccurrence`), compatible with `jobs` -> `job_occurrences` `ON DELETE CASCADE`. This
+  different single Job, `persist_posting` fails closed with
+  `CandidateResolutionUnstableError` rather than retrying. If the recheck reports more
+  than one Job, the authoritative unbounded requery either confirms a genuine
+  `AMBIGUOUS` outcome or, when the two queries disagree, fails closed with the same
+  instability error. Retrying while holding a lock on a stale candidate risks
+  accumulating locks in inconsistent order across concurrent transactions, a deadlock
+  surface strictly worse than one safe failure. Lock order is always parent (`Job`)
+  before child (`JobOccurrence`), compatible with `jobs` -> `job_occurrences`
+  `ON DELETE CASCADE`. This
   parent-before-child order is now global, not Tier-2/3-specific: Tier 1's own found
   branch (below) discovers its existing occurrence unlocked, locks the parent `Job`
   first, then re-locks and revalidates the occurrence — an initial implementation locked
