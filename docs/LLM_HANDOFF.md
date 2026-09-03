@@ -401,3 +401,27 @@ that detail.
 - STOP — do not merge to `main` or begin ProviderRegistry/multi-provider orchestration,
   Tier 4, provider contact, Phase 3, or any other slice until the user explicitly
   authorizes the next action.
+
+### Merge record
+
+- Date: 2026-09-03. User authorized merging `phase-2/query-planner` into `main`
+  following Codex's final Approved re-review (no findings) above.
+- Pre-merge state: `main` and `origin/main` both at `5b2c947`; feature branch
+  pushed and clean at `1840874` (merge-base `5b2c947` — no divergence).
+- Merge: `git merge --no-ff phase-2/query-planner` on `main` — merge commit
+  `8a57550`. Post-merge diff against the feature branch's tip is empty (zero
+  content difference); `check_repo.py` and `git diff --check` both clean.
+- Post-merge verification: genuine external `verify.py --level routine --focus
+  tests/test_query_planner.py` — all **10 steps PASS** (Ruff format/check,
+  mypy, `check_repo.py`, `git diff --check`, disposable-database URL/
+  reachability, **41 focused tests**, **1446 full-suite tests**, temp-directory
+  cleanup). `alembic heads` confirms `0017` remains the sole head; no migration
+  files touched by the merge. Dev database (`jobgoblin`) confirmed unchanged at
+  `0006` — untouched throughout.
+- Pushed: `main` at `8a57550`, matching `origin/main`.
+- Rollback boundary: to revert this slice, reset `main` to `5b2c947` (the
+  commit immediately before this merge) — this removes `QueryPlanner` and its
+  tests/docs cleanly, with no migration to reverse and no data written by this
+  slice to any environment.
+- STOP — do not begin ProviderRegistry/multi-provider orchestration, Tier 4,
+  provider contact, Phase 3, or any other slice without separate authorization.
