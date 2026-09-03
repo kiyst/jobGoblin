@@ -786,20 +786,28 @@ SourceQuery | None` is called once per provider present in
 2. **Validate.** Every name in the resolved source list must be a key in
    `provider_capabilities.sources`. An unknown name **raises before any `SourceQuery` is
    constructed** — it is never silently dropped — failing validation for that provider
-   entirely, before `discover()` is ever called. `ingestion/pipeline.py` records this as a
+   entirely, before `discover()` is ever called. **This is a future
+   ProviderRegistry/multi-provider orchestrator responsibility, not something the
+   current pipeline does**: that orchestrator (not yet implemented — see this section's
+   own "Phase 2 implementation notes" below) must catch this and record it as a
    planning-time failure on the `CollectionRun` (not a `collection_run_provider_attempts`
-   row, since no provider call was attempted for that source) and continues with
-   whatever other providers/sources in the run remain valid.
-3. **Empty resolved list → no execution.** `QueryPlanner` returns `None` (no
-   `SourceQuery`, and `ingestion/pipeline.py` never calls that provider's `discover()`)
-   for exactly two *legitimate* empty selections: an explicit
-   `enabled_sources[provider] == []`, or an absent key expanding against a
-   `provider_capabilities.sources` that itself advertises zero sources. **"Every listed
-   source failed validation" is not a third path to this outcome** — step 2 already
-   raises on the *first* unknown name, before the list could ever be filtered down to
-   empty; an explicit list containing any unknown name always raises, never resolves to
-   an empty selection. Returning `None` is different from "the provider errored" — it's
-   simply not part of this run.
+   row, since no provider call was attempted for that source), then continue with
+   whatever other providers/sources in the run remain valid. `ingestion/pipeline.py`'s
+   current `run()` neither calls `QueryPlanner.plan()` nor performs any of this — its
+   `query` parameter is a required, already-constructed `SourceQuery` supplied directly
+   by its caller.
+3. **Empty resolved list → no execution.** `QueryPlanner` returns `None` for exactly two
+   *legitimate* empty selections: an explicit `enabled_sources[provider] == []`, or an
+   absent key expanding against a `provider_capabilities.sources` that itself advertises
+   zero sources. **"Every listed source failed validation" is not a third path to this
+   outcome** — step 2 already raises on the *first* unknown name, before the list could
+   ever be filtered down to empty; an explicit list containing any unknown name always
+   raises, never resolves to an empty selection. Returning `None` is different from "the
+   provider errored" — it's simply not part of this run. **Handling `None` is likewise a
+   future orchestrator responsibility**: it must skip calling that provider's
+   `discover()` entirely for a `None` result, never treating `None` itself as an error.
+   `ingestion/pipeline.py`'s current `run()` does not accept a `None` query at all — its
+   `query` parameter is a required `SourceQuery`, not `SourceQuery | None`.
 4. **Build one `SourceQuery` per provider.** `sources` is set to the validated,
    non-empty source list from steps 1–3.
 5. **Determine local vs. remote enforcement per source.** For each source in `sources`,
@@ -828,9 +836,11 @@ field still share a cache entry). A request for `sources=["linkedin"]` and
   currently-configured source for that provider is used.
 - *Explicit empty source list* (`enabled_sources[provider] == []`) → that provider runs
   with zero sources this cycle — no `discover()` call at all.
-- *Unknown source name* → validation failure for that provider, recorded on the
-  `CollectionRun`, before any provider call; other valid providers/sources in the same
-  run are unaffected.
+- *Unknown source name* → `QueryPlanner` raises before any provider call; recording it on
+  the `CollectionRun` and continuing with other valid providers/sources in the same run
+  is the future orchestrator's responsibility (see this section's own "Phase 2
+  implementation notes" below) — the current `ingestion/pipeline.py::run()` does not
+  call `QueryPlanner.plan()` at all.
 - *Two sources with different filter capabilities* (e.g. one supports salary filtering,
   one doesn't) → they end up with different `local_enforcement` entries in the same
   `SourceQuery`, even though both belong to the same provider and the same planning call.

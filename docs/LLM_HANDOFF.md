@@ -98,124 +98,6 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-09-01, Claude Code (Sonnet 5). Class H correction pass on
-  `phase-2/partial-success-handling` for the single finding from review commit
-  `d5acc3a`. Base `d5acc3a`. No product code beyond the exact bounded scope
-  requested: schema, migrations, statuses, error-selection logic, aggregation,
-  `failures` shape, and logging are all untouched.
-- Outcome, addressing the finding exactly: the Core-update `error_message`
-  normalization now trims the identical four-character set
-  (`COVERED_WHITESPACE = " \t\n\r"`) as `CollectionRunProviderAttempt`'s own ORM
-  `@validates` and its database `CHECK`s, instead of Python's broader default
-  `str.strip()` whitespace set.
-  1. Promoted `collection_run_provider_attempt.py`'s existing private
-     `_COVERED_WHITESPACE` to a public `COVERED_WHITESPACE` (both `@validates`
-     methods updated to the new name; confirmed zero remaining references to the
-     old private name anywhere in that file via direct grep).
-  2. `pipeline.py` now imports `COVERED_WHITESPACE` from that same module and
-     calls `selected_error.detail.strip(COVERED_WHITESPACE) or None` — one
-     shared constant, not a second, independently-drifting literal.
-  3. `CollectionRun.failures[*].error.detail` construction is untouched — it
-     still reads `error.detail` directly (never `error_message`), confirmed by
-     direct inspection and by the new test's own assertion that `failures`
-     always reflects the exact original `ProviderError.detail`.
-- New regression test (`test_pipeline_normalizes_error_message_with_the_shared_
-  covered_whitespace_set`) proves, in one run across four sources: covered outer
-  whitespace (space/tab/LF/CR) is trimmed from `error_message`; genuine non-covered
-  Unicode whitespace (real U+00A0 non-breaking-space characters — confirmed via a
-  direct byte-level `repr()` check during adversarial review, not merely visual
-  inspection, since a terminal/editor cannot visually distinguish U+00A0 from an
-  ASCII space) survives byte-for-byte; a covered-whitespace-only detail collapses
-  `error_message` to `NULL`; a non-covered-whitespace-only detail stays non-`NULL`;
-  and `CollectionRun.failures[*].error.detail` is the exact untouched original
-  value in all four cases simultaneously.
-- Files changed: `backend/app/db/models/collection_run_provider_attempt.py`
-  (constant rename only — no column, `CHECK`, or migration change);
-  `backend/app/ingestion/pipeline.py` (import + one normalization line);
-  `backend/tests/test_ingestion_pipeline.py` (one new test); this handoff entry.
-- Verification: genuine external `python scripts/verify.py --level routine
-  --focus tests/test_ingestion_pipeline.py` — all **10 steps PASS**: Ruff
-  format/check, mypy (82 source files), `check_repo.py`, `git diff --check`,
-  database-URL safety, real test-database reachability, **56 focused tests**
-  (was 55; +1), **1405 full-suite tests** (was 1404; +1), temp-directory
-  cleanup. `alembic heads` confirms `0017` remains the sole head; `git diff
-  --stat -- backend/migrations/` is empty — no schema/migration touched, as
-  required.
-- Adversarial self-review: dispatched a fresh-context subagent against the
-  actual diff. It confirmed the rename left no dangling `_COVERED_WHITESPACE`
-  reference; `pipeline.py` imports and uses the shared constant rather than a
-  duplicated literal; the new test's "non-covered whitespace" literals are
-  genuinely non-ASCII U+00A0 (verified at the byte level, not just visually —
-  called out explicitly as exactly the trap this kind of test can fall into);
-  all five required behaviors are proven in one test; no other module imports
-  `_COVERED_WHITESPACE` from this specific file (the same private-constant name
-  is reused independently, unrelated, in several other model files, none of
-  which reference this one); and the diff's scope is exactly the three files
-  above, touching nothing else. No findings.
-- Deviations/known limitations: none new.
-- STOP — awaiting Codex re-review. Do not merge, begin another Phase 2 slice, or
-  make any unrelated change.
-
-### Work review
-
-- Date/agent: 2026-09-01, Codex. Correction diff reviewed:
-  `d5acc3a..5ceed41` on `phase-2/partial-success-handling`.
-- Independent verification: inspected the shared-constant rename, both model-validator
-  call sites, the Core-update path, the unchanged run-level failure construction, and
-  the new persistence/reload regression. Ran the genuine external canonical verifier
-  focused on `tests/test_ingestion_pipeline.py`: all **10 steps PASS**, including **56
-  focused tests** and **1405 full-suite tests**.
-- Prior-finding disposition: **closed**. `pipeline.py` now trims attempt-level
-  `error_message` with the exact public `COVERED_WHITESPACE` constant used by
-  `CollectionRunProviderAttempt`; no unrestricted `.strip()` or duplicate literal
-  remains in the affected path. Covered outer characters trim, covered-only input
-  becomes SQL NULL, and non-covered U+00A0 survives persistence and reload.
-- Independently parsed the regression source and confirmed its boundary characters are
-  actual U+00A0 code points (`0xA0`), not visually similar ASCII spaces. Confirmed
-  `CollectionRun.failures[*].error.detail` remains the exact original input for all four
-  cases and receives no incidental normalization.
-- Scope check: only the model constant/validator references, pipeline import and one
-  normalization call, the regression test, and this handoff rotation changed. No schema,
-  migration, status, aggregation, error-selection, failure-shape, or logging behavior
-  changed. No further findings.
-- Verdict: **Approved**. The multi-source partial-success handling slice and its
-  correction are accepted; no additional correction pass is required.
-- Exact requested corrections: none.
-- STOP — do not merge to `main`, begin another Phase 2 slice, contact providers, or
-  perform the Phase 2 exit-gate audit until the user explicitly authorizes it.
-
-**Merge record (appended, not a rewrite of the entry above):** Approved at review
-commit `9441ee2` (no findings, after the whitespace-normalization correction recorded
-earlier in this same review cycle). Per user authorization,
-`phase-2/partial-success-handling` was merged into `main` with a normal merge commit
-(`002b7f8`; `--no-ff`, no squash/rebase/force-push) and pushed. `main`/`origin/main`
-are both now at `002b7f8`. Verified: the feature branch was clean and pushed at
-`9441ee2`, and `main`/`origin/main` were still at `02ef086` immediately before the
-merge; `main` has zero content diff against the feature branch (`git diff main
-phase-2/partial-success-handling --stat` empty); migration `0017` remains the sole
-Alembic head; `python -m scripts.check_repo` exited `0`; `git diff --check` was
-clean; working tree clean throughout. No `/compact`, network request, or database
-mutation was performed during the merge.
-
-**Rollback boundary:** reverting `002b7f8` (a single merge commit) restores `main` to
-`02ef086` exactly — no schema/migration exists in this slice to downgrade, and no
-data migration accompanies it (every column this slice populates —
-`collection_run_provider_attempts.status='partial'`/`error_category`/`error_message`/
-`retry_count`/`rate_limited`/`incomplete_results`, `collection_runs.failures` — already
-existed from Phase 1). This merges the multi-source partial-success handling slice
-only (`backend/app/ingestion/pipeline.py`, `backend/app/db/models/
-collection_run_provider_attempt.py`'s `COVERED_WHITESPACE` promotion, their tests, and
-the documentation files listed in the `Work done` entries above) — it does **not**
-touch Tier 4, `QueryPlanner`, `ProviderRegistry`, any live provider, the Phase 2
-exit-gate audit, or any other Phase 2 work, all of which remain not started and are
-not authorized by this merge.
-
----
-
-## Iteration 2
-
-### Work done
-
 - Date/agent: 2026-09-02, Claude Code (Sonnet 5). Class H implementation of the
   approved QueryPlanner fixture-integration slice on `phase-2/query-planner`,
   based on clean `main@5b2c947`. This is a genuinely new product slice
@@ -329,5 +211,161 @@ not authorized by this merge.
 - Deviations/known limitations: none beyond the already-recorded, pre-existing
   `alembic check` substitution.
 - STOP — awaiting Codex review. Do not merge, begin `ProviderRegistry`/
+  multi-provider orchestration, add schema changes, contact live providers, wire
+  `QueryPlanner` into `pipeline.run()`, or start any other slice.
+
+### Work review
+
+- Date/agent: 2026-09-02, Codex. Implementation diff reviewed:
+  `5b2c947..d7cb03c` on `phase-2/query-planner`.
+- Independent verification: inspected the complete planner, focused tests, and
+  architecture/roadmap changes. Ran the genuine external canonical verifier focused
+  on `tests/test_query_planner.py`: all **10 steps PASS**, including Ruff, mypy,
+  repository/diff checks, disposable-database safety and reachability, **33 focused
+  tests**, **1438 full-suite tests**, and temporary-directory cleanup.
+- Confirmed behavior: source expansion and explicit-empty semantics are correct;
+  malformed `enabled_sources` values and unknown sources fail before provider use;
+  field mappings, remote-rule behavior, per-source enforcement, input copying, and the
+  one-source fixture/pipeline compatibility proof otherwise match the approved scope.
+- **Medium — the canonical-slug check accepts a final newline.**
+  `backend/app/discovery/query_planner.py` compiles
+  `^[a-z0-9][a-z0-9._-]*$` and tests it with `Pattern.match()`. In Python, `$` may
+  match immediately before a final newline: the current implementation accepts
+  `"fixture_provider\n"` even though `Pattern.fullmatch()` rejects it. This violates
+  the claimed exact lowercase-ASCII-slug boundary and can let a planner identifier
+  differ from the canonical value later produced by ORM trimming. Use an actual full
+  match (`fullmatch`, with a pattern suitable for it) and add isolated regressions for
+  a trailing LF and CR/LF on the provider, capability-map key, and embedded source
+  paths.
+- **Medium — unbounded PostgreSQL numeric can become non-finite during planning.**
+  `saved_searches.radius_miles` is deliberately an unconstrained-precision PostgreSQL
+  `numeric`, while `SourceQuery.radius_miles` is `float`. The direct conversion
+  `float(saved_search.radius_miles)` turns a valid stored value such as
+  `Decimal("1e10000")` into positive infinity, and Pydantic currently accepts that
+  infinity. A non-finite provider query is neither the stored value nor a usable radius.
+  Convert and then require `math.isfinite`, raising a fixed, categorical
+  `QueryPlanValidationError` on overflow/non-finite output. Add accepted finite/fractional
+  and rejected overflow regressions; do not add a database bound or migration.
+- **Low — normative architecture text claims deferred orchestration already exists.**
+  `docs/ARCHITECTURE.md` §6.6 steps 2–3 still say `ingestion/pipeline.py` records a
+  planning-time failure and avoids the provider call. The same new section later
+  correctly says the planner is not wired and those behaviors require the future
+  ProviderRegistry/orchestration loop. Rewrite steps 2–3 in future/ownership-neutral
+  terms: the future orchestrator must record/continue and must not call `discover()`;
+  the current `pipeline.run()` does neither planning nor accept `None`.
+- **Low — executable schema comments still say QueryPlanner is deferred.**
+  `backend/app/schemas/provider.py` still says source expansion and
+  `local_enforcement` assignment are deferred and callers construct queries directly.
+  Update those comments/docstrings to distinguish the now-implemented planner from its
+  still-deferred production orchestration/wiring. No schema behavior change is needed.
+- Verdict: **Changes requested.** The planner design is accepted, but the two bounded
+  executable corrections and two documentation corrections above are required before
+  merge.
+- STOP — do not merge, begin ProviderRegistry/multi-provider orchestration, contact a
+  provider, add a migration, or start another slice. Apply only these corrections after
+  user authorization, rerun the focused canonical verifier/full suite, and return for
+  re-review.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-09-02, Claude Code (Sonnet 5). Class H correction pass on
+  `phase-2/query-planner` for the four bounded findings from review commit
+  (uncommitted at review time; committed together with this correction — see
+  Iteration 1's `Work review` above, preserved byte-for-byte, not rewritten).
+  Base: `d7cb03c` plus the uncommitted review. No product code beyond the exact
+  four corrections requested: `ProviderRegistry`, multi-provider orchestration,
+  schema, migrations, and any wiring of `QueryPlanner` into `pipeline.run()`
+  remain untouched.
+- Outcome, addressing each finding exactly:
+  1. **Canonical-slug full-match.** `query_planner.py`'s `_CANONICAL_SLUG_PATTERN`
+     is now checked with `.fullmatch()` at all three sites (provider, capability
+     mapping key, embedded `SourceCapabilities.source`) instead of `.match()`.
+     Python's `$` matches either true end-of-string or immediately before a
+     single trailing `\n`, so `.match()` wrongly accepted
+     `"fixture_provider\n"`; `.fullmatch()` requires the match to consume the
+     entire string, closing that gap — confirmed empirically before and after.
+     Six new isolated regressions: trailing LF and CRLF for each of the
+     provider/capability-key/embedded-source paths, each holding the other two
+     identifiers valid so only the intended check fires. (CRLF was already
+     rejected pre-fix — `\r` was never in the allowed character class — so
+     those two are confirmatory, not regression, tests; only the LF variants
+     would have failed before this fix. Stated explicitly in the test file's
+     own comment.)
+  2. **`radius_miles` finiteness.** After `Decimal -> float` conversion,
+     `math.isfinite()` is now required; a non-finite result (e.g.
+     `Decimal("1e10000")` overflowing to infinity — a legitimately storable
+     value under `saved_searches.radius_miles`'s unconstrained-precision
+     `numeric`) raises a new fixed, categorical `QueryPlanValidationError`
+     (`_ERROR_RADIUS_MILES_NOT_FINITE`) that never embeds the actual value or
+     the words "inf"/"infinity". Two new tests: an ordinary finite fractional
+     value is accepted; `Decimal("1e10000")` is rejected. No database
+     `CHECK`/migration added, per instruction.
+  3. **`ARCHITECTURE.md` §6.6 steps 2–3, and their "Behavior summary" bullet
+     restating the same claim**, no longer assert that the current
+     `ingestion/pipeline.py::run()` records planning-time failures or handles a
+     `None` planned query — neither is true today (`run()` doesn't call
+     `QueryPlanner.plan()` at all). Both responsibilities are now attributed
+     explicitly to the future ProviderRegistry/multi-provider orchestrator,
+     cross-referenced to this same section's own "Phase 2 implementation
+     notes". Checked the rest of §6.6 for the same stale claim restated
+     elsewhere — found and fixed one additional instance (the summary bullet)
+     beyond the two numbered steps Codex named, for internal consistency
+     within the same section.
+  4. **`backend/app/schemas/provider.py`'s `SourceQuery` docstring and
+     `local_enforcement` comment** now distinguish "`QueryPlanner.plan()` —
+     implemented" from "wiring into `ingestion/pipeline.py` — still deferred",
+     replacing the stale "QueryPlanner (deferred)" wording. No schema or
+     validator change — confirmed the diff is comment-only.
+- A fresh-context adversarial review (below) found one additional test-isolation
+  gap beyond the four findings, fixed in this same pass: the original
+  capability-map-key trailing-LF/CRLF tests set *both* the dict key and the
+  embedded `.source` to the same invalid string, so they could not distinguish
+  "the key check fired" from "the embedded-source check fired" (both live
+  behind one `or`). Fixed by keeping the embedded `.source` a valid — but
+  deliberately different-from-the-key — slug in both tests, isolating the
+  key-specific path the same way the embedded-source tests already isolated
+  theirs.
+- Files changed: `backend/app/discovery/query_planner.py` (fullmatch; finite
+  check; new error constant and docstring additions),
+  `backend/tests/test_query_planner.py` (8 new tests: 6 slug/newline, 2
+  radius-finiteness; one existing pair of tests corrected for isolation),
+  `docs/ARCHITECTURE.md` (§6.6 steps 2–3 and summary bullet reattributed to the
+  future orchestrator), `backend/app/schemas/provider.py` (comment-only), this
+  handoff entry (Iteration 1's `Work done`/`Work review` preserved verbatim,
+  oldest prior iteration dropped per the rotation rule). No schema, migration,
+  `ingestion/pipeline.py`, `ProviderRegistry`, orchestration, Tier 4, or
+  live-provider file touched.
+- Verification: genuine external `python scripts/verify.py --level routine
+  --focus tests/test_query_planner.py` — all **10 steps PASS**: Ruff
+  format/check, mypy (85 source files), `check_repo.py`, `git diff --check`,
+  database-URL safety, real test-database reachability, **41 focused tests**
+  (was 33; +8), **1446 full-suite tests** (was 1438; +8), temp-directory
+  cleanup, ~137s. `alembic heads` confirms `0017` remains the sole head; `git
+  diff --stat -- backend/migrations/` is empty. `alembic current` against the
+  configured dev database (`jobgoblin`) confirmed unchanged at the same
+  pre-existing `0006` before and after this pass — no `alembic upgrade` was
+  run; all schema/database work ran only against the disposable
+  `jobgoblin_test` database.
+- Adversarial self-review: dispatched a fresh-context subagent against the
+  actual diff. It independently re-verified the `.fullmatch()` fix by direct
+  regex execution (not just trusting the diff) and confirmed CRLF was already
+  rejected pre-fix, correctly distinguishing genuine regressions from
+  confirmatory tests; traced the `radius_miles` finite check end-to-end and
+  confirmed no false-positive path on an ordinary value and no value/"inf"
+  leakage in the new error message; confirmed `ARCHITECTURE.md` §6.6 is now
+  internally consistent throughout, not just at the two numbered steps;
+  confirmed `provider.py`'s diff is comment-only; and confirmed the capability-
+  map-key isolation gap described above, which was fixed in this same pass
+  before finalizing. It also flagged that this handoff entry did not yet exist
+  at the time it ran (an artifact of running the review before writing this
+  `Work done` section, not a defect) and confirmed the diff's scope is exactly
+  the four corrections, their tests, and this handoff — nothing else.
+- Deviations/known limitations: none beyond the already-recorded, pre-existing
+  `alembic check` substitution.
+- STOP — awaiting Codex re-review. Do not merge, begin `ProviderRegistry`/
   multi-provider orchestration, add schema changes, contact live providers, wire
   `QueryPlanner` into `pipeline.run()`, or start any other slice.

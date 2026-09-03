@@ -1,3 +1,4 @@
+import math
 import re
 from collections.abc import Sequence
 
@@ -10,6 +11,12 @@ from app.schemas.provider import ProviderCapabilities, SourceQuery
 # ASCII, starts with a letter/digit, otherwise letters/digits/`.`/`_`/`-`.
 # `QueryPlanner` enforces the same grammar in memory, before any of these
 # values are trusted to build a query — see `QueryPlanValidationError`.
+#
+# Checked with `.fullmatch()`, never `.match()`: Python's `$` matches either
+# at the true end of the string *or* immediately before a single trailing
+# `\n` — so `.match()` against this pattern would wrongly accept
+# `"fixture_provider\n"` even though it is not a canonical slug. `.fullmatch()`
+# requires the match to consume the entire string, closing that gap.
 _CANONICAL_SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 
 # Every `QueryPlanValidationError` message below is a fixed, categorical
@@ -46,6 +53,9 @@ _ERROR_ENABLED_SOURCES_DUPLICATE = (
     "enabled_sources value for the selected provider contains duplicate source names"
 )
 _ERROR_UNKNOWN_SOURCE = "a requested source is not present in provider capabilities"
+_ERROR_RADIUS_MILES_NOT_FINITE = (
+    "saved_search.radius_miles could not be converted to a finite radius"
+)
 
 # Fields checked against one of `SourceCapabilities`' 4 dedicated booleans,
 # never against the generic `supported_query_fields` set — authoritative
@@ -107,7 +117,12 @@ class QueryPlanValidationError(RuntimeError):
       but not a list, containing a non-string element, or containing
       duplicate source names — its own `CHECK` only guarantees a top-level
       JSON object, nothing about a given key's value;
-    - a requested source name absent from `provider_capabilities.sources`.
+    - a requested source name absent from `provider_capabilities.sources`;
+    - `saved_search.radius_miles` (an unconstrained-precision PostgreSQL
+      `numeric`) converting to a non-finite `float` (e.g. `Decimal("1e10000")`
+      overflows to infinity) — a non-finite radius is neither the stored
+      value nor a usable one, and `SourceQuery.radius_miles`'s own type
+      currently accepts it silently if not checked here.
 
     Every message above is a fixed, categorical string — see the module-level
     `_ERROR_*` constants for why no raise site ever interpolates the actual
@@ -187,10 +202,10 @@ class QueryPlanner:
         for that field; the dedicated boolean alone decides it, silently,
         every time.
         """
-        if not _CANONICAL_SLUG_PATTERN.match(provider_capabilities.provider):
+        if not _CANONICAL_SLUG_PATTERN.fullmatch(provider_capabilities.provider):
             raise QueryPlanValidationError(_ERROR_PROVIDER_SLUG_INVALID)
         for key, source_capabilities in provider_capabilities.sources.items():
-            if not _CANONICAL_SLUG_PATTERN.match(key) or not _CANONICAL_SLUG_PATTERN.match(
+            if not _CANONICAL_SLUG_PATTERN.fullmatch(key) or not _CANONICAL_SLUG_PATTERN.fullmatch(
                 source_capabilities.source
             ):
                 raise QueryPlanValidationError(_ERROR_CAPABILITY_SOURCE_SLUG_INVALID)
@@ -231,9 +246,11 @@ class QueryPlanner:
             return None
 
         excluded_titles = list(saved_search.excluded_titles or [])
-        radius_miles = (
-            float(saved_search.radius_miles) if saved_search.radius_miles is not None else None
-        )
+        radius_miles: float | None = None
+        if saved_search.radius_miles is not None:
+            radius_miles = float(saved_search.radius_miles)
+            if not math.isfinite(radius_miles):
+                raise QueryPlanValidationError(_ERROR_RADIUS_MILES_NOT_FINITE)
         salary_floor = saved_search.salary_floor
         employment_types = list(saved_search.employment_types or [])
         seniority = list(saved_search.seniority or [])

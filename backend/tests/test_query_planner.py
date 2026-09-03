@@ -1,6 +1,7 @@
 import uuid
 from collections.abc import Sequence
 from datetime import UTC, datetime
+from decimal import Decimal
 
 import pytest
 from sqlalchemy import select
@@ -185,6 +186,69 @@ def test_capability_key_source_mismatch_raises() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Trailing-newline slug rejection (review finding: `.match()` against a
+# `$`-anchored pattern wrongly accepts a single trailing `\n`; `.fullmatch()`
+# closes that gap). CRLF is included for completeness even though it was
+# already rejected before this fix (`\r` is never in the allowed character
+# class), so these are isolated regressions per identifier path, not all
+# proving a behavior change.
+# ---------------------------------------------------------------------------
+
+
+def test_provider_slug_rejects_trailing_lf() -> None:
+    saved_search = _saved_search(enabled_sources=None)
+    capabilities = _capabilities(
+        {"fixture_ats": _source_capabilities("fixture_ats")}, provider="fixture_provider\n"
+    )
+    with pytest.raises(QueryPlanValidationError):
+        QueryPlanner.plan(saved_search, capabilities, titles=[], locations=[])
+
+
+def test_provider_slug_rejects_trailing_crlf() -> None:
+    saved_search = _saved_search(enabled_sources=None)
+    capabilities = _capabilities(
+        {"fixture_ats": _source_capabilities("fixture_ats")}, provider="fixture_provider\r\n"
+    )
+    with pytest.raises(QueryPlanValidationError):
+        QueryPlanner.plan(saved_search, capabilities, titles=[], locations=[])
+
+
+def test_capability_map_key_rejects_trailing_lf() -> None:
+    """Only the dict key carries the trailing LF; the embedded `.source`
+    stays a valid slug (deliberately different from the key), isolating
+    this check from the embedded-source check and from the separate
+    key/source mismatch check — both of which the OR-condition would
+    otherwise make ambiguous if both sides were invalid."""
+    saved_search = _saved_search(enabled_sources=None)
+    capabilities = _capabilities({"fixture_ats\n": _source_capabilities("fixture_ats")})
+    with pytest.raises(QueryPlanValidationError):
+        QueryPlanner.plan(saved_search, capabilities, titles=[], locations=[])
+
+
+def test_capability_map_key_rejects_trailing_crlf() -> None:
+    saved_search = _saved_search(enabled_sources=None)
+    capabilities = _capabilities({"fixture_ats\r\n": _source_capabilities("fixture_ats")})
+    with pytest.raises(QueryPlanValidationError):
+        QueryPlanner.plan(saved_search, capabilities, titles=[], locations=[])
+
+
+def test_embedded_source_rejects_trailing_lf() -> None:
+    """Key stays a valid slug; only the embedded `.source` carries the
+    trailing LF, isolating this check from the mapping-key check above."""
+    saved_search = _saved_search(enabled_sources=None)
+    capabilities = _capabilities({"fixture_ats": _source_capabilities("fixture_ats\n")})
+    with pytest.raises(QueryPlanValidationError):
+        QueryPlanner.plan(saved_search, capabilities, titles=[], locations=[])
+
+
+def test_embedded_source_rejects_trailing_crlf() -> None:
+    saved_search = _saved_search(enabled_sources=None)
+    capabilities = _capabilities({"fixture_ats": _source_capabilities("fixture_ats\r\n")})
+    with pytest.raises(QueryPlanValidationError):
+        QueryPlanner.plan(saved_search, capabilities, titles=[], locations=[])
+
+
+# ---------------------------------------------------------------------------
 # Defensive titles/locations validation.
 # ---------------------------------------------------------------------------
 
@@ -287,6 +351,27 @@ def test_radius_miles_mapped_independently_of_locations_population() -> None:
     assert result.radius_miles == 25.0
     assert result.locations == []
     assert result.local_enforcement["fixture_ats"] == set()  # radius alone, remotely supported
+
+
+def test_radius_miles_accepts_finite_fractional_value() -> None:
+    saved_search = _saved_search(enabled_sources=None, radius_miles=Decimal("12.5"))
+    capabilities = _capabilities({"fixture_ats": _source_capabilities("fixture_ats")})
+    result = QueryPlanner.plan(saved_search, capabilities, titles=[], locations=[])
+    assert result is not None
+    assert result.radius_miles == 12.5
+
+
+def test_radius_miles_rejects_decimal_overflow() -> None:
+    """`saved_searches.radius_miles` is an unconstrained-precision PostgreSQL
+    `numeric` — a value this large is a legitimately storable `Decimal` but
+    overflows `float` to infinity. A non-finite radius is neither the stored
+    value nor a usable one."""
+    saved_search = _saved_search(enabled_sources=None, radius_miles=Decimal("1e10000"))
+    capabilities = _capabilities({"fixture_ats": _source_capabilities("fixture_ats")})
+    with pytest.raises(QueryPlanValidationError) as excinfo:
+        QueryPlanner.plan(saved_search, capabilities, titles=[], locations=[])
+    assert "1e10000" not in str(excinfo.value)
+    assert "inf" not in str(excinfo.value).lower()
 
 
 def test_every_representable_field_maps_correctly() -> None:

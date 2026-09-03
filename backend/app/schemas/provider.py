@@ -6,8 +6,12 @@ from pydantic import BaseModel, Field
 class SourceQuery(BaseModel):
     """What a provider is asked to do (docs/ARCHITECTURE.md §6.1). An empty
     `sources` list means "run this provider with zero sources" (don't call
-    it), not "all sources" — that expansion is `QueryPlanner`'s job
-    (deferred; this slice's callers construct `SourceQuery` directly).
+    it), not "all sources" — that expansion is `QueryPlanner.plan()`'s job
+    (`app/discovery/query_planner.py` — implemented). What remains deferred
+    is wiring it into `ingestion/pipeline.py`'s own call sites: nothing in
+    this codebase yet calls `plan()` automatically, so a caller may still
+    construct a `SourceQuery` directly instead, exactly as every current
+    test does.
     """
 
     sources: list[str] = Field(default_factory=list)
@@ -25,7 +29,10 @@ class SourceQuery(BaseModel):
     excluded_companies: list[str] = Field(default_factory=list)
     max_results: int | None = None
 
-    # Set by QueryPlanner (deferred), never by a caller directly in this slice.
+    # Set by `QueryPlanner.plan()` (implemented) when a caller uses it; a
+    # caller constructing `SourceQuery` directly instead must populate this
+    # itself if it wants enforcement tracked — nothing does so automatically
+    # yet, since `plan()` is not wired into `ingestion/pipeline.py`.
     local_enforcement: dict[str, set[str]] = Field(default_factory=dict)
 
 
