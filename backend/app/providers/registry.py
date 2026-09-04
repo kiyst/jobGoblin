@@ -12,6 +12,8 @@ from app.schemas.provider import ProviderCapabilities
 # because it originates from a `DiscoveryProvider`/`ProviderCapabilities`
 # object rather than raw input — an adapter can be buggy, and every message
 # here must be safe to log or persist verbatim.
+_ERROR_PROVIDER_NAME_UNAVAILABLE = "a provider's name attribute is missing or could not be read"
+_ERROR_PROVIDER_NAME_NOT_STRING = "a provider's name is not a string"
 _ERROR_INVALID_PROVIDER_SLUG = (
     "a registered provider's name does not match the canonical provider-slug grammar"
 )
@@ -20,7 +22,10 @@ _ERROR_CAPABILITIES_RAISED = "a provider's capabilities() call raised or returne
 _ERROR_CAPABILITIES_NAME_MISMATCH = (
     "a provider's capabilities().provider does not match its own registered name"
 )
-_ERROR_NAME_DRIFT = "a registered provider's current name no longer matches its registered name"
+_ERROR_NAME_DRIFT = (
+    "a registered provider's current name is unavailable or no longer matches its "
+    "registered name"
+)
 _ERROR_UNKNOWN_PROVIDER = "no provider is registered under the requested name"
 
 
@@ -29,17 +34,23 @@ class ProviderRegistrationError(RuntimeError):
     configuration/wiring problem, never a per-saved-search runtime condition
     (that is `UnknownProviderError`, or the future orchestrator's own
     planning-failure handling). Every raise site is one of:
+    - a provider's `.name` attribute being missing, raising on access, or not
+      a `str` — accessing `.name` is not assumed safe, since a
+      `DiscoveryProvider` is an arbitrary object;
     - a provider's `.name` failing the canonical lowercase-ASCII-slug
       grammar (`app.schemas.identifiers.is_canonical_slug`);
     - two providers registered under the same name;
-    - `provider.capabilities()` raising, or returning a malformed value (its
-      declared return type is not runtime-enforced) during registration;
+    - `provider.capabilities()` raising, or not returning an actual
+      `ProviderCapabilities` instance (its declared return type is not
+      runtime-enforced — a duck-shaped object with a matching `.provider`
+      attribute is rejected too, before it is ever read or copied);
     - `provider.capabilities().provider` not matching the provider's own
       registered `.name`;
-    - a previously-registered provider's `.name` having changed since
-      registration — detected when the entry is resolved (`get()`), not
-      proactively, since a `DiscoveryProvider` is an arbitrary object and is
-      never assumed immutable.
+    - a previously-registered provider's `.name` attribute having changed,
+      started raising, or stopped being a `str` since registration —
+      detected when the entry is resolved (`get()`), not proactively, since
+      a `DiscoveryProvider` is an arbitrary object and is never assumed
+      immutable.
 
     Every message is a fixed, categorical string (see the module-level
     `_ERROR_*` constants) — never the original exception's text, a provider
@@ -82,23 +93,32 @@ class ProviderRegistry:
     def __init__(self, providers: Sequence[DiscoveryProvider]) -> None:
         entries: dict[str, RegisteredProvider] = {}
         for provider in providers:
-            name = provider.name
+            try:
+                name = provider.name
+            except Exception:
+                # A `DiscoveryProvider` is an arbitrary object — a missing
+                # `.name` attribute, or a `.name` property that itself
+                # raises, must not escape as a raw exception.
+                raise ProviderRegistrationError(_ERROR_PROVIDER_NAME_UNAVAILABLE) from None
+            if not isinstance(name, str):
+                raise ProviderRegistrationError(_ERROR_PROVIDER_NAME_NOT_STRING)
             if not is_canonical_slug(name):
                 raise ProviderRegistrationError(_ERROR_INVALID_PROVIDER_SLUG)
             if name in entries:
                 raise ProviderRegistrationError(_ERROR_DUPLICATE_PROVIDER_NAME)
             try:
                 capabilities = provider.capabilities()
-                capabilities_provider = capabilities.provider
             except Exception:
-                # Covers both `capabilities()` raising outright and a
-                # malformed return value (e.g. `None`, or an object with no
-                # `.provider` attribute) — a `DiscoveryProvider`'s declared
-                # return type is not runtime-enforced, so either failure
-                # mode must convert to the same sanitized, categorical
-                # exception rather than let a raw `AttributeError` escape.
                 raise ProviderRegistrationError(_ERROR_CAPABILITIES_RAISED) from None
-            if capabilities_provider != name:
+            if not isinstance(capabilities, ProviderCapabilities):
+                # Covers every malformed return: `None`, or a duck-shaped
+                # object (e.g. `SimpleNamespace(provider=name)`) that would
+                # otherwise pass the attribute read below and only fail
+                # later, unsanitized, at `.model_copy(...)`. Requiring the
+                # actual type before either is read/copied keeps the whole
+                # path inside this one sanitized boundary.
+                raise ProviderRegistrationError(_ERROR_CAPABILITIES_RAISED)
+            if capabilities.provider != name:
                 raise ProviderRegistrationError(_ERROR_CAPABILITIES_NAME_MISMATCH)
             entries[name] = RegisteredProvider(
                 provider=provider, capabilities=capabilities.model_copy(deep=True)
@@ -116,15 +136,23 @@ class ProviderRegistry:
 
         Raises `UnknownProviderError` (message never contains `name`) if
         nothing is registered under it. Raises `ProviderRegistrationError`
-        if the provider's own `.name` no longer matches the name it was
-        registered under — checked on every resolution, since a
-        `DiscoveryProvider` is an arbitrary object and is never assumed
-        immutable.
+        if the provider's own `.name` is missing, raises on access, or no
+        longer matches the name it was registered under — checked on every
+        resolution, since a `DiscoveryProvider` is an arbitrary object and is
+        never assumed immutable.
         """
         entry = self._entries.get(name)
         if entry is None:
             raise UnknownProviderError(_ERROR_UNKNOWN_PROVIDER)
-        if entry.provider.name != name:
+        try:
+            current_name = entry.provider.name
+        except Exception:
+            # Same "arbitrary object" treatment as construction-time access:
+            # a `.name` property that starts raising after registration must
+            # fail closed the same way an outright mismatch does, never
+            # escape raw.
+            raise ProviderRegistrationError(_ERROR_NAME_DRIFT) from None
+        if current_name != name:
             raise ProviderRegistrationError(_ERROR_NAME_DRIFT)
         return RegisteredProvider(
             provider=entry.provider, capabilities=entry.capabilities.model_copy(deep=True)

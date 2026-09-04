@@ -735,13 +735,20 @@ directly. **Implemented** as `app/providers/registry.py::ProviderRegistry` (Phas
 ProviderRegistry slice) as a pure in-memory name→instance directory:
 
 - **Construction-time validation, fail-closed.** For each `DiscoveryProvider` passed to
-  `ProviderRegistry(providers)`: its `.name` must match the canonical lowercase-ASCII-slug
-  grammar (`app/schemas/identifiers.py::is_canonical_slug()` — the same predicate
-  `QueryPlanner` uses, extracted so the grammar has one shared implementation instead of
-  independently drifting copies); two providers sharing the same `.name` are rejected;
-  `.capabilities()` is called exactly once per provider, and a raised exception is
-  converted to a fixed, categorical `ProviderRegistrationError` that never exposes the
-  original exception's text; `capabilities().provider` must equal the provider's own
+  `ProviderRegistry(providers)`: accessing `.name` at all is guarded — a missing
+  attribute or a `.name` property that raises converts to a fixed
+  `ProviderRegistrationError`, and a `.name` that is not a `str` is rejected before it is
+  ever checked against the grammar; the (now-confirmed-`str`) name must match the
+  canonical lowercase-ASCII-slug grammar (`app/schemas/identifiers.py::is_canonical_slug()`
+  — the same predicate `QueryPlanner` uses, extracted so the grammar has one shared
+  implementation instead of independently drifting copies); two providers sharing the
+  same `.name` are rejected; `.capabilities()` is called exactly once per provider, and
+  either a raised exception or a return value that is not an actual `ProviderCapabilities`
+  instance (a duck-shaped object with a coincidentally-matching `.provider` attribute is
+  rejected too, before it is ever read further or copied — its declared return type is
+  not runtime-enforced) converts to the same fixed, categorical
+  `ProviderRegistrationError` that never exposes the original exception's text or the
+  malformed value itself; `capabilities().provider` must equal the provider's own
   `.name`. Any violation raises `ProviderRegistrationError` before the registry is usable
   at all — a wiring/configuration problem caught at construction, not at per-saved-search
   runtime.
@@ -752,9 +759,10 @@ ProviderRegistry slice) as a pure in-memory name→instance directory:
   registry's own stored snapshot or any other caller's previously resolved copy.
   `.capabilities()` itself is never called again after registration.
 - **Name-drift detection on resolution, not proactively.** A `DiscoveryProvider` is an
-  arbitrary object, never assumed immutable — `get()` re-checks that the provider's
-  current `.name` still equals the name it was registered under, and fails closed with
-  `ProviderRegistrationError` if it has drifted since registration.
+  arbitrary object, never assumed immutable — `get()` re-checks the provider's current
+  `.name` the same guarded way as construction (an inaccessible/raising `.name` is treated
+  identically to a mismatch), and fails closed with `ProviderRegistrationError` if it is
+  unavailable or no longer equals the name it was registered under.
 - **`names()`** returns every registered name, alphabetically sorted, as a new list on
   every call.
 - **`get(name)`** raises `UnknownProviderError` (message never contains `name`) if nothing
