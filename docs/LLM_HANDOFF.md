@@ -461,3 +461,36 @@ that detail.
   contact, parallel/concurrent provider execution, the scheduler, API
   routes, Tier 4, Phase 3, `ProviderRegistry` production composition, or any
   migration.
+
+### Work review
+
+- Date/agent: 2026-09-05, Codex. Correction diff independently reviewed:
+  `63e16ef..7384be5` on `phase-2/orchestration`.
+- Independent verification: inspected the corrected abort discovery/finalization flow,
+  source-issue aggregation, cleanup ordering, real initialization seam, associated tests,
+  and documentation. Ran the three timing-sensitive regressions five consecutive times
+  against PostgreSQL (**15/15 executions passed**), then the complete focused file
+  (**26 passed**). Ran the genuine canonical verifier focused on
+  `tests/test_orchestrator.py`: all **10 steps PASS**, including Ruff, mypy,
+  repository/diff checks, disposable-database safety/reachability, **26 focused tests**,
+  **1493 full-suite tests**, and temporary-directory cleanup.
+- Finding disposition: **all five prior findings are closed.** Abort recovery now queries
+  durable `status='running'` attempt rows by `collection_run_id`, closing the post-begin
+  commit window. It trusts the in-memory execution state only when its durable attempt-id
+  set exactly matches those running rows; an already-committed success is therefore not
+  re-finalized, its errors are not duplicated, and its terminal attempts are not
+  overwritten. The run rollup remains an absolute SQL-SUM reconciliation over attempt
+  rows. `state.possibly_incomplete` is now aggregated across providers, covering the
+  completed-source-plus-ProviderError case while leaving that source's attempt completed.
+  Cleanup identifiers are captured before assertions throughout the new test file. The
+  deletion race now invokes the real `run_saved_search()` initialization through a narrow
+  no-op-by-default coordination seam, with bounded waits and failure-safe task cleanup.
+- Scope/documentation: only the authorized orchestrator, tests, architecture text, and
+  handoff ledger changed; no model, migration, live provider, parallel execution,
+  scheduler, API, Tier 4, Phase 3, or production composition entered the pass. No further
+  findings.
+- Verdict: **Approved.** The bounded multi-provider orchestration slice and its correction
+  pass are accepted; no additional correction is required.
+- Exact requested corrections: none.
+- STOP — do not merge to `main` or begin another slice until the user explicitly
+  authorizes it.
