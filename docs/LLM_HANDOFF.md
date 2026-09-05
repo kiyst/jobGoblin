@@ -350,3 +350,34 @@ that detail.
 - STOP — awaiting Codex re-review. Do not merge or begin orchestration,
   pipeline ownership changes, `enabled_providers` semantics, ProviderRegistry
   production composition, provider contact, Tier 4, Phase 3, or migrations.
+
+### Work review
+
+- Date/agent: 2026-09-03, Codex. Correction diff reviewed:
+  `4ab3a0d..0784b07` on `phase-2/provider-registry`.
+- Independent verification: inspected every changed executable, test, and documentation
+  path; ran the six focused malformed-capabilities/name-access regressions directly
+  (**6 passed**); then ran the genuine external canonical verifier focused on
+  `tests/test_provider_registry.py`: all **10 steps PASS**, including Ruff, mypy,
+  repository/diff checks, disposable-database safety/reachability, **21 focused tests**,
+  **1467 full-suite tests**, and temporary-directory cleanup.
+- Prior-finding disposition: **closed**. Construction now establishes an actual
+  `ProviderCapabilities` instance before accessing/copying it, so a duck-shaped matching
+  object receives the fixed registration error rather than leaking `AttributeError`.
+  Construction-time provider-name access now sanitizes missing/raising attributes and
+  rejects non-string values before slug validation; resolution-time access likewise
+  converts a newly-raising property into the fixed drift/registration error. The ordinary
+  `Exception` boundary correctly leaves cancellation and process-control exceptions
+  uncaught.
+- Documentation/scope check: ARCHITECTURE §6.4 matches the corrected runtime boundary;
+  no QueryPlanner behavior, orchestration, pipeline ownership, enabled-provider
+  semantics, database model, migration, or provider contact entered the correction.
+  The disclosed hypothetical malicious `ProviderCapabilities` subclass is outside the
+  project-owned Pydantic contract and does not warrant broadening this bounded slice.
+  No further findings.
+- Verdict: **Approved**. The ProviderRegistry slice and bounded correction pass are
+  accepted; no additional correction is required.
+- Exact requested corrections: none.
+- STOP — do not merge to `main` or begin multi-provider orchestration, pipeline changes,
+  `enabled_providers` semantics, production composition, provider contact, Tier 4,
+  Phase 3, or any other slice until the user explicitly authorizes the next action.
