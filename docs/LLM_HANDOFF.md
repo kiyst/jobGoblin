@@ -335,3 +335,42 @@ that detail.
 - Exact requested corrections: none.
 - STOP — do not merge to `main` or begin Phase 3 until the user explicitly
   authorizes that action.
+
+### Merge record
+
+- Date: 2026-09-05. User authorized merging `phase-2/closure` into `main`
+  following Codex's Approved re-review and Phase 2 exit-gate sign-off
+  (commit `0ca367f`) above.
+- Pre-merge state: `main` and `origin/main` both at `4db557c`; feature
+  branch `phase-2/closure` pushed and clean at `0ca367f` (containing
+  correction commit `cffe8a1`, correction commit `d09ac00`, and Codex's
+  approval commit `0ca367f`).
+- Merge: `git merge --no-ff phase-2/closure` on `main` — merge commit
+  `d4bd606`. `git diff phase-2/closure HEAD` is empty (zero content
+  difference); `git diff --check` and `check_repo.py` both exit 0; working
+  tree clean.
+- Post-merge verification: genuine external `python scripts/verify.py
+  --level routine` (full run) — all **9 steps PASS** (Ruff format/check,
+  mypy, `check_repo.py`, `git diff --check`, disposable-database URL/
+  reachability, **1495 full-suite tests**, temp-directory cleanup).
+  `alembic heads` confirms `0017` remains the sole head; `git diff --stat
+  4db557c -- migrations/` is empty — no migration introduced by the merge.
+  Dev database (`jobgoblin`) confirmed unchanged at the pre-existing `0006`
+  — untouched throughout.
+- Pushed: `main` at `d4bd606`, matching `origin/main`.
+- Rollback boundary: to revert this slice, reset `main` to `4db557c` (the
+  commit immediately before this merge) — this removes both new fixture
+  pairs, the two fixture-driven identity tests in
+  `test_ingestion_pipeline.py`, the ARCHITECTURE.md §11 wording correction,
+  and the ROADMAP.md closure-candidate note cleanly, with no migration to
+  reverse and no data written by this slice to any environment.
+- **Phase 2 is officially complete.** Every documented Phase 2 requirement
+  is satisfied, intentionally deferred with an approved architectural
+  reason (Tier 4; `ProviderRegistry` production composition; live
+  providers — none of these are Phase 2 exit criteria), or now closed by
+  this branch; Codex's independent exit-gate review found no remaining
+  blocker. Tier 4 remains explicitly deferred, not implemented.
+- STOP — do not propose or begin Phase 3, live-provider integration,
+  production `ProviderRegistry` composition, parallel/concurrent provider
+  execution, the scheduler, API routes, or any migration without separate
+  authorization.
