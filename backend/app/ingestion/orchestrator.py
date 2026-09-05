@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import uuid
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from datetime import datetime
 
@@ -228,43 +229,90 @@ async def _finalize_provider_success(
             )
 
 
-async def _finalize_provider_aborted(
+async def _fetch_running_attempts(
+    engine: AsyncEngine, collection_run_id: uuid.UUID
+) -> list[CollectionRunProviderAttempt]:
+    """The durable, authoritative source of truth for "which attempt rows
+    are still in flight" on abort — never the Python-side
+    `current_attempt_ids`/`current_state` variables, which can be stale or
+    unset relative to what has actually committed. A cancellation delivered
+    after `_begin_provider_attempt()`'s transaction commits but before its
+    `await` returns leaves those Python variables unset even though real
+    `status='running'` rows now exist; a cancellation delivered after
+    `_finalize_provider_success()`'s transaction commits but before its
+    `await` returns leaves those same variables still pointing at a
+    provider whose rows are no longer `'running'` at all. Querying by
+    durable `status` closes both windows at once: the first case is found
+    and fixed here regardless of the Python variables; the second case is
+    correctly not found (and therefore left untouched) here, regardless of
+    them."""
+    async with AsyncSession(bind=engine) as session:
+        rows = await session.execute(
+            select(CollectionRunProviderAttempt).where(
+                CollectionRunProviderAttempt.collection_run_id == collection_run_id,
+                CollectionRunProviderAttempt.status == "running",
+            )
+        )
+        return list(rows.scalars().all())
+
+
+async def _finalize_running_attempts_aborted(
     engine: AsyncEngine,
     collection_run_id: uuid.UUID,
-    attempt_ids: dict[str, uuid.UUID],
-    state: ProviderExecutionState,
+    running_attempts: list[CollectionRunProviderAttempt],
+    state: ProviderExecutionState | None,
     failed_at: datetime,
 ) -> None:
-    """Best-effort, called only for the one provider that was still in
-    flight when a whole-run abort occurred. Every attempt row becomes
-    `'failed'` uniformly — never a mix of `'completed'`/`'partial'` derived
-    from a `DiscoveryResult` that may or may not have even been received —
-    with a fixed, sanitized `error_category`/`error_message` (never the
-    aborting exception's own text). `retry_count`/`rate_limited`/
-    `incomplete_results` still use `state.source_stats`, if known,
-    preserving genuinely-known telemetry through the failure; if the abort
-    happened before `state.source_stats` was ever populated (`discover()`
-    itself raised), every value falls back to its own safe default. Known
-    graceful `ProviderError` entries (`state.failures`) are still merged
-    into `collection_runs.failures` even though the run is aborting."""
+    """Best-effort, called only for attempt rows `_fetch_running_attempts`
+    durably found still `status='running'` at abort time — never for a
+    provider whose rows already reached a terminal status, regardless of
+    what the caller's own `current_attempt_ids`/`current_state` variables
+    still happen to reference. Every such row becomes `'failed'` uniformly
+    — never a mix of `'completed'`/`'partial'` derived from a
+    `DiscoveryResult` that may or may not have even been received — with a
+    fixed, sanitized `error_category`/`error_message` (never the aborting
+    exception's own text). The `WHERE status = 'running'` guard is repeated
+    on the UPDATE itself, not just the earlier `SELECT`, so a row that
+    somehow already turned terminal between the two is never clobbered.
+
+    `state` is the caller's own `ProviderExecutionState`, passed only when
+    the caller has already confirmed (by comparing durable attempt ids, not
+    by trusting `state is not None` alone) that it genuinely corresponds to
+    these still-running rows — `None` otherwise, in which case every value
+    falls back to its own safe default. Known graceful `ProviderError`
+    entries (`state.failures`) are merged into `collection_runs.failures`
+    only when `state` is trusted this way, so a state that was already
+    committed by `_finalize_provider_success` is never merged a second
+    time."""
     async with AsyncSession(bind=engine) as session, session.begin():
-        if state.failures:
+        if state is not None and state.failures:
             await session.execute(
                 update(CollectionRun)
                 .where(CollectionRun.id == collection_run_id)
                 .values(failures=CollectionRun.failures.op("||")(cast(state.failures, JSONB)))
             )
-        for source, attempt_id in attempt_ids.items():
-            stat = state.source_stats.get(source)
+        for attempt in running_attempts:
+            stat = state.source_stats.get(attempt.source) if state is not None else None
             await session.execute(
                 update(CollectionRunProviderAttempt)
-                .where(CollectionRunProviderAttempt.id == attempt_id)
+                .where(
+                    CollectionRunProviderAttempt.id == attempt.id,
+                    CollectionRunProviderAttempt.status == "running",
+                )
                 .values(
                     status="failed",
                     completed_at=failed_at,
-                    jobs_discovered=state.per_source_discovered.get(source, 0),
-                    jobs_inserted=state.per_source_inserted.get(source, 0),
-                    jobs_updated=state.per_source_updated.get(source, 0),
+                    jobs_discovered=(
+                        state.per_source_discovered.get(attempt.source, 0)
+                        if state is not None
+                        else 0
+                    ),
+                    jobs_inserted=(
+                        state.per_source_inserted.get(attempt.source, 0) if state is not None else 0
+                    ),
+                    jobs_updated=(
+                        state.per_source_updated.get(attempt.source, 0) if state is not None else 0
+                    ),
                     retry_count=stat.retry_count if stat is not None else 0,
                     rate_limited=stat.rate_limited if stat is not None else False,
                     incomplete_results=stat.incomplete_results if stat is not None else False,
@@ -281,6 +329,7 @@ async def run_saved_search(
     *,
     clock: Clock,
     observed_at: datetime,
+    _after_saved_search_locked: Callable[[], Awaitable[None]] | None = None,
 ) -> uuid.UUID:
     """Runs one `CollectionRun` spanning every provider selected for
     `saved_search_id`, sequentially. See docs/ARCHITECTURE.md's
@@ -325,23 +374,43 @@ async def run_saved_search(
       :delta`, one SQL expression, in the same transaction as the attempt
       rows — this cannot race with anything, since both writes commit or
       roll back together).
-    - On a whole-run abort: the in-flight provider's own attempt rows are
-      finalized best-effort from whatever `ProviderExecutionState` already
-      captured, then `CollectionRun`'s own rollup is *recomputed from a
-      fresh `SELECT SUM(...)` over every persisted attempt row for this
-      run* and written as an absolute value — never derived from a
-      parallel in-memory running total, which could fall out of sync with
-      the database if a cancellation is delivered between a provider's
-      commit finishing and the next line of Python resuming. This makes
-      `CollectionRun`'s rollup always exactly `SUM` over its own attempt
-      rows, provably, on every path.
+    - On a whole-run abort: still-`status='running'` attempt rows are
+      rediscovered from the database itself (`_fetch_running_attempts`),
+      never from the `current_attempt_ids`/`current_state` Python
+      variables alone — a cancellation can be delivered after either
+      `_begin_provider_attempt()` or `_finalize_provider_success()`
+      commits but before its own `await` returns control to the next line
+      of Python, and in either case those variables would otherwise be
+      wrong (unset when rows are genuinely still running; stale when rows
+      are already terminal). Rediscovered running rows are finalized
+      best-effort, enriched with `ProviderExecutionState` telemetry only
+      when the caller's own state provably corresponds to exactly those
+      rows (by durable attempt-id set comparison, not by `state is not
+      None` alone) — so an already-committed provider's rows and
+      `failures` entries are never re-touched or duplicated. `CollectionRun`'s
+      own rollup is then *recomputed from a fresh `SELECT SUM(...)` over
+      every persisted attempt row for this run* and written as an
+      absolute value — never derived from a parallel in-memory running
+      total. This makes `CollectionRun`'s rollup always exactly `SUM`
+      over its own attempt rows, provably, on every path.
     - Status: `'failed'` only for a whole-run abort; `'completed_with_errors'`
       for a natural completion with any planning failure, graceful
-      `ProviderError`, non-`'completed'` attempt, parse error, or identity
-      conflict — including the case where *every* provider produced a
-      planning failure; `'completed'` otherwise, including an explicit
-      empty provider list or every provider being silently skipped by
-      `QueryPlanner` returning `None`.
+      `ProviderError` (aggregated per provider via `state.
+      possibly_incomplete`, exactly mirroring `pipeline.run()`'s own use of
+      `DiscoveryResult.possibly_incomplete` — catching a `ProviderError` on
+      an otherwise-`completed=True` source too, not just a non-`'completed'`
+      attempt), parse error, or identity conflict — including the case
+      where *every* provider produced a planning failure; `'completed'`
+      otherwise, including an explicit empty provider list or every
+      provider being silently skipped by `QueryPlanner` returning `None`.
+
+    `_after_saved_search_locked` is a narrow, private test-only
+    coordination seam — `None` (a no-op) for every real caller. If
+    provided, it is awaited once, immediately after the `SavedSearch` row
+    is loaded and validated but still `FOR SHARE`-locked within the
+    initialization transaction, letting a test interleave a concurrent
+    delete attempt against the *real* lock this function itself takes,
+    without duplicating its SQL.
     """
     async with AsyncSession(bind=engine, expire_on_commit=False) as session, session.begin():
         loaded = await session.execute(
@@ -352,6 +421,9 @@ async def run_saved_search(
             raise SavedSearchNotFoundError(_ERROR_SAVED_SEARCH_NOT_FOUND)
         if not saved_search.is_active:
             raise InactiveSavedSearchError(_ERROR_INACTIVE_SAVED_SEARCH)
+
+        if _after_saved_search_locked is not None:
+            await _after_saved_search_locked()
 
         titles_result = await session.execute(
             select(SavedSearchTitle.title)
@@ -409,7 +481,7 @@ async def run_saved_search(
     any_planning_failure = False
     run_had_parse_error = False
     run_had_conflict = False
-    any_attempt_not_completed = False
+    run_had_source_issue = False
     current_attempt_ids: dict[str, uuid.UUID] | None = None
     current_state: ProviderExecutionState | None = None
 
@@ -469,9 +541,15 @@ async def run_saved_search(
             await _finalize_provider_success(
                 engine, collection_run_id, attempt_ids, state, provider_completed_at
             )
-            any_attempt_not_completed = any_attempt_not_completed or any(
-                resolve_attempt_status(stat) != "completed" for stat in state.source_stats.values()
-            )
+            # `state.possibly_incomplete` mirrors `DiscoveryResult.
+            # possibly_incomplete` exactly (any source not completed, any
+            # incomplete_results, or any ProviderError at all) — it
+            # subsumes the narrower "any attempt status != completed"
+            # check and additionally catches a graceful `ProviderError` on
+            # an otherwise `completed=True`, `incomplete_results=False`
+            # source, which `resolve_attempt_status()` alone would call
+            # `'completed'` and miss entirely.
+            run_had_source_issue = run_had_source_issue or state.possibly_incomplete
             run_had_parse_error = run_had_parse_error or state.had_parse_error
             run_had_conflict = run_had_conflict or state.had_conflict
 
@@ -488,7 +566,7 @@ async def run_saved_search(
                 any_planning_failure
                 or run_had_parse_error
                 or run_had_conflict
-                or any_attempt_not_completed
+                or run_had_source_issue
             )
             else "completed"
         )
@@ -514,9 +592,26 @@ async def run_saved_search(
             type(run_exc).__name__,
         )
         with suppress(Exception, asyncio.CancelledError):
-            if current_attempt_ids is not None and current_state is not None:
-                await _finalize_provider_aborted(
-                    engine, collection_run_id, current_attempt_ids, current_state, failed_at
+            running_attempts = await _fetch_running_attempts(engine, collection_run_id)
+            if running_attempts:
+                # Only trust `current_state` if the durable set of still-
+                # running attempt ids exactly matches `current_attempt_ids`
+                # — proving it genuinely corresponds to these rows, not a
+                # stale reference to an already-finalized provider (whose
+                # rows would no longer be 'running' at all, and so would
+                # never reach this branch in the first place) nor an
+                # absent reference to a provider whose begin-transaction
+                # committed before this function's own local variable
+                # assignment ever ran.
+                running_ids = {attempt.id for attempt in running_attempts}
+                matching_state = (
+                    current_state
+                    if current_attempt_ids is not None
+                    and set(current_attempt_ids.values()) == running_ids
+                    else None
+                )
+                await _finalize_running_attempts_aborted(
+                    engine, collection_run_id, running_attempts, matching_state, failed_at
                 )
             async with AsyncSession(bind=engine) as session, session.begin():
                 totals = await session.execute(

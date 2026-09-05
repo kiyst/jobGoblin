@@ -1027,7 +1027,12 @@ other's internals.
    Missing row → `SavedSearchNotFoundError`; `is_active=False` →
    `InactiveSavedSearchError` — both before any write. Running collection for a paused
    search has no current caller needing it (Phase 8's API doesn't exist yet); an explicit
-   override belongs to whichever future slice actually introduces one.
+   override belongs to whichever future slice actually introduces one. A narrow, private,
+   no-op-by-default test-only seam (`_after_saved_search_locked`) is awaited immediately
+   after this lock is confirmed held, letting a test interleave a genuinely concurrent
+   delete against the real lock — proving the lock itself is load-bearing (removing it
+   would surface as an unexpected foreign-key-violation exception out of this function,
+   not a silently-green test) without duplicating this function's own SQL in the test.
 2. Loads `SavedSearchTitle.title`/`SavedSearchLocation.location_text`, each
    `ORDER BY created_at, id` — deterministic (repeatable), **not insertion order**:
    PostgreSQL's `now()` is fixed at transaction start, so rows inserted together in one
@@ -1097,14 +1102,28 @@ other's internals.
   `result.errors` order) are merged into `CollectionRun.failures` in this same transaction.
 
 **Whole-run abort** (`ProviderRegistrationError`, an unexpected exception, or
-`asyncio.CancelledError`): the in-flight provider's own attempt rows (if any were created)
-are finalized best-effort — every one becomes `status='failed'` uniformly, with a fixed,
-sanitized `error_category`/`error_message` (never the aborting exception's own text);
-`retry_count`/`rate_limited`/`incomplete_results` still use whatever `ProviderExecutionState
-.source_stats` had already captured before the abort, if any, so genuinely known telemetry
-survives the failure; any already-known `state.failures` are still merged in. Then —
-**never from a parallel in-memory running total, which a cancellation delivered between an
-earlier provider's commit and the next line of Python could leave out of sync with the
+`asyncio.CancelledError`): still-`status='running'` attempt rows are **rediscovered from
+the database itself** (`_fetch_running_attempts`, a fresh `SELECT ... WHERE status =
+'running'` scoped to this run) — never solely from the `current_attempt_ids`/
+`current_state` Python variables the per-provider loop maintains. Two distinct commit/
+cancellation windows make those variables alone unreliable: a cancellation delivered after
+`_begin_provider_attempt()`'s transaction commits but before its own `await` returns
+control leaves `current_attempt_ids` unset even though a real `status='running'` row now
+exists (it would otherwise stay `'running'` forever); a cancellation delivered after
+`_finalize_provider_success()`'s transaction commits but before its own `await` returns
+leaves those same variables still pointing at a provider whose rows are already terminal
+(re-processing it would duplicate its `failures` entries and overwrite a completed attempt
+back to `'failed'`). Querying live `status` closes both: rows genuinely still `'running'`
+are always found and fixed regardless of the Python variables; rows already terminal are
+never found and therefore never re-touched, regardless of them. Rediscovered rows are
+finalized best-effort — every one becomes `status='failed'` uniformly (the `WHERE status =
+'running'` guard is repeated on the `UPDATE` itself, not just the discovery `SELECT`), with
+a fixed, sanitized `error_category`/`error_message` (never the aborting exception's own
+text); `ProviderExecutionState` telemetry and `failures` entries are merged only when the
+caller's own state provably corresponds to exactly the rediscovered rows — proven by
+comparing the durable set of still-running attempt ids against `current_attempt_ids`, never
+by trusting `current_state is not None` alone. Then — **never from a parallel in-memory
+running total, which either cancellation window above could leave out of sync with the
 database** — `CollectionRun.jobs_discovered/inserted/updated` are recomputed from a fresh
 `SELECT SUM(...)` over every persisted `collection_run_provider_attempts` row for this run
 and written as an absolute value. This makes `CollectionRun`'s rollup provably equal to
@@ -1117,10 +1136,15 @@ of the lazy, per-provider creation above, not by cleanup.
 
 **Status, computed once, at natural completion or abort:**
 - `'failed'` — whole-run abort only.
-- `'completed_with_errors'` — natural completion with any planning failure, any graceful
-  `ProviderError`, any attempt row whose status isn't `'completed'`, any parse error, or
-  any identity conflict — including the case where *every* provider produced a planning
-  failure.
+- `'completed_with_errors'` — natural completion with any planning failure, any attempt row
+  whose status isn't `'completed'`, any parse error, or any identity conflict — including
+  the case where *every* provider produced a planning failure. A graceful `ProviderError`
+  is caught by aggregating each provider's own `state.possibly_incomplete` (mirroring
+  `DiscoveryResult.possibly_incomplete` exactly: any source not completed, any incomplete
+  results, *or* any `ProviderError` at all), not merely by checking each attempt's own
+  terminal status — a source that stays `completed=True`/`incomplete_results=False` despite
+  carrying a real `ProviderError` (e.g. "succeeded after a retry") would otherwise be
+  missed entirely, since its own attempt status alone reads `'completed'`.
 - `'completed'` — otherwise, including an explicit empty provider list and every provider
   being silently skipped by `QueryPlanner` returning `None`.
 

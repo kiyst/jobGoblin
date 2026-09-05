@@ -1,5 +1,6 @@
 import asyncio
 import uuid
+from contextlib import suppress
 from datetime import UTC, datetime
 from typing import cast
 
@@ -13,7 +14,7 @@ from app.db.models import (
     SavedSearch,
     SavedSearchTitle,
 )
-from app.ingestion import provider_execution
+from app.ingestion import orchestrator, provider_execution
 from app.ingestion.clock import FixedClock
 from app.ingestion.orchestrator import (
     DuplicateEnabledProviderError,
@@ -190,6 +191,10 @@ async def test_two_providers_succeed_in_one_run(db_engine: AsyncEngine) -> None:
                 db_engine, saved_search_id, registry, clock=clock, observed_at=t1
             )
             collection_run_ids.append(run_id)
+            for job in (job_a, job_b):
+                job_id, raw_id = await _cleanup_ids_for(db_engine, job.source_job_id)
+                job_ids.append(job_id)
+                raw_ingestion_ids.append(raw_id)
 
             run = await _collection_run(db_engine, run_id)
             assert run.status == "completed"
@@ -201,11 +206,6 @@ async def test_two_providers_succeed_in_one_run(db_engine: AsyncEngine) -> None:
             attempts = await _attempts(db_engine, run_id)
             assert len(attempts) == 2
             assert {a.status for a in attempts} == {"completed"}
-
-            for job in (job_a, job_b):
-                job_id, raw_id = await _cleanup_ids_for(db_engine, job.source_job_id)
-                job_ids.append(job_id)
-                raw_ingestion_ids.append(raw_id)
         finally:
             await _cleanup(
                 db_engine,
@@ -274,16 +274,16 @@ async def test_query_planner_none_result_is_silently_skipped(db_engine: AsyncEng
                 db_engine, saved_search_id, registry, clock=clock, observed_at=t1
             )
             collection_run_ids.append(run_id)
+            job_id, raw_id = await _cleanup_ids_for(db_engine, job_b.source_job_id)
+            job_ids.append(job_id)
+            raw_ingestion_ids.append(raw_id)
+
             run = await _collection_run(db_engine, run_id)
             assert run.status == "completed"
             assert run.providers_attempted == ["beta"]
             assert run.failures == []
             assert provider_a.discover_call_count == 0
             assert provider_b.discover_call_count == 1
-
-            job_id, raw_id = await _cleanup_ids_for(db_engine, job_b.source_job_id)
-            job_ids.append(job_id)
-            raw_ingestion_ids.append(raw_id)
         finally:
             await _cleanup(
                 db_engine,
@@ -435,6 +435,10 @@ async def test_planning_failure_unknown_provider_plus_successful_sibling(
                 db_engine, saved_search_id, registry, clock=clock, observed_at=t1
             )
             collection_run_ids.append(run_id)
+            job_id, raw_id = await _cleanup_ids_for(db_engine, job_b.source_job_id)
+            job_ids.append(job_id)
+            raw_ingestion_ids.append(raw_id)
+
             run = await _collection_run(db_engine, run_id)
             assert run.status == "completed_with_errors"
             assert run.providers_attempted == ["beta"]
@@ -443,10 +447,6 @@ async def test_planning_failure_unknown_provider_plus_successful_sibling(
             assert failure["provider"] == "ghost"
             assert failure["source"] is None
             assert cast(dict[str, object], failure["error"])["category"] == "unknown"
-
-            job_id, raw_id = await _cleanup_ids_for(db_engine, job_b.source_job_id)
-            job_ids.append(job_id)
-            raw_ingestion_ids.append(raw_id)
         finally:
             await _cleanup(
                 db_engine,
@@ -503,6 +503,10 @@ async def test_graceful_provider_error_plus_successful_sibling(db_engine: AsyncE
                 db_engine, saved_search_id, registry, clock=clock, observed_at=t1
             )
             collection_run_ids.append(run_id)
+            job_id, raw_id = await _cleanup_ids_for(db_engine, job_b.source_job_id)
+            job_ids.append(job_id)
+            raw_ingestion_ids.append(raw_id)
+
             run = await _collection_run(db_engine, run_id)
             assert run.status == "completed_with_errors"
             assert sorted(run.providers_attempted) == ["alpha", "beta"]
@@ -517,10 +521,6 @@ async def test_graceful_provider_error_plus_successful_sibling(db_engine: AsyncE
             beta_attempt = next(a for a in attempts if a.provider == "beta")
             assert alpha_attempt.status == "failed"
             assert beta_attempt.status == "completed"
-
-            job_id, raw_id = await _cleanup_ids_for(db_engine, job_b.source_job_id)
-            job_ids.append(job_id)
-            raw_ingestion_ids.append(raw_id)
         finally:
             await _cleanup(
                 db_engine,
@@ -643,9 +643,9 @@ async def test_provider_registry_name_drift_aborts_whole_run(db_engine: AsyncEng
                     .scalars()
                     .all()
                 )
+            collection_run_ids.extend(run.id for run in runs)
             assert len(runs) == 1
             run = runs[0]
-            collection_run_ids.append(run.id)
             assert run.status == "failed"
             assert run.providers_attempted == []
             attempts = await _attempts(db_engine, run.id)
@@ -695,9 +695,9 @@ async def test_unexpected_discover_exception_aborts_whole_run_no_sibling(
                     .scalars()
                     .all()
                 )
+            collection_run_ids.extend(run.id for run in runs)
             assert len(runs) == 1
             run = runs[0]
-            collection_run_ids.append(run.id)
             assert run.status == "failed"
             assert provider_b.discover_call_count == 0
 
@@ -750,8 +750,8 @@ async def test_malformed_discovery_result_aborts_whole_run_no_sibling(
                     .scalars()
                     .all()
                 )
+            collection_run_ids.extend(run.id for run in runs)
             run = runs[0]
-            collection_run_ids.append(run.id)
             assert run.status == "failed"
             assert provider_b.discover_call_count == 0
         finally:
@@ -797,8 +797,8 @@ async def test_cancellation_mid_provider_aborts_whole_run(db_engine: AsyncEngine
                     .scalars()
                     .all()
                 )
+            collection_run_ids.extend(run.id for run in runs)
             run = runs[0]
-            collection_run_ids.append(run.id)
             assert run.status == "failed"
             assert provider_b.discover_call_count == 0
             attempts = await _attempts(db_engine, run.id)
@@ -810,6 +810,269 @@ async def test_cancellation_mid_provider_aborts_whole_run(db_engine: AsyncEngine
                 job_ids=[],
                 collection_run_ids=collection_run_ids,
                 raw_ingestion_ids=[],
+            )
+
+
+# ---------------------------------------------------------------------------
+# Transaction-boundary regressions: cancellation delivered after a
+# durable commit but before the awaiting caller's next line runs.
+# ---------------------------------------------------------------------------
+
+
+async def test_cancellation_after_begin_attempt_commit_leaves_no_row_running(
+    db_engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Simulates cancellation delivered after `_begin_provider_attempt()`'s
+    transaction has already committed (attempt row + `providers_attempted`
+    durable) but before its `await` returns control to `run_saved_search()`
+    — the exact window that previously left `current_attempt_ids` unset
+    while a real `status='running'` row already existed, permanently. Wraps
+    the real helper (letting it genuinely commit) and then raises
+    `CancelledError`, proving the abort handler still discovers and
+    finalizes the row via `_fetch_running_attempts`, never leaving it
+    permanently `running`."""
+    t1 = datetime(2026, 4, 22, tzinfo=UTC)
+    clock = FixedClock(t1)
+    provider_a = ConfigurableProvider("alpha", capabilities=_capabilities("alpha", "source_a"))
+    registry = ProviderRegistry([provider_a])
+
+    real_begin = orchestrator._begin_provider_attempt
+
+    async def _begin_then_cancel(*args: object, **kwargs: object) -> dict[str, uuid.UUID]:
+        await real_begin(*args, **kwargs)  # type: ignore[arg-type]
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(orchestrator, "_begin_provider_attempt", _begin_then_cancel)
+
+    collection_run_ids: list[uuid.UUID] = []
+    async with real_committed_user_and_saved_search(
+        db_engine, "orch-cancel-after-begin-commit@example.com", enabled_providers=["alpha"]
+    ) as (_session, user_id, saved_search_id):
+        try:
+            with pytest.raises(asyncio.CancelledError):
+                await run_saved_search(
+                    db_engine, saved_search_id, registry, clock=clock, observed_at=t1
+                )
+
+            async with AsyncSession(bind=db_engine) as session:
+                runs = (
+                    (
+                        await session.execute(
+                            select(CollectionRun).where(
+                                CollectionRun.saved_search_id == saved_search_id
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+            collection_run_ids.extend(run.id for run in runs)
+
+            assert len(runs) == 1
+            run = runs[0]
+            assert run.status == "failed"
+            # _begin_provider_attempt's own transaction genuinely committed
+            # before the simulated cancellation:
+            assert run.providers_attempted == ["alpha"]
+
+            attempts = await _attempts(db_engine, run.id)
+            assert len(attempts) == 1
+            assert attempts[0].status == "failed"  # not stuck at 'running'
+        finally:
+            await _cleanup(
+                db_engine,
+                user_ids=[user_id],
+                job_ids=[],
+                collection_run_ids=collection_run_ids,
+                raw_ingestion_ids=[],
+            )
+
+
+async def test_cancellation_after_success_finalization_commit_does_not_duplicate_or_overwrite(
+    db_engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Simulates cancellation delivered after `_finalize_provider_success()`'s
+    transaction has already committed (attempt row terminal, counters
+    incremented, `failures` merged) but before its `await` returns control
+    to `run_saved_search()` — the exact window that previously let the
+    abort handler re-run against an already-finalized provider, appending
+    its `ProviderError` a second time and overwriting its completed attempt
+    back to `'failed'`. Wraps the real finalizer (letting it genuinely
+    commit) and then raises `CancelledError` — proves alpha's one error
+    remains exactly one error, its completed attempt stays completed, its
+    counters remain exactly what `_finalize_provider_success` committed,
+    and the parent run still ends `'failed'` because orchestration itself
+    was cancelled (beta is never reached)."""
+    t1 = datetime(2026, 4, 23, tzinfo=UTC)
+    clock = FixedClock(t1)
+    job_a = _job("alpha", "source_a", source_job_id="A-10", discovered_at=t1)
+    result_with_error = DiscoveryResult(
+        provider="alpha",
+        jobs=[job_a],
+        source_stats=[SourceRunStats(source="source_a", completed=True, jobs_found=1)],
+        errors=[
+            ProviderError(
+                source="source_a",
+                category=ProviderErrorCategory.TIMEOUT,
+                retryable=True,
+                detail="transient timeout, retried successfully",
+                occurred_at=t1,
+            )
+        ],
+        started_at=t1,
+        completed_at=t1,
+    )
+    provider_a = ConfigurableProvider(
+        "alpha", capabilities=_capabilities("alpha", "source_a"), result=result_with_error
+    )
+    provider_b = ConfigurableProvider("beta", capabilities=_capabilities("beta", "source_b"))
+    registry = ProviderRegistry([provider_a, provider_b])
+
+    real_finalize = orchestrator._finalize_provider_success
+
+    async def _finalize_then_cancel(*args: object, **kwargs: object) -> None:
+        await real_finalize(*args, **kwargs)  # type: ignore[arg-type]
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(orchestrator, "_finalize_provider_success", _finalize_then_cancel)
+
+    job_ids: list[uuid.UUID] = []
+    raw_ingestion_ids: list[uuid.UUID] = []
+    collection_run_ids: list[uuid.UUID] = []
+    async with real_committed_user_and_saved_search(
+        db_engine,
+        "orch-cancel-after-success-commit@example.com",
+        enabled_providers=["alpha", "beta"],
+    ) as (_session, user_id, saved_search_id):
+        try:
+            with pytest.raises(asyncio.CancelledError):
+                await run_saved_search(
+                    db_engine, saved_search_id, registry, clock=clock, observed_at=t1
+                )
+
+            async with AsyncSession(bind=db_engine) as session:
+                runs = (
+                    (
+                        await session.execute(
+                            select(CollectionRun).where(
+                                CollectionRun.saved_search_id == saved_search_id
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+            collection_run_ids.extend(run.id for run in runs)
+            job_id, raw_id = await _cleanup_ids_for(db_engine, job_a.source_job_id)
+            job_ids.append(job_id)
+            raw_ingestion_ids.append(raw_id)
+
+            assert len(runs) == 1
+            run = runs[0]
+            assert run.status == "failed"  # orchestration itself was cancelled
+            assert len(run.failures) == 1  # alpha's one error, never duplicated
+            assert provider_b.discover_call_count == 0  # beta never reached
+
+            attempts = await _attempts(db_engine, run.id)
+            assert len(attempts) == 1
+            assert attempts[0].provider == "alpha"
+            assert attempts[0].status == "completed"  # never overwritten to 'failed'
+
+            sum_discovered = sum(a.jobs_discovered for a in attempts)
+            sum_inserted = sum(a.jobs_inserted for a in attempts)
+            sum_updated = sum(a.jobs_updated for a in attempts)
+            assert run.jobs_discovered == sum_discovered == 1
+            assert run.jobs_inserted == sum_inserted == 1
+            assert run.jobs_updated == sum_updated == 0
+        finally:
+            await _cleanup(
+                db_engine,
+                user_ids=[user_id],
+                job_ids=job_ids,
+                collection_run_ids=collection_run_ids,
+                raw_ingestion_ids=raw_ingestion_ids,
+            )
+
+
+# ---------------------------------------------------------------------------
+# A ProviderError on a completed=True source must still force
+# completed_with_errors, not just a non-completed attempt.
+# ---------------------------------------------------------------------------
+
+
+async def test_provider_error_on_completed_source_forces_completed_with_errors(
+    db_engine: AsyncEngine,
+) -> None:
+    t1 = datetime(2026, 4, 24, tzinfo=UTC)
+    clock = FixedClock(t1)
+    job_a = _job("alpha", "source_a", source_job_id="A-11", discovered_at=t1)
+    job_b = _job("beta", "source_b", source_job_id="B-11", discovered_at=t1)
+    result_with_error = DiscoveryResult(
+        provider="alpha",
+        jobs=[job_a],
+        source_stats=[
+            SourceRunStats(
+                source="source_a", completed=True, jobs_found=1, incomplete_results=False
+            )
+        ],
+        errors=[
+            ProviderError(
+                source="source_a",
+                category=ProviderErrorCategory.RATE_LIMITED,
+                retryable=True,
+                detail="rate limited but retried successfully",
+                occurred_at=t1,
+            )
+        ],
+        started_at=t1,
+        completed_at=t1,
+    )
+    provider_a = ConfigurableProvider(
+        "alpha", capabilities=_capabilities("alpha", "source_a"), result=result_with_error
+    )
+    provider_b = ConfigurableProvider(
+        "beta",
+        capabilities=_capabilities("beta", "source_b"),
+        result=_result("beta", "source_b", [job_b], at=t1),
+    )
+    registry = ProviderRegistry([provider_a, provider_b])
+
+    job_ids: list[uuid.UUID] = []
+    raw_ingestion_ids: list[uuid.UUID] = []
+    collection_run_ids: list[uuid.UUID] = []
+    async with real_committed_user_and_saved_search(
+        db_engine, "orch-error-on-completed@example.com", enabled_providers=["alpha", "beta"]
+    ) as (_session, user_id, saved_search_id):
+        try:
+            run_id = await run_saved_search(
+                db_engine, saved_search_id, registry, clock=clock, observed_at=t1
+            )
+            collection_run_ids.append(run_id)
+            for job in (job_a, job_b):
+                job_id, raw_id = await _cleanup_ids_for(db_engine, job.source_job_id)
+                job_ids.append(job_id)
+                raw_ingestion_ids.append(raw_id)
+
+            run = await _collection_run(db_engine, run_id)
+            assert run.status == "completed_with_errors"
+            assert len(run.failures) == 1
+            failure = cast(dict[str, object], run.failures[0])
+            assert failure["provider"] == "alpha"
+            assert failure["source"] == "source_a"
+
+            attempts = await _attempts(db_engine, run_id)
+            alpha_attempt = next(a for a in attempts if a.provider == "alpha")
+            beta_attempt = next(a for a in attempts if a.provider == "beta")
+            assert alpha_attempt.status == "completed"
+            assert alpha_attempt.error_category == "rate_limited"
+            assert beta_attempt.status == "completed"
+        finally:
+            await _cleanup(
+                db_engine,
+                user_ids=[user_id],
+                job_ids=job_ids,
+                collection_run_ids=collection_run_ids,
+                raw_ingestion_ids=raw_ingestion_ids,
             )
 
 
@@ -865,6 +1128,9 @@ async def test_persistence_exception_after_partial_progress_preserves_exact_coun
                     db_engine, saved_search_id, registry, clock=clock, observed_at=t1
                 )
 
+            # Every cleanup ID is captured first, before any assertion that
+            # could fail — a fallible assertion below must never leave a
+            # row uncaptured for cleanup.
             async with AsyncSession(bind=db_engine) as session:
                 runs = (
                     (
@@ -877,9 +1143,53 @@ async def test_persistence_exception_after_partial_progress_preserves_exact_coun
                     .scalars()
                     .all()
                 )
+            collection_run_ids.extend(run.id for run in runs)
+
+            async with AsyncSession(bind=db_engine) as session:
+                from app.db.models import JobOccurrence
+
+                occurrences = (
+                    (
+                        await session.execute(
+                            select(JobOccurrence).where(
+                                JobOccurrence.source_job_id.in_(
+                                    [job_a.source_job_id, job_b1.source_job_id]
+                                )
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+            job_ids.extend(occurrence.job_id for occurrence in occurrences)
+
+            async with AsyncSession(bind=db_engine) as session:
+                from app.db.models import RawJobIngestion
+
+                raws = (
+                    (
+                        await session.execute(
+                            select(RawJobIngestion.id).where(
+                                RawJobIngestion.source_identifier.in_(
+                                    [
+                                        job_a.source_job_id,
+                                        job_b1.source_job_id,
+                                        job_b2.source_job_id,
+                                    ]
+                                )
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                raw_ingestion_ids.extend(raws)
+
+            # Assertions follow — every ID above already tracked, so a
+            # failure here still leaves nothing behind in the shared
+            # disposable test database.
             assert len(runs) == 1
             run = runs[0]
-            collection_run_ids.append(run.id)
             assert run.status == "failed"
 
             attempts = await _attempts(db_engine, run.id)
@@ -904,41 +1214,6 @@ async def test_persistence_exception_after_partial_progress_preserves_exact_coun
             assert run.jobs_discovered == sum_discovered == 3
             assert run.jobs_inserted == sum_inserted == 2
             assert run.jobs_updated == sum_updated == 0
-
-            for job in (job_a, job_b1):
-                async with AsyncSession(bind=db_engine) as session:
-                    from app.db.models import JobOccurrence
-
-                    occ = (
-                        await session.execute(
-                            select(JobOccurrence).where(
-                                JobOccurrence.source_job_id == job.source_job_id
-                            )
-                        )
-                    ).scalar_one()
-                    job_ids.append(occ.job_id)
-
-            async with AsyncSession(bind=db_engine) as session:
-                from app.db.models import RawJobIngestion
-
-                raws = (
-                    (
-                        await session.execute(
-                            select(RawJobIngestion.id).where(
-                                RawJobIngestion.source_identifier.in_(
-                                    [
-                                        job_a.source_job_id,
-                                        job_b1.source_job_id,
-                                        job_b2.source_job_id,
-                                    ]
-                                )
-                            )
-                        )
-                    )
-                    .scalars()
-                    .all()
-                )
-                raw_ingestion_ids.extend(raws)
         finally:
             await _cleanup(
                 db_engine,
@@ -980,10 +1255,6 @@ async def test_parse_error_forces_completed_with_errors_without_provider_error(
                 db_engine, saved_search_id, registry, clock=clock, observed_at=t1
             )
             collection_run_ids.append(run_id)
-            run = await _collection_run(db_engine, run_id)
-            assert run.status == "completed_with_errors"
-            assert run.failures == []
-
             async with AsyncSession(bind=db_engine) as session:
                 from app.db.models import RawJobIngestion
 
@@ -1000,8 +1271,13 @@ async def test_parse_error_forces_completed_with_errors_without_provider_error(
                     .scalars()
                     .first()
                 )
-                assert raw is not None
+            if raw is not None:
                 raw_ingestion_ids.append(raw.id)
+
+            run = await _collection_run(db_engine, run_id)
+            assert run.status == "completed_with_errors"
+            assert run.failures == []
+            assert raw is not None
         finally:
             await _cleanup(
                 db_engine,
@@ -1054,6 +1330,11 @@ async def test_providers_enforced_locally_is_deterministic_sorted_json(
                 db_engine, saved_search_id, registry, clock=clock, observed_at=t1
             )
             collection_run_ids.append(run_id)
+            for job in (job_a, job_b):
+                job_id, raw_id = await _cleanup_ids_for(db_engine, job.source_job_id)
+                job_ids.append(job_id)
+                raw_ingestion_ids.append(raw_id)
+
             run = await _collection_run(db_engine, run_id)
             enforced = cast(dict[str, dict[str, list[str]]], run.providers_enforced_locally)
             assert set(enforced.keys()) == {"alpha", "beta"}
@@ -1067,11 +1348,6 @@ async def test_providers_enforced_locally_is_deterministic_sorted_json(
                 assert "salary_floor" in fields
                 assert "employment_types" in fields
                 assert "seniority" in fields
-
-            for job in (job_a, job_b):
-                job_id, raw_id = await _cleanup_ids_for(db_engine, job.source_job_id)
-                job_ids.append(job_id)
-                raw_ingestion_ids.append(raw_id)
         finally:
             await _cleanup(
                 db_engine,
@@ -1124,6 +1400,11 @@ async def test_per_provider_attempt_timestamps_are_distinct_and_ordered(
                 db_engine, saved_search_id, registry, clock=clock, observed_at=t1
             )
             collection_run_ids.append(run_id)
+            for job in (job_a, job_b):
+                job_id, raw_id = await _cleanup_ids_for(db_engine, job.source_job_id)
+                job_ids.append(job_id)
+                raw_ingestion_ids.append(raw_id)
+
             run = await _collection_run(db_engine, run_id)
             attempts = await _attempts(db_engine, run_id)
             alpha_attempt = next(a for a in attempts if a.provider == "alpha")
@@ -1136,11 +1417,6 @@ async def test_per_provider_attempt_timestamps_are_distinct_and_ordered(
             assert alpha_attempt.completed_at <= beta_attempt.started_at
             assert run.completed_at is not None
             assert run.completed_at >= beta_attempt.completed_at
-
-            for job in (job_a, job_b):
-                job_id, raw_id = await _cleanup_ids_for(db_engine, job.source_job_id)
-                job_ids.append(job_id)
-                raw_ingestion_ids.append(raw_id)
         finally:
             await _cleanup(
                 db_engine,
@@ -1192,12 +1468,13 @@ async def test_deterministic_provider_processing_order(db_engine: AsyncEngine) -
                 db_engine, saved_search_id, registry_explicit, clock=clock, observed_at=t1
             )
             collection_run_ids.append(run_id)
-            run = await _collection_run(db_engine, run_id)
-            assert run.providers_attempted == ["zeta", "alpha"]
             for job in (job_z, job_a):
                 job_id, raw_id = await _cleanup_ids_for(db_engine, job.source_job_id)
                 job_ids.append(job_id)
                 raw_ingestion_ids.append(raw_id)
+
+            run = await _collection_run(db_engine, run_id)
+            assert run.providers_attempted == ["zeta", "alpha"]
         finally:
             await _cleanup(
                 db_engine,
@@ -1222,12 +1499,13 @@ async def test_deterministic_provider_processing_order(db_engine: AsyncEngine) -
                 db_engine, saved_search_id, registry_null, clock=clock, observed_at=t1
             )
             collection_run_ids.append(run_id)
-            run = await _collection_run(db_engine, run_id)
-            assert run.providers_attempted == ["alpha", "zeta"]
             for job in (job_z2, job_a2):
                 job_id, raw_id = await _cleanup_ids_for(db_engine, job.source_job_id)
                 job_ids.append(job_id)
                 raw_ingestion_ids.append(raw_id)
+
+            run = await _collection_run(db_engine, run_id)
+            assert run.providers_attempted == ["alpha", "zeta"]
         finally:
             await _cleanup(
                 db_engine,
@@ -1294,52 +1572,60 @@ async def test_deterministic_child_ordering_not_insertion_order(db_engine: Async
 async def test_saved_search_deletion_race_survives_with_saved_search_id_null(
     db_engine: AsyncEngine,
 ) -> None:
+    """Exercises `run_saved_search()` itself — not a copied SQL sequence.
+    `_after_saved_search_locked` (a narrow, private, no-op-by-default
+    coordination seam `run_saved_search()` calls immediately after its own
+    real `FOR SHARE` lock is acquired) starts a genuinely concurrent
+    `DELETE` and waits for it to actually reach PostgreSQL and block on
+    that real lock, before letting `run_saved_search()`'s own transaction
+    proceed to commit. If the real lock were ever removed from production,
+    the `DELETE` would instead complete immediately during this window,
+    and `run_saved_search()`'s own later `CollectionRun` insert would then
+    hit a genuine foreign-key violation against the now-deleted parent row
+    — surfacing as an unexpected exception out of `run_saved_search()`
+    itself, failing this test loudly, not silently passing."""
     t1 = datetime(2026, 4, 21, tzinfo=UTC)
-    lock_acquired = asyncio.Event()
-    delete_attempted = asyncio.Event()
+    clock = FixedClock(t1)
+    registry = ProviderRegistry([])
+    delete_started = asyncio.Event()
 
     async with real_committed_user_and_saved_search(
         db_engine, "orch-deletion-race@example.com", enabled_providers=[]
     ) as (_session, user_id, saved_search_id):
         collection_run_id: uuid.UUID | None = None
-
-        async def _holder() -> uuid.UUID:
-            # The real orchestrator initialization sequence, invoked directly
-            # so the test can interleave a concurrent DELETE while the FOR
-            # SHARE lock is held, before this transaction commits.
-            async with (
-                AsyncSession(bind=db_engine, expire_on_commit=False) as session,
-                session.begin(),
-            ):
-                loaded = await session.execute(
-                    select(SavedSearch)
-                    .where(SavedSearch.id == saved_search_id)
-                    .with_for_update(read=True)
-                )
-                saved_search = loaded.scalar_one()
-                assert saved_search.is_active
-                lock_acquired.set()
-                await delete_attempted.wait()
-                await asyncio.sleep(0.2)  # scheduling safety margin only —
-                # correctness comes from the real row lock below, not this
-                # sleep; it just gives the deleter's statement time to
-                # actually reach Postgres and start waiting on the lock.
-                run = CollectionRun(
-                    saved_search_id=saved_search_id, started_at=t1, status="running"
-                )
-                session.add(run)
-                await session.flush()
-                run_id = run.id
-            return run_id
+        deleter_task: asyncio.Task[None] | None = None
 
         async def _deleter() -> None:
-            await lock_acquired.wait()
             async with AsyncSession(bind=db_engine) as session, session.begin():
-                delete_attempted.set()
+                delete_started.set()
                 await session.execute(delete(SavedSearch).where(SavedSearch.id == saved_search_id))
 
+        async def _start_concurrent_delete_and_let_it_block() -> None:
+            nonlocal deleter_task
+            deleter_task = asyncio.create_task(_deleter())
+            await asyncio.wait_for(delete_started.wait(), timeout=5)
+            # Scheduling safety margin only — correctness comes from the
+            # real FOR SHARE row lock run_saved_search() itself is holding
+            # at this point, not this sleep; it only gives the DELETE
+            # statement time to actually reach PostgreSQL and start
+            # waiting on that lock before this seam returns and
+            # run_saved_search()'s own transaction is allowed to commit.
+            await asyncio.sleep(0.2)
+
         try:
-            collection_run_id, _ = await asyncio.gather(_holder(), _deleter())
+            collection_run_id = await asyncio.wait_for(
+                run_saved_search(
+                    db_engine,
+                    saved_search_id,
+                    registry,
+                    clock=clock,
+                    observed_at=t1,
+                    _after_saved_search_locked=_start_concurrent_delete_and_let_it_block,
+                ),
+                timeout=10,
+            )
+            assert deleter_task is not None
+            await asyncio.wait_for(deleter_task, timeout=5)
 
             async with AsyncSession(bind=db_engine) as session:
                 still_saved_search = await session.get(SavedSearch, saved_search_id)
@@ -1348,7 +1634,12 @@ async def test_saved_search_deletion_race_survives_with_saved_search_id_null(
                 run = await session.get(CollectionRun, collection_run_id)
                 assert run is not None
                 assert run.saved_search_id is None  # ON DELETE SET NULL fired
+                assert run.status == "completed"
         finally:
+            if deleter_task is not None and not deleter_task.done():
+                deleter_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await deleter_task
             async with AsyncSession(bind=db_engine) as cleanup_session:
                 if collection_run_id is not None:
                     existing_run = await cleanup_session.get(CollectionRun, collection_run_id)
