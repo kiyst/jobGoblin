@@ -357,10 +357,8 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   computed per source from dedicated capability booleans (4 fields) plus
   `supported_query_fields` (the rest), never contradicting each other by construction.
   Proven by a fixture-driven integration test feeding its real output into the existing,
-  unmodified `ingestion/pipeline.py::run()`. Not yet wired into the pipeline
-  automatically, and does not persist planning failures or
-  `collection_runs.providers_enforced_locally` — both require the orchestration loop a
-  later slice adds.
+  unmodified `ingestion/pipeline.py::run()`; also now called by the multi-provider
+  orchestrator below.
   `ProviderRegistry` ([ARCHITECTURE.md §6.4](ARCHITECTURE.md#64-discoveryprovider-protocol-sourcecapabilities-providercapabilities-providerhealth)) —
   `app/providers/registry.py::ProviderRegistry` is a pure in-memory, fail-closed
   name→instance directory: construction rejects an invalid canonical provider slug, a
@@ -371,18 +369,33 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   the provider's current `.name` against its registered name on every resolution (a
   provider is never assumed immutable) and raises a sanitized `UnknownProviderError` for
   an unregistered name; `names()` returns every registered name, alphabetically sorted.
-  The canonical lowercase-ASCII-slug grammar is now shared with `QueryPlanner` via a new
-  `app/schemas/identifiers.py::is_canonical_slug()` predicate, replacing two independent
-  copies of the same regex. Proven by a compatibility test feeding a resolved capability
-  snapshot directly into `QueryPlanner.plan()`, offline, no database or network access.
-  Not yet composed into a real production instance, and not yet consulted by
-  `ingestion/pipeline.py` — that, along with `enabled_providers` NULL/empty/explicit-list
-  semantics, is the next orchestration slice's job.
+  The canonical lowercase-ASCII-slug grammar is shared with `QueryPlanner` via
+  `app/schemas/identifiers.py::is_canonical_slug()`, replacing two independent copies of
+  the same regex. Now consulted by the multi-provider orchestrator below; composing the
+  one real production registry instance (which live provider adapters to register) remains
+  deferred until a live provider adapter exists (Phase 4+).
+  Multi-provider orchestration ([ARCHITECTURE.md §6.8](ARCHITECTURE.md#68-multi-provider-orchestration-run_saved_search)) —
+  `app/ingestion/orchestrator.py::run_saved_search()` creates exactly one `CollectionRun`
+  spanning every provider selected for one saved search, sequentially: loads the
+  authoritative `SavedSearch` (locked `FOR SHARE` for the duration of a single
+  initialization transaction, so a concurrent delete can't race the `CollectionRun`'s FK)
+  plus its title/location rows (`ORDER BY created_at, id` — deterministic, not insertion
+  order); validates `enabled_providers` (canonical slugs, no duplicates) before any write;
+  plans each provider via `QueryPlanner`, durably recording an unknown-provider or
+  planning-validation failure (`source: null`) as a sibling-continuing outcome the instant
+  it occurs; creates attempt rows lazily, atomically with `providers_attempted`/
+  `providers_enforced_locally`, immediately before each provider's `discover()` call —
+  never pre-created, never left behind for an unreached provider. Every other failure
+  (registry name drift, an unexpected provider exception, a malformed `DiscoveryResult`, a
+  persistence/database exception, or cancellation) aborts the entire run; `CollectionRun`'s
+  rollup counters are then recomputed from a fresh `SUM` over its own attempt rows and
+  written as an absolute value — never a parallel in-memory running total — so they can
+  never disagree with the attempt rows or double-count. `pipeline.py::run()` is unchanged
+  (zero behavior/signature change; its logic is now shared via a new
+  `app/ingestion/provider_execution.py` module, not duplicated).
   Still deferred: Tier 4 (blocked on a company-text-to-`company_id` resolution capability
-  that does not exist yet, not merely unimplemented), multi-provider orchestration
-  (`ingestion/pipeline.py`'s single-`CollectionRun`-per-provider ownership must be
-  refactored so one saved-search execution across several providers shares exactly one
-  `CollectionRun`), live providers.
+  that does not exist yet, not merely unimplemented), `ProviderRegistry` production
+  composition, live providers.
 - **Phases 3-14: not started.** Begin each phase only after completing its preflight in
   [PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md) and receiving approval for the next
   smallest slice.
