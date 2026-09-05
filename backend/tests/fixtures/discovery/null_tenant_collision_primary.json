@@ -1,0 +1,22 @@
+{
+  "provider": "fixture_provider",
+  "source": "fixture_ats",
+  "source_tenant_id": null,
+  "source_job_id": "NT-5555",
+  "requisition_id_raw": null,
+  "title": "Support Engineer",
+  "company": "Beta Widgets",
+  "location": "Chicago, IL",
+  "source_url": "https://careers.example.net/postings/NT-5555",
+  "apply_url": "https://careers.example.net/postings/NT-5555/apply",
+  "canonical_url": "https://careers.example.net/postings/NT-5555",
+  "description": "Support enterprise customers.",
+  "compensation_text": "$70,000 - $90,000",
+  "posted_at": "2026-04-05T00:00:00+00:00",
+  "discovered_at": "2026-04-05T00:00:00+00:00",
+  "raw": {
+    "id": "NT-5555",
+    "title": "Support Engineer",
+    "compensation": "$70,000 - $90,000"
+  }
+}

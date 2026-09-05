@@ -1523,10 +1523,15 @@ exists.
      (`conflict_type = 'evidence_mismatch'`) referencing the existing occurrence, with
      the existing occurrence's canonical URL left untouched but `last_seen_at` still
      advanced (proves §8's Rev 3 conflict-handling redesign, [ADR 0007](DECISIONS/0007-identity-conflict-quarantine.md));
-   - an **`ambiguous_match` case**: a payload whose company-scoped requisition fallback
-     (tier 4) matches two distinct existing `Job`s — must create a new, standalone `Job`
-     plus an `identity_conflicts` row (`conflict_type = 'ambiguous_match'`) listing every
-     candidate, never guessing which one it belongs to;
+   - an **`ambiguous_match` case**: a payload whose Tier 2 (canonical URL) or Tier 3
+     (tenant-scoped requisition) resolution matches two distinct existing `Job`s — must
+     create a new, standalone `Job` plus an `identity_conflicts` row
+     (`conflict_type = 'ambiguous_match'`) listing every candidate, never guessing which
+     one it belongs to. **Tier 4 (company-scoped requisition fallback) remains explicitly
+     deferred** ([ADR 0004](DECISIONS/0004-scoped-deterministic-identity.md)) pending a
+     company-text-to-`company_id` resolution capability this pipeline does not yet have —
+     it is not implemented and not required for Phase 2 closure; the `ambiguous_match`
+     conflict type itself is fully proven through the Tiers that are implemented;
    - a malformed/partial payload (produces a `RawJobIngestion` with
      `processing_status = 'parse_error'` and no `JobOccurrence`);
    - a simulated partial-provider-failure case, driven by an explicit

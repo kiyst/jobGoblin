@@ -396,6 +396,20 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   Still deferred: Tier 4 (blocked on a company-text-to-`company_id` resolution capability
   that does not exist yet, not merely unimplemented), `ProviderRegistry` production
   composition, live providers.
+  A read-only Phase 2 exit-gate audit (2026-09-05, from clean `main@4db557c`) cross-checked
+  every documented Phase 2 requirement against the actually-merged code, tests, and
+  migrations. It found no unsatisfied requirement and no blocking gap; it found exactly two
+  bounded documentation/test-coverage discrepancies: ARCHITECTURE.md §11 cited an
+  unimplemented Tier 4 path as the required `ambiguous_match` fixture case (the conflict
+  type is actually proven through Tiers 2/3), and two of §11's required fixture-driven
+  pipeline cases (same-`source_job_id`-different-tenants; NULL-tenant natural-key collision)
+  were previously proven only at the Phase 1 database-constraint level, not through the
+  Phase 2 fixture-driven `pipeline.run()` path §11 specifies. The `phase-2/closure` branch
+  corrects both — the §11 wording, and two new fixture-driven tests
+  (`test_two_distinct_tenants_sharing_source_job_id_produce_two_jobs`,
+  `test_null_tenant_natural_key_collision_resolves_to_one_occurrence`) in
+  `tests/test_ingestion_pipeline.py`. This is the **Phase 2 closure candidate**, pending
+  Codex's independent exit-gate review and sign-off — not yet a declared-complete phase.
 - **Phases 3-14: not started.** Begin each phase only after completing its preflight in
   [PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md) and receiving approval for the next
   smallest slice.

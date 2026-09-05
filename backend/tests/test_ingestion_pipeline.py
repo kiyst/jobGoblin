@@ -437,6 +437,228 @@ async def test_two_run_natural_key_spine(
         )
 
 
+async def test_two_distinct_tenants_sharing_source_job_id_produce_two_jobs(
+    db_engine: AsyncEngine,
+) -> None:
+    """ARCHITECTURE.md §11: two fixture payloads sharing the same
+    `(provider, source, source_job_id)` but differing `source_tenant_id`
+    must resolve to two separate `Job`s through the real `pipeline.run()`
+    path — proving Tier 1's natural key is tenant-scoped by the
+    application's own upsert logic, not merely that the two partial
+    unique indexes independently allow this at the SQL level (already
+    proven in `test_job_occurrences.py`). Canonical URLs and requisition
+    ids are deliberately distinct so neither Tier 2 nor Tier 3 could
+    accidentally attach these to each other."""
+    job_primary = _load_fixture("two_tenants_shared_source_job_id_primary")
+    job_secondary = _load_fixture("two_tenants_shared_source_job_id_secondary")
+    assert job_primary.source_job_id == job_secondary.source_job_id
+    assert job_primary.source_tenant_id != job_secondary.source_tenant_id
+    assert job_primary.canonical_url != job_secondary.canonical_url
+    assert job_primary.requisition_id_raw != job_secondary.requisition_id_raw
+
+    t1 = datetime(2026, 4, 1, tzinfo=UTC)
+    query = SourceQuery(sources=["fixture_ats"])
+
+    job_ids: list[uuid.UUID] = []
+    collection_run_ids: list[uuid.UUID] = []
+    raw_ingestion_ids: list[uuid.UUID] = []
+    try:
+        run_id = await pipeline.run(
+            db_engine,
+            FixtureProvider([job_primary, job_secondary], called_at=t1),
+            query,
+            observed_at=t1,
+            clock=FixedClock(t1),
+        )
+        collection_run_ids.append(run_id)
+
+        assert await _raw_ingestion_count(db_engine) == 2
+        assert await _job_count(db_engine) == 2
+        assert await _occurrence_count(db_engine) == 2
+        assert await _conflict_count(db_engine) == 0
+
+        async with AsyncSession(bind=db_engine) as session:
+            occurrences = (
+                (
+                    await session.execute(
+                        select(JobOccurrence).where(JobOccurrence.source_job_id == "SHARED-9001")
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        assert len(occurrences) == 2
+        by_tenant = {occ.source_tenant_id: occ for occ in occurrences}
+        assert set(by_tenant) == {"north-star-inc", "vertex-holdings"}
+        occurrence_north = by_tenant["north-star-inc"]
+        occurrence_vertex = by_tenant["vertex-holdings"]
+        # Captured before any further assertion, so a later failure still
+        # leaves cleanup able to find both rows.
+        job_ids.extend([occurrence_north.job_id, occurrence_vertex.job_id])
+        assert occurrence_north.job_id != occurrence_vertex.job_id
+
+        async with AsyncSession(bind=db_engine) as session:
+            run = await session.get(CollectionRun, run_id)
+            assert run is not None
+            assert run.status == "completed"
+            assert run.jobs_discovered == 2
+            assert run.jobs_inserted == 2
+            assert run.jobs_updated == 0
+            assert run.failures == []
+
+            attempts = (
+                (
+                    await session.execute(
+                        select(CollectionRunProviderAttempt).where(
+                            CollectionRunProviderAttempt.collection_run_id == run_id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert len(attempts) == 1
+            assert attempts[0].status == "completed"
+            assert attempts[0].jobs_discovered == 2
+            assert attempts[0].jobs_inserted == 2
+            assert attempts[0].jobs_updated == 0
+
+            raw_rows = (await session.execute(select(RawJobIngestion))).scalars().all()
+            raw_ingestion_ids.extend(row.id for row in raw_rows)  # before any assertion
+            assert len(raw_rows) == 2
+            assert all(row.processing_status == "normalized" for row in raw_rows)
+            assert {row.job_occurrence_id for row in raw_rows} == {
+                occurrence_north.id,
+                occurrence_vertex.id,
+            }
+
+            job_north = await session.get(Job, occurrence_north.job_id)
+            assert job_north is not None
+            assert job_north.title == job_primary.title
+            job_vertex = await session.get(Job, occurrence_vertex.job_id)
+            assert job_vertex is not None
+            assert job_vertex.title == job_secondary.title
+    finally:
+        await _cleanup(
+            db_engine,
+            user_ids=[],
+            job_ids=job_ids,
+            collection_run_ids=collection_run_ids,
+            raw_ingestion_ids=raw_ingestion_ids,
+        )
+
+
+async def test_null_tenant_natural_key_collision_resolves_to_one_occurrence(
+    db_engine: AsyncEngine,
+) -> None:
+    """ARCHITECTURE.md §11: two genuinely distinct fixture payloads sharing
+    `(provider, source, source_job_id)` with `source_tenant_id = NULL` in
+    both (simulating LinkedIn/Indeed) must resolve to the same occurrence
+    through the real `pipeline.run()` path, never a duplicate — proving
+    the `job_occurrences_natural_key_no_tenant` index's uniqueness is
+    actually honored end-to-end by the application's upsert logic, not
+    merely that the index itself rejects a raw duplicate insert (already
+    proven in `test_job_occurrences.py`). The two payloads share an
+    identical canonical URL (a clean re-observation, never
+    `evidence_mismatch`) but differ in `compensation_text` alone, so the
+    test also proves that a changed descriptive field stays frozen on
+    replay rather than merely proving nothing changed at all."""
+    job_first = _load_fixture("null_tenant_collision_primary")
+    job_second = _load_fixture("null_tenant_collision_secondary")
+    assert job_first.source_job_id == job_second.source_job_id
+    assert job_first.source_tenant_id is None
+    assert job_second.source_tenant_id is None
+    assert job_first.canonical_url == job_second.canonical_url
+    assert job_first.compensation_text != job_second.compensation_text
+
+    t1 = datetime(2026, 4, 5, tzinfo=UTC)
+    t2 = t1 + timedelta(hours=1)
+    query = SourceQuery(sources=["fixture_ats"])
+
+    job_ids: list[uuid.UUID] = []
+    collection_run_ids: list[uuid.UUID] = []
+    raw_ingestion_ids: list[uuid.UUID] = []
+    try:
+        run1_id = await pipeline.run(
+            db_engine,
+            FixtureProvider([job_first], called_at=t1),
+            query,
+            observed_at=t1,
+            clock=FixedClock(t1),
+        )
+        collection_run_ids.append(run1_id)
+
+        occurrence_1 = await _occurrence_by_job_id(db_engine, "NT-5555")
+        job_ids.append(occurrence_1.job_id)
+        assert occurrence_1.first_seen_at == t1
+        assert occurrence_1.last_seen_at == t1
+
+        run2_id = await pipeline.run(
+            db_engine,
+            FixtureProvider([job_second], called_at=t2),
+            query,
+            observed_at=t2,
+            clock=FixedClock(t2),
+        )
+        collection_run_ids.append(run2_id)
+
+        assert await _raw_ingestion_count(db_engine) == 2
+        assert await _job_count(db_engine) == 1
+        assert await _occurrence_count(db_engine) == 1
+        assert await _conflict_count(db_engine) == 0
+
+        occurrence_2 = await _occurrence_by_job_id(db_engine, "NT-5555")
+        assert occurrence_2.id == occurrence_1.id  # same row, not a duplicate
+        assert occurrence_2.first_seen_at == t1  # never moves
+        assert occurrence_2.last_seen_at == t2  # advanced forward
+
+        async with AsyncSession(bind=db_engine) as session:
+            run2 = await session.get(CollectionRun, run2_id)
+            assert run2 is not None
+            assert run2.status == "completed"
+            assert run2.jobs_discovered == 1
+            assert run2.jobs_inserted == 0
+            assert run2.jobs_updated == 1
+
+            attempts_2 = (
+                (
+                    await session.execute(
+                        select(CollectionRunProviderAttempt).where(
+                            CollectionRunProviderAttempt.collection_run_id == run2_id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert len(attempts_2) == 1
+            assert attempts_2[0].status == "completed"
+            assert attempts_2[0].jobs_discovered == 1
+            assert attempts_2[0].jobs_inserted == 0
+            assert attempts_2[0].jobs_updated == 1
+
+            raw_rows = (await session.execute(select(RawJobIngestion))).scalars().all()
+            raw_ingestion_ids.extend(row.id for row in raw_rows)  # before any assertion
+            assert len(raw_rows) == 2
+            assert all(row.processing_status == "normalized" for row in raw_rows)
+            assert all(row.job_occurrence_id == occurrence_1.id for row in raw_rows)
+
+            job_row = await session.get(Job, occurrence_1.job_id)
+            assert job_row is not None
+            assert job_row.last_seen_at == t2
+            # Descriptive field is frozen on replay — the second payload's
+            # differing value never overwrites the first.
+            assert job_row.compensation_text == job_first.compensation_text
+    finally:
+        await _cleanup(
+            db_engine,
+            user_ids=[],
+            job_ids=job_ids,
+            collection_run_ids=collection_run_ids,
+            raw_ingestion_ids=raw_ingestion_ids,
+        )
+
+
 async def test_reobservation_only_advances_observational_fields(
     db_engine: AsyncEngine,
 ) -> None:
