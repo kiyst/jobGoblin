@@ -357,13 +357,59 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   computed per source from dedicated capability booleans (4 fields) plus
   `supported_query_fields` (the rest), never contradicting each other by construction.
   Proven by a fixture-driven integration test feeding its real output into the existing,
-  unmodified `ingestion/pipeline.py::run()`. Not yet wired into the pipeline
-  automatically, and does not persist planning failures or
-  `collection_runs.providers_enforced_locally` — both require the orchestration loop the
-  next slice adds.
+  unmodified `ingestion/pipeline.py::run()`; also now called by the multi-provider
+  orchestrator below.
+  `ProviderRegistry` ([ARCHITECTURE.md §6.4](ARCHITECTURE.md#64-discoveryprovider-protocol-sourcecapabilities-providercapabilities-providerhealth)) —
+  `app/providers/registry.py::ProviderRegistry` is a pure in-memory, fail-closed
+  name→instance directory: construction rejects an invalid canonical provider slug, a
+  duplicate name, a `capabilities()` exception (converted to a sanitized
+  `ProviderRegistrationError`), or a `capabilities().provider`/`.name` mismatch; a
+  registered provider's `ProviderCapabilities` is captured as a read-isolated deep-copy
+  snapshot, never re-fetched from `capabilities()` after registration; `get()` re-checks
+  the provider's current `.name` against its registered name on every resolution (a
+  provider is never assumed immutable) and raises a sanitized `UnknownProviderError` for
+  an unregistered name; `names()` returns every registered name, alphabetically sorted.
+  The canonical lowercase-ASCII-slug grammar is shared with `QueryPlanner` via
+  `app/schemas/identifiers.py::is_canonical_slug()`, replacing two independent copies of
+  the same regex. Now consulted by the multi-provider orchestrator below; composing the
+  one real production registry instance (which live provider adapters to register) remains
+  deferred until a live provider adapter exists (Phase 4+).
+  Multi-provider orchestration ([ARCHITECTURE.md §6.8](ARCHITECTURE.md#68-multi-provider-orchestration-run_saved_search)) —
+  `app/ingestion/orchestrator.py::run_saved_search()` creates exactly one `CollectionRun`
+  spanning every provider selected for one saved search, sequentially: loads the
+  authoritative `SavedSearch` (locked `FOR SHARE` for the duration of a single
+  initialization transaction, so a concurrent delete can't race the `CollectionRun`'s FK)
+  plus its title/location rows (`ORDER BY created_at, id` — deterministic, not insertion
+  order); validates `enabled_providers` (canonical slugs, no duplicates) before any write;
+  plans each provider via `QueryPlanner`, durably recording an unknown-provider or
+  planning-validation failure (`source: null`) as a sibling-continuing outcome the instant
+  it occurs; creates attempt rows lazily, atomically with `providers_attempted`/
+  `providers_enforced_locally`, immediately before each provider's `discover()` call —
+  never pre-created, never left behind for an unreached provider. Every other failure
+  (registry name drift, an unexpected provider exception, a malformed `DiscoveryResult`, a
+  persistence/database exception, or cancellation) aborts the entire run; `CollectionRun`'s
+  rollup counters are then recomputed from a fresh `SUM` over its own attempt rows and
+  written as an absolute value — never a parallel in-memory running total — so they can
+  never disagree with the attempt rows or double-count. `pipeline.py::run()` is unchanged
+  (zero behavior/signature change; its logic is now shared via a new
+  `app/ingestion/provider_execution.py` module, not duplicated).
   Still deferred: Tier 4 (blocked on a company-text-to-`company_id` resolution capability
-  that does not exist yet, not merely unimplemented), `ProviderRegistry`,
-  multi-provider orchestration, live providers.
+  that does not exist yet, not merely unimplemented), `ProviderRegistry` production
+  composition, live providers.
+  A read-only Phase 2 exit-gate audit (2026-09-05, from clean `main@4db557c`) cross-checked
+  every documented Phase 2 requirement against the actually-merged code, tests, and
+  migrations. It found no unsatisfied requirement and no blocking gap; it found exactly two
+  bounded documentation/test-coverage discrepancies: ARCHITECTURE.md §11 cited an
+  unimplemented Tier 4 path as the required `ambiguous_match` fixture case (the conflict
+  type is actually proven through Tiers 2/3), and two of §11's required fixture-driven
+  pipeline cases (same-`source_job_id`-different-tenants; NULL-tenant natural-key collision)
+  were previously proven only at the Phase 1 database-constraint level, not through the
+  Phase 2 fixture-driven `pipeline.run()` path §11 specifies. The `phase-2/closure` branch
+  corrects both — the §11 wording, and two new fixture-driven tests
+  (`test_two_distinct_tenants_sharing_source_job_id_produce_two_jobs`,
+  `test_null_tenant_natural_key_collision_resolves_to_one_occurrence`) in
+  `tests/test_ingestion_pipeline.py`. This is the **Phase 2 closure candidate**, pending
+  Codex's independent exit-gate review and sign-off — not yet a declared-complete phase.
 - **Phases 3-14: not started.** Begin each phase only after completing its preflight in
   [PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md) and receiving approval for the next
   smallest slice.

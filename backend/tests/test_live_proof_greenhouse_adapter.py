@@ -40,7 +40,7 @@ from app.db.models import (
     RawJobIngestion,
     UserJob,
 )
-from app.ingestion import pipeline
+from app.ingestion import pipeline, provider_execution
 from app.ingestion.clock import FixedClock
 from app.ingestion.hashing import canonical_json_hash
 from app.schemas.discovered_job import DiscoveredJob, SourceRunStats
@@ -783,7 +783,7 @@ async def test_cleanup_recovers_rows_left_by_a_pipeline_run_that_raises_mid_tran
     async def _raise_after_commit(*_args: Any, **_kwargs: Any) -> Any:
         raise RuntimeError("deliberate failure after a committed sub-transaction")
 
-    monkeypatch.setattr(pipeline, "persist_posting", _raise_after_commit)
+    monkeypatch.setattr(provider_execution, "persist_posting", _raise_after_commit)
 
     provider = live_proof._SingleJobReplayProvider(job, source="greenhouse", called_at=t1)
     try:

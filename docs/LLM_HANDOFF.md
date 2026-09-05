@@ -98,173 +98,202 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-09-02, Claude Code (Sonnet 5). Class H implementation of the
-  approved QueryPlanner fixture-integration slice on `phase-2/query-planner`,
-  based on clean `main@5b2c947`. This is a genuinely new product slice
-  (following the accepted Phase 2 completion re-sequencing, conclusion 3 of the
-  prior read-only exit-gate audit) — not part of the exit-gate closure or
-  ProviderRegistry work, both still untouched.
-- Outcome: new `app/discovery/query_planner.py::QueryPlanner.plan()` — a
-  stateless `@staticmethod`, no database access, no network access, never
-  calling a provider's `discover()` — translates one `SavedSearch` plus one
-  provider's `ProviderCapabilities` into a `SourceQuery | None`. Not yet wired
-  into `ingestion/pipeline.py`; proven instead by a fixture-driven integration
-  test feeding its real output into the existing, unmodified
-  `pipeline.run()`.
-- Binding decisions applied exactly as authorized, across two revision rounds:
-  1. `QueryPlanner.plan(saved_search, provider_capabilities, *, titles, locations)
-     -> SourceQuery | None` — a class `@staticmethod`, matching the documented
-     `QueryPlanner.plan(...)` call form exactly, not a bare module function.
-  2. `titles`/`locations` are caller-supplied `Sequence[str]` — `SavedSearchTitle`/
-     `SavedSearchLocation` have no ORM relationship to `SavedSearch` and no
-     ordering column of their own, so `QueryPlanner` cannot load or order them
-     itself; it preserves whatever order it is given, verbatim, and documents
-     that defining "deterministic order" is the future loader's responsibility.
-     A bare `str`/`bytes` value for either parameter is rejected rather than
-     silently iterated character-by-character; every element must be `str`.
-  3. The source-validation contradiction is resolved and `ARCHITECTURE.md` §6.6
-     step 3 corrected: `None` is returned only for an explicit empty selection
-     or an absent key expanding against zero advertised sources — never for
-     "every listed source failed validation," since an unknown name always
-     raises before the list could be filtered to empty.
-  4. `SavedSearch.enabled_sources`' selected-provider value is validated at
-     runtime (must be a list, all-string elements, no duplicates) since its own
-     `CHECK` only guarantees a top-level JSON object.
-  5. `provider_capabilities.provider`, every `ProviderCapabilities.sources`
-     mapping key, and every embedded `SourceCapabilities.source` must match the
-     same canonical lowercase-ASCII-slug grammar every other `provider`/`source`
-     database `CHECK` in this schema already enforces
-     (`^[a-z0-9][a-z0-9._-]*$`); every mapping key must equal its own embedded
-     `.source`. Malformed identifiers are rejected, never normalized.
-  6. Every `QueryPlanValidationError` message is a fixed, categorical string —
-     no raise site interpolates a provider name, source name, capabilities key,
-     embedded `.source`, or `enabled_sources` value; none of that is "trusted"
-     merely because it came from a `ProviderCapabilities` object rather than raw
-     JSON.
-  7. Complete `SavedSearch` -> `SourceQuery` field mapping implemented exactly
-     as specified, including `preferred_companies -> company_filter` (not
-     deferred) and `recency_limit_hours -> posted_within_hours` (renamed).
-     `remote_rules -> remote_ok`: `remote_only -> True`; `hybrid_ok`/
-     `onsite_ok`/`any -> None` — no `onsite_ok -> False`, since a tri-state
-     boolean cannot losslessly express four rules and `False` would incorrectly
-     assert "remote forbidden."
-  8. Every unrepresentable field named explicitly in code and docs
-     (`preferred_salary`, `industries`, skill/keyword fields, polling/scoring/
-     provider-enablement fields, `max_results`). `SavedSearchLocation.
-     radius_miles_override`/coordinates identified as a genuine `SourceQuery`
-     schema gap, not silently claimed to be covered by the single global
-     `radius_miles` field — `radius_miles` itself is still mapped independently
-     of whether `locations` is populated; no new "radius requires location"
-     invariant was invented.
-  9. `local_enforcement` contains exactly one key per resolved source, always
-     (including an explicit empty set). 4 fields are governed exclusively by
-     their own dedicated `SourceCapabilities` boolean (`locations`/
-     `radius_miles` sharing one); the remaining 6 by `supported_query_fields`
-     membership. No contradiction is possible by construction — the two
-     mechanisms cover disjoint field-name sets, so a dedicated field's name
-     appearing in `supported_query_fields` too is simply never consulted.
-- Files changed: `backend/app/discovery/__init__.py` (new),
-  `backend/app/discovery/query_planner.py` (new),
-  `backend/tests/test_query_planner.py` (new, 33 tests), `docs/ARCHITECTURE.md`
-  (signature/return-type correction, §6.6 step 3 contradiction fix, new "Phase 2
-  implementation notes" subsection with the complete field-mapping table),
-  `docs/ROADMAP.md` (capability description, merge-state-neutral); this handoff
-  entry. No schema, migration, `ingestion/pipeline.py`, `providers/fixture.py`,
-  `ProviderRegistry`, multi-provider orchestration, planning-failure
-  persistence, `providers_enforced_locally` persistence, Tier 4, or live-provider
-  file touched.
+- Date/agent: 2026-09-05, Claude Code (Sonnet 5). Class H correction pass on
+  `phase-2/orchestration` for the five bounded findings from the original
+  implementation's review (that original implementation and its review are
+  now rotated out of this ledger per the two-iteration rule; both remain in
+  Git history at commit `63e16ef` and its review commit). Base: `63e16ef`
+  plus the uncommitted review. No product code beyond the five corrections
+  requested: live providers, parallelism, scheduler, API routes, Tier 4,
+  Phase 3, migration, and `ProviderRegistry` production composition all
+  remain untouched.
+- Outcome, addressing each finding exactly:
+  1. **Cancellation after `_begin_provider_attempt()` commits, before
+     `current_attempt_ids` is assigned.** New `_fetch_running_attempts()`
+     queries `collection_run_provider_attempts` directly for
+     `status='running'` rows scoped to this run — the durable, authoritative
+     source of truth the abort handler now consults *instead of* trusting
+     `current_attempt_ids`/`current_state` as the sole gate. A row genuinely
+     still `'running'` is always found and finalized to `'failed'`
+     regardless of whether the Python variables ever got assigned.
+  2. **Cancellation after `_finalize_provider_success()` commits, before
+     `current_attempt_ids`/`current_state` reset to `None`.** Same
+     `_fetch_running_attempts()` mechanism closes this window too: a
+     provider whose rows already reached a terminal status is never
+     rediscovered (its rows are no longer `'running'`), so
+     `_finalize_running_attempts_aborted()` (renamed from
+     `_finalize_provider_aborted`) never re-touches it. `state` is only
+     "trusted" for telemetry/`failures`-merging when the durable set of
+     still-running attempt ids exactly equals `current_attempt_ids`'s
+     values — never merely `state is not None` — so a stale reference to an
+     already-committed provider can never duplicate its `failures` entry or
+     overwrite its completed attempt back to `'failed'`. The `UPDATE` itself
+     repeats the `WHERE status = 'running'` guard (not just the discovery
+     `SELECT`), defense-in-depth against a row turning terminal between the
+     two.
+  3. **A `ProviderError` on a `completed=True` source was invisible to run
+     status.** Replaced `any_attempt_not_completed` (derived only from
+     `resolve_attempt_status() != "completed"`) with `run_had_source_issue`,
+     aggregated from each provider's own `state.possibly_incomplete` —
+     mirroring `DiscoveryResult.possibly_incomplete` exactly (any source not
+     completed, any incomplete results, *or* any `ProviderError` at all).
+     This subsumes the narrower check it replaces and additionally catches
+     the missed case: a source that stays `completed=True`/
+     `incomplete_results=False` despite carrying a real `ProviderError`
+     (e.g. "succeeded after a retry") now correctly forces
+     `'completed_with_errors'`.
+  4. **Assertion-before-ID-capture leak risk.** Audited the entire test
+     file, not just the cited line ranges — every test that can produce a
+     `CollectionRun`/`Job`/`RawJobIngestion` row now captures its cleanup id
+     immediately after the relevant query/operation, before any assertion
+     that could fail, including tests Codex's review didn't explicitly cite
+     (e.g. the two-providers-succeed happy path, the `None`-skip test, both
+     planning-failure/graceful-error sibling tests, both
+     `providers_enforced_locally`/timestamp tests, both explicit/`NULL`
+     provider-order sub-tests). The partial-progress test's block was
+     restructured most substantially: all three cleanup queries (run,
+     `JobOccurrence`, `RawJobIngestion`) now run as one contiguous block
+     immediately after the run raises, before any of its many content
+     assertions.
+  5. **Deletion-race test proved a copied SQL sequence, not
+     `run_saved_search()` itself.** Added a narrow, private, no-op-by-
+     default keyword-only parameter to `run_saved_search()` itself,
+     `_after_saved_search_locked: Callable[[], Awaitable[None]] | None =
+     None`, awaited once immediately after the real `FOR SHARE` lock is
+     confirmed and the row validated, inside the real initialization
+     transaction. The test now calls the *real* `run_saved_search()`,
+     passing a callback that starts a genuinely concurrent `DELETE` and
+     waits (bounded, `asyncio.wait_for(..., timeout=...)`) for it to
+     actually reach PostgreSQL and block on the real lock, before letting
+     the real transaction proceed to commit — proven (below) to fail loudly
+     with a foreign-key violation if the real lock is ever removed, rather
+     than staying silently green.
+- Files changed: `backend/app/ingestion/orchestrator.py` (all five
+  corrections: `_fetch_running_attempts`, renamed
+  `_finalize_running_attempts_aborted`, `run_had_source_issue`,
+  `_after_saved_search_locked` seam; docstring rewritten to match),
+  `backend/tests/test_orchestrator.py` (3 new regression tests; the
+  deletion-race test rewritten to use the real function via the new seam;
+  cleanup-ordering fixes across the file), `docs/ARCHITECTURE.md` §6.8
+  (abort-mechanics and status-aggregation prose corrected to match; new
+  sentence on the test-only seam), this handoff entry. No `db/models/`,
+  `enabled_providers` semantics, `CollectionRun` schema, migration,
+  provider-contact, or other-slice file touched.
+- New tests (3): `test_cancellation_after_begin_attempt_commit_leaves_no_row_running`,
+  `test_cancellation_after_success_finalization_commit_does_not_duplicate_or_overwrite`
+  (both wrap the *real* `_begin_provider_attempt`/`_finalize_provider_success`
+  via `monkeypatch`, let it genuinely commit, then raise `CancelledError`
+  immediately after — simulating the exact commit/cancellation windows
+  Codex identified, deterministically, without relying on real asyncio
+  scheduling races), and
+  `test_provider_error_on_completed_source_forces_completed_with_errors`
+  (the exact missing case Codex named: `completed=True`,
+  `incomplete_results=False`, one real `ProviderError`, successful
+  sibling).
 - Verification: genuine external `python scripts/verify.py --level routine
-  --focus tests/test_query_planner.py` — all **10 steps PASS**: Ruff
-  format/check, mypy (85 source files), `check_repo.py`, `git diff --check`,
-  database-URL safety, real test-database reachability, **33 focused tests**,
-  **1438 full-suite tests** (was 1405; +33), temp-directory cleanup, ~114s.
-  `alembic heads` confirms `0017` remains the sole head; `git diff --stat --
-  backend/migrations/` is empty — zero schema/migration touched, as required.
-  `alembic check` against the configured dev database (`jobgoblin`) still fails
-  for the same pre-existing reason recorded in the two prior iterations (stamped
-  at `0006`, far behind head `0017` — a condition that predates every branch in
-  this ledger and is unrelated to this slice, which adds zero migrations); not
-  remediated — a direct before/after `alembic current` check confirms it stayed
-  at `0006` throughout. All schema/database work ran only against the disposable
-  `jobgoblin_test` database.
+  --focus tests/test_orchestrator.py` — all **10 steps PASS**: Ruff
+  format/check, mypy (51 source files), `check_repo.py`, `git diff --check`,
+  database-URL safety, real test-database reachability, **26 focused
+  tests** (was 23; +3), **1493 full-suite tests** (was 1490; +3),
+  temp-directory cleanup, ~121-149s across reruns. `alembic heads` confirms
+  `0017` remains the sole head; `git diff --stat -- backend/migrations/` is
+  empty. Dev database (`jobgoblin`) confirmed unchanged at the pre-existing
+  `0006`. A direct disposable-database row-count check confirmed 0 before
+  and 0 after the full suite, both before and after the adversarial
+  stress-testing described below — no leaked rows at any point.
 - Adversarial self-review: dispatched a fresh-context subagent against the
-  actual diff. It confirmed, across all 10 checked dimensions: every validation
-  check (canonical-slug/key-mismatch, titles/locations bare-string and
-  non-string-element, enabled_sources shape, unknown-source) is independently
-  reachable and exercised by a test isolating exactly that one check; zero raise
-  sites interpolate a runtime value into any message, and the test file's own
-  "message never contains the offending value" assertions use sufficiently
-  distinctive values to be meaningful, not vacuous; the dedicated-vs-generic
-  `local_enforcement` split never contradicts itself even when a test
-  deliberately makes `supported_query_fields` disagree with a dedicated
-  boolean; no mutation of `saved_search`/`provider_capabilities`/the caller's
-  own `titles`/`locations` list objects; `radius_miles` is mapped independent of
-  `locations`; `remote_rules` mapping has no accidental `False` path; the one
-  database-backed integration test captures every cleanup-tracking ID before
-  any assertion that could fail (the exact defect class caught and fixed in
-  each of the two immediately preceding slices — deliberately re-checked here
-  and found not reintroduced); the integration test's own comments explicitly
-  disclaim implying `FixtureProvider` applies filters remotely or that
-  `pipeline.run()` filters locally; `plan` is confirmed a `@staticmethod` on a
-  class; and the new `ARCHITECTURE.md` prose matches the actual code exactly,
-  field for field. No findings.
-- Deviations/known limitations: none beyond the already-recorded, pre-existing
-  `alembic check` substitution.
-- STOP — awaiting Codex review. Do not merge, begin `ProviderRegistry`/
-  multi-provider orchestration, add schema changes, contact live providers, wire
-  `QueryPlanner` into `pipeline.run()`, or start any other slice.
+  actual diff, instructed to *prove* — not merely read — that each of the
+  five corrections is load-bearing. For each finding, it temporarily
+  reverted the specific fixed mechanism (finding 1/2: swapped
+  `_fetch_running_attempts()` back for the old
+  `current_attempt_ids is not None and current_state is not None` gate;
+  finding 3: swapped `run_had_source_issue` back for the old
+  `any_attempt_not_completed`; finding 5: removed `.with_for_update(read=
+  True)` from the real `SELECT`), reran that finding's specific regression
+  test, and confirmed it failed in exactly the predicted way (attempt stuck
+  `'running'`; `failures` duplicated to length 2; status stayed
+  `'completed'` instead of `'completed_with_errors'`; a real
+  `ForeignKeyViolationError` on the `CollectionRun` insert), then reverted
+  its own temporary edit and confirmed `git diff`/`git status` matched the
+  pre-stress-test state exactly. For finding 4, it re-scanned the *entire*
+  test file (not only the cited tests) for the same assertion-before-
+  capture pattern and found none remaining anywhere. It additionally
+  confirmed `run_saved_search()` has zero production callers yet (so the
+  new test-only seam cannot activate outside a test), reran
+  `test_ingestion_pipeline.py`/`test_ingestion_concurrency.py`/
+  `test_live_proof_greenhouse_adapter.py` explicitly (95 passed, confirming
+  `pipeline.run()` is still unaffected), and reran the full suite plus a
+  fresh row-count check after all stress-testing to confirm no residue.
+  No further findings.
+- Deviations/known limitations: none beyond the already-recorded,
+  pre-existing `alembic check` substitution.
+- STOP — awaiting Codex re-review. Do not merge or begin live-provider
+  contact, parallel/concurrent provider execution, the scheduler, API
+  routes, Tier 4, Phase 3, `ProviderRegistry` production composition, or any
+  migration.
 
 ### Work review
 
-- Date/agent: 2026-09-02, Codex. Implementation diff reviewed:
-  `5b2c947..d7cb03c` on `phase-2/query-planner`.
-- Independent verification: inspected the complete planner, focused tests, and
-  architecture/roadmap changes. Ran the genuine external canonical verifier focused
-  on `tests/test_query_planner.py`: all **10 steps PASS**, including Ruff, mypy,
-  repository/diff checks, disposable-database safety and reachability, **33 focused
-  tests**, **1438 full-suite tests**, and temporary-directory cleanup.
-- Confirmed behavior: source expansion and explicit-empty semantics are correct;
-  malformed `enabled_sources` values and unknown sources fail before provider use;
-  field mappings, remote-rule behavior, per-source enforcement, input copying, and the
-  one-source fixture/pipeline compatibility proof otherwise match the approved scope.
-- **Medium — the canonical-slug check accepts a final newline.**
-  `backend/app/discovery/query_planner.py` compiles
-  `^[a-z0-9][a-z0-9._-]*$` and tests it with `Pattern.match()`. In Python, `$` may
-  match immediately before a final newline: the current implementation accepts
-  `"fixture_provider\n"` even though `Pattern.fullmatch()` rejects it. This violates
-  the claimed exact lowercase-ASCII-slug boundary and can let a planner identifier
-  differ from the canonical value later produced by ORM trimming. Use an actual full
-  match (`fullmatch`, with a pattern suitable for it) and add isolated regressions for
-  a trailing LF and CR/LF on the provider, capability-map key, and embedded source
-  paths.
-- **Medium — unbounded PostgreSQL numeric can become non-finite during planning.**
-  `saved_searches.radius_miles` is deliberately an unconstrained-precision PostgreSQL
-  `numeric`, while `SourceQuery.radius_miles` is `float`. The direct conversion
-  `float(saved_search.radius_miles)` turns a valid stored value such as
-  `Decimal("1e10000")` into positive infinity, and Pydantic currently accepts that
-  infinity. A non-finite provider query is neither the stored value nor a usable radius.
-  Convert and then require `math.isfinite`, raising a fixed, categorical
-  `QueryPlanValidationError` on overflow/non-finite output. Add accepted finite/fractional
-  and rejected overflow regressions; do not add a database bound or migration.
-- **Low — normative architecture text claims deferred orchestration already exists.**
-  `docs/ARCHITECTURE.md` §6.6 steps 2–3 still say `ingestion/pipeline.py` records a
-  planning-time failure and avoids the provider call. The same new section later
-  correctly says the planner is not wired and those behaviors require the future
-  ProviderRegistry/orchestration loop. Rewrite steps 2–3 in future/ownership-neutral
-  terms: the future orchestrator must record/continue and must not call `discover()`;
-  the current `pipeline.run()` does neither planning nor accept `None`.
-- **Low — executable schema comments still say QueryPlanner is deferred.**
-  `backend/app/schemas/provider.py` still says source expansion and
-  `local_enforcement` assignment are deferred and callers construct queries directly.
-  Update those comments/docstrings to distinguish the now-implemented planner from its
-  still-deferred production orchestration/wiring. No schema behavior change is needed.
-- Verdict: **Changes requested.** The planner design is accepted, but the two bounded
-  executable corrections and two documentation corrections above are required before
-  merge.
-- STOP — do not merge, begin ProviderRegistry/multi-provider orchestration, contact a
-  provider, add a migration, or start another slice. Apply only these corrections after
-  user authorization, rerun the focused canonical verifier/full suite, and return for
-  re-review.
+- Date/agent: 2026-09-05, Codex. Correction diff independently reviewed:
+  `63e16ef..7384be5` on `phase-2/orchestration`.
+- Independent verification: inspected the corrected abort discovery/finalization flow,
+  source-issue aggregation, cleanup ordering, real initialization seam, associated tests,
+  and documentation. Ran the three timing-sensitive regressions five consecutive times
+  against PostgreSQL (**15/15 executions passed**), then the complete focused file
+  (**26 passed**). Ran the genuine canonical verifier focused on
+  `tests/test_orchestrator.py`: all **10 steps PASS**, including Ruff, mypy,
+  repository/diff checks, disposable-database safety/reachability, **26 focused tests**,
+  **1493 full-suite tests**, and temporary-directory cleanup.
+- Finding disposition: **all five prior findings are closed.** Abort recovery now queries
+  durable `status='running'` attempt rows by `collection_run_id`, closing the post-begin
+  commit window. It trusts the in-memory execution state only when its durable attempt-id
+  set exactly matches those running rows; an already-committed success is therefore not
+  re-finalized, its errors are not duplicated, and its terminal attempts are not
+  overwritten. The run rollup remains an absolute SQL-SUM reconciliation over attempt
+  rows. `state.possibly_incomplete` is now aggregated across providers, covering the
+  completed-source-plus-ProviderError case while leaving that source's attempt completed.
+  Cleanup identifiers are captured before assertions throughout the new test file. The
+  deletion race now invokes the real `run_saved_search()` initialization through a narrow
+  no-op-by-default coordination seam, with bounded waits and failure-safe task cleanup.
+- Scope/documentation: only the authorized orchestrator, tests, architecture text, and
+  handoff ledger changed; no model, migration, live provider, parallel execution,
+  scheduler, API, Tier 4, Phase 3, or production composition entered the pass. No further
+  findings.
+- Verdict: **Approved.** The bounded multi-provider orchestration slice and its correction
+  pass are accepted; no additional correction is required.
+- Exact requested corrections: none.
+- STOP — do not merge to `main` or begin another slice until the user explicitly
+  authorizes it.
+
+### Merge record
+
+- Date: 2026-09-06. User authorized merging `phase-2/orchestration` into
+  `main` following Codex's final Approved re-review (no findings) above.
+- Pre-merge state: `main` and `origin/main` both at `9f4c921`; feature
+  branch pushed and clean at `f0fe7cd` (merge-base `9f4c921` — no
+  divergence), containing correction commit `7384be5` plus the review
+  commit.
+- Merge: `git merge --no-ff phase-2/orchestration` on `main` — merge commit
+  `7959a2e`. Post-merge diff against the feature branch's tip is empty
+  (zero content difference); `check_repo.py` and `git diff --check` both
+  exit 0; working tree clean.
+- Post-merge verification: genuine external `verify.py --level routine
+  --focus tests/test_orchestrator.py` — all **10 steps PASS** (Ruff
+  format/check, mypy, `check_repo.py`, `git diff --check`, disposable-
+  database URL/reachability, **26 focused tests**, **1493 full-suite
+  tests**, temp-directory cleanup). `alembic heads` confirms `0017` remains
+  the sole head; no migration files touched by the merge. Dev database
+  (`jobgoblin`) confirmed unchanged at `0006` — untouched throughout.
+- Pushed: `main` at `7959a2e`, matching `origin/main`.
+- Rollback boundary: to revert this slice, reset `main` to `9f4c921` (the
+  commit immediately before this merge) — this removes `run_saved_search()`,
+  `provider_execution.py`, the `pipeline.py` extraction refactor, and their
+  tests/docs cleanly, with no migration to reverse and no data written by
+  this slice to any environment.
+- STOP — do not begin live-provider integration, production
+  `ProviderRegistry` composition, parallel/concurrent provider execution,
+  the scheduler, API routes, Tier 4, Phase 3, or migrations without separate
+  authorization.
 
 ---
 
@@ -272,156 +301,89 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-09-02, Claude Code (Sonnet 5). Class H correction pass on
-  `phase-2/query-planner` for the four bounded findings from review commit
-  (uncommitted at review time; committed together with this correction — see
-  Iteration 1's `Work review` above, preserved byte-for-byte, not rewritten).
-  Base: `d7cb03c` plus the uncommitted review. No product code beyond the exact
-  four corrections requested: `ProviderRegistry`, multi-provider orchestration,
-  schema, migrations, and any wiring of `QueryPlanner` into `pipeline.run()`
-  remain untouched.
-- Outcome, addressing each finding exactly:
-  1. **Canonical-slug full-match.** `query_planner.py`'s `_CANONICAL_SLUG_PATTERN`
-     is now checked with `.fullmatch()` at all three sites (provider, capability
-     mapping key, embedded `SourceCapabilities.source`) instead of `.match()`.
-     Python's `$` matches either true end-of-string or immediately before a
-     single trailing `\n`, so `.match()` wrongly accepted
-     `"fixture_provider\n"`; `.fullmatch()` requires the match to consume the
-     entire string, closing that gap — confirmed empirically before and after.
-     Six new isolated regressions: trailing LF and CRLF for each of the
-     provider/capability-key/embedded-source paths, each holding the other two
-     identifiers valid so only the intended check fires. (CRLF was already
-     rejected pre-fix — `\r` was never in the allowed character class — so
-     those two are confirmatory, not regression, tests; only the LF variants
-     would have failed before this fix. Stated explicitly in the test file's
-     own comment.)
-  2. **`radius_miles` finiteness.** After `Decimal -> float` conversion,
-     `math.isfinite()` is now required; a non-finite result (e.g.
-     `Decimal("1e10000")` overflowing to infinity — a legitimately storable
-     value under `saved_searches.radius_miles`'s unconstrained-precision
-     `numeric`) raises a new fixed, categorical `QueryPlanValidationError`
-     (`_ERROR_RADIUS_MILES_NOT_FINITE`) that never embeds the actual value or
-     the words "inf"/"infinity". Two new tests: an ordinary finite fractional
-     value is accepted; `Decimal("1e10000")` is rejected. No database
-     `CHECK`/migration added, per instruction.
-  3. **`ARCHITECTURE.md` §6.6 steps 2–3, and their "Behavior summary" bullet
-     restating the same claim**, no longer assert that the current
-     `ingestion/pipeline.py::run()` records planning-time failures or handles a
-     `None` planned query — neither is true today (`run()` doesn't call
-     `QueryPlanner.plan()` at all). Both responsibilities are now attributed
-     explicitly to the future ProviderRegistry/multi-provider orchestrator,
-     cross-referenced to this same section's own "Phase 2 implementation
-     notes". Checked the rest of §6.6 for the same stale claim restated
-     elsewhere — found and fixed one additional instance (the summary bullet)
-     beyond the two numbered steps Codex named, for internal consistency
-     within the same section.
-  4. **`backend/app/schemas/provider.py`'s `SourceQuery` docstring and
-     `local_enforcement` comment** now distinguish "`QueryPlanner.plan()` —
-     implemented" from "wiring into `ingestion/pipeline.py` — still deferred",
-     replacing the stale "QueryPlanner (deferred)" wording. No schema or
-     validator change — confirmed the diff is comment-only.
-- A fresh-context adversarial review (below) found one additional test-isolation
-  gap beyond the four findings, fixed in this same pass: the original
-  capability-map-key trailing-LF/CRLF tests set *both* the dict key and the
-  embedded `.source` to the same invalid string, so they could not distinguish
-  "the key check fired" from "the embedded-source check fired" (both live
-  behind one `or`). Fixed by keeping the embedded `.source` a valid — but
-  deliberately different-from-the-key — slug in both tests, isolating the
-  key-specific path the same way the embedded-source tests already isolated
-  theirs.
-- Files changed: `backend/app/discovery/query_planner.py` (fullmatch; finite
-  check; new error constant and docstring additions),
-  `backend/tests/test_query_planner.py` (8 new tests: 6 slug/newline, 2
-  radius-finiteness; one existing pair of tests corrected for isolation),
-  `docs/ARCHITECTURE.md` (§6.6 steps 2–3 and summary bullet reattributed to the
-  future orchestrator), `backend/app/schemas/provider.py` (comment-only), this
-  handoff entry (Iteration 1's `Work done`/`Work review` preserved verbatim,
-  oldest prior iteration dropped per the rotation rule). No schema, migration,
-  `ingestion/pipeline.py`, `ProviderRegistry`, orchestration, Tier 4, or
-  live-provider file touched.
-- Verification: genuine external `python scripts/verify.py --level routine
-  --focus tests/test_query_planner.py` — all **10 steps PASS**: Ruff
-  format/check, mypy (85 source files), `check_repo.py`, `git diff --check`,
-  database-URL safety, real test-database reachability, **41 focused tests**
-  (was 33; +8), **1446 full-suite tests** (was 1438; +8), temp-directory
-  cleanup, ~137s. `alembic heads` confirms `0017` remains the sole head; `git
-  diff --stat -- backend/migrations/` is empty. `alembic current` against the
-  configured dev database (`jobgoblin`) confirmed unchanged at the same
-  pre-existing `0006` before and after this pass — no `alembic upgrade` was
-  run; all schema/database work ran only against the disposable
-  `jobgoblin_test` database.
-- Adversarial self-review: dispatched a fresh-context subagent against the
-  actual diff. It independently re-verified the `.fullmatch()` fix by direct
-  regex execution (not just trusting the diff) and confirmed CRLF was already
-  rejected pre-fix, correctly distinguishing genuine regressions from
-  confirmatory tests; traced the `radius_miles` finite check end-to-end and
-  confirmed no false-positive path on an ordinary value and no value/"inf"
-  leakage in the new error message; confirmed `ARCHITECTURE.md` §6.6 is now
-  internally consistent throughout, not just at the two numbered steps;
-  confirmed `provider.py`'s diff is comment-only; and confirmed the capability-
-  map-key isolation gap described above, which was fixed in this same pass
-  before finalizing. It also flagged that this handoff entry did not yet exist
-  at the time it ran (an artifact of running the review before writing this
-  `Work done` section, not a defect) and confirmed the diff's scope is exactly
-  the four corrections, their tests, and this handoff — nothing else.
-- Deviations/known limitations: none beyond the already-recorded, pre-existing
-  `alembic check` substitution.
-- STOP — awaiting Codex re-review. Do not merge, begin `ProviderRegistry`/
-  multi-provider orchestration, add schema changes, contact live providers, wire
-  `QueryPlanner` into `pipeline.run()`, or start any other slice.
-
-### Work review
-
-- Date/agent: 2026-09-02, Codex. Correction diff reviewed:
-  `d7cb03c..15ce73c` on `phase-2/query-planner`.
-- Independent verification: inspected every changed executable/test/documentation file;
-  directly ran the eight focused newline/finiteness cases (**8 passed**); then ran the
-  genuine external canonical verifier focused on `tests/test_query_planner.py`: all
-  **10 steps PASS**, including Ruff, mypy, repository/diff checks, disposable-database
-  safety/reachability, **41 focused tests**, **1446 full-suite tests**, and temporary-
-  directory cleanup.
-- Prior-finding disposition: **closed**. Canonical provider/source identifiers now use
-  true full-string matching on all three paths, including isolated trailing-LF/CRLF
-  coverage. `radius_miles` conversion now rejects non-finite float output with a fixed,
-  sanitized error while preserving valid finite fractional values. No database bound,
-  schema change, or migration was introduced.
-- Documentation disposition: **closed**. ARCHITECTURE §6.6 now assigns planning-failure
-  persistence, continuation, and `None` handling to the future orchestrator and states
-  accurately that current `pipeline.run()` accepts only an already-built `SourceQuery`.
-  `schemas/provider.py` now distinguishes the implemented planner from its deferred
-  automatic wiring without changing schema behavior.
-- Scope/adversarial-fix check: the additional test correction only isolates the
-  capability-map-key cases by keeping the embedded source valid; it changes no product
-  behavior and makes the intended branch provable. No ProviderRegistry, orchestration,
-  pipeline wiring, provider contact, migration, or unrelated product work entered the
-  diff. No further findings.
-- Verdict: **Approved**. The QueryPlanner fixture-integration slice and bounded
-  correction pass are accepted; no additional correction is required.
-- Exact requested corrections: none.
-- STOP — do not merge to `main` or begin ProviderRegistry/multi-provider orchestration,
-  Tier 4, provider contact, Phase 3, or any other slice until the user explicitly
-  authorizes the next action.
-
-### Merge record
-
-- Date: 2026-09-03. User authorized merging `phase-2/query-planner` into `main`
-  following Codex's final Approved re-review (no findings) above.
-- Pre-merge state: `main` and `origin/main` both at `5b2c947`; feature branch
-  pushed and clean at `1840874` (merge-base `5b2c947` — no divergence).
-- Merge: `git merge --no-ff phase-2/query-planner` on `main` — merge commit
-  `8a57550`. Post-merge diff against the feature branch's tip is empty (zero
-  content difference); `check_repo.py` and `git diff --check` both clean.
-- Post-merge verification: genuine external `verify.py --level routine --focus
-  tests/test_query_planner.py` — all **10 steps PASS** (Ruff format/check,
-  mypy, `check_repo.py`, `git diff --check`, disposable-database URL/
-  reachability, **41 focused tests**, **1446 full-suite tests**, temp-directory
-  cleanup). `alembic heads` confirms `0017` remains the sole head; no migration
-  files touched by the merge. Dev database (`jobgoblin`) confirmed unchanged at
-  `0006` — untouched throughout.
-- Pushed: `main` at `8a57550`, matching `origin/main`.
-- Rollback boundary: to revert this slice, reset `main` to `5b2c947` (the
-  commit immediately before this merge) — this removes `QueryPlanner` and its
-  tests/docs cleanly, with no migration to reverse and no data written by this
-  slice to any environment.
-- STOP — do not begin ProviderRegistry/multi-provider orchestration, Tier 4,
-  provider contact, Phase 3, or any other slice without separate authorization.
+- Date/agent: 2026-09-05, Claude Code (Sonnet 5). Risk class R Phase 2
+  closure pass on `phase-2/closure`, based on clean `main@4db557c`,
+  implementing the smallest bounded closure identified by a prior read-only
+  Phase 2 exit-gate audit (also this session). The audit found no
+  unsatisfied Phase 2 requirement and no blocking gap; it found exactly two
+  bounded documentation/test-coverage discrepancies, both closed here. Full
+  suite and real-PostgreSQL verification were run (a heavier bar than R's
+  default) at the user's explicit direction, since the new tests exercise
+  identity behavior. No live providers, Tier 4, Phase 3, migration, or
+  production behavior touched.
+- Findings closed:
+  1. **ARCHITECTURE.md §11 cited an unimplemented Tier 4 path as the
+     required `ambiguous_match` fixture case.** Reworded to state the
+     conflict type is proven through the implemented Tier 2/3
+     candidate-resolution paths; Tier 4 remains explicitly deferred per
+     [ADR 0004](DECISIONS/0004-scoped-deterministic-identity.md) pending a
+     company-text-to-`company_id` resolution capability that does not exist.
+     No implication that Tier 4 is implemented or required for closure.
+  2. **Two of §11's required fixture-driven pipeline cases were previously
+     proven only at the Phase 1 database-constraint level**
+     (`test_job_occurrences.py`), not through the actual `pipeline.run()`
+     path §11 specifies. Added two new fixtures under
+     `tests/fixtures/discovery/` (`two_tenants_shared_source_job_id_primary/
+     secondary.json`, `null_tenant_collision_primary/secondary.json`) and two
+     new tests in `tests/test_ingestion_pipeline.py`:
+     `test_two_distinct_tenants_sharing_source_job_id_produce_two_jobs`
+     (same `source_job_id`, two distinct non-null tenants, distinct
+     canonical URLs/requisition ids so Tier 2/3 cannot accidentally attach
+     them — proves two `Job`s/two `JobOccurrence`s, exact run/attempt
+     counters, both raw rows normalized) and
+     `test_null_tenant_natural_key_collision_resolves_to_one_occurrence`
+     (same `source_job_id`, `source_tenant_id = NULL` in two genuinely
+     distinct payloads — identical canonical URL so this is a clean
+     re-observation, not `evidence_mismatch`; differ only in
+     `compensation_text` — proves one `Job`/one `JobOccurrence`, both raw
+     rows normalized, `first_seen_at` frozen, `last_seen_at` advances, exact
+     insert/update counters, zero `IdentityConflict` rows, and that the
+     differing descriptive field stays frozen on replay, not silently
+     proving nothing changed).
+- Files changed: `docs/ARCHITECTURE.md` §11 (wording fix only),
+  `docs/ROADMAP.md` (Phase 2 status: audit summary and closure-candidate
+  note appended), `backend/tests/fixtures/discovery/` (4 new JSON files),
+  `backend/tests/test_ingestion_pipeline.py` (2 new tests), this handoff
+  entry. No model, schema, migration, provider-contact, or
+  production-behavior file touched.
+- Verification: genuine external `python scripts/verify.py --level routine`
+  (full run, no `--focus`, since this closure spans the whole Phase 2
+  fixture-proof surface) — all **9 steps PASS**: Ruff format/check, mypy,
+  `check_repo.py`, `git diff --check`, disposable-database URL/reachability,
+  **1495 full-suite tests** (was 1493; +2), temp-directory cleanup, ~137s.
+  Also ran the full relevant ingestion/identity suites directly
+  (`test_ingestion_pipeline.py`, `test_ingestion_concurrency.py`,
+  `test_ingestion_natural_key.py`, `test_job_occurrences.py`,
+  `test_orchestrator.py`): **250 passed**. `alembic heads` confirms `0017`
+  remains the sole head; `git diff --stat origin/main -- migrations/` is
+  empty. Dev database (`jobgoblin`) confirmed unchanged at the pre-existing
+  `0006`. A direct disposable-database row-count check (`jobs`,
+  `job_occurrences`, `raw_job_ingestions`, `collection_runs`,
+  `collection_run_provider_attempts`, `identity_conflicts`, `users`,
+  `user_jobs`) confirmed 0 before and 0 after the full suite.
+- Adversarial self-review (abbreviated, proportionate to Class R per
+  `LLM_WORKFLOW.md`): temporarily broke each new test's own invariant in
+  `app/ingestion/persistence.py::_existing_occurrence_conditions()` and
+  confirmed the corresponding new test failed for the intended reason, then
+  reverted cleanly (`git diff --stat` empty afterward). (1) Removed the
+  `TENANT`-domain `source_tenant_id` equality condition — the two-tenants
+  test failed exactly at `_job_count(db_engine) == 2` (got `1`), with the
+  second payload incorrectly colliding into the first tenant's occurrence
+  and raising an `evidence_mismatch` conflict, proving tenant scoping is
+  load-bearing. (2) Inverted the `NO_TENANT`-domain condition from
+  `.is_(None)` to `.isnot(None)` — the NULL-tenant-collision test failed
+  with a real `UniqueViolationError` on `uq_job_occurrences_no_tenant_natural_key`
+  (the lookup could no longer find the existing row, so the second
+  submission attempted a raw `INSERT`), proving the application-side lookup
+  — not just the underlying constraint — is what makes this a clean
+  idempotent upsert. Both breaks left transient rows in the disposable test
+  database (from the crashed second run in case 2); both were identified
+  and deleted before continuing, and a fresh row-count check confirmed 0
+  rows across all affected tables before the final verification run above.
+- Deviations/known limitations: none beyond the already-recorded,
+  pre-existing `alembic check` substitution. This closure pass does not
+  declare Phase 2 complete — that determination is Codex's, on independent
+  exit-gate review.
+- STOP — awaiting Codex's independent exit-gate review and sign-off. Do not
+  merge, begin Phase 3, contact providers, add production behavior, or
+  create a migration.

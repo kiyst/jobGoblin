@@ -1,23 +1,15 @@
 import math
-import re
 from collections.abc import Sequence
 
 from app.db.models.saved_search import SavedSearch
+from app.schemas.identifiers import is_canonical_slug
 from app.schemas.provider import ProviderCapabilities, SourceQuery
 
-# Same canonical-identifier grammar already enforced by every `provider`/
-# `source` database CHECK in this schema (`job_occurrences`,
-# `raw_job_ingestions`, `collection_run_provider_attempts`): lowercase,
-# ASCII, starts with a letter/digit, otherwise letters/digits/`.`/`_`/`-`.
-# `QueryPlanner` enforces the same grammar in memory, before any of these
-# values are trusted to build a query — see `QueryPlanValidationError`.
-#
-# Checked with `.fullmatch()`, never `.match()`: Python's `$` matches either
-# at the true end of the string *or* immediately before a single trailing
-# `\n` — so `.match()` against this pattern would wrongly accept
-# `"fixture_provider\n"` even though it is not a canonical slug. `.fullmatch()`
-# requires the match to consume the entire string, closing that gap.
-_CANONICAL_SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
+# Canonical-identifier grammar validation (lowercase ASCII slug, same
+# grammar already enforced by every `provider`/`source` database CHECK in
+# this schema) is shared with `app/providers/registry.py` via
+# `app.schemas.identifiers.is_canonical_slug()` — see that module for why
+# it is a predicate function rather than an exported regex.
 
 # Every `QueryPlanValidationError` message below is a fixed, categorical
 # string — never an f-string interpolating a provider name, source name,
@@ -202,12 +194,10 @@ class QueryPlanner:
         for that field; the dedicated boolean alone decides it, silently,
         every time.
         """
-        if not _CANONICAL_SLUG_PATTERN.fullmatch(provider_capabilities.provider):
+        if not is_canonical_slug(provider_capabilities.provider):
             raise QueryPlanValidationError(_ERROR_PROVIDER_SLUG_INVALID)
         for key, source_capabilities in provider_capabilities.sources.items():
-            if not _CANONICAL_SLUG_PATTERN.fullmatch(key) or not _CANONICAL_SLUG_PATTERN.fullmatch(
-                source_capabilities.source
-            ):
+            if not is_canonical_slug(key) or not is_canonical_slug(source_capabilities.source):
                 raise QueryPlanValidationError(_ERROR_CAPABILITY_SOURCE_SLUG_INVALID)
             if key != source_capabilities.source:
                 raise QueryPlanValidationError(_ERROR_CAPABILITY_KEY_MISMATCH)
