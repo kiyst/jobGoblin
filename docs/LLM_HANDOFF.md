@@ -381,3 +381,34 @@ that detail.
 - STOP — do not merge to `main` or begin multi-provider orchestration, pipeline changes,
   `enabled_providers` semantics, production composition, provider contact, Tier 4,
   Phase 3, or any other slice until the user explicitly authorizes the next action.
+
+### Merge record
+
+- Date: 2026-09-04. User authorized merging `phase-2/provider-registry` into
+  `main` following Codex's final Approved re-review (no findings) above.
+- Pre-merge state: `main` and `origin/main` both at `342534f`; feature branch
+  pushed and clean at `eada592` (merge-base `342534f` — no divergence).
+- Merge: `git merge --no-ff phase-2/provider-registry` on `main` — merge
+  commit `c67f1f5`. Post-merge diff against the feature branch's tip is
+  empty (zero content difference); `check_repo.py` and `git diff --check`
+  both clean.
+- Post-merge verification: genuine external `verify.py --level routine
+  --focus tests/test_provider_registry.py` — all **10 steps PASS** (Ruff
+  format/check, mypy, `check_repo.py`, `git diff --check`, disposable-
+  database URL/reachability, **21 focused tests**, **1467 full-suite
+  tests**, temp-directory cleanup). One transient reachability failure was
+  observed on the first attempt (the local `jobgoblin-postgres-1` Docker
+  container had exited ~15 minutes earlier, unrelated to this merge);
+  restarted the container, confirmed healthy, and reran to a clean pass.
+  `alembic heads` confirms `0017` remains the sole head; no migration files
+  touched by the merge. Dev database (`jobgoblin`) confirmed unchanged at
+  `0006` — untouched throughout.
+- Pushed: `main` at `c67f1f5`, matching `origin/main`.
+- Rollback boundary: to revert this slice, reset `main` to `342534f` (the
+  commit immediately before this merge) — this removes `ProviderRegistry`,
+  the shared `is_canonical_slug()` extraction, and their tests/docs cleanly,
+  with no migration to reverse and no data written by this slice to any
+  environment.
+- STOP — do not begin multi-provider orchestration, pipeline ownership
+  changes, `enabled_providers` semantics, production composition, provider
+  contact, Tier 4, Phase 3, or migrations without separate authorization.
