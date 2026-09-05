@@ -494,3 +494,33 @@ that detail.
 - Exact requested corrections: none.
 - STOP — do not merge to `main` or begin another slice until the user explicitly
   authorizes it.
+
+### Merge record
+
+- Date: 2026-09-06. User authorized merging `phase-2/orchestration` into
+  `main` following Codex's final Approved re-review (no findings) above.
+- Pre-merge state: `main` and `origin/main` both at `9f4c921`; feature
+  branch pushed and clean at `f0fe7cd` (merge-base `9f4c921` — no
+  divergence), containing correction commit `7384be5` plus the review
+  commit.
+- Merge: `git merge --no-ff phase-2/orchestration` on `main` — merge commit
+  `7959a2e`. Post-merge diff against the feature branch's tip is empty
+  (zero content difference); `check_repo.py` and `git diff --check` both
+  exit 0; working tree clean.
+- Post-merge verification: genuine external `verify.py --level routine
+  --focus tests/test_orchestrator.py` — all **10 steps PASS** (Ruff
+  format/check, mypy, `check_repo.py`, `git diff --check`, disposable-
+  database URL/reachability, **26 focused tests**, **1493 full-suite
+  tests**, temp-directory cleanup). `alembic heads` confirms `0017` remains
+  the sole head; no migration files touched by the merge. Dev database
+  (`jobgoblin`) confirmed unchanged at `0006` — untouched throughout.
+- Pushed: `main` at `7959a2e`, matching `origin/main`.
+- Rollback boundary: to revert this slice, reset `main` to `9f4c921` (the
+  commit immediately before this merge) — this removes `run_saved_search()`,
+  `provider_execution.py`, the `pipeline.py` extraction refactor, and their
+  tests/docs cleanly, with no migration to reverse and no data written by
+  this slice to any environment.
+- STOP — do not begin live-provider integration, production
+  `ProviderRegistry` composition, parallel/concurrent provider execution,
+  the scheduler, API routes, Tier 4, Phase 3, or migrations without separate
+  authorization.
