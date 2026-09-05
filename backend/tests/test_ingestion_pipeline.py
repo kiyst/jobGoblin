@@ -470,13 +470,11 @@ async def test_two_distinct_tenants_sharing_source_job_id_produce_two_jobs(
             observed_at=t1,
             clock=FixedClock(t1),
         )
-        collection_run_ids.append(run_id)
+        collection_run_ids.append(run_id)  # before any assertion
 
-        assert await _raw_ingestion_count(db_engine) == 2
-        assert await _job_count(db_engine) == 2
-        assert await _occurrence_count(db_engine) == 2
-        assert await _conflict_count(db_engine) == 0
-
+        # Every cleanup identifier is captured here, before any assertion
+        # below could fail, so a failed assertion never leaves rows behind
+        # for cleanup to miss.
         async with AsyncSession(bind=db_engine) as session:
             occurrences = (
                 (
@@ -487,14 +485,20 @@ async def test_two_distinct_tenants_sharing_source_job_id_produce_two_jobs(
                 .scalars()
                 .all()
             )
+            raw_rows = (await session.execute(select(RawJobIngestion))).scalars().all()
+        job_ids.extend({occ.job_id for occ in occurrences})
+        raw_ingestion_ids.extend(row.id for row in raw_rows)
+
+        assert await _raw_ingestion_count(db_engine) == 2
+        assert await _job_count(db_engine) == 2
+        assert await _occurrence_count(db_engine) == 2
+        assert await _conflict_count(db_engine) == 0
+
         assert len(occurrences) == 2
         by_tenant = {occ.source_tenant_id: occ for occ in occurrences}
         assert set(by_tenant) == {"north-star-inc", "vertex-holdings"}
         occurrence_north = by_tenant["north-star-inc"]
         occurrence_vertex = by_tenant["vertex-holdings"]
-        # Captured before any further assertion, so a later failure still
-        # leaves cleanup able to find both rows.
-        job_ids.extend([occurrence_north.job_id, occurrence_vertex.job_id])
         assert occurrence_north.job_id != occurrence_vertex.job_id
 
         async with AsyncSession(bind=db_engine) as session:
@@ -523,11 +527,10 @@ async def test_two_distinct_tenants_sharing_source_job_id_produce_two_jobs(
             assert attempts[0].jobs_inserted == 2
             assert attempts[0].jobs_updated == 0
 
-            raw_rows = (await session.execute(select(RawJobIngestion))).scalars().all()
-            raw_ingestion_ids.extend(row.id for row in raw_rows)  # before any assertion
-            assert len(raw_rows) == 2
-            assert all(row.processing_status == "normalized" for row in raw_rows)
-            assert {row.job_occurrence_id for row in raw_rows} == {
+            raw_rows_check = (await session.execute(select(RawJobIngestion))).scalars().all()
+            assert len(raw_rows_check) == 2
+            assert all(row.processing_status == "normalized" for row in raw_rows_check)
+            assert {row.job_occurrence_id for row in raw_rows_check} == {
                 occurrence_north.id,
                 occurrence_vertex.id,
             }
@@ -586,12 +589,44 @@ async def test_null_tenant_natural_key_collision_resolves_to_one_occurrence(
             observed_at=t1,
             clock=FixedClock(t1),
         )
-        collection_run_ids.append(run1_id)
+        collection_run_ids.append(run1_id)  # before any assertion
 
         occurrence_1 = await _occurrence_by_job_id(db_engine, "NT-5555")
-        job_ids.append(occurrence_1.job_id)
+        job_ids.append(occurrence_1.job_id)  # before any assertion
+        async with AsyncSession(bind=db_engine) as session:
+            raw_rows_1 = (await session.execute(select(RawJobIngestion))).scalars().all()
+        raw_ingestion_ids.extend(row.id for row in raw_rows_1)  # before any assertion
+
         assert occurrence_1.first_seen_at == t1
         assert occurrence_1.last_seen_at == t1
+
+        async with AsyncSession(bind=db_engine) as session:
+            run1 = await session.get(CollectionRun, run1_id)
+            assert run1 is not None
+            assert run1.status == "completed"
+            assert run1.jobs_discovered == 1
+            assert run1.jobs_inserted == 1
+            assert run1.jobs_updated == 0
+            assert run1.failures == []
+
+            attempts_1 = (
+                (
+                    await session.execute(
+                        select(CollectionRunProviderAttempt).where(
+                            CollectionRunProviderAttempt.collection_run_id == run1_id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert len(attempts_1) == 1
+            assert attempts_1[0].status == "completed"
+            assert attempts_1[0].jobs_discovered == 1
+            assert attempts_1[0].jobs_inserted == 1
+            assert attempts_1[0].jobs_updated == 0
+            assert attempts_1[0].error_category is None
+            assert attempts_1[0].error_message is None
 
         run2_id = await pipeline.run(
             db_engine,
@@ -600,7 +635,13 @@ async def test_null_tenant_natural_key_collision_resolves_to_one_occurrence(
             observed_at=t2,
             clock=FixedClock(t2),
         )
-        collection_run_ids.append(run2_id)
+        collection_run_ids.append(run2_id)  # before any assertion
+
+        async with AsyncSession(bind=db_engine) as session:
+            all_raw_rows = (await session.execute(select(RawJobIngestion))).scalars().all()
+        run1_raw_ids = set(raw_ingestion_ids)
+        new_raw_rows = [row for row in all_raw_rows if row.id not in run1_raw_ids]
+        raw_ingestion_ids.extend(row.id for row in new_raw_rows)  # before any assertion
 
         assert await _raw_ingestion_count(db_engine) == 2
         assert await _job_count(db_engine) == 1
@@ -638,7 +679,6 @@ async def test_null_tenant_natural_key_collision_resolves_to_one_occurrence(
             assert attempts_2[0].jobs_updated == 1
 
             raw_rows = (await session.execute(select(RawJobIngestion))).scalars().all()
-            raw_ingestion_ids.extend(row.id for row in raw_rows)  # before any assertion
             assert len(raw_rows) == 2
             assert all(row.processing_status == "normalized" for row in raw_rows)
             assert all(row.job_occurrence_id == occurrence_1.id for row in raw_rows)
