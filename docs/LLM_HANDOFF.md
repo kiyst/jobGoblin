@@ -98,153 +98,229 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-09-03, Claude Code (Sonnet 5). Class H implementation of the
-  approved two-slice boundary's Slice 1, `ProviderRegistry` only, on
-  `phase-2/provider-registry`, based on clean `main@342534f`. Slice 2
-  (multi-provider orchestration) is explicitly not started — no
-  `ingestion/pipeline.py` change, no `CollectionRun`/`enabled_providers`
-  behavior, no production composition of a real registry instance.
+- Date/agent: 2026-09-05, Claude Code (Sonnet 5). Class H implementation of
+  the approved, twice-revised multi-provider orchestration proposal, on
+  `phase-2/orchestration`, based on clean `main@9f4c921`. Implements exactly
+  `run_saved_search()` per the final authorized design (superseding two
+  prior proposal-only rounds); no live providers, parallelism, scheduler,
+  API routes, Tier 4, Phase 3, migration, or `ProviderRegistry` production
+  composition touched.
 - Outcome:
-  - **`app/schemas/identifiers.py`** (new) — extracts the canonical
-    lowercase-ASCII-slug regex out of `query_planner.py` into a single shared
-    predicate, `is_canonical_slug(value: str) -> bool`, using `.fullmatch()`
-    only. The compiled pattern itself stays private/unexported specifically so
-    no caller can reach for it directly and reintroduce the project's own
-    prior `.match()` bug — `is_canonical_slug()` is the only entry point.
-  - **`app/discovery/query_planner.py`** — now imports and calls
-    `is_canonical_slug()` instead of its own private compiled regex; zero
-    behavior change (all 41 existing focused tests pass unmodified).
-  - **`app/providers/registry.py`** (new) — `ProviderRegistry`,
-    `ProviderRegistrationError`, `UnknownProviderError`,
-    `RegisteredProvider` (frozen dataclass: `.provider`, `.capabilities`).
-    Construction fails closed on: an invalid canonical provider name; a
-    duplicate registered name; `capabilities()` raising *or* returning a
-    malformed value (e.g. `None` — its declared return type isn't
-    runtime-enforced) — both converted to one fixed, categorical
-    `ProviderRegistrationError` that never exposes the original
-    exception's text; `capabilities().provider != provider.name`. The
-    `ProviderCapabilities` snapshot is captured via `.model_copy(deep=True)`
-    at registration and never re-fetched; `get(name)` returns a **fresh**
-    deep copy every call (mutating one resolved copy can never affect the
-    registry's own state or a different caller's copy) and re-checks the
-    provider's *current* `.name` against its registered name on every
-    resolution — a `DiscoveryProvider` is an arbitrary object, never assumed
-    immutable, so drift is detected at resolution, not just at construction.
-    `names()` returns every registered name, alphabetically sorted, as a new
-    list each call. Registered names are used verbatim as dict keys — never
-    normalized. No module-level singleton, no database access, no network
-    access.
-  - **`backend/tests/test_provider_registry.py`** (new, 15 tests) — empty
-    registry; deterministic sorted `names()` independent of registration
-    order; successful lookup; duplicate rejection; invalid provider slug
-    including isolated trailing-LF/CRLF cases; capabilities-name mismatch;
-    `capabilities()` exception sanitization; `capabilities()` returning a
-    malformed value (`None`) also rejected, not a raw `AttributeError`
-    (added during adversarial review, below); `capabilities()` called
-    exactly once on successful registration, confirmed unchanged across two
-    subsequent `get()` calls; mutating a resolved snapshot (including a
-    *nested* `SourceCapabilities` field, and adding a new dict entry) cannot
-    mutate the stored registry state; provider `.name` drift after
-    registration detected on resolution; unknown-name errors never contain
-    the requested name; a resolved capability snapshot feeds
-    `QueryPlanner.plan()` directly and produces a valid `SourceQuery` —
-    entirely offline, the real current-consumer compatibility proof.
-  - **`docs/ARCHITECTURE.md`** §6.4 — replaces the one-paragraph
-    `ProviderRegistry` mention with a precise subsection documenting the
-    implemented contract above; explicitly states production composition
-    and `ingestion/pipeline.py` wiring are **not yet implemented** (Slice
-    2's job), per the instruction not to document the orchestration
-    proposal as settled.
-  - **`docs/ROADMAP.md`** — Phase 2 status paragraph adds `ProviderRegistry`
-    as implemented (same "not yet composed/consulted" caveat), moves it out
-    of the "still deferred" list, and reframes the remaining deferred item
-    as "multi-provider orchestration" (Slice 2) rather than the prior
-    combined "`ProviderRegistry`, multi-provider orchestration" phrasing.
-- Files changed: exactly the authorized set — `backend/app/schemas/
-  identifiers.py`, `backend/app/discovery/query_planner.py`,
-  `backend/app/providers/registry.py`, `backend/tests/
-  test_provider_registry.py`, `docs/ARCHITECTURE.md`, `docs/ROADMAP.md`,
-  this handoff entry. No `ingestion/`, `db/models/`, migration, or
-  `enabled_providers`/`CollectionRun` file touched.
+  - **`app/ingestion/provider_execution.py`** (new) — extracted the
+    discover→validate→write-raw→resolve-identity→persist→accumulate logic
+    out of `pipeline.py::run()`'s inlined body, unchanged in substance.
+    `ProviderExecutionState` (a typed dataclass: per-source counters,
+    `failures`, `had_parse_error`, `had_conflict`, `possibly_incomplete`,
+    `source_stats`, `selected_errors`) is mutated **in place** by
+    `execute_provider_query()` — `source_stats`/`selected_errors`/`failures`
+    are populated immediately once a valid `DiscoveryResult` is received,
+    *before* the per-posting loop that could later raise, so a downstream
+    persistence exception still leaves genuinely-known telemetry available
+    to whichever caller's exception handler runs next. `UnsupportedDiscoveryResultError`
+    and the per-posting transaction helpers (`_write_fetched_row`,
+    `_mark_parse_error`) moved here too; `pipeline.py` re-exports both for
+    the existing test suite's direct use.
+  - **`app/ingestion/pipeline.py`** — `run()`'s internals now delegate to
+    `provider_execution.py`; public signature/behavior is unchanged (zero
+    regression across the entire existing pipeline/concurrency/live-proof
+    suite). Two existing tests (`test_ingestion_pipeline.py`,
+    `test_live_proof_greenhouse_adapter.py`) had their
+    `monkeypatch.setattr(pipeline, "persist_posting", ...)` call sites
+    retargeted to `provider_execution.persist_posting` — the only place the
+    call now actually lives after extraction; no other change to either
+    test file.
+  - **`app/ingestion/orchestrator.py`** (new) — `run_saved_search(engine,
+    saved_search_id, provider_registry, *, clock, observed_at) -> uuid.UUID`,
+    plus `SavedSearchNotFoundError`, `InactiveSavedSearchError`,
+    `MalformedEnabledProviderError`, `DuplicateEnabledProviderError`. One
+    `CollectionRun` per call, `saved_search_id` always populated. One
+    initialization transaction: `SELECT ... FOR SHARE`s the `SavedSearch`
+    row (closing the FK-race window against a concurrent delete — protects
+    only the parent/FK write, never a serializable snapshot of title/
+    location child rows, read plain/unlocked in the same transaction),
+    validates `is_active`/`enabled_providers` (every entry a `str` matching
+    `is_canonical_slug()`, no duplicates) before any write, then creates the
+    run. Sequential per-provider loop: only `UnknownProviderError` and
+    `QueryPlanValidationError` are sibling-continuing planning failures,
+    durably recorded the instant they occur (`failures`, `source: null` —
+    reusing the existing `ProviderErrorCategory.UNKNOWN` value, never an
+    invented one); `ProviderRegistrationError` (registry name drift), any
+    `discover()` exception, `UnsupportedDiscoveryResultError`, and any raw-
+    storage/identity/persistence/database exception are **not** caught
+    per-provider — they abort the entire run, matching `pipeline.run()`'s
+    existing fail-closed posture, now scoped over N providers. Attempt rows
+    are created lazily, atomically with `providers_attempted`/
+    `providers_enforced_locally` (`local_enforcement`'s `set[str]` values
+    converted to `sorted(list)` first — deterministic JSON regardless of set
+    hash order), immediately before each provider's `discover()` call — a
+    provider never reached has zero attempt rows. Normal per-provider
+    completion atomically increments `CollectionRun`'s rollup by that
+    provider's own deltas (one SQL `col = col + :delta` expression, same
+    transaction as its attempt rows). **The targeted regression fix**: on a
+    whole-run abort, `CollectionRun`'s rollup is *never* derived from a
+    parallel Python running total (none exists anywhere in this file) — it
+    is recomputed from a fresh `SELECT SUM(...)` over every persisted
+    attempt row for the run and written as an absolute value, so it is
+    provably always exactly `SUM` over its own attempt rows, never double-
+    counted or lost regardless of when the abort was delivered.
+  - **`tests/support/configurable_provider.py`** (new) — a fully
+    configurable `DiscoveryProvider` test double (distinct name, arbitrary/
+    malformed `DiscoveryResult`, or an exception to raise from `discover()`);
+    `FixtureProvider` stays completely untouched.
+  - **`tests/test_orchestrator.py`** (new, 23 tests) — every scenario from
+    the approved test matrix: two providers succeeding; explicit
+    empty/`None`-skipped selections; malformed slug (including a non-string
+    element) / inactive / duplicate / not-found zero-write validation;
+    planning-failure and graceful-`ProviderError` sibling-continuation;
+    registry-drift / unexpected-exception / malformed-result whole-run
+    abort with no sibling execution; persistence exception after partial
+    progress (the exact-once-counter regression, proving `CollectionRun.
+    jobs_* == SUM(attempts)` post-abort); parse error and identity conflict
+    each independently forcing `completed_with_errors`; deterministic
+    sorted `providers_enforced_locally`; per-provider attempt timestamp
+    ordering (via a `FixedClock.advance()` side effect proving no provider
+    inherits an earlier one's start time); deterministic provider
+    processing order (explicit preserved, `NULL` sorted) and child
+    (title/location) ordering (proving `(created_at, id)`, not insertion
+    order — same-transaction inserts share an identical `created_at`);
+    cancellation mid-provider; a genuine two-real-transaction `SavedSearch`
+    deletion-race test (`asyncio.Event`-coordinated `FOR SHARE` vs.
+    concurrent `DELETE`, proving the row survives with `saved_search_id =
+    NULL`); no leaked rows or permanently-running rows across every
+    scenario.
+  - **`docs/ARCHITECTURE.md`** — new §6.8 documenting the full design above;
+    corrected every "future orchestrator (not yet implemented)" placeholder
+    in §6.4/§6.6 now that it exists, without overclaiming production
+    composition (still genuinely deferred). **`docs/DATA_MODEL.md`** —
+    documents `failures`'s `source: null` planning-failure case, reconciled
+    with the existing `{provider, source, error}` shape (Rev 24 note).
+    **`docs/ROADMAP.md`** — Phase 2 status paragraph updated; removed
+    `ProviderRegistry`/orchestration from "still deferred."
+- Files changed: exactly the above — `backend/app/ingestion/
+  provider_execution.py` (new), `backend/app/ingestion/pipeline.py`
+  (extraction refactor), `backend/app/ingestion/orchestrator.py` (new),
+  `backend/tests/support/__init__.py`/`configurable_provider.py` (new),
+  `backend/tests/test_orchestrator.py` (new), `backend/tests/
+  test_ingestion_pipeline.py`/`test_live_proof_greenhouse_adapter.py`
+  (monkeypatch-target retargeting only), `docs/ARCHITECTURE.md`,
+  `docs/DATA_MODEL.md`, `docs/ROADMAP.md`, this handoff entry. No `db/
+  models/` or migration file touched.
 - Verification: genuine external `python scripts/verify.py --level routine
-  --focus tests/test_provider_registry.py` — all **10 steps PASS**: Ruff
-  format/check, mypy (49 source files), `check_repo.py`, `git diff --check`,
-  database-URL safety, real test-database reachability, **15 focused tests**,
-  **1461 full-suite tests** (was 1446; +15), temp-directory cleanup, ~96s.
-  `alembic heads` confirms `0017` remains the sole head; `git diff --stat --
-  backend/migrations/` is empty — zero migration touched, as required. Dev
-  database (`jobgoblin`) confirmed unchanged at the pre-existing `0006`
-  before and after, via a direct `alembic current` read.
+  --focus tests/test_orchestrator.py` — all **10 steps PASS**: Ruff
+  format/check, mypy (51 source files), `check_repo.py`, `git diff --check`,
+  database-URL safety, real test-database reachability, **23 focused
+  tests**, **1490 full-suite tests** (was 1467; +23), temp-directory
+  cleanup, ~119s. `alembic heads` confirms `0017` remains the sole head;
+  `git diff --stat -- backend/migrations/` is empty. Dev database
+  (`jobgoblin`) confirmed unchanged at the pre-existing `0006`. A direct
+  disposable-database row-count check (`raw_job_ingestions`, `jobs`,
+  `job_occurrences`, `collection_runs`, `collection_run_provider_attempts`,
+  `users`, `saved_searches`) confirmed 0 before and 0 after the full suite —
+  no leaked rows.
 - Adversarial self-review: dispatched a fresh-context subagent against the
-  actual diff. It independently re-verified (not merely trusted) that the
-  canonical-slug regex now has exactly one compiled copy in the whole
-  `backend/` tree (`app/schemas/identifiers.py`, via its own grep) and that
-  the three database `CHECK`s the module's comment names are the only
-  matching migrations (also its own grep); ran the full suite itself
-  (1460 passed, pre-fix count); confirmed the deep-copy isolation claim
-  against a *nested* mutable field, not just top-level reassignment; and
-  confirmed `query_planner.py`'s extraction is behavior-identical (41/41
-  pass). **One Low finding**: `capabilities()` raising was sanitized, but a
-  malformed *return value* (e.g. `None`) would instead surface as a raw,
-  unsanitized `AttributeError` from the mismatch check right after it,
-  inconsistent with the module's own stated intent of converting every
-  adapter misbehavior into one categorical exception. Fixed: widened the
-  `try` to cover the `.provider` attribute read too, so both failure modes
-  convert to the same `ProviderRegistrationError`; added
-  `test_capabilities_returning_a_malformed_value_is_rejected_not_a_raw_attribute_error`
-  as its regression test; reran the full verifier afterward (1461 passed,
-  +1 for the new test) to confirm the fix.
-- Deviations/known limitations: none beyond the already-recorded, pre-existing
-  `alembic check` substitution.
-- STOP — awaiting Codex review. Do not implement or modify ingestion
-  orchestration, pipeline ownership, `enabled_providers` semantics,
-  `CollectionRun` behavior, `ProviderRegistry` production composition, live
-  providers, Tier 4, Phase 3, or any migration.
+  actual diff, scoped to 12 specific correctness properties (one `Collection
+  Run` per call; the narrowed exception boundary; the no-double-counting
+  abort mechanism; lazy atomic attempt creation; `ProviderExecutionState`'s
+  mutate-in-place design; `pipeline.run()`'s unchanged behavior;
+  `enabled_providers` zero-write validation; the deletion-race test's actual
+  concurrency soundness — including tracing what would happen if the lock
+  were broken, confirming no false-positive pass is possible; per-provider
+  timestamp distinctness; the earlier leaked-row defect class specifically
+  re-checked and confirmed absent via independent row-count reruns;
+  `local_enforcement` JSON determinism; and 3 specific docs-vs-code claims).
+  It independently reran the full suite, mypy, ruff, and a live
+  `is_canonical_slug(None)` repro. **One Medium finding**: `enabled_providers`
+  containing a `None` element crashed with a raw, unsanitized `TypeError`
+  instead of the documented `MalformedEnabledProviderError`, since
+  `is_canonical_slug()` assumes `str` and `enabled_providers` is a plain
+  `text[]` with no CHECK constraining its elements. Fixed: added an
+  `isinstance(name, str)` guard before the slug check (mirroring
+  `ProviderRegistry`'s own established pattern for the identical class of
+  defect); widened `_ERROR_MALFORMED_ENABLED_PROVIDER`'s fixed message;
+  added `test_non_string_enabled_provider_element_zero_writes`. Two Low
+  findings (no orchestrator-level test composing a graceful `ProviderError`
+  with a successful sibling; no test for a mid-`_finalize_provider_success`
+  database exception) — the first was cheap and directly on point, so
+  `test_graceful_provider_error_plus_successful_sibling` was added; the
+  second was traced algebraically (an exception there rolls back that one
+  atomic transaction entirely, leaving the abort handler's own state
+  correctly bound) and left as a documented, no-code-defect-found residual,
+  disproportionate to add a synthetic DB-fault-injection test for. Reran the
+  full verifier after both fixes: 23 focused (was 21; +2), 1490 full-suite
+  (was 1488; +2), all 10 steps still PASS, zero leaked rows reconfirmed.
+- Deviations/known limitations: none beyond the already-recorded,
+  pre-existing `alembic check` substitution.
+- STOP — awaiting Codex review. Do not merge or begin live-provider
+  contact, parallel/concurrent provider execution, the scheduler, API
+  routes, Tier 4, Phase 3, `ProviderRegistry` production composition, or any
+  migration.
 
 ### Work review
 
-- Date/agent: 2026-09-03, Codex. Implementation diff reviewed:
-  `342534f..4ab3a0d` on `phase-2/provider-registry`.
-- Independent verification: inspected the complete registry/shared-identifier change,
-  tests, and architecture/roadmap updates. Ran the genuine external canonical verifier
-  focused on `tests/test_provider_registry.py`: all **10 steps PASS**, including Ruff,
-  mypy, repository/diff checks, disposable-database safety/reachability, **15 focused
-  tests**, **1461 full-suite tests**, and temporary-directory cleanup. Snapshot copying,
-  one-call capability capture, sorted names, duplicate/unknown handling, name drift, and
-  QueryPlanner compatibility otherwise match the approved slice.
-- **Medium — a malformed capabilities object with a `.provider` attribute escapes as a
-  raw exception.** The constructor catches a raised `capabilities()` call and a return
-  such as `None`, but it does not establish that the returned object is actually
-  `ProviderCapabilities`. A duck-shaped value such as
-  `SimpleNamespace(provider="alpha")` passes the guarded attribute read and then raises
-  raw `AttributeError` at `capabilities.model_copy(deep=True)`, outside the `try`. This
-  contradicts the documented guarantee that malformed returns become a fixed,
-  categorical `ProviderRegistrationError`. Require an actual `ProviderCapabilities`
-  instance before reading/copying it (or otherwise keep the entire validation/copy path
-  inside a sanitized boundary), and add a regression for a malformed object whose
-  `.provider` happens to match.
-- **Medium — malformed/raising provider names bypass the registry's sanitized boundary.**
-  `name = provider.name` is outside a guard and `is_canonical_slug()` assumes `str`.
-  A provider exposing `name=None` currently raises raw `TypeError` from `re.fullmatch`;
-  a missing or raising `.name` attribute likewise escapes raw at construction. The
-  resolution-time `entry.provider.name` read can also propagate a property exception
-  rather than the promised categorical name-drift/registration error. Validate that the
-  construction-time name is a string before calling the predicate, sanitize ordinary
-  exceptions from reading it, and protect the resolution-time read the same way. Do not
-  catch `CancelledError`, `KeyboardInterrupt`, or `SystemExit`. Add isolated tests for
-  non-string/missing-or-raising construction names and a name property that begins
-  raising after successful registration.
-- Documentation/handoff correction: update the current Work done and §6.4 wording so
-  “malformed capabilities return” and arbitrary-provider/name-drift guarantees match the
-  corrected full boundary; preserve this review verbatim. No orchestration or schema
-  change is required.
-- Verdict: **Changes requested.** The registry design and capability-snapshot approach
-  are accepted; only the two bounded fail-closed corrections and their documentation/
-  tests are required before merge.
-- STOP — do not merge or begin orchestration, pipeline ownership changes,
-  `enabled_providers` semantics, ProviderRegistry production composition, provider
-  contact, Tier 4, Phase 3, or migrations. Apply only these corrections after user
-  authorization and return for re-review.
+- Date/agent: 2026-09-05, Codex. Implementation diff independently reviewed:
+  `9f4c921..63e16ef` on `phase-2/orchestration`.
+- Verification: inspected every changed implementation/test/documentation path; ran
+  `tests/test_orchestrator.py` directly (**23 passed**); then ran the genuine canonical
+  verifier focused on that file: all **10 steps PASS**, including Ruff, mypy,
+  repository/diff checks, disposable-database safety/reachability, **23 focused tests**,
+  **1490 full-suite tests**, and temporary-directory cleanup. No migration diff was
+  introduced. The existing suite is green, but it does not exercise the transaction-
+  boundary cases below.
+- **High — cancellation after lazy-attempt commit can leave an attempt permanently
+  `running`.** `run_saved_search()` assigns `current_attempt_ids` only after awaiting
+  `_begin_provider_attempt()` (`orchestrator.py:448-453`). If that helper's transaction
+  commits and cancellation is delivered before the await returns, the attempt rows and
+  `providers_attempted` entry are durable but the abort handler still sees
+  `current_attempt_ids is None`; it skips `_finalize_provider_aborted()` and marks only
+  the parent run failed. This is the exact async commit-ambiguity window the approved
+  design required the implementation to close. Abort recovery must discover persisted
+  `status='running'` attempts by `collection_run_id`, not depend exclusively on IDs
+  assigned after an awaited commit. Add a regression that wraps the real begin helper,
+  lets it commit, then raises `CancelledError`, and proves no attempt remains running.
+- **High — cancellation after successful provider-finalization commit can duplicate
+  failures and overwrite a completed attempt as failed.** `_finalize_provider_success()`
+  atomically commits attempt completion, counter increments, and `state.failures`, but
+  `current_attempt_ids/current_state` are cleared only after the await returns
+  (`orchestrator.py:468-481`). Cancellation delivered after the commit but before return
+  sends the same state through `_finalize_provider_aborted()`, which appends its
+  `ProviderError` entries a second time and rewrites already-terminal attempts to
+  `failed`. Abort reconciliation must re-read durable attempt status and finalize/append
+  only when the success transaction did not commit (for example, operate only on still-
+  `running` attempts). Add a regression that calls the real success finalizer, raises
+  `CancelledError` immediately after it commits, and proves one error remains one error,
+  completed attempts stay completed, counters equal attempt sums, and the parent run is
+  failed because orchestration was cancelled.
+- **Medium — a `ProviderError` on a source that reports `completed=True` can leave the
+  parent run incorrectly `completed`.** The single-provider pipeline uses
+  `state.possibly_incomplete`, which is true whenever `DiscoveryResult.errors` is
+  non-empty. The orchestrator aggregates only planning/parse/conflict and non-completed
+  attempt flags (`orchestrator.py:472-493`), never `state.possibly_incomplete`. The new
+  graceful-error test uses `completed=False`, so the failed attempt masks this omission.
+  Aggregate a run-level provider/source-issue flag from every completed execution state
+  and add the missing case: `completed=True`, `incomplete_results=False`, one real
+  `ProviderError`, plus a successful sibling must yield a completed attempt carrying its
+  error and a `CollectionRun.status='completed_with_errors'`.
+- **Medium — the new persistent-database tests repeat the cleanup-ordering defect the
+  handoff claims was checked.** Several tests perform fallible assertions before
+  capturing created Job/RawJobIngestion IDs (for example
+  `test_orchestrator.py:883-941`), and some exception-path tests assert run counts before
+  recording the run ID (`:646-648`, `:698-700`, `:880-882`). A failed assertion can
+  therefore leave rows that corrupt later row-count tests. Audit the new file and make
+  cleanup independent of assertions: capture IDs immediately after the operation and
+  before assertions, or use a failure-safe before/after identity-scope cleanup pattern.
+- **Medium — the deletion-race test proves a copied SQL sequence, not
+  `run_saved_search()` itself.** `test_saved_search_deletion_race_survives_with_saved_search_id_null`
+  manually repeats the `SELECT ... FOR SHARE` and `CollectionRun` insert
+  (`test_orchestrator.py:1306-1333`). Removing the lock from production would leave this
+  test green. Exercise the real initialization path using a narrow private coordination
+  seam/event (or an equivalent non-duplicating mechanism), bounded timeouts, and
+  failure-safe release/cleanup so the regression is load-bearing against the actual
+  orchestrator.
+- Verdict: **Changes requested.** The overall architecture, narrowed exception policy,
+  database-derived abort rollups, ProviderExecutionState extraction, planning semantics,
+  JSON conversion, and documentation direction are sound. Correct only the five bounded
+  findings above, rerun Class H verification and adversarial review, then stop for
+  re-review. Do not merge or begin another slice.
 
 ---
 
@@ -252,163 +328,169 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-09-03, Claude Code (Sonnet 5). Class H correction pass on
-  `phase-2/provider-registry` for the two bounded findings from Iteration 1's
+- Date/agent: 2026-09-05, Claude Code (Sonnet 5). Class H correction pass on
+  `phase-2/orchestration` for the five bounded findings from Iteration 1's
   `Work review` above (uncommitted at review time; committed together with
-  this correction, preserved byte-for-byte, not rewritten). Base: `4ab3a0d`
-  plus the uncommitted review. No product code beyond the two corrections
-  requested: orchestration, pipeline ownership, `enabled_providers`
-  semantics, `CollectionRun` behavior, production composition, Tier 4, and
-  migrations all remain untouched.
+  this correction, preserved byte-for-byte, not rewritten). Base: `63e16ef`
+  plus the uncommitted review. No product code beyond the five corrections
+  requested: live providers, parallelism, scheduler, API routes, Tier 4,
+  Phase 3, migration, and `ProviderRegistry` production composition all
+  remain untouched.
 - Outcome, addressing each finding exactly:
-  1. **Malformed `capabilities()` return, fully sanitized.** `registry.py`'s
-     constructor now checks `isinstance(capabilities, ProviderCapabilities)`
-     immediately after the (still try/except-guarded) `capabilities()` call,
-     before `.provider` is ever read or `.model_copy()` is ever called. A
-     duck-shaped object with a coincidentally-matching `.provider` attribute
-     (e.g. `SimpleNamespace(provider="alpha")`, which previously reached
-     `.model_copy(...)` and raised a raw `AttributeError` there) now fails
-     closed with the same fixed `ProviderRegistrationError` as every other
-     malformed-return case, before either attribute is touched.
-  2. **Provider-name access hardened, at both construction and resolution.**
-     Construction: `provider.name` is now read inside its own `try/except
-     Exception` (a missing attribute or a raising `.name` property converts
-     to a new fixed `_ERROR_PROVIDER_NAME_UNAVAILABLE`), followed by an
-     explicit `isinstance(name, str)` check (`_ERROR_PROVIDER_NAME_NOT_STRING`)
-     before the value is ever passed to `is_canonical_slug()` — closing the
-     raw `TypeError` `re.fullmatch()` would otherwise raise on a non-`str`
-     (e.g. `None`). Resolution: `get()`'s `entry.provider.name` read is now
-     inside the same kind of `try/except Exception`, folded into the
-     existing name-drift check (`_ERROR_NAME_DRIFT`, message text updated to
-     cover "unavailable or no longer matches") — a `.name` property that
-     starts raising after successful registration fails closed exactly like
-     an outright name mismatch. `except Exception` (never a bare `except:`
-     or `except BaseException`) is used at every one of these new guards, so
-     `asyncio.CancelledError`/`KeyboardInterrupt`/`SystemExit` are never
-     caught — confirmed by construction (`CancelledError` is a
-     `BaseException` subclass since Python 3.8, not an `Exception`
-     subclass), not merely asserted.
-- Files changed: `backend/app/providers/registry.py` (both corrections;
-  updated `ProviderRegistrationError` docstring's raise-site list; updated
-  `get()`'s docstring), `backend/tests/test_provider_registry.py` (6 new
-  tests, below), `docs/ARCHITECTURE.md` §6.4 (construction-time-validation
-  and name-drift-detection bullets rewritten to describe the corrected full
-  boundary — guarded `.name` access, non-`str` rejection, and the
-  duck-shaped-capabilities rejection — matching Codex's finding that the
-  prior wording no longer matched reality), this handoff entry (Iteration 1
-  preserved verbatim per the rotation rule, including its own now-superseded
-  Work done claims — corrected going forward starting with this entry and
-  the current §6.4 text, not retroactively rewritten as history). No
-  `ingestion/`, `db/models/`, migration, or `enabled_providers`/
-  `CollectionRun` file touched.
-- New tests (6, all isolated to exactly one guard each): a malformed
-  duck-shaped `capabilities()` return whose `.provider` matches the
-  registered name; `None` and a non-string (`123`) provider name at
-  construction; a provider missing `.name` entirely; a `.name` property that
-  raises at construction; a `.name` property that starts raising only after
-  successful registration, caught on resolution.
+  1. **Cancellation after `_begin_provider_attempt()` commits, before
+     `current_attempt_ids` is assigned.** New `_fetch_running_attempts()`
+     queries `collection_run_provider_attempts` directly for
+     `status='running'` rows scoped to this run — the durable, authoritative
+     source of truth the abort handler now consults *instead of* trusting
+     `current_attempt_ids`/`current_state` as the sole gate. A row genuinely
+     still `'running'` is always found and finalized to `'failed'`
+     regardless of whether the Python variables ever got assigned.
+  2. **Cancellation after `_finalize_provider_success()` commits, before
+     `current_attempt_ids`/`current_state` reset to `None`.** Same
+     `_fetch_running_attempts()` mechanism closes this window too: a
+     provider whose rows already reached a terminal status is never
+     rediscovered (its rows are no longer `'running'`), so
+     `_finalize_running_attempts_aborted()` (renamed from
+     `_finalize_provider_aborted`) never re-touches it. `state` is only
+     "trusted" for telemetry/`failures`-merging when the durable set of
+     still-running attempt ids exactly equals `current_attempt_ids`'s
+     values — never merely `state is not None` — so a stale reference to an
+     already-committed provider can never duplicate its `failures` entry or
+     overwrite its completed attempt back to `'failed'`. The `UPDATE` itself
+     repeats the `WHERE status = 'running'` guard (not just the discovery
+     `SELECT`), defense-in-depth against a row turning terminal between the
+     two.
+  3. **A `ProviderError` on a `completed=True` source was invisible to run
+     status.** Replaced `any_attempt_not_completed` (derived only from
+     `resolve_attempt_status() != "completed"`) with `run_had_source_issue`,
+     aggregated from each provider's own `state.possibly_incomplete` —
+     mirroring `DiscoveryResult.possibly_incomplete` exactly (any source not
+     completed, any incomplete results, *or* any `ProviderError` at all).
+     This subsumes the narrower check it replaces and additionally catches
+     the missed case: a source that stays `completed=True`/
+     `incomplete_results=False` despite carrying a real `ProviderError`
+     (e.g. "succeeded after a retry") now correctly forces
+     `'completed_with_errors'`.
+  4. **Assertion-before-ID-capture leak risk.** Audited the entire test
+     file, not just the cited line ranges — every test that can produce a
+     `CollectionRun`/`Job`/`RawJobIngestion` row now captures its cleanup id
+     immediately after the relevant query/operation, before any assertion
+     that could fail, including tests Codex's review didn't explicitly cite
+     (e.g. the two-providers-succeed happy path, the `None`-skip test, both
+     planning-failure/graceful-error sibling tests, both
+     `providers_enforced_locally`/timestamp tests, both explicit/`NULL`
+     provider-order sub-tests). The partial-progress test's block was
+     restructured most substantially: all three cleanup queries (run,
+     `JobOccurrence`, `RawJobIngestion`) now run as one contiguous block
+     immediately after the run raises, before any of its many content
+     assertions.
+  5. **Deletion-race test proved a copied SQL sequence, not
+     `run_saved_search()` itself.** Added a narrow, private, no-op-by-
+     default keyword-only parameter to `run_saved_search()` itself,
+     `_after_saved_search_locked: Callable[[], Awaitable[None]] | None =
+     None`, awaited once immediately after the real `FOR SHARE` lock is
+     confirmed and the row validated, inside the real initialization
+     transaction. The test now calls the *real* `run_saved_search()`,
+     passing a callback that starts a genuinely concurrent `DELETE` and
+     waits (bounded, `asyncio.wait_for(..., timeout=...)`) for it to
+     actually reach PostgreSQL and block on the real lock, before letting
+     the real transaction proceed to commit — proven (below) to fail loudly
+     with a foreign-key violation if the real lock is ever removed, rather
+     than staying silently green.
+- Files changed: `backend/app/ingestion/orchestrator.py` (all five
+  corrections: `_fetch_running_attempts`, renamed
+  `_finalize_running_attempts_aborted`, `run_had_source_issue`,
+  `_after_saved_search_locked` seam; docstring rewritten to match),
+  `backend/tests/test_orchestrator.py` (3 new regression tests; the
+  deletion-race test rewritten to use the real function via the new seam;
+  cleanup-ordering fixes across the file), `docs/ARCHITECTURE.md` §6.8
+  (abort-mechanics and status-aggregation prose corrected to match; new
+  sentence on the test-only seam), this handoff entry (Iteration 1
+  preserved verbatim per the rotation rule). No `db/models/`,
+  `enabled_providers` semantics, `CollectionRun` schema, migration,
+  provider-contact, or other-slice file touched.
+- New tests (3): `test_cancellation_after_begin_attempt_commit_leaves_no_row_running`,
+  `test_cancellation_after_success_finalization_commit_does_not_duplicate_or_overwrite`
+  (both wrap the *real* `_begin_provider_attempt`/`_finalize_provider_success`
+  via `monkeypatch`, let it genuinely commit, then raise `CancelledError`
+  immediately after — simulating the exact commit/cancellation windows
+  Codex identified, deterministically, without relying on real asyncio
+  scheduling races), and
+  `test_provider_error_on_completed_source_forces_completed_with_errors`
+  (the exact missing case Codex named: `completed=True`,
+  `incomplete_results=False`, one real `ProviderError`, successful
+  sibling).
 - Verification: genuine external `python scripts/verify.py --level routine
-  --focus tests/test_provider_registry.py` — all **10 steps PASS**: Ruff
-  format/check, mypy (49 source files, including the new protocol-violating
-  test doubles under explicit, narrow `# type: ignore[list-item]` — the
-  violation is the deliberate point of each test), `check_repo.py`, `git diff
-  --check`, database-URL safety, real test-database reachability, **21
-  focused tests** (was 15; +6), **1467 full-suite tests** (was 1461; +6),
-  temp-directory cleanup, ~107s. `alembic heads` confirms `0017` remains the
-  sole head; `git diff --stat -- backend/migrations/` is empty. Dev database
-  (`jobgoblin`) confirmed unchanged at the pre-existing `0006` before and
-  after, via a direct `alembic current` read.
+  --focus tests/test_orchestrator.py` — all **10 steps PASS**: Ruff
+  format/check, mypy (51 source files), `check_repo.py`, `git diff --check`,
+  database-URL safety, real test-database reachability, **26 focused
+  tests** (was 23; +3), **1493 full-suite tests** (was 1490; +3),
+  temp-directory cleanup, ~121-149s across reruns. `alembic heads` confirms
+  `0017` remains the sole head; `git diff --stat -- backend/migrations/` is
+  empty. Dev database (`jobgoblin`) confirmed unchanged at the pre-existing
+  `0006`. A direct disposable-database row-count check confirmed 0 before
+  and 0 after the full suite, both before and after the adversarial
+  stress-testing described below — no leaked rows at any point.
 - Adversarial self-review: dispatched a fresh-context subagent against the
-  actual diff (abbreviated to the questions that actually apply — a pure
-  in-memory correction, no schema/concurrency surface). It independently ran
-  the tests (62/62: 21 registry + 41 query_planner) and mypy (clean, with
-  `warn_unused_ignores = true` proving every new `# type: ignore[...]` is
-  necessary and correctly coded, not a blanket suppression); empirically
-  confirmed `is_canonical_slug(None)`/`is_canonical_slug(123)` raise a raw
-  `TypeError` absent the `isinstance(name, str)` guard, proving that guard is
-  load-bearing rather than decorative; empirically confirmed
-  `asyncio.CancelledError`'s MRO excludes `Exception` on this project's
-  Python 3.12, proving (not assuming) `except Exception` cannot swallow it;
-  and, for each of the 6 new tests, mentally reverted its specific target
-  guard and confirmed the test would then fail on a *different*, unsanitized
-  exception rather than silently pass for the wrong reason — including
-  tracing that reverting the `isinstance(capabilities, ProviderCapabilities)`
-  check causes the duck-shaped-object test to instead crash unsanitized at
-  `.model_copy(...)`, exactly the original defect. **One Low/informational
-  residual, deliberately not acted on**: the `.provider` read and
-  `.model_copy()` calls occurring *after* the `isinstance` check are still
-  unguarded — a hypothetical malicious `ProviderCapabilities` *subclass*
-  overriding `.provider` as a raising property could still escape unsanitized.
-  Out of scope of the two specific corrections Codex requested (which named
-  the non-instance/duck-typing case, now fixed) and `ProviderCapabilities` is
-  a project-owned Pydantic model, not attacker-controlled input — left
-  unaddressed per the "exactly the two bounded fail-closed corrections"
-  instruction, same disposition as the prior slice's declined out-of-scope
-  suggestion.
-- Deviations/known limitations: none beyond the already-recorded, pre-existing
-  `alembic check` substitution.
-- STOP — awaiting Codex re-review. Do not merge or begin orchestration,
-  pipeline ownership changes, `enabled_providers` semantics, ProviderRegistry
-  production composition, provider contact, Tier 4, Phase 3, or migrations.
+  actual diff, instructed to *prove* — not merely read — that each of the
+  five corrections is load-bearing. For each finding, it temporarily
+  reverted the specific fixed mechanism (finding 1/2: swapped
+  `_fetch_running_attempts()` back for the old
+  `current_attempt_ids is not None and current_state is not None` gate;
+  finding 3: swapped `run_had_source_issue` back for the old
+  `any_attempt_not_completed`; finding 5: removed `.with_for_update(read=
+  True)` from the real `SELECT`), reran that finding's specific regression
+  test, and confirmed it failed in exactly the predicted way (attempt stuck
+  `'running'`; `failures` duplicated to length 2; status stayed
+  `'completed'` instead of `'completed_with_errors'`; a real
+  `ForeignKeyViolationError` on the `CollectionRun` insert), then reverted
+  its own temporary edit and confirmed `git diff`/`git status` matched the
+  pre-stress-test state exactly. For finding 4, it re-scanned the *entire*
+  test file (not only the cited tests) for the same assertion-before-
+  capture pattern and found none remaining anywhere. It additionally
+  confirmed `run_saved_search()` has zero production callers yet (so the
+  new test-only seam cannot activate outside a test), reran
+  `test_ingestion_pipeline.py`/`test_ingestion_concurrency.py`/
+  `test_live_proof_greenhouse_adapter.py` explicitly (95 passed, confirming
+  `pipeline.run()` is still unaffected), and reran the full suite plus a
+  fresh row-count check after all stress-testing to confirm no residue.
+  No further findings.
+- Deviations/known limitations: none beyond the already-recorded,
+  pre-existing `alembic check` substitution.
+- STOP — awaiting Codex re-review. Do not merge or begin live-provider
+  contact, parallel/concurrent provider execution, the scheduler, API
+  routes, Tier 4, Phase 3, `ProviderRegistry` production composition, or any
+  migration.
 
 ### Work review
 
-- Date/agent: 2026-09-03, Codex. Correction diff reviewed:
-  `4ab3a0d..0784b07` on `phase-2/provider-registry`.
-- Independent verification: inspected every changed executable, test, and documentation
-  path; ran the six focused malformed-capabilities/name-access regressions directly
-  (**6 passed**); then ran the genuine external canonical verifier focused on
-  `tests/test_provider_registry.py`: all **10 steps PASS**, including Ruff, mypy,
-  repository/diff checks, disposable-database safety/reachability, **21 focused tests**,
-  **1467 full-suite tests**, and temporary-directory cleanup.
-- Prior-finding disposition: **closed**. Construction now establishes an actual
-  `ProviderCapabilities` instance before accessing/copying it, so a duck-shaped matching
-  object receives the fixed registration error rather than leaking `AttributeError`.
-  Construction-time provider-name access now sanitizes missing/raising attributes and
-  rejects non-string values before slug validation; resolution-time access likewise
-  converts a newly-raising property into the fixed drift/registration error. The ordinary
-  `Exception` boundary correctly leaves cancellation and process-control exceptions
-  uncaught.
-- Documentation/scope check: ARCHITECTURE §6.4 matches the corrected runtime boundary;
-  no QueryPlanner behavior, orchestration, pipeline ownership, enabled-provider
-  semantics, database model, migration, or provider contact entered the correction.
-  The disclosed hypothetical malicious `ProviderCapabilities` subclass is outside the
-  project-owned Pydantic contract and does not warrant broadening this bounded slice.
-  No further findings.
-- Verdict: **Approved**. The ProviderRegistry slice and bounded correction pass are
-  accepted; no additional correction is required.
+- Date/agent: 2026-09-05, Codex. Correction diff independently reviewed:
+  `63e16ef..7384be5` on `phase-2/orchestration`.
+- Independent verification: inspected the corrected abort discovery/finalization flow,
+  source-issue aggregation, cleanup ordering, real initialization seam, associated tests,
+  and documentation. Ran the three timing-sensitive regressions five consecutive times
+  against PostgreSQL (**15/15 executions passed**), then the complete focused file
+  (**26 passed**). Ran the genuine canonical verifier focused on
+  `tests/test_orchestrator.py`: all **10 steps PASS**, including Ruff, mypy,
+  repository/diff checks, disposable-database safety/reachability, **26 focused tests**,
+  **1493 full-suite tests**, and temporary-directory cleanup.
+- Finding disposition: **all five prior findings are closed.** Abort recovery now queries
+  durable `status='running'` attempt rows by `collection_run_id`, closing the post-begin
+  commit window. It trusts the in-memory execution state only when its durable attempt-id
+  set exactly matches those running rows; an already-committed success is therefore not
+  re-finalized, its errors are not duplicated, and its terminal attempts are not
+  overwritten. The run rollup remains an absolute SQL-SUM reconciliation over attempt
+  rows. `state.possibly_incomplete` is now aggregated across providers, covering the
+  completed-source-plus-ProviderError case while leaving that source's attempt completed.
+  Cleanup identifiers are captured before assertions throughout the new test file. The
+  deletion race now invokes the real `run_saved_search()` initialization through a narrow
+  no-op-by-default coordination seam, with bounded waits and failure-safe task cleanup.
+- Scope/documentation: only the authorized orchestrator, tests, architecture text, and
+  handoff ledger changed; no model, migration, live provider, parallel execution,
+  scheduler, API, Tier 4, Phase 3, or production composition entered the pass. No further
+  findings.
+- Verdict: **Approved.** The bounded multi-provider orchestration slice and its correction
+  pass are accepted; no additional correction is required.
 - Exact requested corrections: none.
-- STOP — do not merge to `main` or begin multi-provider orchestration, pipeline changes,
-  `enabled_providers` semantics, production composition, provider contact, Tier 4,
-  Phase 3, or any other slice until the user explicitly authorizes the next action.
-
-### Merge record
-
-- Date: 2026-09-04. User authorized merging `phase-2/provider-registry` into
-  `main` following Codex's final Approved re-review (no findings) above.
-- Pre-merge state: `main` and `origin/main` both at `342534f`; feature branch
-  pushed and clean at `eada592` (merge-base `342534f` — no divergence).
-- Merge: `git merge --no-ff phase-2/provider-registry` on `main` — merge
-  commit `c67f1f5`. Post-merge diff against the feature branch's tip is
-  empty (zero content difference); `check_repo.py` and `git diff --check`
-  both clean.
-- Post-merge verification: genuine external `verify.py --level routine
-  --focus tests/test_provider_registry.py` — all **10 steps PASS** (Ruff
-  format/check, mypy, `check_repo.py`, `git diff --check`, disposable-
-  database URL/reachability, **21 focused tests**, **1467 full-suite
-  tests**, temp-directory cleanup). One transient reachability failure was
-  observed on the first attempt (the local `jobgoblin-postgres-1` Docker
-  container had exited ~15 minutes earlier, unrelated to this merge);
-  restarted the container, confirmed healthy, and reran to a clean pass.
-  `alembic heads` confirms `0017` remains the sole head; no migration files
-  touched by the merge. Dev database (`jobgoblin`) confirmed unchanged at
-  `0006` — untouched throughout.
-- Pushed: `main` at `c67f1f5`, matching `origin/main`.
-- Rollback boundary: to revert this slice, reset `main` to `342534f` (the
-  commit immediately before this merge) — this removes `ProviderRegistry`,
-  the shared `is_canonical_slug()` extraction, and their tests/docs cleanly,
-  with no migration to reverse and no data written by this slice to any
-  environment.
-- STOP — do not begin multi-provider orchestration, pipeline ownership
-  changes, `enabled_providers` semantics, production composition, provider
-  contact, Tier 4, Phase 3, or migrations without separate authorization.
+- STOP — do not merge to `main` or begin another slice until the user explicitly
+  authorizes it.

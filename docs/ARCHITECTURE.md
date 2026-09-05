@@ -729,10 +729,10 @@ class DiscoveryProvider(Protocol):
 ```
 
 `ProviderRegistry` holds the configured provider instances, exposes them by name, and is
-intended to be the single place a future orchestrator asks "which providers are enabled
-for this saved search, and are they healthy" — no other module should enumerate providers
-directly. **Implemented** as `app/providers/registry.py::ProviderRegistry` (Phase 2's
-ProviderRegistry slice) as a pure in-memory name→instance directory:
+the single place the orchestrator asks "which providers are enabled for this saved
+search" — no other module enumerates providers directly. **Implemented** as
+`app/providers/registry.py::ProviderRegistry` (Phase 2's ProviderRegistry slice) as a pure
+in-memory name→instance directory:
 
 - **Construction-time validation, fail-closed.** For each `DiscoveryProvider` passed to
   `ProviderRegistry(providers)`: accessing `.name` at all is guarded — a missing
@@ -769,13 +769,12 @@ ProviderRegistry slice) as a pure in-memory name→instance directory:
   is registered under it.
 - **No module-level singleton.** A registry is constructed explicitly by its caller; there
   is no proven need yet for ambient global access, and a singleton would let tests
-  interfere with each other's registration state. Composing the one real production
-  instance, and actually wiring `ingestion/pipeline.py` to ask it "which providers are
-  enabled for this saved search, and are they healthy," is the future orchestration
-  slice's job — **not yet implemented**; this slice's own compatibility test (a resolved
-  `RegisteredProvider.capabilities` snapshot fed directly into `QueryPlanner.plan()`,
-  offline, no database or network access) is the current consumer proving the two are
-  already compatible.
+  interfere with each other's registration state. `app/ingestion/orchestrator.py::
+  run_saved_search()` (§6.8) is the implemented consumer that asks a caller-supplied
+  registry "which providers are enabled for this saved search"; composing the one real
+  production instance (which real `DiscoveryProvider` adapters to register, at
+  application startup) remains **not yet implemented** — out of scope until a live
+  provider adapter exists to register (Phase 4+).
 
 ### 6.5 `SavedSearch.enabled_sources` — unambiguous source selection
 
@@ -831,16 +830,15 @@ SourceQuery | None` is called once per provider present in
 2. **Validate.** Every name in the resolved source list must be a key in
    `provider_capabilities.sources`. An unknown name **raises before any `SourceQuery` is
    constructed** — it is never silently dropped — failing validation for that provider
-   entirely, before `discover()` is ever called. **This is a future
-   ProviderRegistry/multi-provider orchestrator responsibility, not something the
-   current pipeline does**: that orchestrator (not yet implemented — see this section's
-   own "Phase 2 implementation notes" below) must catch this and record it as a
-   planning-time failure on the `CollectionRun` (not a `collection_run_provider_attempts`
-   row, since no provider call was attempted for that source), then continue with
-   whatever other providers/sources in the run remain valid. `ingestion/pipeline.py`'s
-   current `run()` neither calls `QueryPlanner.plan()` nor performs any of this — its
-   `query` parameter is a required, already-constructed `SourceQuery` supplied directly
-   by its caller.
+   entirely, before `discover()` is ever called. **Implemented** by
+   `app/ingestion/orchestrator.py::run_saved_search()` (§6.8): it catches
+   `QueryPlanValidationError` per provider, durably records it as a planning-time failure
+   on the `CollectionRun` (`failures`, with `source: null` — not a
+   `collection_run_provider_attempts` row, since no provider call was attempted), and
+   continues with whatever other providers in the run remain valid.
+   `ingestion/pipeline.py`'s single-provider `run()` neither calls `QueryPlanner.plan()`
+   nor performs any of this — its `query` parameter remains a required, already-
+   constructed `SourceQuery` supplied directly by its caller; only the orchestrator plans.
 3. **Empty resolved list → no execution.** `QueryPlanner` returns `None` for exactly two
    *legitimate* empty selections: an explicit `enabled_sources[provider] == []`, or an
    absent key expanding against a `provider_capabilities.sources` that itself advertises
@@ -848,11 +846,11 @@ SourceQuery | None` is called once per provider present in
    outcome** — step 2 already raises on the *first* unknown name, before the list could
    ever be filtered down to empty; an explicit list containing any unknown name always
    raises, never resolves to an empty selection. Returning `None` is different from "the
-   provider errored" — it's simply not part of this run. **Handling `None` is likewise a
-   future orchestrator responsibility**: it must skip calling that provider's
-   `discover()` entirely for a `None` result, never treating `None` itself as an error.
-   `ingestion/pipeline.py`'s current `run()` does not accept a `None` query at all — its
-   `query` parameter is a required `SourceQuery`, not `SourceQuery | None`.
+   provider errored" — it's simply not part of this run. **Implemented** by
+   `run_saved_search()`: a `None` result is skipped silently — no `discover()` call, no
+   attempt row, no `providers_attempted` entry, no failure. `ingestion/pipeline.py`'s
+   single-provider `run()` still does not accept a `None` query at all — its `query`
+   parameter is a required `SourceQuery`, not `SourceQuery | None`.
 4. **Build one `SourceQuery` per provider.** `sources` is set to the validated,
    non-empty source list from steps 1–3.
 5. **Determine local vs. remote enforcement per source.** For each source in `sources`,
@@ -882,10 +880,9 @@ field still share a cache entry). A request for `sources=["linkedin"]` and
 - *Explicit empty source list* (`enabled_sources[provider] == []`) → that provider runs
   with zero sources this cycle — no `discover()` call at all.
 - *Unknown source name* → `QueryPlanner` raises before any provider call; recording it on
-  the `CollectionRun` and continuing with other valid providers/sources in the same run
-  is the future orchestrator's responsibility (see this section's own "Phase 2
-  implementation notes" below) — the current `ingestion/pipeline.py::run()` does not
-  call `QueryPlanner.plan()` at all.
+  the `CollectionRun` and continuing with other valid providers/sources in the same run is
+  implemented by `run_saved_search()` (§6.8) — the single-provider `ingestion/
+  pipeline.py::run()` does not call `QueryPlanner.plan()` at all.
 - *Two sources with different filter capabilities* (e.g. one supports salary filtering,
   one doesn't) → they end up with different `local_enforcement` entries in the same
   `SourceQuery`, even though both belong to the same provider and the same planning call.
@@ -898,14 +895,14 @@ provider's `discover()` — with these decisions resolved during implementation:
 - **`titles`/`locations` are supplied parameters, not read off `saved_search` directly.**
   `SavedSearchTitle`/`SavedSearchLocation` are separate child tables with no ORM
   relationship wired to `SavedSearch`, and `QueryPlanner` performs no database I/O of its
-  own — it cannot load them itself. The caller (the future ProviderRegistry/orchestration
-  slice) loads these rows and supplies plain `Sequence[str]` values. Neither table has an
-  ordering column today (no `position`/`sort_order` on either) — `QueryPlanner` does not
-  define what "deterministic order" means; it treats both sequences as opaque and
-  preserves whatever order it is given, verbatim, never sorting, deduplicating, or
-  reordering either one. A bare `str`/`bytes` value for either parameter is rejected
-  (`QueryPlanValidationError`) rather than silently iterated character-by-character, and
-  every element must itself be a `str`.
+  own — it cannot load them itself. The caller (`run_saved_search()`, §6.8) loads these
+  rows itself, `ORDER BY created_at, id`, and supplies plain `Sequence[str]` values.
+  Neither table has an ordering column today (no `position`/`sort_order` on either) —
+  `QueryPlanner` still does not define what "deterministic order" means; it treats both
+  sequences as opaque and preserves whatever order it is given, verbatim, never sorting,
+  deduplicating, or reordering either one. A bare `str`/`bytes` value for either parameter
+  is rejected (`QueryPlanValidationError`) rather than silently iterated
+  character-by-character, and every element must itself be a `str`.
 - **`enabled_sources` runtime validation.** Its own `CHECK` only guarantees a top-level
   JSON object — nothing about a given provider key's value. `QueryPlanner` validates at
   runtime that a present key's value is a list, every element is a string, and there are
@@ -974,17 +971,17 @@ provider's `discover()` — with these decisions resolved during implementation:
   `supported_query_fields` happens to also name a dedicated field, it is simply never
   consulted for that field; the dedicated boolean alone decides it, silently, every time.
 - **Multi-provider concerns are absent by design.** `plan()` never consults
-  `saved_search.enabled_providers` — deciding *which* providers to plan for is the
-  ProviderRegistry/orchestration slice's responsibility; trusting the caller to invoke
-  `plan()` only for already-selected providers is a documented boundary, not an
-  oversight.
-- **Not yet wired into `ingestion/pipeline.py`.** This slice does not call `plan()` from
-  inside `pipeline.run()`, and does not persist planning failures onto `CollectionRun` or
-  populate `collection_runs.providers_enforced_locally` — both require the orchestration
-  loop (create the `CollectionRun`, iterate providers, catch `QueryPlanValidationError`,
-  write the failure) that doesn't exist without `ProviderRegistry`. The fixture-driven
-  integration test instead calls `plan()` externally and feeds its real output into the
-  existing, unmodified `pipeline.run()`, proving the two are already compatible.
+  `saved_search.enabled_providers` — deciding *which* providers to plan for is
+  `run_saved_search()`'s (§6.8) responsibility; trusting the caller to invoke `plan()`
+  only for already-selected providers is a documented boundary, not an oversight.
+- **Wired into `app/ingestion/orchestrator.py`, not `ingestion/pipeline.py`.** The
+  single-provider `pipeline.run()` still does not call `plan()` and still does not accept
+  a `None` query — its own fixture-driven integration test continues to call `plan()`
+  externally and feed its output into the unmodified `pipeline.run()`, proving the two
+  remain compatible. The multi-provider case is handled by a new, separate function,
+  `orchestrator.py::run_saved_search()` (§6.8), which does call `plan()` once per
+  resolved provider, does persist planning failures onto `CollectionRun.failures`, and
+  does populate `collection_runs.providers_enforced_locally`.
 
 ### 6.7 `MatchResult`
 
@@ -1006,6 +1003,162 @@ class MatchResult(BaseModel):
 
 Hard filters (e.g. salary below floor) are evaluated separately from scoring and can
 short-circuit it; missing data always scores neutral, never zero or reject, per §35.
+
+### 6.8 Multi-provider orchestration (`run_saved_search`)
+
+**Implemented** as `app/ingestion/orchestrator.py::run_saved_search(engine,
+saved_search_id, provider_registry, *, clock, observed_at) -> uuid.UUID` — Phase 2's
+multi-provider orchestration slice. Creates **exactly one** `CollectionRun` spanning every
+provider selected for one saved search, sequentially (no parallel provider execution in
+this slice). `pipeline.py::run()` is unchanged and remains the single-provider primitive;
+`run_saved_search()` shares its actual discover-through-persist logic via a new module,
+`app/ingestion/provider_execution.py`, rather than either function reaching into the
+other's internals.
+
+**Initialization, one transaction, before any provider is touched:**
+1. `SELECT ... FOR SHARE` the `SavedSearch` row by id — held for the duration of this one
+   transaction, so a concurrent delete cannot complete while `CollectionRun.saved_search_id`
+   is being written to reference it (closes the FK race that a plain `SELECT` then
+   `INSERT` would otherwise have). **This lock protects only the parent-row/FK
+   initialization** — it is not a serializable snapshot of the `SavedSearchTitle`/
+   `SavedSearchLocation` child rows, which are read with a plain, unlocked `SELECT` in the
+   same transaction (sufficient for a consistent one-time read; nothing in this design
+   needs to prevent a concurrent edit to a title/location while this transaction runs).
+   Missing row → `SavedSearchNotFoundError`; `is_active=False` →
+   `InactiveSavedSearchError` — both before any write. Running collection for a paused
+   search has no current caller needing it (Phase 8's API doesn't exist yet); an explicit
+   override belongs to whichever future slice actually introduces one. A narrow, private,
+   no-op-by-default test-only seam (`_after_saved_search_locked`) is awaited immediately
+   after this lock is confirmed held, letting a test interleave a genuinely concurrent
+   delete against the real lock — proving the lock itself is load-bearing (removing it
+   would surface as an unexpected foreign-key-violation exception out of this function,
+   not a silently-green test) without duplicating this function's own SQL in the test.
+2. Loads `SavedSearchTitle.title`/`SavedSearchLocation.location_text`, each
+   `ORDER BY created_at, id` — deterministic (repeatable), **not insertion order**:
+   PostgreSQL's `now()` is fixed at transaction start, so rows inserted together in one
+   transaction share an identical `created_at`, and the `id` (a random UUIDv4) tie-break
+   then produces a stable but insertion-order-unrelated sequence for those rows.
+3. Resolves `saved_search.enabled_providers`: `NULL` → every name in
+   `provider_registry.names()` (already alphabetically sorted); explicit list → every
+   entry checked to be a `str` matching `is_canonical_slug()` (`MalformedEnabledProviderError`
+   if any entry is not a string or fails the grammar — `enabled_providers` is a plain
+   `text[]` with no CHECK constraining its elements, so a non-string element is possible
+   through the database even though no current caller can produce one; before this check,
+   a malformed value never reaches `CollectionRun.failures.provider` unvalidated) and
+   checked for duplicates (`DuplicateEnabledProviderError`) — both before any write — then
+   used in the array's own given order, never re-sorted. A canonical-but-unregistered
+   name is **not** rejected here; it becomes a per-provider
+   planning failure once the loop reaches it (below).
+4. Creates the `CollectionRun` row (`status='running'`, `saved_search_id` always
+   populated, `started_at = clock.now()`) and commits — releasing the `FOR SHARE` lock.
+
+**Per provider, strictly sequential, in the resolved order:**
+- `provider_registry.get(name)` raising `UnknownProviderError`, or `QueryPlanner.plan()`
+  raising `QueryPlanValidationError`, are the **only two** exceptions that continue to the
+  next provider — both are durably recorded the instant they occur (their own transaction,
+  not batched to the end) as one `CollectionRun.failures` entry: `{provider: name, source:
+  null, error: {category: "unknown", retryable: false, detail: <the exception's own fixed
+  message>, occurred_at}}`. `source: null` is a legitimate use of this column's existing,
+  CHECK-unconstrained-beyond-top-level-array JSON shape (the same "`NULL` for unknown
+  values, never an invented sentinel" convention this schema already follows) — no source
+  was ever resolved for a planning failure, so there is nothing else to put there. No new
+  `error.category` value was invented; the existing `ProviderErrorCategory.UNKNOWN` value
+  is reused.
+- `ProviderRegistrationError` (including provider name drift, detected by `ProviderRegistry
+  .get()` on every resolution) is **deliberately not caught here** — it aborts the entire
+  run, since a registry-integrity failure is a composition-time defect, not a per-provider,
+  data-driven outcome.
+- `QueryPlanner.plan()` returning `None` is a true silent skip: no attempt row, no
+  `providers_attempted` entry, no failure — matching §6.6 step 3 exactly.
+- Once planning yields a real `SourceQuery`, one transaction atomically: creates one
+  `CollectionRunProviderAttempt` row per source (`started_at = clock.now()`, freshly read
+  for *this* provider — never reused from the run's own `started_at` or an earlier
+  provider), appends the provider's name to `providers_attempted`, and merges its
+  `local_enforcement` into `providers_enforced_locally` — `SourceQuery.local_enforcement`
+  (`dict[str, set[str]]`) is converted to `{provider: {source: sorted(fields)}}` first,
+  since a Python `set` is not JSON-serializable and its iteration order is not guaranteed
+  deterministic; sorting makes the persisted JSON identical across runs regardless of the
+  set's internal hash order.
+- `provider_execution.py::execute_provider_query()` then runs — the same discover →
+  validate-consistency → write-raw-rows → resolve-identity → persist → accumulate logic
+  `pipeline.run()` already has, extracted so both callers share it. It mutates a caller-
+  owned `ProviderExecutionState` (per-source counters, `failures`, `had_parse_error`,
+  `had_conflict`, `possibly_incomplete`, `source_stats`, `selected_errors`) **in place** —
+  never "accumulate locally, build a result, return only on success," which would silently
+  discard everything gathered before a mid-execution exception. **Any** exception here
+  (`provider.discover()` raising, `UnsupportedDiscoveryResultError`, or any raw-storage/
+  identity/persistence/database exception) aborts the *entire* run — these are not
+  sibling-continuing outcomes, matching `pipeline.run()`'s own existing fail-closed
+  posture, now scoped over N providers instead of one. A source reporting
+  `completed=False`/`incomplete_results=True`, or a graceful `ProviderError`, remains the
+  existing non-exceptional, per-source degraded outcome — unaffected.
+- On normal completion of a provider (no exception): one transaction finalizes that
+  provider's own attempt rows (status/counts/error fields, identical computation to
+  `pipeline.run()`'s) and atomically **increments** `CollectionRun.jobs_discovered/
+  inserted/updated` by exactly this provider's own deltas — a single `col = col + :delta`
+  SQL expression, in the same transaction as the attempt-row writes, so it can never
+  observably disagree with them. Any graceful `ProviderError` entries this provider's
+  `DiscoveryResult` reported (`state.failures`, real non-null `source`, in their original
+  `result.errors` order) are merged into `CollectionRun.failures` in this same transaction.
+
+**Whole-run abort** (`ProviderRegistrationError`, an unexpected exception, or
+`asyncio.CancelledError`): still-`status='running'` attempt rows are **rediscovered from
+the database itself** (`_fetch_running_attempts`, a fresh `SELECT ... WHERE status =
+'running'` scoped to this run) — never solely from the `current_attempt_ids`/
+`current_state` Python variables the per-provider loop maintains. Two distinct commit/
+cancellation windows make those variables alone unreliable: a cancellation delivered after
+`_begin_provider_attempt()`'s transaction commits but before its own `await` returns
+control leaves `current_attempt_ids` unset even though a real `status='running'` row now
+exists (it would otherwise stay `'running'` forever); a cancellation delivered after
+`_finalize_provider_success()`'s transaction commits but before its own `await` returns
+leaves those same variables still pointing at a provider whose rows are already terminal
+(re-processing it would duplicate its `failures` entries and overwrite a completed attempt
+back to `'failed'`). Querying live `status` closes both: rows genuinely still `'running'`
+are always found and fixed regardless of the Python variables; rows already terminal are
+never found and therefore never re-touched, regardless of them. Rediscovered rows are
+finalized best-effort — every one becomes `status='failed'` uniformly (the `WHERE status =
+'running'` guard is repeated on the `UPDATE` itself, not just the discovery `SELECT`), with
+a fixed, sanitized `error_category`/`error_message` (never the aborting exception's own
+text); `ProviderExecutionState` telemetry and `failures` entries are merged only when the
+caller's own state provably corresponds to exactly the rediscovered rows — proven by
+comparing the durable set of still-running attempt ids against `current_attempt_ids`, never
+by trusting `current_state is not None` alone. Then — **never from a parallel in-memory
+running total, which either cancellation window above could leave out of sync with the
+database** — `CollectionRun.jobs_discovered/inserted/updated` are recomputed from a fresh
+`SELECT SUM(...)` over every persisted `collection_run_provider_attempts` row for this run
+and written as an absolute value. This makes `CollectionRun`'s rollup provably equal to
+`SUM` over its own attempt rows on every path, never double-counted or lost, regardless of
+exactly when the abort was delivered. `status='failed'` is set, and the original exception
+is always re-raised, never swallowed (`with suppress(Exception, asyncio.CancelledError)`
+wraps only this best-effort telemetry write itself, matching `pipeline.run()`'s own
+existing pattern). Providers never reached have no attempt rows at all — by construction
+of the lazy, per-provider creation above, not by cleanup.
+
+**Status, computed once, at natural completion or abort:**
+- `'failed'` — whole-run abort only.
+- `'completed_with_errors'` — natural completion with any planning failure, any attempt row
+  whose status isn't `'completed'`, any parse error, or any identity conflict — including
+  the case where *every* provider produced a planning failure. A graceful `ProviderError`
+  is caught by aggregating each provider's own `state.possibly_incomplete` (mirroring
+  `DiscoveryResult.possibly_incomplete` exactly: any source not completed, any incomplete
+  results, *or* any `ProviderError` at all), not merely by checking each attempt's own
+  terminal status — a source that stays `completed=True`/`incomplete_results=False` despite
+  carrying a real `ProviderError` (e.g. "succeeded after a retry") would otherwise be
+  missed entirely, since its own attempt status alone reads `'completed'`.
+- `'completed'` — otherwise, including an explicit empty provider list and every provider
+  being silently skipped by `QueryPlanner` returning `None`.
+
+**`failures` ordering**: append/processing order — provider iteration order at the top
+level, and (for a provider's own graceful errors) the original `result.errors` order
+within it. Never called chronological order, since `ProviderError.occurred_at` values are
+adapter-supplied and not guaranteed sorted.
+
+**Explicitly excluded from this slice**: live network requests, new real providers,
+parallel/concurrent provider execution, the scheduler (Phase 9), API routes (Phase 8),
+Tier 4 identity, Phase 3, caching/fingerprinting, actual local-filter execution (§6.6's
+`providers_enforced_locally` remains planning metadata only — nothing reads it back to
+filter anything), `ProviderRegistry` production composition, and any schema migration
+(every column this slice writes already existed).
 
 ---
 

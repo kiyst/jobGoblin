@@ -21,7 +21,7 @@ from app.db.models import (
     User,
     UserJob,
 )
-from app.ingestion import persistence, pipeline
+from app.ingestion import persistence, pipeline, provider_execution
 from app.ingestion.clock import FixedClock
 from app.ingestion.identity import resolve_identity
 from app.ingestion.natural_key import NaturalKey, NaturalKeyDomain
@@ -846,7 +846,7 @@ async def test_unexpected_failure_propagates_and_marks_run_failed(
     query = SourceQuery(sources=["fixture_ats"])
     clock = FixedClock(t1)
 
-    original_persist = pipeline.persist_posting
+    original_persist = provider_execution.persist_posting
     call_count = 0
 
     async def _fail_on_second_posting(
@@ -862,7 +862,7 @@ async def test_unexpected_failure_propagates_and_marks_run_failed(
             raise RuntimeError("simulated unexpected persistence failure SECRET_VALUE")
         return await original_persist(engine, natural_key, job, observed_at, raw_id)
 
-    monkeypatch.setattr(pipeline, "persist_posting", _fail_on_second_posting)
+    monkeypatch.setattr(provider_execution, "persist_posting", _fail_on_second_posting)
     caplog.set_level(logging.INFO, logger="app.ingestion.pipeline")
 
     job_ids: list[uuid.UUID] = []
@@ -4019,7 +4019,7 @@ async def test_pipeline_fails_closed_for_unhandled_upsert_kind(
     async def _fake_persist_posting(*args: object, **kwargs: object) -> object:
         return _FakeOutcome()
 
-    monkeypatch.setattr(pipeline, "persist_posting", _fake_persist_posting)
+    monkeypatch.setattr(provider_execution, "persist_posting", _fake_persist_posting)
 
     collection_run_ids: list[uuid.UUID] = []
     raw_ingestion_ids: list[uuid.UUID] = []
