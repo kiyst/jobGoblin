@@ -307,3 +307,31 @@ that detail.
   scope for this bounded correction.
 - STOP — awaiting Codex re-review. Do not merge, begin Phase 3, contact
   providers, add production behavior, or create a migration.
+
+### Work review
+
+- Date/reviewer: 2026-09-05, Codex.
+- Diff reviewed: `cffe8a1..d09ac00` on `phase-2/closure`.
+- Verdict: **Approved.** Both bounded findings from Iteration 1 are closed,
+  and no further corrections are required.
+- Independent review: inspected both corrected tests and the two-iteration
+  ledger rotation. In the distinct-tenant case, the run id, both resulting
+  Job ids, and both raw-ingestion ids are now captured before the first
+  post-run assertion. In the NULL-tenant case, the first run's Job/raw ids
+  and the second run's newly-created raw id are captured before their
+  respective assertions. The first run and its sole provider attempt now
+  explicitly prove `completed`, `discovered=1`, `inserted=1`, `updated=0`,
+  and an empty failure/error state, completing the insert-then-update matrix.
+- Verification: reran the two corrected tests directly (**2 passed**) and
+  independently ran `python scripts/verify.py --level routine`: all **9
+  checks PASS**, including Ruff, mypy, repository/diff checks, disposable-DB
+  safety/reachability, **1495 full-suite tests**, and temporary-directory
+  cleanup. No product code, fixture content, schema, migration, architecture,
+  or ROADMAP semantics changed in this correction.
+- Exit-gate disposition: the reviewed closure candidate satisfies the bounded
+  Phase 2 exit-gate corrections. Phase 2 may be declared complete after this
+  approved branch is merged into `main` and the normal post-merge checks pass.
+  Tier 4 remains deliberately deferred and is not represented as implemented.
+- Exact requested corrections: none.
+- STOP — do not merge to `main` or begin Phase 3 until the user explicitly
+  authorizes that action.
