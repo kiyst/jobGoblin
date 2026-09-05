@@ -729,8 +729,53 @@ class DiscoveryProvider(Protocol):
 ```
 
 `ProviderRegistry` holds the configured provider instances, exposes them by name, and is
-the single place `ingestion/pipeline.py` asks "which providers are enabled for this saved
-search, and are they healthy" — no other module enumerates providers directly.
+intended to be the single place a future orchestrator asks "which providers are enabled
+for this saved search, and are they healthy" — no other module should enumerate providers
+directly. **Implemented** as `app/providers/registry.py::ProviderRegistry` (Phase 2's
+ProviderRegistry slice) as a pure in-memory name→instance directory:
+
+- **Construction-time validation, fail-closed.** For each `DiscoveryProvider` passed to
+  `ProviderRegistry(providers)`: accessing `.name` at all is guarded — a missing
+  attribute or a `.name` property that raises converts to a fixed
+  `ProviderRegistrationError`, and a `.name` that is not a `str` is rejected before it is
+  ever checked against the grammar; the (now-confirmed-`str`) name must match the
+  canonical lowercase-ASCII-slug grammar (`app/schemas/identifiers.py::is_canonical_slug()`
+  — the same predicate `QueryPlanner` uses, extracted so the grammar has one shared
+  implementation instead of independently drifting copies); two providers sharing the
+  same `.name` are rejected; `.capabilities()` is called exactly once per provider, and
+  either a raised exception or a return value that is not an actual `ProviderCapabilities`
+  instance (a duck-shaped object with a coincidentally-matching `.provider` attribute is
+  rejected too, before it is ever read further or copied — its declared return type is
+  not runtime-enforced) converts to the same fixed, categorical
+  `ProviderRegistrationError` that never exposes the original exception's text or the
+  malformed value itself; `capabilities().provider` must equal the provider's own
+  `.name`. Any violation raises `ProviderRegistrationError` before the registry is usable
+  at all — a wiring/configuration problem caught at construction, not at per-saved-search
+  runtime.
+- **Stable, read-isolated capability snapshot.** The `ProviderCapabilities` returned by
+  `.capabilities()` at registration time is stored as a deep copy. `ProviderRegistry.get(name)`
+  returns a `RegisteredProvider(provider, capabilities)` pair where `capabilities` is
+  always a *fresh* deep copy — a caller mutating the returned object can never affect the
+  registry's own stored snapshot or any other caller's previously resolved copy.
+  `.capabilities()` itself is never called again after registration.
+- **Name-drift detection on resolution, not proactively.** A `DiscoveryProvider` is an
+  arbitrary object, never assumed immutable — `get()` re-checks the provider's current
+  `.name` the same guarded way as construction (an inaccessible/raising `.name` is treated
+  identically to a mismatch), and fails closed with `ProviderRegistrationError` if it is
+  unavailable or no longer equals the name it was registered under.
+- **`names()`** returns every registered name, alphabetically sorted, as a new list on
+  every call.
+- **`get(name)`** raises `UnknownProviderError` (message never contains `name`) if nothing
+  is registered under it.
+- **No module-level singleton.** A registry is constructed explicitly by its caller; there
+  is no proven need yet for ambient global access, and a singleton would let tests
+  interfere with each other's registration state. Composing the one real production
+  instance, and actually wiring `ingestion/pipeline.py` to ask it "which providers are
+  enabled for this saved search, and are they healthy," is the future orchestration
+  slice's job — **not yet implemented**; this slice's own compatibility test (a resolved
+  `RegisteredProvider.capabilities` snapshot fed directly into `QueryPlanner.plan()`,
+  offline, no database or network access) is the current consumer proving the two are
+  already compatible.
 
 ### 6.5 `SavedSearch.enabled_sources` — unambiguous source selection
 
