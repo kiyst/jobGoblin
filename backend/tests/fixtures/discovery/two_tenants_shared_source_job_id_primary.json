@@ -1,0 +1,22 @@
+{
+  "provider": "fixture_provider",
+  "source": "fixture_ats",
+  "source_tenant_id": "north-star-inc",
+  "source_job_id": "SHARED-9001",
+  "requisition_id_raw": "NS-9001",
+  "title": "Site Reliability Engineer",
+  "company": "North Star Inc",
+  "location": "Austin, TX",
+  "source_url": "https://northstar.example.com/jobs/SHARED-9001",
+  "apply_url": "https://northstar.example.com/jobs/SHARED-9001/apply",
+  "canonical_url": "https://northstar.example.com/jobs/SHARED-9001",
+  "description": "Operate North Star's production infrastructure.",
+  "compensation_text": "$140,000 - $170,000",
+  "posted_at": "2026-04-01T00:00:00+00:00",
+  "discovered_at": "2026-04-01T00:00:00+00:00",
+  "raw": {
+    "id": "SHARED-9001",
+    "title": "Site Reliability Engineer",
+    "tenant": "north-star-inc"
+  }
+}

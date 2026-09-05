@@ -1,0 +1,22 @@
+{
+  "provider": "fixture_provider",
+  "source": "fixture_ats",
+  "source_tenant_id": "vertex-holdings",
+  "source_job_id": "SHARED-9001",
+  "requisition_id_raw": "VX-9001",
+  "title": "Warehouse Supervisor",
+  "company": "Vertex Holdings",
+  "location": "Reno, NV",
+  "source_url": "https://vertex.example.com/jobs/SHARED-9001",
+  "apply_url": "https://vertex.example.com/jobs/SHARED-9001/apply",
+  "canonical_url": "https://vertex.example.com/jobs/SHARED-9001",
+  "description": "Supervise warehouse operations for Vertex Holdings.",
+  "compensation_text": "$55,000 - $65,000",
+  "posted_at": "2026-04-01T00:00:00+00:00",
+  "discovered_at": "2026-04-01T00:00:00+00:00",
+  "raw": {
+    "id": "SHARED-9001",
+    "title": "Warehouse Supervisor",
+    "tenant": "vertex-holdings"
+  }
+}
