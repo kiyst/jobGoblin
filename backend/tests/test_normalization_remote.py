@@ -53,38 +53,54 @@ def test_classify_remote_type_is_deterministic() -> None:
         assert first == second
 
 
-_DISALLOWED_IMPORT_PREFIXES = (
-    "app.providers",
-    "app.db",
-    "app.ingestion",
-    "app.services",
-    "app.api",
-    "sqlalchemy",
-    "asyncpg",
-    "alembic",
-    "httpx",
-    "fastapi",
-)
-_CHECKED_MODULES = ("app/normalization/remote.py", "app/normalization/types.py")
+def _imported_module_names(source: str) -> list[str]:
+    tree = ast.parse(source)
+    names: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names.extend(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module is not None:
+            names.append(node.module)
+    return names
 
 
-def test_import_boundary() -> None:
+# Fail-closed exact allow-list, not a deny-list: anything not explicitly
+# named here is rejected, including a legitimate future addition (which
+# must update this list deliberately) and any not-yet-invented network
+# client this list was never written to anticipate.
+_ALLOWED_IMPORTS: dict[str, frozenset[str]] = {
+    "app/normalization/types.py": frozenset({"__future__", "dataclasses", "enum", "typing"}),
+    "app/normalization/remote.py": frozenset(
+        {"__future__", "re", "unicodedata", "typing", "app.normalization.types"}
+    ),
+}
+
+
+@pytest.mark.parametrize("relative_path", sorted(_ALLOWED_IMPORTS))
+def test_import_boundary_allow_list(relative_path: str) -> None:
     """docs/PHASE_RISK_CHECKLIST.md's Phase 3 exit gate: no parser imports
     providers, ORM models, UI code, or network clients. Proven by AST
-    inspection of the actual source files, not merely a docstring claim
-    that could silently go stale."""
+    inspection against an exact permitted-import allow-list, not a
+    deny-list — a deny-list would silently accept any import (e.g.
+    `requests`, `aiohttp`, `socket`) it was never written to name."""
     backend_root = Path(__file__).resolve().parent.parent
-    for relative_path in _CHECKED_MODULES:
-        source_path = backend_root / relative_path
-        tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=str(source_path))
-        imported_names: list[str] = []
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                imported_names.extend(alias.name for alias in node.names)
-            elif isinstance(node, ast.ImportFrom) and node.module is not None:
-                imported_names.append(node.module)
-        for name in imported_names:
-            assert not name.startswith(_DISALLOWED_IMPORT_PREFIXES), (
-                f"{relative_path} imports {name!r}, violating the Phase 3 "
-                "no-provider/no-database/no-network import boundary"
-            )
+    source = (backend_root / relative_path).read_text(encoding="utf-8")
+    imports = _imported_module_names(source)
+    allowed = _ALLOWED_IMPORTS[relative_path]
+    for name in imports:
+        assert name in allowed, (
+            f"{relative_path} imports {name!r}, which is not on its exact "
+            f"allow-list {sorted(allowed)!r}"
+        )
+
+
+def test_import_boundary_rejects_unrecognized_import() -> None:
+    """Synthetic regression proving the allow-list check is genuinely
+    fail-closed: a network client that was never written into any
+    allow-list is rejected on its own terms, not merely absent from a
+    deny-list that would have silently let it through."""
+    synthetic_source = "import requests\n"
+    imports = _imported_module_names(synthetic_source)
+    allowed = _ALLOWED_IMPORTS["app/normalization/remote.py"]
+    assert imports == ["requests"]
+    assert not all(name in allowed for name in imports)

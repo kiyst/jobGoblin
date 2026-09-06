@@ -98,161 +98,6 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-09-05, Claude Code (Sonnet 5). Risk class R correction
-  pass on `phase-2/closure` for the two bounded findings from the original
-  Phase 2 closure pass's review (that original pass and its review are now
-  rotated out of this ledger per the two-iteration rule; both remain in
-  Git history at commit `cffe8a1` and its review commit). Base: `cffe8a1`
-  plus the uncommitted review. Only the affected test file and this
-  handoff ledger changed — no fixture content, product code, architecture
-  wording, or ROADMAP closure-candidate status touched, per the user's
-  explicit preservation instruction.
-- Outcome, addressing each finding exactly:
-  1. **Cleanup not failure-safe.** Audited both new tests end to end.
-     `test_two_distinct_tenants_sharing_source_job_id_produce_two_jobs` now
-     queries the run's `JobOccurrence`/`RawJobIngestion` rows and extends
-     `job_ids`/`raw_ingestion_ids` immediately after `pipeline.run()`
-     returns, before any assertion (previously deferred until after the
-     four global-count assertions).
-     `test_null_tenant_natural_key_collision_resolves_to_one_occurrence` now
-     captures run 1's raw-ingestion id immediately after run 1 (before its
-     `first_seen_at`/`last_seen_at` assertions), and run 2's new raw-
-     ingestion id immediately after run 2 (before any of the count/content
-     assertions that follow) — using the same
-     already-captured-ids-minus-new-rows pattern
-     `test_two_run_natural_key_spine` established. Both tests' later
-     assertions now read from data already captured for cleanup, not the
-     other way around.
-  2. **NULL-tenant test's first-run counters unproven.** Added an assertion
-     block immediately after run 1's raw-ingestion id is captured: `run1`
-     is `completed`, `jobs_discovered=1`, `jobs_inserted=1`,
-     `jobs_updated=0`, `failures=[]`; its sole
-     `CollectionRunProviderAttempt` is `completed`,
-     `jobs_discovered=1`/`jobs_inserted=1`/`jobs_updated=0`, and
-     `error_category`/`error_message` are both `None` (the "empty failure
-     state" Codex requested). The existing run-2 `inserted=0, updated=1`
-     assertions are unchanged, so the full insert-then-update transition is
-     now proven end to end.
-- Files changed: `backend/tests/test_ingestion_pipeline.py` (both tests'
-  cleanup-capture ordering; new first-run assertion block in the
-  NULL-tenant test), this handoff entry. No fixture, product code, migration,
-  or other documentation file touched.
-- Verification: the two focused tests directly (**2 passed**); the full
-  relevant ingestion/identity suite (`test_ingestion_pipeline.py`,
-  `test_ingestion_concurrency.py`, `test_ingestion_natural_key.py`,
-  `test_job_occurrences.py`, `test_orchestrator.py`): **250 passed**;
-  genuine external `python scripts/verify.py --level routine` (full run) —
-  all **9 steps PASS**, **1495 full-suite tests**, ~130-143s across reruns.
-  `alembic heads` confirms `0017` remains the sole head; `git diff --stat
-  origin/main -- migrations/` is empty; dev database (`jobgoblin`) confirmed
-  unchanged at `0006`. Explicit disposable-database row-count check (`jobs`,
-  `job_occurrences`, `raw_job_ingestions`, `collection_runs`,
-  `collection_run_provider_attempts`, `identity_conflicts`, `users`,
-  `user_jobs`): 0 before the suite, 0 after.
-- Adversarial self-review (abbreviated, proportionate to Class R): re-broke
-  both invariants exercised in the prior review (`_existing_occurrence_
-  conditions()`'s `TENANT`-domain tenant filter removed; `NO_TENANT`-domain
-  filter inverted) to prove finding 1's fix is actually load-bearing, not
-  just finding 2's new assertions. (1) With the tenant filter removed,
-  `test_two_distinct_tenants_...` still failed at the same assertion as
-  before — but this time a fresh disposable-database row-count check
-  immediately afterward confirmed **0 rows in every affected table**,
-  proving the earlier-captured ids let `finally` clean up completely despite
-  the failure (this is the exact scenario the prior review's finding 1 said
-  could leak rows before the fix). (2) With the `NO_TENANT` filter inverted,
-  the second `pipeline.run()` call itself raised a real
-  `UniqueViolationError` (as before) rather than failing at an assertion;
-  because the raising call never returns, its own internally-written
-  `CollectionRun`/attempt/raw rows cannot be captured by any id-after-return
-  pattern — a pre-existing structural property shared by every test in this
-  file that calls `pipeline.run()` once per line, not a regression from
-  this correction and not one of the two findings. The resulting one leaked
-  row per table was identified and deleted, and a fresh row-count check
-  confirmed 0 before the final verification run above. Both temporary
-  breaks were then reverted (`git diff --stat -- backend/app/ingestion/
-  persistence.py` empty afterward), and the two focused tests re-confirmed
-  passing.
-- Deviations/known limitations: the pre-existing `alembic check`
-  substitution (unrelated, recorded previously); the structural
-  raise-before-return cleanup limitation noted above, which affects the
-  whole file, not just these two tests, and was left unmodified as out of
-  scope for this bounded correction.
-- STOP — awaiting Codex re-review. Do not merge, begin Phase 3, contact
-  providers, add production behavior, or create a migration.
-
-### Work review
-
-- Date/reviewer: 2026-09-05, Codex.
-- Diff reviewed: `cffe8a1..d09ac00` on `phase-2/closure`.
-- Verdict: **Approved.** Both bounded findings are closed, and no further
-  corrections are required.
-- Independent review: inspected both corrected tests and the two-iteration
-  ledger rotation. In the distinct-tenant case, the run id, both resulting
-  Job ids, and both raw-ingestion ids are now captured before the first
-  post-run assertion. In the NULL-tenant case, the first run's Job/raw ids
-  and the second run's newly-created raw id are captured before their
-  respective assertions. The first run and its sole provider attempt now
-  explicitly prove `completed`, `discovered=1`, `inserted=1`, `updated=0`,
-  and an empty failure/error state, completing the insert-then-update matrix.
-- Verification: reran the two corrected tests directly (**2 passed**) and
-  independently ran `python scripts/verify.py --level routine`: all **9
-  checks PASS**, including Ruff, mypy, repository/diff checks, disposable-DB
-  safety/reachability, **1495 full-suite tests**, and temporary-directory
-  cleanup. No product code, fixture content, schema, migration, architecture,
-  or ROADMAP semantics changed in this correction.
-- Exit-gate disposition: the reviewed closure candidate satisfies the bounded
-  Phase 2 exit-gate corrections. Phase 2 may be declared complete after this
-  approved branch is merged into `main` and the normal post-merge checks pass.
-  Tier 4 remains deliberately deferred and is not represented as implemented.
-- Exact requested corrections: none.
-- STOP — do not merge to `main` or begin Phase 3 until the user explicitly
-  authorizes that action.
-
-### Merge record
-
-- Date: 2026-09-05. User authorized merging `phase-2/closure` into `main`
-  following Codex's Approved re-review and Phase 2 exit-gate sign-off
-  (commit `0ca367f`) above.
-- Pre-merge state: `main` and `origin/main` both at `4db557c`; feature
-  branch `phase-2/closure` pushed and clean at `0ca367f` (containing
-  correction commit `cffe8a1`, correction commit `d09ac00`, and Codex's
-  approval commit `0ca367f`).
-- Merge: `git merge --no-ff phase-2/closure` on `main` — merge commit
-  `d4bd606`. `git diff phase-2/closure HEAD` is empty (zero content
-  difference); `git diff --check` and `check_repo.py` both exit 0; working
-  tree clean.
-- Post-merge verification: genuine external `python scripts/verify.py
-  --level routine` (full run) — all **9 steps PASS** (Ruff format/check,
-  mypy, `check_repo.py`, `git diff --check`, disposable-database URL/
-  reachability, **1495 full-suite tests**, temp-directory cleanup).
-  `alembic heads` confirms `0017` remains the sole head; `git diff --stat
-  4db557c -- migrations/` is empty — no migration introduced by the merge.
-  Dev database (`jobgoblin`) confirmed unchanged at the pre-existing `0006`
-  — untouched throughout.
-- Pushed: `main` at `d4bd606`, matching `origin/main`.
-- Rollback boundary: to revert this slice, reset `main` to `4db557c` (the
-  commit immediately before this merge) — this removes both new fixture
-  pairs, the two fixture-driven identity tests in
-  `test_ingestion_pipeline.py`, the ARCHITECTURE.md §11 wording correction,
-  and the ROADMAP.md closure-candidate note cleanly, with no migration to
-  reverse and no data written by this slice to any environment.
-- **Phase 2 is officially complete.** Every documented Phase 2 requirement
-  is satisfied, intentionally deferred with an approved architectural
-  reason (Tier 4; `ProviderRegistry` production composition; live
-  providers — none of these are Phase 2 exit criteria), or now closed by
-  this branch; Codex's independent exit-gate review found no remaining
-  blocker. Tier 4 remains explicitly deferred, not implemented.
-- STOP — do not propose or begin Phase 3, live-provider integration,
-  production `ProviderRegistry` composition, parallel/concurrent provider
-  execution, the scheduler, API routes, or any migration without separate
-  authorization.
-
----
-
-## Iteration 2
-
-### Work done
-
 - Date/agent: 2026-09-06, Claude Code (Sonnet 5). Risk class R implementation
   of the approved Phase 3 remote-classifier proposal (v3 plus its binding
   implementation clarifications) on `phase-3/remote-classifier`, based on
@@ -379,3 +224,191 @@ that detail.
   silently handled.
 - STOP — awaiting Codex review. Do not merge, begin another Phase 3 parser,
   wire into ingestion/persistence, contact providers, or create a migration.
+
+### Work review
+
+- Date/reviewer: 2026-09-06, Codex.
+- Diff reviewed: `199eb00..cba5b14` on `phase-3/remote-classifier`.
+- Verdict: **Changes requested.** The shared result/provenance type, deterministic
+  mechanics, fixture harness, and implementation boundaries are sound, and all
+  authored tests pass. The classifier nevertheless emits confident structured facts
+  for several common phrases that do not state the job's work arrangement—the exact
+  primary risk named by the Phase 3 checklist.
+- Independent verification: inspected all eight changed files; ran both targeted
+  modules (**43 passed**) and the canonical routine verifier (**all 9 checks PASS,
+  1538 full-suite tests**). Directly exercised additional realistic negative cases
+  against the committed implementation.
+- Findings:
+  1. **High — generic tokens are treated as work-arrangement evidence without
+     sufficient field/context qualification, and negation can fail open.** The
+     committed classifier returns `hybrid/PARSED_DESCRIPTION` for `Hybrid Cloud
+     Engineer` / `Build hybrid cloud infrastructure`, `remote/PARSED_DESCRIPTION`
+     for `Manage remote teams across several regions` and `Troubleshoot remote
+     systems and devices`, and `onsite/PARSED_DESCRIPTION` for `Candidates must
+     attend an in-person interview` and `Attend quarterly in-person meetings`.
+     It also returns `remote/PARSED_DESCRIPTION` for `This is not, under any
+     circumstances, a remote position` and `hybrid/PARSED_DESCRIPTION` for `This
+     position is not remote or hybrid`. These are false facts, not merely missed
+     detections. The module docstring calls the long-negation behavior "fail-closed"
+     even though it preserves the positive match and therefore fails open. Replace
+     the shared bare-token treatment with conservative field-aware evidence rules:
+     title markers may remain narrowly supported with domain exclusions, while
+     description matches must express an arrangement (for example, remote/hybrid/
+     onsite role, position, schedule, attendance, or work), not merely mention a
+     remote team/system, hybrid technology, or an in-person event. Add domain/event
+     exclusions as needed. An unmatched negation cue in a sentence containing a
+     candidate must make that field unavailable rather than leave the candidate
+     positive; propagate negation across directly coordinated `or`/`nor` alternatives
+     so `not remote or hybrid` cannot produce `hybrid`. Preserve the already-correct
+     `not remote, onsite` behavior. Add all seven reproduced strings above as
+     regressions, plus title-only `Hybrid Cloud Engineer` and a positive control for
+     every retained arrangement phrase.
+  2. **Medium — the AST import-boundary test is a deny-list while claiming to prove
+     the complete no-network/no-layer dependency boundary.** It would accept imports
+     such as `requests`, `aiohttp`, `urllib.request`, `socket`, or any newly introduced
+     client not named in `_DISALLOWED_IMPORT_PREFIXES`. Use a fail-closed allow-list
+     for these two modules' exact permitted imports (standard-library modules actually
+     required plus `app.normalization.types` for `remote.py`), and add a synthetic AST
+     regression proving an unrecognized import is rejected.
+  3. **Low — ROADMAP's adjacent Phase 2 status remains stale.** The edited status
+     section still calls `phase-2/closure` a pending closure candidate even though
+     it was approved, merged at `d4bd606`, recorded at `199eb00`, and Phase 2 is
+     officially complete. Correct that historical status while retaining the accurate
+     statement that this Phase 3 branch is pending review and Phase 3 is incomplete.
+- Exact requested correction: address only the classifier semantics/docstring,
+  regression corpus/tests, fail-closed import-boundary test, ROADMAP status, and this
+  handoff ledger. Preserve `NormalizationResult`/`Provenance`, public signature,
+  offline/pure boundary, exhaustive-catalog discipline, no-persistence scope, and all
+  previously passing safety cases. Run the targeted modules and canonical verifier;
+  in the adversarial self-review explicitly replay every reproduced false-positive and
+  temporarily break the new field/context and unresolved-negation protections. Do not
+  merge or start another parser pending re-review.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-09-06, Claude Code (Sonnet 5). Risk class R correction
+  pass on `phase-3/remote-classifier` for the three findings from Iteration
+  1's `Work review` above. Base: commit `cba5b14` plus the uncommitted
+  review. Preserved: `NormalizationResult`/`Provenance`, the public
+  `classify_remote_type(title, description)` signature, the pure/offline
+  boundary, unsupported-phrase behavior, and every previously-passing
+  safety case (all reconfirmed still passing, unchanged expected values).
+  No ingestion/persistence/providers/models/migration or other parser
+  touched.
+- Outcome, addressing each finding exactly:
+  1. **Generic tokens treated as evidence without context; negation could
+     fail open.** Resolved via three additions, all scoped to
+     `remote.py`, without a broad "positive arrangement requirement" that
+     would have (and, in an earlier draft, did) broken the already-correct
+     `"Not remote, onsite."` case:
+     - New exclusion phrase `"hybrid cloud"` (masked in both fields) —
+       closes the `Hybrid Cloud Engineer`/`Build hybrid cloud
+       infrastructure` false positives, including the title-only case,
+       which the description-only mechanisms below cannot reach.
+     - New **description-only** context-cue set (`team`/`teams`/
+       `system`/`systems`/`device`/`devices`/`interview`/`meeting`/
+       `meetings`), applied only when processing `description`, never
+       `title` — closes `Manage remote teams...`, `Troubleshoot remote
+       systems and devices`, `...an in-person interview`, and `...quarterly
+       in-person meetings` by suppressing the nearby positive match, the
+       same 3-token-window mechanism the existing universal context cues
+       already used, just field-scoped. `title` keeps only the universal
+       cues and exclusion phrases, per the review's own distinction
+       ("title markers may remain narrowly supported with domain
+       exclusions, while description matches must express an
+       arrangement").
+     - **Negation coordination + unresolved-negation poisoning**: negation
+       suppression now propagates transitively to any candidate directly
+       coordinated with an already-suppressed one via exactly one
+       `"or"`/`"nor"` token between their spans (never a bare
+       comma-adjacent gap — verified this distinction explicitly, see
+       below) — closes `This position is not remote or hybrid`. Separately,
+       if a negation cue is present in a sentence containing a candidate
+       anywhere, but its own nearest-candidate search finds nothing within
+       its 3-token window (an "unresolved" negator), that sentence's
+       candidates are now discarded entirely rather than left positive —
+       closes `This is not, under any circumstances, a remote position`
+       (previously a documented "accepted limitation"; now genuinely
+       fixed, not merely relabeled).
+     - Module docstring corrected: the old "fail-closed" claim for
+       long-distance negation (which actually preserved a positive match)
+       is removed; the new unresolved-negation-poisoning behavior is
+       documented as what it actually is.
+  2. **AST deny-list, not fail-closed.** Replaced `_DISALLOWED_IMPORT_
+     PREFIXES` with an exact `_ALLOWED_IMPORTS` dict (one entry per file,
+     naming every import actually present — stdlib only, plus
+     `app.normalization.types` for `remote.py`); anything not explicitly
+     listed now fails. Added
+     `test_import_boundary_rejects_unrecognized_import`, a synthetic
+     regression parsing a fabricated `"import requests"` snippet (not a
+     real file) and asserting it is correctly rejected by the same
+     allow-list check — proving the mechanism itself is fail-closed, not
+     only that the two real files happen to pass it today.
+  3. **ROADMAP's stale Phase 2 status.** The `phase-2/closure` paragraph
+     now states it was approved, merged at `d4bd606`, recorded at
+     `199eb00`, and that Phase 2 is officially complete — replacing the
+     old "pending Codex's independent exit-gate review" wording. The
+     adjacent Phase 3 paragraph (already accurate — first slice
+     implemented, pending review, not complete) is untouched.
+- New/changed fixture cases (14 added to the corpus, now 41 total): the
+  seven reproduced strings verbatim (`hybrid_cloud_title_and_description_
+  exclusion`, `hybrid_cloud_title_only_exclusion`, `description_only_
+  remote_team_mention_not_arrangement`, `description_only_remote_systems_
+  mention_not_arrangement`, `description_only_in_person_interview_event_
+  not_arrangement`, `description_only_in_person_meetings_event_not_
+  arrangement`, `unresolved_long_distance_negation_forces_unavailable`,
+  `negation_coordinated_or_alternative_forces_unavailable`), one extra
+  coordination case isolating the or/nor mechanism from every other
+  protection (`negation_coordination_propagates_independent_of_other_
+  protections`), an explicit duplicate recording that comma-adjacency
+  must never coordinate (`negation_preserves_uncoordinated_alternative`),
+  and four positive controls (`positive_control_work_from_home`,
+  `positive_control_wfh`, `positive_control_in_office`,
+  `positive_control_onsite_bare`) covering every retained catalog phrase
+  not already exercised elsewhere.
+- Files changed: `backend/app/normalization/remote.py` (all corrections;
+  docstring rewritten to match), `backend/tests/test_normalization_
+  remote.py` (allow-list import-boundary tests replacing the deny-list
+  test), `backend/tests/fixtures/normalization/remote_type_cases.json`
+  (14 new cases), `docs/ROADMAP.md` (Phase 2 status correction), this
+  handoff entry. `app/normalization/types.py` and `test_normalization_
+  types.py` untouched — no finding required changing them.
+- Verification: the two targeted modules directly (**59 passed**, was 43);
+  genuine external `python scripts/verify.py --level routine` (full run) —
+  all **9 steps PASS**, **1554 full-suite tests** (was 1538; +16, i.e. +14
+  corpus cases and +2 import-boundary tests replacing the 1 old deny-list
+  test), ~120-126s across reruns. `ruff format --check`, `ruff check`, and
+  `mypy` all pass on the changed files individually before the full run.
+  `check_repo.py` and `git diff --check` both pass as part of the
+  verifier. No database/migration/schema touched.
+- Adversarial self-review (abbreviated, proportionate to Class R): replayed
+  all seven reproduced false-positive strings against the corrected
+  implementation (all now `unavailable`, confirmed via the passing corpus
+  tests above), then four targeted breaks against the new protections,
+  each reverted cleanly (`git diff --stat` empty afterward). (1) Disabled
+  the description-only context cues — exactly the four non-hybrid-cloud
+  reproduction cases failed, each leaking its false-positive value again.
+  (2) Removed `"hybrid cloud"` from the exclusion phrases — both
+  hybrid-cloud cases (title+description, and title-only) failed, leaking
+  `hybrid`. (3) Disabled unresolved-negation poisoning — exactly the
+  long-distance-negation case failed, leaking `remote`. (4) Disabled
+  or/nor coordination propagation — both coordination-dependent cases
+  failed, leaking `hybrid`, while `negation_preserves_uncoordinated_
+  alternative` (`"Not remote, onsite."`) **still passed** even with
+  coordination disabled — direct proof that the comma-adjacent case never
+  relied on coordination, and that the two mechanisms are genuinely
+  independent as designed.
+- Deviations/known limitations: the pre-existing `alembic check`
+  substitution (unrelated, recorded previously, not applicable — no
+  schema/migration touched). The module docstring's remaining accepted
+  limitation (two separate, unconnected negators/candidates coincidentally
+  sharing one sentence could still cross-poison) is stated explicitly, not
+  silently handled — narrower in scope than the original long-distance
+  case, which is now fixed.
+- STOP — awaiting Codex re-review. Do not merge, begin another Phase 3
+  parser, wire into ingestion/persistence, contact providers, or create a
+  migration.

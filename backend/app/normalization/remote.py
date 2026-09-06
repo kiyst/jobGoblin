@@ -5,8 +5,9 @@ docs/PHASE_RISK_CHECKLIST.md's Phase 3 exit gate).
 Pure function: `title`/`description` free text in, one
 `NormalizationResult` out. No database, ORM, provider, network, or
 ingestion-pipeline dependency — `test_normalization_remote.py`'s
-`test_import_boundary` proves this by AST inspection. Writing the result
-into `jobs.remote_type`/`jobs.field_provenance` and threading
+`test_import_boundary_allow_list` proves this by AST inspection against an
+exact, fail-closed permitted-import allow-list (not a deny-list). Writing
+the result into `jobs.remote_type`/`jobs.field_provenance` and threading
 `parser_version` are both Phase 4+ ingestion-layer concerns, out of scope
 here.
 
@@ -35,20 +36,51 @@ here.
    catalog and input text can never disagree on apostrophe/hyphen/
    whitespace handling.
 5. **Exclusion-span masking**: every `_EXCLUSION_TOKEN_PHRASES` match
-   (e.g. "remote sensing") marks every token in its span as masked;
-   masked tokens are invisible to every later step, including the
-   standalone "remote" phrase — this is what stops "remote sensing"'s
-   embedded "remote" from also registering as its own positive candidate.
+   (e.g. "remote sensing", "hybrid cloud") marks every token in its span as
+   masked; masked tokens are invisible to every later step, including the
+   standalone "remote"/"hybrid" phrase — this is what stops "remote
+   sensing"'s embedded "remote", or "hybrid cloud"'s embedded "hybrid",
+   from also registering as its own positive candidate. Exclusion phrases
+   apply identically to both `title` and `description`.
 6. Positive-candidate collection over the unmasked tokens.
-7. **Negation suppression**: for each negation cue, find its *nearest*
-   surviving candidate(s) within a 3-token window (ties suppress both,
-   never neither); a cue never suppresses every candidate in its window
-   indiscriminately, only the nearest.
-8. **Context-exclusion suppression**: for each context cue (e.g.
-   "stipend", "vpn"), suppress *every* candidate within a 3-token window
-   (unlike negation, not narrowed to nearest-only).
-9. Distinct surviving labels across all sentences of this one field: zero
-   -> no signal; one -> that field's signal; two or more -> `"conflict"`.
+7. **Context-exclusion suppression**: for each context cue, suppress every
+   candidate within a 3-token same-sentence window. Two cue sets apply:
+   a small universal set (benefit/tooling mentions — "stipend", "vpn",
+   ... — checked in both fields) and a larger set checked only in
+   `description` (generic collocates that mean the surrounding sentence is
+   *not* describing this position's own arrangement — "team(s)",
+   "system(s)", "device(s)", "interview", "meeting(s)" — e.g. "manage
+   remote teams", "troubleshoot remote systems", "an in-person interview").
+   `title` does not get this second, description-only set: a bare marker
+   in a title (e.g. "Senior Backend Engineer (Remote)") already describes
+   the position itself, by construction of what a job title is — the
+   review's approved distinction between "title markers may remain
+   narrowly supported with domain exclusions" (the universal exclusion
+   phrases/cues, which do apply to titles) and "description matches must
+   express an arrangement, not merely mention" a team/system/event (the
+   description-only cues, which do not apply to titles).
+8. **Negation suppression**: for each negation cue, find its *nearest*
+   surviving candidate(s) within a 3-token same-sentence window (a tie
+   suppresses both, never neither; a cue never suppresses every candidate
+   in its window indiscriminately, only the nearest). Suppression then
+   propagates transitively to any candidate directly coordinated with an
+   already-suppressed one via exactly one "or"/"nor" token between their
+   spans (never a bare comma-adjacent gap, which is plain juxtaposition,
+   not coordination) — so "not remote or hybrid" cannot leave "hybrid"
+   unnegated, while "not remote, onsite" still correctly leaves "onsite"
+   untouched (comma-adjacency alone never coordinates).
+9. **Unresolved-negation poisoning**: if a negation cue is present in a
+   sentence that contains at least one candidate anywhere, but that cue's
+   own nearest-candidate search finds nothing within its 3-token window
+   (an "unresolved" negator — a negation clearly present in the sentence,
+   just structurally out of the algorithm's reach), the *entire sentence's*
+   candidates are discarded rather than left as an unsuppressed positive
+   match. This is what makes "This is not, under any circumstances, a
+   remote position" resolve to no signal instead of a confident "remote":
+   the negator exists, but can't be proven to have successfully attached to
+   anything, so nothing from that sentence is trusted.
+10. Distinct surviving labels across all sentences of this one field: zero
+    -> no signal; one -> that field's signal; two or more -> `"conflict"`.
 
 **Cross-field precedence** (docs/DATA_MODEL.md's Provenance vocabulary):
 a conflict anywhere (within a field or between fields) always yields
@@ -64,13 +96,17 @@ listed in full below. A phrase not on these lists (e.g. "telecommute")
 contributes no signal at all; adding one requires its own reviewed change,
 not silent expansion here.
 
-**Known, accepted limitation**: negation only reaches 3 tokens in either
-direction within the same sentence. A negator more than 3 tokens from its
-intended target (e.g. "This is not, under any circumstances, a remote
-position" — 4 intervening tokens) is not recognized, and the target
-survives as an unnegated positive candidate. This is an intentionally
-narrow, fail-closed design (favoring a simple, fully-specified,
-easily-tested rule over a general negation-scope parser) — not a special
+**Known, accepted limitation**: the negation window itself only reaches 3
+tokens in either direction within the same sentence — but unlike an
+earlier version of this module, a negator that exists just outside that
+window is never silently ignored (see step 9 above): its sentence's
+candidates are discarded, not left positive. The genuinely unhandled case
+is different and narrower: two *separate*, unconnected negators and
+candidates that both happen to sit in the same sentence purely by
+coincidence (not a realistic job-posting construction this catalog is
+tuned for) could still poison each other's sentence. This is an
+intentionally narrow, fail-closed design (a simple, fully-specified,
+easily-tested rule over a general negation-scope parser), not a special
 case silently handled elsewhere.
 """
 
@@ -93,6 +129,8 @@ _CURLY_APOSTROPHES = ("‘", "’")
 
 _NEGATION_WINDOW = 3
 _CONTEXT_WINDOW = 3
+
+_COORDINATING_CONJUNCTIONS = frozenset({"or", "nor"})
 
 
 def _normalize_text(text: str) -> str:
@@ -126,21 +164,48 @@ _POSITIVE_TOKEN_PHRASES: dict[RemoteType, frozenset[tuple[str, ...]]] = {
     "onsite": frozenset(_compile_phrase(p) for p in _ONSITE_PHRASES),
 }
 
-# Domain-collision / geographic-remoteness phrases — masked entirely,
-# contributing no signal (positive or negative).
-_EXCLUSION_PHRASES = {"remote sensing", "remote desktop", "remote location"}
+# Domain-collision phrases — masked entirely, contributing no signal
+# (positive or negative), in both title and description. "hybrid cloud" is
+# a cloud-computing infrastructure term (a mix of on-prem and cloud
+# infrastructure), not a work-arrangement claim — e.g. "Hybrid Cloud
+# Engineer" as a job title, or "Build hybrid cloud infrastructure" in a
+# description.
+_EXCLUSION_PHRASES = {"remote sensing", "remote desktop", "remote location", "hybrid cloud"}
 _EXCLUSION_TOKEN_PHRASES = frozenset(_compile_phrase(p) for p in _EXCLUSION_PHRASES)
 
 # Benefit/tooling context cues — a nearby positive match is suppressed
-# (e.g. "remote work stipend", "remote collaboration protocol"). Kept
-# deliberately narrow: generic words like "software"/"tool"/"equipment"/
-# "access" were considered and rejected — each collides with ordinary job
-# titles/descriptions having nothing to do with remote-work benefits (e.g.
-# "Software Engineer (Remote)", "Equipment Operator", "Access Control
-# Specialist"), which would silently suppress a genuine positive signal.
-# Every cue kept here is unambiguous in this context.
+# (e.g. "remote work stipend", "remote collaboration protocol"). Applies to
+# both title and description. Kept deliberately narrow: generic words like
+# "software"/"tool"/"equipment"/"access" were considered and rejected —
+# each collides with ordinary job titles/descriptions having nothing to do
+# with remote-work benefits (e.g. "Software Engineer (Remote)", "Equipment
+# Operator", "Access Control Specialist"), which would silently suppress a
+# genuine positive signal. Every cue kept here is unambiguous in this
+# context.
 _EXCLUSION_CONTEXT_CUES = frozenset(
     _compile_phrase(p)[0] for p in ("stipend", "collaboration", "vpn", "protocol", "allowance")
+)
+
+# Description-only context cues (never applied to title — see the module
+# docstring's step 7): a nearby positive match is suppressed because the
+# surrounding sentence is describing something *other than* this position's
+# own arrangement — managing a remote team, troubleshooting remote
+# equipment, or an in-person interview/meeting event, not a remote/hybrid/
+# onsite role. Each pairs a singular and plural surface form deliberately
+# (no stemming anywhere in this module).
+_DESCRIPTION_ONLY_CONTEXT_CUES = frozenset(
+    _compile_phrase(p)[0]
+    for p in (
+        "team",
+        "teams",
+        "system",
+        "systems",
+        "device",
+        "devices",
+        "interview",
+        "meeting",
+        "meetings",
+    )
 )
 
 _NEGATION_CUES = frozenset(
@@ -176,14 +241,34 @@ def _distance(pivot: int, start: int, end: int) -> int:
     return 0
 
 
-def _extract_signal(text: str | None) -> RemoteType | Literal["conflict"] | None:
+def _is_coordinated(a_start: int, a_end: int, b_start: int, b_end: int, tokens: list[str]) -> bool:
+    """True only if the two spans are joined by exactly one coordinating
+    conjunction token ("or"/"nor") and nothing else between them — never
+    for a bare comma-adjacent gap (that's plain juxtaposition, already
+    handled by the nearest-only negation rule, not coordination that should
+    propagate a negation)."""
+    if b_start > a_end:
+        gap = tokens[a_end + 1 : b_start]
+    elif a_start > b_end:
+        gap = tokens[b_end + 1 : a_start]
+    else:
+        return False
+    return len(gap) == 1 and gap[0] in _COORDINATING_CONJUNCTIONS
+
+
+def _extract_signal(
+    text: str | None, *, extra_context_cues: frozenset[str] = frozenset()
+) -> RemoteType | Literal["conflict"] | None:
     """Returns this one field's local classification: a single label, the
     `"conflict"` sentinel when more than one distinct label survives
-    anywhere in the field, or `None` when no signal survives at all."""
+    anywhere in the field, or `None` when no signal survives at all.
+    `extra_context_cues` is the description-only cue set (empty for
+    title)."""
     if text is None or not text.strip():
         return None
 
     normalized = _normalize_text(text)
+    context_cues = _EXCLUSION_CONTEXT_CUES | extra_context_cues
     survivors: set[str] = set()
 
     for sentence in _SENTENCE_SPLIT_RE.split(normalized):
@@ -204,6 +289,7 @@ def _extract_signal(text: str | None) -> RemoteType | Literal["conflict"] | None
                     candidates.append((start, end, label))
 
         suppressed: set[int] = set()
+        unresolved_negation = False
 
         negation_positions = [
             i for i, token in enumerate(tokens) if not masked[i] and token in _NEGATION_CUES
@@ -220,20 +306,46 @@ def _extract_signal(text: str | None) -> RemoteType | Literal["conflict"] | None
                     nearest_indices = [idx]
                 elif distance == nearest_distance:
                     nearest_indices.append(idx)
+
+            if not nearest_indices:
+                if candidates:
+                    unresolved_negation = True
+                continue
+
             # Only the nearest candidate(s) to this cue are suppressed —
             # never every candidate in its window indiscriminately. A tie
             # suppresses both, failing closed rather than guessing.
             suppressed.update(nearest_indices)
 
+            # Propagate transitively to any candidate directly coordinated
+            # with an already-suppressed one, so "not remote or hybrid"
+            # cannot leave "hybrid" unnegated.
+            frontier = list(nearest_indices)
+            while frontier:
+                current = frontier.pop()
+                c_start, c_end, _c_label = candidates[current]
+                for other_idx, (o_start, o_end, _o_label) in enumerate(candidates):
+                    if other_idx in suppressed:
+                        continue
+                    if _is_coordinated(c_start, c_end, o_start, o_end, tokens):
+                        suppressed.add(other_idx)
+                        frontier.append(other_idx)
+
         context_positions = [
-            i
-            for i, token in enumerate(tokens)
-            if not masked[i] and token in _EXCLUSION_CONTEXT_CUES
+            i for i, token in enumerate(tokens) if not masked[i] and token in context_cues
         ]
         for ctx_pos in context_positions:
             for idx, (start, end, _label) in enumerate(candidates):
                 if _distance(ctx_pos, start, end) <= _CONTEXT_WINDOW:
                     suppressed.add(idx)
+
+        if unresolved_negation:
+            # A negation cue exists in this sentence, alongside at least
+            # one candidate, but could not be proven to have attached to
+            # anything within its window — discard the whole sentence's
+            # contribution rather than leave an unsuppressed candidate
+            # looking like a confident positive match.
+            continue
 
         survivors.update(
             label for idx, (_start, _end, label) in enumerate(candidates) if idx not in suppressed
@@ -255,7 +367,9 @@ def classify_remote_type(
     `parser_version`. See the module docstring for the full algorithm and
     precedence rules."""
     title_signal = _extract_signal(title)
-    description_signal = _extract_signal(description)
+    description_signal = _extract_signal(
+        description, extra_context_cues=_DESCRIPTION_ONLY_CONTEXT_CUES
+    )
 
     if title_signal == _CONFLICT or description_signal == _CONFLICT:
         return NormalizationResult(None, Provenance.UNAVAILABLE)

@@ -241,5 +241,131 @@
     "expected_value": null,
     "expected_provenance": "unavailable",
     "note": "A zero-width space embedded inside the keyword itself prevents the match; the character is never stripped."
+  },
+  {
+    "id": "hybrid_cloud_title_and_description_exclusion",
+    "origin": "synthetic_adversarial",
+    "title": "Hybrid Cloud Engineer",
+    "description": "Build hybrid cloud infrastructure.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review reproduction: 'hybrid cloud' is a cloud-computing infrastructure term, not a work-arrangement claim, in both title and description."
+  },
+  {
+    "id": "hybrid_cloud_title_only_exclusion",
+    "origin": "synthetic_adversarial",
+    "title": "Hybrid Cloud Engineer",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review requirement: the exclusion must hold for the title alone, not only when a corroborating description is also present."
+  },
+  {
+    "id": "description_only_remote_team_mention_not_arrangement",
+    "origin": "synthetic_adversarial",
+    "title": "Data Analyst",
+    "description": "Manage remote teams across several regions.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review reproduction: 'remote' describing a managed team, not this position's own arrangement."
+  },
+  {
+    "id": "description_only_remote_systems_mention_not_arrangement",
+    "origin": "synthetic_adversarial",
+    "title": "Data Analyst",
+    "description": "Troubleshoot remote systems and devices.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review reproduction: 'remote' describing IT equipment, not this position's own arrangement."
+  },
+  {
+    "id": "description_only_in_person_interview_event_not_arrangement",
+    "origin": "synthetic_adversarial",
+    "title": "Data Analyst",
+    "description": "Candidates must attend an in-person interview.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review reproduction: 'in-person' describing a one-time interview event, not this position's ongoing work arrangement."
+  },
+  {
+    "id": "description_only_in_person_meetings_event_not_arrangement",
+    "origin": "synthetic_adversarial",
+    "title": "Data Analyst",
+    "description": "Attend quarterly in-person meetings with clients.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review reproduction: 'in-person' describing periodic meetings, not this position's ongoing work arrangement."
+  },
+  {
+    "id": "unresolved_long_distance_negation_forces_unavailable",
+    "origin": "synthetic_adversarial",
+    "title": "Data Analyst",
+    "description": "This is not, under any circumstances, a remote position.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review reproduction: the negator is 4 tokens from 'remote', outside the 3-token window, but must still poison the sentence rather than leave 'remote' as a confident positive."
+  },
+  {
+    "id": "negation_coordinated_or_alternative_forces_unavailable",
+    "origin": "synthetic_adversarial",
+    "title": "Data Analyst",
+    "description": "This position is not remote or hybrid.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review reproduction: negation must propagate across the directly coordinated 'or' alternative so 'hybrid' cannot survive unnegated."
+  },
+  {
+    "id": "negation_coordination_propagates_independent_of_other_protections",
+    "origin": "synthetic_adversarial",
+    "title": "Data Analyst",
+    "description": "This role is not remote or hybrid work.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "A longer coordination case where neither candidate is removed by any other mechanism, isolating the or/nor propagation rule itself as the reason both are suppressed."
+  },
+  {
+    "id": "negation_preserves_uncoordinated_alternative",
+    "origin": "synthetic_adversarial",
+    "title": "Data Analyst",
+    "description": "Not remote, onsite.",
+    "expected_value": "onsite",
+    "expected_provenance": "parsed_description",
+    "note": "Duplicate-by-design of negation_nearest_only_comma_onsite, recorded again here to make explicit that comma-adjacency must never be treated as or/nor coordination."
+  },
+  {
+    "id": "positive_control_work_from_home",
+    "origin": "synthetic_representative",
+    "title": "Customer Support Representative",
+    "description": "This role offers full work from home flexibility.",
+    "expected_value": "remote",
+    "expected_provenance": "parsed_description",
+    "note": "Positive control for the self-sufficient 'work from home' phrase, unaffected by the new description-only context cues."
+  },
+  {
+    "id": "positive_control_wfh",
+    "origin": "synthetic_representative",
+    "title": "Data Entry Specialist (WFH)",
+    "description": null,
+    "expected_value": "remote",
+    "expected_provenance": "inferred",
+    "note": "Positive control for the 'wfh' acronym as a title-only marker."
+  },
+  {
+    "id": "positive_control_in_office",
+    "origin": "synthetic_representative",
+    "title": "Front Desk Coordinator",
+    "description": "This in-office role is based at our downtown headquarters.",
+    "expected_value": "onsite",
+    "expected_provenance": "parsed_description",
+    "note": "Positive control for 'in-office' describing the position itself, with no bad-collocate cue nearby."
+  },
+  {
+    "id": "positive_control_onsite_bare",
+    "origin": "synthetic_representative",
+    "title": "Warehouse Lead",
+    "description": "This onsite role requires daily attendance at our facility.",
+    "expected_value": "onsite",
+    "expected_provenance": "parsed_description",
+    "note": "Positive control for the bare 'onsite' token describing the position itself, outside of any negation context."
   }
 ]
