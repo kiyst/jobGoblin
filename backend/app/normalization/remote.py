@@ -11,7 +11,51 @@ the result into `jobs.remote_type`/`jobs.field_provenance` and threading
 `parser_version` are both Phase 4+ ingestion-layer concerns, out of scope
 here.
 
-**Pipeline (applied independently to `title` and `description`):**
+**Field-specific positive-evidence contract (the actual current design):**
+
+`title` and `description` use two *different* positive catalogs, because a
+job title is inherently a claim about the position itself, while free-text
+description prose routinely mentions "remote"/"hybrid"/"in person" about
+something *other than* this job's own arrangement (a managed team, a piece
+of equipment, a one-time event) — the exact failure mode two prior review
+rounds found.
+
+- **`title`** matches the bare marker catalog (`_BARE_TOKEN_PHRASES`):
+  `"remote"`, `"remotely"`, `"work from home"`, `"work from anywhere"`,
+  `"wfh"`, `"hybrid"`, `"onsite"`, `"on site"`, `"in office"`, `"in
+  person"`. A bare marker in a title (e.g. "Senior Backend Engineer
+  (Remote)") already describes the position, by construction of what a
+  job title is. A small set of domain/subject exclusion phrases (below)
+  catches the ambiguous cases where a title's generic noun, not the
+  position's arrangement, is what "remote"/"hybrid" is modifying (e.g.
+  "Remote Systems Administrator", "Remote Team Manager").
+- **`description`** matches only **arrangement-bearing phrases**
+  (`_DESCRIPTION_POSITIVE_PHRASES`): each of `remote`/`hybrid`/`onsite`
+  (`onsite` also as `"on site"`) combined with one of `role`, `position`,
+  `job`, `work arrangement`, `schedule`, `attendance`, `attendance
+  requirement` (e.g. "remote role", "hybrid position", "onsite
+  attendance", "onsite attendance requirement"),
+  plus the self-sufficient phrases `"work remotely"`, `"work from home"`,
+  `"work from anywhere"`, `"wfh"`, and `"work in the office"`. A **bare**
+  `remote`/`hybrid`/`onsite`/`"in person"` token in description prose is
+  *not* sufficient on its own — "Serve remote customers across several
+  regions" or "Design and operate hybrid databases" must not read as a
+  work-arrangement fact merely because the word appears. This positive
+  catalog is the primary semantic gate; the exclusion phrases and
+  context-exclusion cues below remain in place too, as defense in depth,
+  not as the mechanism that does this job.
+- **The narrow comma-contrast exception**: a bare, non-arrangement-bearing
+  description candidate is allowed to count as signal in exactly one
+  structurally explicit case — it sits immediately after (separated only
+  by a comma, i.e. a zero-token gap) another candidate that a negation cue
+  suppressed in the same sentence. This is what preserves `"Not remote,
+  onsite."` -> `onsite`: "onsite" is bare and would otherwise not qualify,
+  but it directly contrasts with the negated "remote" right before it.
+  This is a narrow, explicitly tested exception, not a general allowance
+  for bare description tokens — see `_is_comma_contrast`.
+
+**Pipeline (applied independently to `title` and `description`, each using
+its own catalog above):**
 
 1. NFKC-normalize, fold curly apostrophes (U+2018/U+2019) to the straight
    apostrophe, then case-fold. Zero-width/format characters (U+200B ZWSP,
@@ -20,94 +64,78 @@ here.
    equal a clean catalog token, so a zero-width-obfuscated keyword fails to
    match rather than being silently repaired.
 2. Split into sentences on `. ; : ! ?` (one or more, collapsed). All
-   subsequent matching is scoped to one sentence at a time — this is what
-   guarantees a multi-token phrase, a negation window, and a
-   context-exclusion window can never cross a sentence boundary, without
-   any separate punctuation-scanning logic.
+   subsequent matching is scoped to one sentence at a time.
 3. Tokenize each sentence on whitespace and `,()[]{}"/&-` (en/em dash
-   included) — a phrase may cross whitespace or a hyphen (both are
-   ordinary token boundaries) but never a sentence-ending mark, since
-   sentence-ending marks aren't present inside a sentence's own token
-   list at all. The apostrophe is deliberately excluded from this
+   included) — a phrase may cross whitespace or a hyphen but never a
+   sentence-ending mark. The apostrophe is deliberately excluded from this
    boundary set, so a contraction survives as one token (`"isn't"`).
 4. Catalog phrases (positive, exclusion, negation, context-exclusion) are
    compiled through this identical normalize+tokenize pipeline
-   (`_compile_phrase`), never hand-written as separate regexes — so
-   catalog and input text can never disagree on apostrophe/hyphen/
-   whitespace handling.
+   (`_compile_phrase`), never hand-written as separate regexes.
 5. **Exclusion-span masking**: every `_EXCLUSION_TOKEN_PHRASES` match
-   (e.g. "remote sensing", "hybrid cloud") marks every token in its span as
-   masked; masked tokens are invisible to every later step, including the
-   standalone "remote"/"hybrid" phrase — this is what stops "remote
-   sensing"'s embedded "remote", or "hybrid cloud"'s embedded "hybrid",
-   from also registering as its own positive candidate. Exclusion phrases
-   apply identically to both `title` and `description`.
-6. Positive-candidate collection over the unmasked tokens.
-7. **Context-exclusion suppression**: for each context cue, suppress every
-   candidate within a 3-token same-sentence window. Two cue sets apply:
-   a small universal set (benefit/tooling mentions — "stipend", "vpn",
-   ... — checked in both fields) and a larger set checked only in
-   `description` (generic collocates that mean the surrounding sentence is
-   *not* describing this position's own arrangement — "team(s)",
-   "system(s)", "device(s)", "interview", "meeting(s)" — e.g. "manage
-   remote teams", "troubleshoot remote systems", "an in-person interview").
-   `title` does not get this second, description-only set: a bare marker
-   in a title (e.g. "Senior Backend Engineer (Remote)") already describes
-   the position itself, by construction of what a job title is — the
-   review's approved distinction between "title markers may remain
-   narrowly supported with domain exclusions" (the universal exclusion
-   phrases/cues, which do apply to titles) and "description matches must
-   express an arrangement, not merely mention" a team/system/event (the
-   description-only cues, which do not apply to titles).
+   (e.g. "remote sensing", "hybrid cloud", "remote systems", "remote
+   team") masks every token in its span from all later consideration.
+   Applies identically to `title` and `description`.
+6. Positive-candidate collection using the field's own catalog (title:
+   bare markers; description: arrangement-bearing phrases, plus the bare
+   catalog collected *separately* only to feed negation/the comma-contrast
+   rule below — never counted as signal on its own).
+7. **Context-exclusion suppression** (defense in depth, not the primary
+   gate): a universal cue set ("stipend", "vpn", ...) applies to both
+   fields; a larger set ("team(s)", "system(s)", "device(s)", "interview",
+   "meeting(s)") applies only in `description`. Each suppresses every
+   candidate within a 3-token same-sentence window.
 8. **Negation suppression**: for each negation cue, find its *nearest*
    surviving candidate(s) within a 3-token same-sentence window (a tie
-   suppresses both, never neither; a cue never suppresses every candidate
-   in its window indiscriminately, only the nearest). Suppression then
-   propagates transitively to any candidate directly coordinated with an
-   already-suppressed one via exactly one "or"/"nor" token between their
-   spans (never a bare comma-adjacent gap, which is plain juxtaposition,
-   not coordination) — so "not remote or hybrid" cannot leave "hybrid"
-   unnegated, while "not remote, onsite" still correctly leaves "onsite"
-   untouched (comma-adjacency alone never coordinates).
+   suppresses both, never neither). Suppression propagates transitively to
+   any candidate directly coordinated with an already-suppressed one via
+   exactly one "or"/"nor" token between their spans (never a bare
+   comma-adjacent gap, which is contrast, not coordination — see above).
 9. **Unresolved-negation poisoning**: if a negation cue is present in a
-   sentence that contains at least one candidate anywhere, but that cue's
-   own nearest-candidate search finds nothing within its 3-token window
-   (an "unresolved" negator — a negation clearly present in the sentence,
-   just structurally out of the algorithm's reach), the *entire sentence's*
-   candidates are discarded rather than left as an unsuppressed positive
-   match. This is what makes "This is not, under any circumstances, a
-   remote position" resolve to no signal instead of a confident "remote":
-   the negator exists, but can't be proven to have successfully attached to
-   anything, so nothing from that sentence is trusted.
-10. Distinct surviving labels across all sentences of this one field: zero
+   sentence containing at least one candidate, but that cue's own
+   nearest-candidate search finds nothing within its window, the entire
+   sentence's candidates are discarded rather than left positive.
+10. In `description` only: apply the comma-contrast exception (above) to
+    any surviving bare candidate; every other bare candidate is discarded
+    (contributes nothing) unless it was an arrangement-bearing match.
+11. Distinct surviving labels across all sentences of this one field: zero
     -> no signal; one -> that field's signal; two or more -> `"conflict"`.
 
 **Cross-field precedence** (docs/DATA_MODEL.md's Provenance vocabulary):
 a conflict anywhere (within a field or between fields) always yields
 `(None, UNAVAILABLE)`; title-only evidence is `INFERRED`; description-only
 evidence is `PARSED_DESCRIPTION`; title and description agreeing is
-`PARSED_DESCRIPTION` (two independent free-text sources corroborating is
-stronger than either alone); no evidence anywhere is
-`(None, UNAVAILABLE)`. Absence of remote language never implies onsite —
-onsite is only ever returned from a positive onsite-phrase match.
+`PARSED_DESCRIPTION`; no evidence anywhere is `(None, UNAVAILABLE)`.
+Absence of remote language never implies onsite.
 
 **Catalogs are exhaustive for this slice** — deliberately conservative,
-listed in full below. A phrase not on these lists (e.g. "telecommute")
-contributes no signal at all; adding one requires its own reviewed change,
-not silent expansion here.
+listed in full above and below. A phrase not on these lists (e.g.
+"telecommute") contributes no signal at all; adding one requires its own
+reviewed change, not silent expansion here.
 
-**Known, accepted limitation**: the negation window itself only reaches 3
-tokens in either direction within the same sentence — but unlike an
-earlier version of this module, a negator that exists just outside that
-window is never silently ignored (see step 9 above): its sentence's
-candidates are discarded, not left positive. The genuinely unhandled case
-is different and narrower: two *separate*, unconnected negators and
-candidates that both happen to sit in the same sentence purely by
-coincidence (not a realistic job-posting construction this catalog is
-tuned for) could still poison each other's sentence. This is an
-intentionally narrow, fail-closed design (a simple, fully-specified,
-easily-tested rule over a general negation-scope parser), not a special
-case silently handled elsewhere.
+**Known, accepted limitation**: the negation window only reaches 3 tokens
+in either direction within the same sentence; an unresolved negator still
+poisons its whole sentence (step 9), so this is not silently ignored. The
+narrower unhandled case is two separate, unconnected negators/candidates
+coincidentally sharing one sentence, which could still cross-poison each
+other — an intentionally narrow, fail-closed design over a general
+negation-scope parser.
+
+**Known, accepted limitation — `title` still uses an enumerated exclusion
+list, not a positive catalog.** Unlike `description`, `title` was not
+redesigned around a positive-evidence requirement (the review's own
+guidance sanctions "title markers may remain narrowly supported with
+domain exclusions"). Adversarial testing beyond the two reproduced titles
+found this genuinely does not generalize: `"Remote Infrastructure
+Engineer"`, `"Remote Client Success Manager"`, and `"Hybrid Network
+Specialist"` all still return a confident positive today, for the same
+underlying reason `description` needed a full redesign rather than a
+larger deny-list — a job title's generic noun can be modified by
+`remote`/`hybrid` in ways this bounded exclusion list cannot exhaustively
+anticipate. Documented here rather than silently left implicit; closing it
+fully (mirroring `description`'s positive-catalog approach, or another
+mechanism) is out of scope for this correction and would need its own
+reviewed change.
 """
 
 from __future__ import annotations
@@ -146,53 +174,98 @@ def _tokenize(sentence: str) -> list[str]:
 
 def _compile_phrase(phrase: str) -> tuple[str, ...]:
     """Tokenizes one catalog phrase through the identical normalize+
-    tokenize pipeline used on input text (point 4 of the approved
-    proposal) — never a hand-maintained separate regex."""
+    tokenize pipeline used on input text — never a hand-maintained
+    separate regex."""
     return tuple(_tokenize(_normalize_text(phrase)))
 
 
-# Deliberately minimal/conservative — see the module docstring. Every
-# surface variant not listed here (e.g. "telecommute") is unsupported and
-# returns no signal until added in its own reviewed change.
-_REMOTE_PHRASES = {"remote", "remotely", "work from home", "work from anywhere", "wfh"}
-_HYBRID_PHRASES = {"hybrid"}
-_ONSITE_PHRASES = {"onsite", "on site", "in office", "in person"}
+def _compile_all(phrases: set[str]) -> frozenset[tuple[str, ...]]:
+    return frozenset(_compile_phrase(p) for p in phrases)
 
-_POSITIVE_TOKEN_PHRASES: dict[RemoteType, frozenset[tuple[str, ...]]] = {
-    "remote": frozenset(_compile_phrase(p) for p in _REMOTE_PHRASES),
-    "hybrid": frozenset(_compile_phrase(p) for p in _HYBRID_PHRASES),
-    "onsite": frozenset(_compile_phrase(p) for p in _ONSITE_PHRASES),
+
+# ---------------------------------------------------------------------------
+# Bare marker catalog — used directly as `title`'s positive catalog, and
+# collected (but never counted as signal on its own) in `description` to
+# feed negation and the narrow comma-contrast rule.
+# ---------------------------------------------------------------------------
+_BARE_REMOTE_PHRASES = {"remote", "remotely", "work from home", "work from anywhere", "wfh"}
+_BARE_HYBRID_PHRASES = {"hybrid"}
+_BARE_ONSITE_PHRASES = {"onsite", "on site", "in office", "in person"}
+
+_BARE_TOKEN_PHRASES: dict[RemoteType, frozenset[tuple[str, ...]]] = {
+    "remote": _compile_all(_BARE_REMOTE_PHRASES),
+    "hybrid": _compile_all(_BARE_HYBRID_PHRASES),
+    "onsite": _compile_all(_BARE_ONSITE_PHRASES),
 }
 
-# Domain-collision phrases — masked entirely, contributing no signal
-# (positive or negative), in both title and description. "hybrid cloud" is
-# a cloud-computing infrastructure term (a mix of on-prem and cloud
-# infrastructure), not a work-arrangement claim — e.g. "Hybrid Cloud
-# Engineer" as a job title, or "Build hybrid cloud infrastructure" in a
-# description.
-_EXCLUSION_PHRASES = {"remote sensing", "remote desktop", "remote location", "hybrid cloud"}
-_EXCLUSION_TOKEN_PHRASES = frozenset(_compile_phrase(p) for p in _EXCLUSION_PHRASES)
+# ---------------------------------------------------------------------------
+# Description's positive catalog — arrangement-bearing phrases only. Built
+# from an explicit prefix set per label and an explicit noun set, so every
+# generated phrase is a deliberate, reviewable combination, not a bare word.
+# ---------------------------------------------------------------------------
+_ARRANGEMENT_PREFIXES: dict[RemoteType, frozenset[str]] = {
+    "remote": frozenset({"remote"}),
+    "hybrid": frozenset({"hybrid"}),
+    "onsite": frozenset({"onsite", "on site"}),
+}
+_ARRANGEMENT_NOUNS = frozenset(
+    {
+        "role",
+        "position",
+        "job",
+        "work arrangement",
+        "schedule",
+        "attendance",
+        "attendance requirement",
+    }
+)
+_SELF_SUFFICIENT_DESCRIPTION_PHRASES: dict[RemoteType, frozenset[str]] = {
+    "remote": frozenset({"work remotely", "work from home", "work from anywhere", "wfh"}),
+    "hybrid": frozenset(),
+    "onsite": frozenset({"work in the office"}),
+}
 
-# Benefit/tooling context cues — a nearby positive match is suppressed
-# (e.g. "remote work stipend", "remote collaboration protocol"). Applies to
-# both title and description. Kept deliberately narrow: generic words like
-# "software"/"tool"/"equipment"/"access" were considered and rejected —
-# each collides with ordinary job titles/descriptions having nothing to do
-# with remote-work benefits (e.g. "Software Engineer (Remote)", "Equipment
-# Operator", "Access Control Specialist"), which would silently suppress a
-# genuine positive signal. Every cue kept here is unambiguous in this
-# context.
+
+def _build_description_positive_phrases() -> dict[RemoteType, frozenset[tuple[str, ...]]]:
+    result: dict[RemoteType, frozenset[tuple[str, ...]]] = {}
+    for label in ("remote", "hybrid", "onsite"):
+        label_key = cast(RemoteType, label)
+        combined = {
+            f"{prefix} {noun}"
+            for prefix in _ARRANGEMENT_PREFIXES[label_key]
+            for noun in _ARRANGEMENT_NOUNS
+        }
+        combined |= _SELF_SUFFICIENT_DESCRIPTION_PHRASES[label_key]
+        result[label_key] = _compile_all(combined)
+    return result
+
+
+_DESCRIPTION_POSITIVE_PHRASES = _build_description_positive_phrases()
+
+# ---------------------------------------------------------------------------
+# Exclusion phrases — domain-collision terms masked entirely (positive or
+# negative signal), in both title and description. "remote systems"/"remote
+# team" cover ambiguous subject/domain titles ("Remote Systems
+# Administrator", "Remote Team Manager") without touching an explicit
+# marker like "Software Engineer (Remote)".
+# ---------------------------------------------------------------------------
+_EXCLUSION_PHRASES = {
+    "remote sensing",
+    "remote desktop",
+    "remote location",
+    "hybrid cloud",
+    "remote systems",
+    "remote team",
+}
+_EXCLUSION_TOKEN_PHRASES = _compile_all(_EXCLUSION_PHRASES)
+
+# Universal context-exclusion cues (defense in depth, both fields).
 _EXCLUSION_CONTEXT_CUES = frozenset(
     _compile_phrase(p)[0] for p in ("stipend", "collaboration", "vpn", "protocol", "allowance")
 )
 
-# Description-only context cues (never applied to title — see the module
-# docstring's step 7): a nearby positive match is suppressed because the
-# surrounding sentence is describing something *other than* this position's
-# own arrangement — managing a remote team, troubleshooting remote
-# equipment, or an in-person interview/meeting event, not a remote/hybrid/
-# onsite role. Each pairs a singular and plural surface form deliberately
-# (no stemming anywhere in this module).
+# Description-only context-exclusion cues (defense in depth, description
+# only — never applied to title).
 _DESCRIPTION_ONLY_CONTEXT_CUES = frozenset(
     _compile_phrase(p)[0]
     for p in (
@@ -231,9 +304,7 @@ def _find_spans(
 
 def _distance(pivot: int, start: int, end: int) -> int:
     """Token distance from a single-token pivot index to a [start, end]
-    span — the distance to the span's nearest edge, 0 if the pivot were
-    (impossibly, since cue and candidate token sets are disjoint) inside
-    the span itself."""
+    span — the distance to the span's nearest edge."""
     if pivot < start:
         return start - pivot
     if pivot > end:
@@ -244,9 +315,8 @@ def _distance(pivot: int, start: int, end: int) -> int:
 def _is_coordinated(a_start: int, a_end: int, b_start: int, b_end: int, tokens: list[str]) -> bool:
     """True only if the two spans are joined by exactly one coordinating
     conjunction token ("or"/"nor") and nothing else between them — never
-    for a bare comma-adjacent gap (that's plain juxtaposition, already
-    handled by the nearest-only negation rule, not coordination that should
-    propagate a negation)."""
+    for a bare comma-adjacent gap, which is contrast (see
+    `_is_comma_contrast`), not coordination."""
     if b_start > a_end:
         gap = tokens[a_end + 1 : b_start]
     elif a_start > b_end:
@@ -256,19 +326,51 @@ def _is_coordinated(a_start: int, a_end: int, b_start: int, b_end: int, tokens: 
     return len(gap) == 1 and gap[0] in _COORDINATING_CONJUNCTIONS
 
 
-def _extract_signal(
-    text: str | None, *, extra_context_cues: frozenset[str] = frozenset()
-) -> RemoteType | Literal["conflict"] | None:
-    """Returns this one field's local classification: a single label, the
-    `"conflict"` sentinel when more than one distinct label survives
-    anywhere in the field, or `None` when no signal survives at all.
-    `extra_context_cues` is the description-only cue set (empty for
-    title)."""
+def _gap_between(
+    a_start: int, a_end: int, b_start: int, b_end: int, tokens: list[str]
+) -> list[str] | None:
+    """The tokens strictly between the two spans, in whichever order they
+    appear; `None` if the spans are not disjoint (should not happen for
+    candidates drawn from disjoint catalogs, but defensive nonetheless)."""
+    if b_start > a_end:
+        return tokens[a_end + 1 : b_start]
+    if a_start > b_end:
+        return tokens[b_end + 1 : a_start]
+    return None
+
+
+def _is_comma_contrast(
+    idx: int,
+    candidates: list[tuple[int, int, RemoteType, bool]],
+    negation_suppressed: set[int],
+    tokens: list[str],
+) -> bool:
+    """True if candidate `idx` sits immediately adjacent (a zero-token gap
+    — separated only by a comma, since a comma produces no token of its
+    own) to some *other* candidate that was suppressed specifically by
+    negation (never by a context-exclusion cue) — the narrow "not X, Y"
+    contrastive construction this module explicitly supports, and the only
+    circumstance in which a bare, non-arrangement-bearing description
+    candidate is ever allowed to count as signal."""
+    start, end, _label, _qualified = candidates[idx]
+    for other_idx in negation_suppressed:
+        if other_idx == idx:
+            continue
+        o_start, o_end, _o_label, _o_qualified = candidates[other_idx]
+        gap = _gap_between(start, end, o_start, o_end, tokens)
+        if gap is not None and len(gap) == 0:
+            return True
+    return False
+
+
+def _extract_title_signal(text: str | None) -> RemoteType | Literal["conflict"] | None:
+    """`title`'s positive catalog is the bare marker set — a bare marker in
+    a title already describes the position, by construction of what a job
+    title is. Only exclusion phrases and universal context cues apply."""
     if text is None or not text.strip():
         return None
 
     normalized = _normalize_text(text)
-    context_cues = _EXCLUSION_CONTEXT_CUES | extra_context_cues
     survivors: set[str] = set()
 
     for sentence in _SENTENCE_SPLIT_RE.split(normalized):
@@ -283,7 +385,7 @@ def _extract_signal(
                     masked[i] = True
 
         candidates: list[tuple[int, int, RemoteType]] = []
-        for label, phrases in _POSITIVE_TOKEN_PHRASES.items():
+        for label, phrases in _BARE_TOKEN_PHRASES.items():
             for phrase in phrases:
                 for start, end in _find_spans(tokens, phrase, masked):
                     candidates.append((start, end, label))
@@ -312,14 +414,7 @@ def _extract_signal(
                     unresolved_negation = True
                 continue
 
-            # Only the nearest candidate(s) to this cue are suppressed —
-            # never every candidate in its window indiscriminately. A tie
-            # suppresses both, failing closed rather than guessing.
             suppressed.update(nearest_indices)
-
-            # Propagate transitively to any candidate directly coordinated
-            # with an already-suppressed one, so "not remote or hybrid"
-            # cannot leave "hybrid" unnegated.
             frontier = list(nearest_indices)
             while frontier:
                 current = frontier.pop()
@@ -332,7 +427,9 @@ def _extract_signal(
                         frontier.append(other_idx)
 
         context_positions = [
-            i for i, token in enumerate(tokens) if not masked[i] and token in context_cues
+            i
+            for i, token in enumerate(tokens)
+            if not masked[i] and token in _EXCLUSION_CONTEXT_CUES
         ]
         for ctx_pos in context_positions:
             for idx, (start, end, _label) in enumerate(candidates):
@@ -340,16 +437,115 @@ def _extract_signal(
                     suppressed.add(idx)
 
         if unresolved_negation:
-            # A negation cue exists in this sentence, alongside at least
-            # one candidate, but could not be proven to have attached to
-            # anything within its window — discard the whole sentence's
-            # contribution rather than leave an unsuppressed candidate
-            # looking like a confident positive match.
             continue
 
         survivors.update(
             label for idx, (_start, _end, label) in enumerate(candidates) if idx not in suppressed
         )
+
+    if not survivors:
+        return None
+    if len(survivors) == 1:
+        return cast(RemoteType, next(iter(survivors)))
+    return _CONFLICT
+
+
+def _extract_description_signal(text: str | None) -> RemoteType | Literal["conflict"] | None:
+    """`description`'s positive catalog is arrangement-bearing phrases only.
+    Bare markers are still collected (so negation has something to attach
+    to), but they count as signal only via the narrow comma-contrast rule
+    — never on their own."""
+    if text is None or not text.strip():
+        return None
+
+    normalized = _normalize_text(text)
+    survivors: set[str] = set()
+    context_cues = _EXCLUSION_CONTEXT_CUES | _DESCRIPTION_ONLY_CONTEXT_CUES
+
+    for sentence in _SENTENCE_SPLIT_RE.split(normalized):
+        tokens = _tokenize(sentence)
+        if not tokens:
+            continue
+
+        masked = [False] * len(tokens)
+        for exclusion_phrase in _EXCLUSION_TOKEN_PHRASES:
+            for start, end in _find_spans(tokens, exclusion_phrase, masked):
+                for i in range(start, end + 1):
+                    masked[i] = True
+
+        qualified: list[tuple[int, int, RemoteType]] = []
+        for label, phrases in _DESCRIPTION_POSITIVE_PHRASES.items():
+            for phrase in phrases:
+                for start, end in _find_spans(tokens, phrase, masked):
+                    qualified.append((start, end, label))
+
+        bare: list[tuple[int, int, RemoteType]] = []
+        for label, phrases in _BARE_TOKEN_PHRASES.items():
+            for phrase in phrases:
+                for start, end in _find_spans(tokens, phrase, masked):
+                    bare.append((start, end, label))
+
+        candidates: list[tuple[int, int, RemoteType, bool]] = [
+            (s, e, label, True) for s, e, label in qualified
+        ] + [(s, e, label, False) for s, e, label in bare]
+
+        suppressed: set[int] = set()
+        negation_suppressed: set[int] = set()
+        unresolved_negation = False
+
+        negation_positions = [
+            i for i, token in enumerate(tokens) if not masked[i] and token in _NEGATION_CUES
+        ]
+        for neg_pos in negation_positions:
+            nearest_distance: int | None = None
+            nearest_indices: list[int] = []
+            for idx, (start, end, _label, _qualified) in enumerate(candidates):
+                distance = _distance(neg_pos, start, end)
+                if distance > _NEGATION_WINDOW:
+                    continue
+                if nearest_distance is None or distance < nearest_distance:
+                    nearest_distance = distance
+                    nearest_indices = [idx]
+                elif distance == nearest_distance:
+                    nearest_indices.append(idx)
+
+            if not nearest_indices:
+                if candidates:
+                    unresolved_negation = True
+                continue
+
+            suppressed.update(nearest_indices)
+            negation_suppressed.update(nearest_indices)
+            frontier = list(nearest_indices)
+            while frontier:
+                current = frontier.pop()
+                c_start, c_end, _c_label, _c_q = candidates[current]
+                for other_idx, (o_start, o_end, _o_label, _o_q) in enumerate(candidates):
+                    if other_idx in suppressed:
+                        continue
+                    if _is_coordinated(c_start, c_end, o_start, o_end, tokens):
+                        suppressed.add(other_idx)
+                        negation_suppressed.add(other_idx)
+                        frontier.append(other_idx)
+
+        context_positions = [
+            i for i, token in enumerate(tokens) if not masked[i] and token in context_cues
+        ]
+        for ctx_pos in context_positions:
+            for idx, (start, end, _label, _qualified) in enumerate(candidates):
+                if _distance(ctx_pos, start, end) <= _CONTEXT_WINDOW:
+                    suppressed.add(idx)
+
+        if unresolved_negation:
+            continue
+
+        for idx, (_start, _end, label, is_qualified) in enumerate(candidates):
+            if idx in suppressed:
+                continue
+            # A bare, unqualified candidate with no comma-contrast rescue
+            # contributes nothing — this is the actual semantic gate.
+            if is_qualified or _is_comma_contrast(idx, candidates, negation_suppressed, tokens):
+                survivors.add(label)
 
     if not survivors:
         return None
@@ -365,11 +561,9 @@ def classify_remote_type(
     """Classifies a posting's remote/hybrid/onsite work arrangement from
     free text alone. Pure function — no I/O, no persistence, no
     `parser_version`. See the module docstring for the full algorithm and
-    precedence rules."""
-    title_signal = _extract_signal(title)
-    description_signal = _extract_signal(
-        description, extra_context_cues=_DESCRIPTION_ONLY_CONTEXT_CUES
-    )
+    the field-specific positive-evidence contract."""
+    title_signal = _extract_title_signal(title)
+    description_signal = _extract_description_signal(description)
 
     if title_signal == _CONFLICT or description_signal == _CONFLICT:
         return NormalizationResult(None, Provenance.UNAVAILABLE)

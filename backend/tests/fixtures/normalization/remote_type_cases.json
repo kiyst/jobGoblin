@@ -15,7 +15,7 @@
     "description": "This is an on-site position based at our Columbus distribution center. No remote work is available for this role.",
     "expected_value": "onsite",
     "expected_provenance": "parsed_description",
-    "note": "Description-only signal; the negated 'remote' in the second sentence contributes nothing, leaving the separate 'on-site' match from the first sentence."
+    "note": "'on-site position' is an arrangement-bearing qualified phrase; the negated bare 'remote' in the second sentence contributes nothing."
   },
   {
     "id": "positive_matching_title_and_description",
@@ -24,16 +24,16 @@
     "description": "This fully remote role allows you to work from anywhere in the US.",
     "expected_value": "remote",
     "expected_provenance": "parsed_description",
-    "note": "Title and description agree; agreement escalates to parsed_description even though the title alone would only be inferred."
+    "note": "'remote role' and 'work from anywhere' are both qualified phrases; title and description agree, escalating to parsed_description."
   },
   {
     "id": "conflicting_title_vs_description",
     "origin": "synthetic_adversarial",
     "title": "Remote Customer Support Specialist",
-    "description": "Candidates must relocate and work on-site five days a week at our headquarters.",
+    "description": "Candidates must relocate to an on-site position, working five days a week at our headquarters.",
     "expected_value": null,
     "expected_provenance": "unavailable",
-    "note": "Cross-field conflict (title says remote, description says onsite) always resolves to unavailable."
+    "note": "Cross-field conflict (title says remote, description's 'on-site position' is a qualified onsite phrase) always resolves to unavailable."
   },
   {
     "id": "no_signal_missing_description",
@@ -51,7 +51,7 @@
     "description": "We offer flexible work arrangements and a supportive team culture.",
     "expected_value": null,
     "expected_provenance": "unavailable",
-    "note": "'flexible' is on no catalog list at all (positive, negation, or exclusion) and must never mean hybrid alone."
+    "note": "'flexible' is on no catalog list at all and must never mean hybrid alone; 'work arrangements' with no remote/hybrid/onsite prefix is not a qualified phrase either."
   },
   {
     "id": "negation_not_remote",
@@ -60,7 +60,7 @@
     "description": "Please note this position is not remote.",
     "expected_value": null,
     "expected_provenance": "unavailable",
-    "note": "Negated remote with no other positive signal must not become onsite by default."
+    "note": "Bare 'remote' (not in 'remote position' order) is negated; must not become onsite by default."
   },
   {
     "id": "negation_remote_work_not_available",
@@ -69,7 +69,7 @@
     "description": "Remote work not available for this position; on-site attendance is mandatory.",
     "expected_value": "onsite",
     "expected_provenance": "parsed_description",
-    "note": "The semicolon splits this into two sentences; 'remote' is negated in the first, and the separate 'on-site' phrase in the second independently survives."
+    "note": "The semicolon splits this into two sentences; bare 'remote' is negated in the first, and the qualified 'on-site attendance' phrase in the second independently survives."
   },
   {
     "id": "false_positive_remote_sensing",
@@ -105,7 +105,7 @@
     "description": "We offer a monthly remote work stipend to help cover your home office setup, along with health insurance and 401k matching.",
     "expected_value": null,
     "expected_provenance": "unavailable",
-    "note": "'stipend' within the context-exclusion window suppresses the nearby 'remote' match — a benefit mention, not a position descriptor."
+    "note": "Bare 'remote' (not qualified, since 'work' alone is not an arrangement noun) is also suppressed by the nearby 'stipend' context cue — belt and suspenders."
   },
   {
     "id": "positive_punctuation_heavy",
@@ -114,7 +114,7 @@
     "description": null,
     "expected_value": "remote",
     "expected_provenance": "inferred",
-    "note": "Em-dash, percent sign, hyphen, and parentheses around the keyword must not prevent a match."
+    "note": "Em-dash, percent sign, hyphen, and parentheses around the keyword must not prevent a title-only bare-marker match."
   },
   {
     "id": "positive_unicode_fullwidth",
@@ -138,10 +138,10 @@
     "id": "two_classes_one_field_conflict",
     "origin": "synthetic_adversarial",
     "title": "Data Analyst",
-    "description": "This hybrid role also allows fully remote work for some team members.",
+    "description": "This hybrid role also allows a fully remote work arrangement for some of our staff.",
     "expected_value": null,
     "expected_provenance": "unavailable",
-    "note": "Two distinct positive classes surviving within one field is itself a conflict, resolved the same as a cross-field conflict."
+    "note": "'hybrid role' and 'remote work arrangement' are both qualified phrases surviving in one field; two distinct labels is itself a conflict."
   },
   {
     "id": "repeated_aliases_same_class",
@@ -150,7 +150,7 @@
     "description": "This is a remote position; you may work remotely from anywhere.",
     "expected_value": "remote",
     "expected_provenance": "parsed_description",
-    "note": "Multiple aliases of the same class in one field ('remote', 'remotely') collapse to that one class, never a conflict."
+    "note": "'remote position' and the self-sufficient 'work remotely' are both qualified and both label 'remote' — multiple aliases of the same class never conflict."
   },
   {
     "id": "agreement_uses_description_provenance",
@@ -159,16 +159,16 @@
     "description": "This hybrid position requires 2 days per week in our downtown office.",
     "expected_value": "hybrid",
     "expected_provenance": "parsed_description",
-    "note": "Second worked example of title/description agreement, distinct from the remote case above."
+    "note": "'hybrid position' is qualified; title and description agree, escalating to parsed_description."
   },
   {
     "id": "negated_remote_then_explicit_onsite",
     "origin": "synthetic_adversarial",
     "title": "Support Specialist",
-    "description": "This role is not remote — it is fully on-site at our headquarters.",
+    "description": "This role is not remote — it is fully an on-site position at our headquarters.",
     "expected_value": "onsite",
     "expected_provenance": "parsed_description",
-    "note": "The negator's nearest candidate is 'remote' (distance 1); 'on-site' is 5 tokens away, outside the negation window, and survives untouched."
+    "note": "The negator's nearest candidate is bare 'remote' (distance 1); the qualified 'on-site position' is far outside the negation window and survives untouched."
   },
   {
     "id": "negation_nearest_only_comma_onsite",
@@ -177,7 +177,7 @@
     "description": "Not remote, onsite.",
     "expected_value": "onsite",
     "expected_provenance": "parsed_description",
-    "note": "Binding proof case: negation suppresses only the nearer candidate (remote, distance 1), never the farther one (onsite, distance 2)."
+    "note": "Binding proof case: negation suppresses only the nearer bare candidate (remote, distance 1); the farther bare 'onsite' survives via the narrow comma-contrast rule, not because bare tokens are generally sufficient."
   },
   {
     "id": "negation_tie_break_suppresses_both",
@@ -195,7 +195,7 @@
     "description": "This isn't a remote position.",
     "expected_value": null,
     "expected_provenance": "unavailable",
-    "note": "The straight-apostrophe contraction 'isn't' is one token after tokenization and functions as a negation cue."
+    "note": "'remote position' is qualified, but negation suppresses all candidates in its window regardless of qualification; 'isn't' is one token after tokenization and functions as a negation cue."
   },
   {
     "id": "contraction_isnt_negation_curly_apostrophe",
@@ -213,16 +213,16 @@
     "description": "We provide a generous stipend for remote employees.",
     "expected_value": null,
     "expected_provenance": "unavailable",
-    "note": "Minimal direct proof of the 3-token context-exclusion window: 'stipend' is 2 tokens from 'remote'."
+    "note": "Bare 'remote' (not qualified, 'employees' is not an arrangement noun) is also suppressed by the 3-token 'stipend' context-exclusion window — defense in depth on top of the positive-catalog gate."
   },
   {
     "id": "sentence_boundary_prevents_cross_sentence_phrase_match",
     "origin": "synthetic_adversarial",
     "title": "Data Analyst",
-    "description": "This role is on. Site coordination happens elsewhere. It is fully remote.",
+    "description": "This role is on. Site coordination happens elsewhere. It is a fully remote position.",
     "expected_value": "remote",
     "expected_provenance": "parsed_description",
-    "note": "'on' and 'site' fall in different sentences and must not combine into an 'onsite' match across the period; only the clean 'remote' in the third sentence survives."
+    "note": "'on' and 'site' fall in different sentences and must not combine into an 'onsite' match across the period; only the qualified 'remote position' in the third sentence survives."
   },
   {
     "id": "unsupported_phrase_telecommute_returns_unavailable",
@@ -249,7 +249,7 @@
     "description": "Build hybrid cloud infrastructure.",
     "expected_value": null,
     "expected_provenance": "unavailable",
-    "note": "Codex review reproduction: 'hybrid cloud' is a cloud-computing infrastructure term, not a work-arrangement claim, in both title and description."
+    "note": "'hybrid cloud' is a cloud-computing infrastructure term, not a work-arrangement claim, in both title and description; masked before any positive-catalog check runs."
   },
   {
     "id": "hybrid_cloud_title_only_exclusion",
@@ -258,7 +258,70 @@
     "description": null,
     "expected_value": null,
     "expected_provenance": "unavailable",
-    "note": "Codex review requirement: the exclusion must hold for the title alone, not only when a corroborating description is also present."
+    "note": "The exclusion must hold for the title alone, not only when a corroborating description is also present."
+  },
+  {
+    "id": "title_remote_systems_administrator_exclusion",
+    "origin": "synthetic_adversarial",
+    "title": "Remote Systems Administrator",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review reproduction: an ambiguous subject/domain title where 'remote' modifies 'systems', not the position's own arrangement; the new 'remote systems' exclusion phrase masks it."
+  },
+  {
+    "id": "title_remote_team_manager_exclusion",
+    "origin": "synthetic_adversarial",
+    "title": "Remote Team Manager",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review reproduction: an ambiguous subject/domain title where 'remote' modifies the managed 'team', not the position's own arrangement; the new 'remote team' exclusion phrase masks it."
+  },
+  {
+    "id": "description_only_remote_customers_not_arrangement",
+    "origin": "synthetic_adversarial",
+    "title": "Data Analyst",
+    "description": "Serve remote customers across several regions.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review reproduction: bare 'remote' describing customers, not this position's own arrangement — no arrangement noun present, so the positive catalog never matches at all (no exclusion cue needed)."
+  },
+  {
+    "id": "description_only_remote_servers_not_arrangement",
+    "origin": "synthetic_adversarial",
+    "title": "Data Analyst",
+    "description": "Monitor and maintain remote servers around the clock.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review reproduction: bare 'remote' describing servers; 'servers' is not even one of the description-only context-exclusion cues, proving the fix is the positive-catalog gate itself, not an enumerated deny-list."
+  },
+  {
+    "id": "description_only_remote_sites_not_arrangement",
+    "origin": "synthetic_adversarial",
+    "title": "Data Analyst",
+    "description": "Travel regularly to remote sites in northern Alaska.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review reproduction: bare 'remote' describing physical sites, not this position's own arrangement."
+  },
+  {
+    "id": "description_only_hybrid_databases_not_arrangement",
+    "origin": "synthetic_adversarial",
+    "title": "Data Analyst",
+    "description": "Design and operate hybrid databases for enterprise clients.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review reproduction: bare 'hybrid' describing a database architecture term, not this position's own arrangement."
+  },
+  {
+    "id": "description_only_in_person_demonstrations_not_arrangement",
+    "origin": "synthetic_adversarial",
+    "title": "Data Analyst",
+    "description": "Conduct in-person demonstrations for prospective clients.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review reproduction: bare 'in-person' describing a one-time demonstration event, not this position's ongoing work arrangement."
   },
   {
     "id": "description_only_remote_team_mention_not_arrangement",
@@ -267,7 +330,7 @@
     "description": "Manage remote teams across several regions.",
     "expected_value": null,
     "expected_provenance": "unavailable",
-    "note": "Codex review reproduction: 'remote' describing a managed team, not this position's own arrangement."
+    "note": "Bare 'remote' describing a managed team; unqualified under the positive catalog, and also redundantly caught by the 'teams' context cue."
   },
   {
     "id": "description_only_remote_systems_mention_not_arrangement",
@@ -276,7 +339,7 @@
     "description": "Troubleshoot remote systems and devices.",
     "expected_value": null,
     "expected_provenance": "unavailable",
-    "note": "Codex review reproduction: 'remote' describing IT equipment, not this position's own arrangement."
+    "note": "Bare 'remote' describing IT equipment; unqualified under the positive catalog, and also redundantly caught by the 'systems'/'devices' context cues."
   },
   {
     "id": "description_only_in_person_interview_event_not_arrangement",
@@ -285,7 +348,7 @@
     "description": "Candidates must attend an in-person interview.",
     "expected_value": null,
     "expected_provenance": "unavailable",
-    "note": "Codex review reproduction: 'in-person' describing a one-time interview event, not this position's ongoing work arrangement."
+    "note": "Bare 'in-person' describing a one-time interview event; unqualified under the positive catalog, and also redundantly caught by the 'interview' context cue."
   },
   {
     "id": "description_only_in_person_meetings_event_not_arrangement",
@@ -294,7 +357,7 @@
     "description": "Attend quarterly in-person meetings with clients.",
     "expected_value": null,
     "expected_provenance": "unavailable",
-    "note": "Codex review reproduction: 'in-person' describing periodic meetings, not this position's ongoing work arrangement."
+    "note": "Bare 'in-person' describing periodic meetings; unqualified under the positive catalog, and also redundantly caught by the 'meetings' context cue."
   },
   {
     "id": "unresolved_long_distance_negation_forces_unavailable",
@@ -303,7 +366,7 @@
     "description": "This is not, under any circumstances, a remote position.",
     "expected_value": null,
     "expected_provenance": "unavailable",
-    "note": "Codex review reproduction: the negator is 4 tokens from 'remote', outside the 3-token window, but must still poison the sentence rather than leave 'remote' as a confident positive."
+    "note": "'remote position' is qualified, but the negator is 4 tokens away, outside the 3-token window; the unresolved-negation rule discards the whole sentence's candidates regardless of qualification, so 'remote' never survives as a confident positive."
   },
   {
     "id": "negation_coordinated_or_alternative_forces_unavailable",
@@ -312,16 +375,16 @@
     "description": "This position is not remote or hybrid.",
     "expected_value": null,
     "expected_provenance": "unavailable",
-    "note": "Codex review reproduction: negation must propagate across the directly coordinated 'or' alternative so 'hybrid' cannot survive unnegated."
+    "note": "Neither bare candidate is qualified here ('position' precedes rather than follows them); negation suppresses the nearer 'remote' and propagates across the coordinated 'or' to 'hybrid', so neither survives."
   },
   {
     "id": "negation_coordination_propagates_independent_of_other_protections",
     "origin": "synthetic_adversarial",
     "title": "Data Analyst",
-    "description": "This role is not remote or hybrid work.",
+    "description": "This is not a remote position or hybrid role.",
     "expected_value": null,
     "expected_provenance": "unavailable",
-    "note": "A longer coordination case where neither candidate is removed by any other mechanism, isolating the or/nor propagation rule itself as the reason both are suppressed."
+    "note": "Both 'remote position' and 'hybrid role' are qualified phrases, isolating or/nor propagation as the only reason 'hybrid role' is suppressed: the negator's own window reaches only 'remote position' directly; without coordination, 'hybrid role' would survive as an independent qualified candidate."
   },
   {
     "id": "negation_preserves_uncoordinated_alternative",
@@ -339,7 +402,7 @@
     "description": "This role offers full work from home flexibility.",
     "expected_value": "remote",
     "expected_provenance": "parsed_description",
-    "note": "Positive control for the self-sufficient 'work from home' phrase, unaffected by the new description-only context cues."
+    "note": "Positive control for the self-sufficient 'work from home' phrase."
   },
   {
     "id": "positive_control_wfh",
@@ -348,24 +411,123 @@
     "description": null,
     "expected_value": "remote",
     "expected_provenance": "inferred",
-    "note": "Positive control for the 'wfh' acronym as a title-only marker."
+    "note": "Positive control for the 'wfh' acronym as a title-only bare marker."
   },
   {
-    "id": "positive_control_in_office",
+    "id": "positive_control_in_office_title_marker",
     "origin": "synthetic_representative",
-    "title": "Front Desk Coordinator",
-    "description": "This in-office role is based at our downtown headquarters.",
+    "title": "Facilities Coordinator (In Office)",
+    "description": null,
     "expected_value": "onsite",
-    "expected_provenance": "parsed_description",
-    "note": "Positive control for 'in-office' describing the position itself, with no bad-collocate cue nearby."
+    "expected_provenance": "inferred",
+    "note": "Positive control for 'in office' as a title-only bare marker (titles use the bare catalog, not the description arrangement-noun requirement)."
   },
   {
-    "id": "positive_control_onsite_bare",
+    "id": "positive_control_onsite_bare_role",
     "origin": "synthetic_representative",
     "title": "Warehouse Lead",
     "description": "This onsite role requires daily attendance at our facility.",
     "expected_value": "onsite",
     "expected_provenance": "parsed_description",
-    "note": "Positive control for the bare 'onsite' token describing the position itself, outside of any negation context."
+    "note": "Positive control for 'onsite role' as a qualified description phrase."
+  },
+  {
+    "id": "positive_control_remote_job",
+    "origin": "synthetic_representative",
+    "title": "Copywriter",
+    "description": "This is a remote job perfect for self-starters who manage their own time.",
+    "expected_value": "remote",
+    "expected_provenance": "parsed_description",
+    "note": "Positive control for the 'remote job' arrangement noun."
+  },
+  {
+    "id": "positive_control_remote_schedule",
+    "origin": "synthetic_representative",
+    "title": "Billing Specialist",
+    "description": "This position follows a remote schedule year-round.",
+    "expected_value": "remote",
+    "expected_provenance": "parsed_description",
+    "note": "Positive control for the 'remote schedule' arrangement noun."
+  },
+  {
+    "id": "positive_control_remote_attendance",
+    "origin": "synthetic_representative",
+    "title": "Technical Writer",
+    "description": "This job follows a remote attendance policy.",
+    "expected_value": "remote",
+    "expected_provenance": "parsed_description",
+    "note": "Positive control for the bare 'attendance' arrangement noun (distinct from the longer 'attendance requirement' phrase)."
+  },
+  {
+    "id": "positive_control_remote_work_arrangement",
+    "origin": "synthetic_representative",
+    "title": "Payroll Coordinator",
+    "description": "Employees are offered a fully remote work arrangement.",
+    "expected_value": "remote",
+    "expected_provenance": "parsed_description",
+    "note": "Positive control for the multi-token 'work arrangement' arrangement noun."
+  },
+  {
+    "id": "positive_control_hybrid_job",
+    "origin": "synthetic_representative",
+    "title": "Recruiter",
+    "description": "This hybrid job blends office and home days each week.",
+    "expected_value": "hybrid",
+    "expected_provenance": "parsed_description",
+    "note": "Positive control for the 'hybrid job' arrangement noun."
+  },
+  {
+    "id": "positive_control_hybrid_schedule",
+    "origin": "synthetic_representative",
+    "title": "Paralegal",
+    "description": "Employees follow a hybrid schedule of three office days per week.",
+    "expected_value": "hybrid",
+    "expected_provenance": "parsed_description",
+    "note": "Positive control for the 'hybrid schedule' arrangement noun."
+  },
+  {
+    "id": "positive_control_hybrid_attendance_requirement",
+    "origin": "synthetic_representative",
+    "title": "Underwriter",
+    "description": "This role has a hybrid attendance requirement of two days weekly.",
+    "expected_value": "hybrid",
+    "expected_provenance": "parsed_description",
+    "note": "Positive control for the multi-token 'attendance requirement' arrangement noun, paired with hybrid."
+  },
+  {
+    "id": "positive_control_onsite_job",
+    "origin": "synthetic_representative",
+    "title": "Machine Operator",
+    "description": "This onsite job is based at our manufacturing plant.",
+    "expected_value": "onsite",
+    "expected_provenance": "parsed_description",
+    "note": "Positive control for the 'onsite job' arrangement noun."
+  },
+  {
+    "id": "positive_control_onsite_work_arrangement",
+    "origin": "synthetic_representative",
+    "title": "Receptionist",
+    "description": "This position offers an onsite work arrangement only.",
+    "expected_value": "onsite",
+    "expected_provenance": "parsed_description",
+    "note": "Positive control for 'onsite work arrangement'."
+  },
+  {
+    "id": "positive_control_on_site_schedule",
+    "origin": "synthetic_representative",
+    "title": "Lab Technician",
+    "description": "This role follows an on-site schedule five days a week.",
+    "expected_value": "onsite",
+    "expected_provenance": "parsed_description",
+    "note": "Positive control for the hyphenated 'on-site' prefix combined with the 'schedule' arrangement noun."
+  },
+  {
+    "id": "positive_control_work_in_the_office",
+    "origin": "synthetic_representative",
+    "title": "Office Manager",
+    "description": "Employees work in the office five days a week.",
+    "expected_value": "onsite",
+    "expected_provenance": "parsed_description",
+    "note": "Positive control for the self-sufficient 'work in the office' phrase."
   }
 ]
