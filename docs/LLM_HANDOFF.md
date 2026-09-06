@@ -98,151 +98,22 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-09-05, Claude Code (Sonnet 5). Risk class R Phase 2
-  closure pass on `phase-2/closure`, based on clean `main@4db557c`,
-  implementing the smallest bounded closure identified by a prior read-only
-  Phase 2 exit-gate audit (also this session). The audit found no
-  unsatisfied Phase 2 requirement and no blocking gap; it found exactly two
-  bounded documentation/test-coverage discrepancies, both closed here. Full
-  suite and real-PostgreSQL verification were run (a heavier bar than R's
-  default) at the user's explicit direction, since the new tests exercise
-  identity behavior. No live providers, Tier 4, Phase 3, migration, or
-  production behavior touched.
-- Findings closed:
-  1. **ARCHITECTURE.md §11 cited an unimplemented Tier 4 path as the
-     required `ambiguous_match` fixture case.** Reworded to state the
-     conflict type is proven through the implemented Tier 2/3
-     candidate-resolution paths; Tier 4 remains explicitly deferred per
-     [ADR 0004](DECISIONS/0004-scoped-deterministic-identity.md) pending a
-     company-text-to-`company_id` resolution capability that does not exist.
-     No implication that Tier 4 is implemented or required for closure.
-  2. **Two of §11's required fixture-driven pipeline cases were previously
-     proven only at the Phase 1 database-constraint level**
-     (`test_job_occurrences.py`), not through the actual `pipeline.run()`
-     path §11 specifies. Added two new fixtures under
-     `tests/fixtures/discovery/` (`two_tenants_shared_source_job_id_primary/
-     secondary.json`, `null_tenant_collision_primary/secondary.json`) and two
-     new tests in `tests/test_ingestion_pipeline.py`:
-     `test_two_distinct_tenants_sharing_source_job_id_produce_two_jobs`
-     (same `source_job_id`, two distinct non-null tenants, distinct
-     canonical URLs/requisition ids so Tier 2/3 cannot accidentally attach
-     them — proves two `Job`s/two `JobOccurrence`s, exact run/attempt
-     counters, both raw rows normalized) and
-     `test_null_tenant_natural_key_collision_resolves_to_one_occurrence`
-     (same `source_job_id`, `source_tenant_id = NULL` in two genuinely
-     distinct payloads — identical canonical URL so this is a clean
-     re-observation, not `evidence_mismatch`; differ only in
-     `compensation_text` — proves one `Job`/one `JobOccurrence`, both raw
-     rows normalized, `first_seen_at` frozen, `last_seen_at` advances, exact
-     insert/update counters, zero `IdentityConflict` rows, and that the
-     differing descriptive field stays frozen on replay, not silently
-     proving nothing changed).
-- Files changed: `docs/ARCHITECTURE.md` §11 (wording fix only),
-  `docs/ROADMAP.md` (Phase 2 status: audit summary and closure-candidate
-  note appended), `backend/tests/fixtures/discovery/` (4 new JSON files),
-  `backend/tests/test_ingestion_pipeline.py` (2 new tests), this handoff
-  entry. No model, schema, migration, provider-contact, or
-  production-behavior file touched.
-- Verification: genuine external `python scripts/verify.py --level routine`
-  (full run, no `--focus`, since this closure spans the whole Phase 2
-  fixture-proof surface) — all **9 steps PASS**: Ruff format/check, mypy,
-  `check_repo.py`, `git diff --check`, disposable-database URL/reachability,
-  **1495 full-suite tests** (was 1493; +2), temp-directory cleanup, ~137s.
-  Also ran the full relevant ingestion/identity suites directly
-  (`test_ingestion_pipeline.py`, `test_ingestion_concurrency.py`,
-  `test_ingestion_natural_key.py`, `test_job_occurrences.py`,
-  `test_orchestrator.py`): **250 passed**. `alembic heads` confirms `0017`
-  remains the sole head; `git diff --stat origin/main -- migrations/` is
-  empty. Dev database (`jobgoblin`) confirmed unchanged at the pre-existing
-  `0006`. A direct disposable-database row-count check (`jobs`,
-  `job_occurrences`, `raw_job_ingestions`, `collection_runs`,
-  `collection_run_provider_attempts`, `identity_conflicts`, `users`,
-  `user_jobs`) confirmed 0 before and 0 after the full suite.
-- Adversarial self-review (abbreviated, proportionate to Class R per
-  `LLM_WORKFLOW.md`): temporarily broke each new test's own invariant in
-  `app/ingestion/persistence.py::_existing_occurrence_conditions()` and
-  confirmed the corresponding new test failed for the intended reason, then
-  reverted cleanly (`git diff --stat` empty afterward). (1) Removed the
-  `TENANT`-domain `source_tenant_id` equality condition — the two-tenants
-  test failed exactly at `_job_count(db_engine) == 2` (got `1`), with the
-  second payload incorrectly colliding into the first tenant's occurrence
-  and raising an `evidence_mismatch` conflict, proving tenant scoping is
-  load-bearing. (2) Inverted the `NO_TENANT`-domain condition from
-  `.is_(None)` to `.isnot(None)` — the NULL-tenant-collision test failed
-  with a real `UniqueViolationError` on `uq_job_occurrences_no_tenant_natural_key`
-  (the lookup could no longer find the existing row, so the second
-  submission attempted a raw `INSERT`), proving the application-side lookup
-  — not just the underlying constraint — is what makes this a clean
-  idempotent upsert. Both breaks left transient rows in the disposable test
-  database (from the crashed second run in case 2); both were identified
-  and deleted before continuing, and a fresh row-count check confirmed 0
-  rows across all affected tables before the final verification run above.
-- Deviations/known limitations: none beyond the already-recorded,
-  pre-existing `alembic check` substitution. This closure pass does not
-  declare Phase 2 complete — that determination is Codex's, on independent
-  exit-gate review.
-- STOP — awaiting Codex's independent exit-gate review and sign-off. Do not
-  merge, begin Phase 3, contact providers, add production behavior, or
-  create a migration.
-
-### Work review
-
-- Date/reviewer: 2026-09-05, Codex.
-- Diff reviewed: `4db557c..cffe8a1` (`phase-2/closure`).
-- Verdict: **Changes requested.** The architecture correction, four fixtures,
-  and the two end-to-end identity scenarios are substantively correct. Both
-  new tests pass independently, and the canonical routine verifier passes all
-  9 checks with 1495 tests. No production-code, schema, migration, or fixture-
-  semantics correction is requested.
-- Findings:
-  1. **Medium — the two new tests are not failure-safe despite the approved
-     cleanup requirement.** In
-     `test_two_distinct_tenants_sharing_source_job_id_produce_two_jobs`, the
-     post-run global assertions at `tests/test_ingestion_pipeline.py:475-478`
-     execute before either the resulting Job ids or raw-ingestion ids are
-     captured; the latter are not captured until lines 497 and 527. In
-     `test_null_tenant_natural_key_collision_resolves_to_one_occurrence`, the
-     post-second-run assertions at lines 605-608 execute before the two raw ids
-     are captured at line 641. If any of those assertions fails—as the
-     adversarial mutation exercise itself demonstrated can happen—the `finally`
-     cleanup lacks enough identifiers to remove all committed rows. Capture all
-     cleanup identifiers immediately after each `pipeline.run()` and before any
-     assertion, or use a before/after identity-scope snapshot whose cleanup does
-     not depend on assertions. Audit both new tests end to end for this ordering.
-  2. **Low — the NULL-tenant test does not prove the first half of its claimed
-     exact counter transition.** It asserts run 2 and its attempt are
-     `inserted=0, updated=1`, but never asserts run 1 and its attempt are
-     `completed`, `discovered=1, inserted=1, updated=0` (and have the expected
-     empty failure state). Add those first-run assertions after cleanup ids have
-     been captured. This makes the documented insert-then-update proof complete.
-- Exact requested correction: change only the affected test file and this
-  handoff ledger unless a directly necessary test helper extraction is justified;
-  make cleanup assertion-independent in both new tests and add exact first-run
-  run/attempt assertions for the NULL-tenant case. Preserve the accepted fixture
-  contents, product code, architecture wording, and ROADMAP closure-candidate
-  status. Re-run the two focused tests, the relevant ingestion/identity suite,
-  the canonical routine verifier, and an explicit before/after disposable-DB
-  row-count check. Do not merge or declare Phase 2 complete pending re-review.
-
----
-
-## Iteration 2
-
-### Work done
-
 - Date/agent: 2026-09-05, Claude Code (Sonnet 5). Risk class R correction
-  pass on `phase-2/closure` for the two bounded findings from Iteration 1's
-  `Work review` above. Base: commit `cffe8a1` plus the uncommitted review.
-  Only the affected test file and this handoff ledger changed — no fixture
-  content, product code, architecture wording, or ROADMAP closure-candidate
-  status touched, per the user's explicit preservation instruction.
+  pass on `phase-2/closure` for the two bounded findings from the original
+  Phase 2 closure pass's review (that original pass and its review are now
+  rotated out of this ledger per the two-iteration rule; both remain in
+  Git history at commit `cffe8a1` and its review commit). Base: `cffe8a1`
+  plus the uncommitted review. Only the affected test file and this
+  handoff ledger changed — no fixture content, product code, architecture
+  wording, or ROADMAP closure-candidate status touched, per the user's
+  explicit preservation instruction.
 - Outcome, addressing each finding exactly:
   1. **Cleanup not failure-safe.** Audited both new tests end to end.
      `test_two_distinct_tenants_sharing_source_job_id_produce_two_jobs` now
      queries the run's `JobOccurrence`/`RawJobIngestion` rows and extends
      `job_ids`/`raw_ingestion_ids` immediately after `pipeline.run()`
-     returns, before any assertion (previously deferred to lines 497/527,
-     after the four global-count assertions).
+     returns, before any assertion (previously deferred until after the
+     four global-count assertions).
      `test_null_tenant_natural_key_collision_resolves_to_one_occurrence` now
      captures run 1's raw-ingestion id immediately after run 1 (before its
      `first_seen_at`/`last_seen_at` assertions), and run 2's new raw-
@@ -279,7 +150,7 @@ that detail.
   `collection_run_provider_attempts`, `identity_conflicts`, `users`,
   `user_jobs`): 0 before the suite, 0 after.
 - Adversarial self-review (abbreviated, proportionate to Class R): re-broke
-  both invariants exercised in Iteration 1's review (`_existing_occurrence_
+  both invariants exercised in the prior review (`_existing_occurrence_
   conditions()`'s `TENANT`-domain tenant filter removed; `NO_TENANT`-domain
   filter inverted) to prove finding 1's fix is actually load-bearing, not
   just finding 2's new assertions. (1) With the tenant filter removed,
@@ -287,19 +158,20 @@ that detail.
   before — but this time a fresh disposable-database row-count check
   immediately afterward confirmed **0 rows in every affected table**,
   proving the earlier-captured ids let `finally` clean up completely despite
-  the failure (this is the exact scenario Codex's finding 1 said could leak
-  rows before the fix). (2) With the `NO_TENANT` filter inverted, the second
-  `pipeline.run()` call itself raised a real `UniqueViolationError` (as
-  before) rather than failing at an assertion; because the raising call
-  never returns, its own internally-written `CollectionRun`/attempt/raw rows
-  cannot be captured by any id-after-return pattern — a pre-existing
-  structural property shared by every test in this file that calls
-  `pipeline.run()` once per line, not a regression from this correction and
-  not one of Codex's two findings. The resulting one leaked row per table
-  was identified and deleted, and a fresh row-count check confirmed 0 before
-  the final verification run above. Both temporary breaks were then reverted
-  (`git diff --stat -- backend/app/ingestion/persistence.py` empty
-  afterward), and the two focused tests re-confirmed passing.
+  the failure (this is the exact scenario the prior review's finding 1 said
+  could leak rows before the fix). (2) With the `NO_TENANT` filter inverted,
+  the second `pipeline.run()` call itself raised a real
+  `UniqueViolationError` (as before) rather than failing at an assertion;
+  because the raising call never returns, its own internally-written
+  `CollectionRun`/attempt/raw rows cannot be captured by any id-after-return
+  pattern — a pre-existing structural property shared by every test in this
+  file that calls `pipeline.run()` once per line, not a regression from
+  this correction and not one of the two findings. The resulting one leaked
+  row per table was identified and deleted, and a fresh row-count check
+  confirmed 0 before the final verification run above. Both temporary
+  breaks were then reverted (`git diff --stat -- backend/app/ingestion/
+  persistence.py` empty afterward), and the two focused tests re-confirmed
+  passing.
 - Deviations/known limitations: the pre-existing `alembic check`
   substitution (unrelated, recorded previously); the structural
   raise-before-return cleanup limitation noted above, which affects the
@@ -312,8 +184,8 @@ that detail.
 
 - Date/reviewer: 2026-09-05, Codex.
 - Diff reviewed: `cffe8a1..d09ac00` on `phase-2/closure`.
-- Verdict: **Approved.** Both bounded findings from Iteration 1 are closed,
-  and no further corrections are required.
+- Verdict: **Approved.** Both bounded findings are closed, and no further
+  corrections are required.
 - Independent review: inspected both corrected tests and the two-iteration
   ledger rotation. In the distinct-tenant case, the run id, both resulting
   Job ids, and both raw-ingestion ids are now captured before the first
@@ -374,3 +246,136 @@ that detail.
   production `ProviderRegistry` composition, parallel/concurrent provider
   execution, the scheduler, API routes, or any migration without separate
   authorization.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-09-06, Claude Code (Sonnet 5). Risk class R implementation
+  of the approved Phase 3 remote-classifier proposal (v3 plus its binding
+  implementation clarifications) on `phase-3/remote-classifier`, based on
+  clean `main@199eb00`. This is the first Phase 3 parser slice — a bounded,
+  pure-function proof of the parser pattern the remaining seven required
+  parsers (title, salary, location, employment, seniority, experience,
+  skill) will each follow in their own future slices. Not wired into
+  ingestion/persistence, no `parser_version` threading, no `field_provenance`
+  write, no other parser touched.
+- Outcome:
+  - **`app/normalization/types.py`** (new) — `Provenance` (`StrEnum`, the
+    six-value docs/DATA_MODEL.md vocabulary exactly) and
+    `NormalizationResult[T]` (frozen dataclass: one atomic `value`/
+    `provenance` pair). `__post_init__` checks, in order: (1)
+    `isinstance(provenance, Provenance)` — rejecting a raw string or
+    unknown value with a fixed, categorical `ValueError` containing no
+    interpolated runtime content, checked first specifically because a raw
+    string sharing a real member's text (e.g. literal `"unavailable"`)
+    would otherwise silently satisfy the invariant below without being a
+    real member; (2) `value is None` iff `provenance is
+    Provenance.UNAVAILABLE`, its own separate fixed categorical message.
+    Documented as deliberately narrow to one atomic value — a future
+    composite parser (salary, location) composes several independent
+    `NormalizationResult`s or defines its own structured per-field result,
+    never one shared provenance tag across sub-fields.
+  - **`app/normalization/remote.py`** (new) — `classify_remote_type(title,
+    description) -> NormalizationResult[Literal["remote","hybrid","onsite"]]`.
+    Pipeline: NFKC-normalize, fold curly apostrophes to straight, case-fold;
+    split into sentences on `. ; : ! ?`; tokenize each sentence on
+    whitespace/`,()[]{}"/&-`/en-em-dash (apostrophe deliberately excluded,
+    so contractions survive as one token; zero-width/format characters
+    never stripped and never a boundary, so an obfuscated keyword fails
+    closed rather than matching); catalog phrases compiled through the
+    identical pipeline (`_compile_phrase`), never a hand-written parallel
+    regex. Exclusion-span masking removes every token of a matched
+    exclusion phrase (e.g. "remote sensing") from all later consideration,
+    including the embedded "remote" token itself. Negation suppresses only
+    the *nearest* candidate(s) to a cue within a 3-token same-sentence
+    window (a tie suppresses both, never neither; a cue never suppresses
+    every candidate in its window). Context-exclusion cues (e.g. "stipend")
+    suppress *every* candidate in their own 3-token window. Cross-field
+    precedence: any conflict anywhere (within one field or between fields)
+    -> `(None, UNAVAILABLE)`; title-only -> `INFERRED`; description-only ->
+    `PARSED_DESCRIPTION`; agreement -> `PARSED_DESCRIPTION`; no signal
+    anywhere -> `(None, UNAVAILABLE)`. Catalogs are deliberately minimal and
+    exhaustive for this slice (5 remote / 1 hybrid / 4 onsite phrases, 3
+    exclusion phrases, 5 context cues, 6 negation cues) — an unsupported
+    phrase (e.g. "telecommute") returns no signal, never a guess.
+  - **`backend/tests/fixtures/normalization/remote_type_cases.json`** (new,
+    27 cases) — every case labeled `synthetic_representative` or
+    `synthetic_adversarial`; none claim `sanitized_capture`, since no real
+    captured project text exists yet for this parser. Covers the full v3
+    matrix plus every binding-clarification proof case: negation
+    nearest-only (`"Not remote, onsite."` -> `onsite`), negation tie-break
+    (`"Remote not onsite."` -> `unavailable`), straight- and
+    curly-apostrophe contractions, the 3-token context-exclusion window,
+    sentence-boundary-blocks-phrase-match, and the unsupported-phrase case.
+  - **`backend/tests/test_normalization_types.py`** (new, 13 tests) —
+    table-driven valid/invalid `(value, provenance)` pairs, including the
+    present-value-with-raw-string case that would otherwise silently bypass
+    the None invariant, each asserting the exact fixed error message.
+  - **`backend/tests/test_normalization_remote.py`** (new, 30 tests) —
+    corpus-driven (table-first, one parametrized test over the JSON file),
+    plus an origin-honesty check, a determinism check (identical input ->
+    bit-for-bit identical result twice — idempotence narrowed to this claim
+    only, not "output fed back in as title is stable", which would not be a
+    meaningful invariant for a free-text-in/enum-out function), and an
+    AST-based import-boundary test proving neither new module imports
+    `app.providers`/`app.db`/`app.ingestion`/`app.services`/`app.api`/
+    `sqlalchemy`/`asyncpg`/`alembic`/`httpx`/`fastapi`.
+  - **`docs/ARCHITECTURE.md`** §4 — added `remote.py`/`types.py` to the
+    `normalization/` diagram (previously missing `remote.py` despite
+    `remote_type` being a required Phase 3 parser and schema column).
+    **`docs/ROADMAP.md`** — states the first Phase 3 slice is implemented
+    on this branch, explicitly not a Phase 3 completion claim; the other
+    seven parsers remain unstarted.
+- Files changed: exactly the six files above plus this handoff entry. No
+  `db/models/`, `ingestion/`, `providers/`, `services/`, `api/`, or
+  migration file touched.
+- A real bug was found and fixed during testing, before any commit: the
+  initial context-exclusion cue list included the word "software", which
+  incorrectly suppressed the "remote" signal in the extremely common title
+  "Software Engineer (Remote)" — caught by the corpus's own
+  `positive_punctuation_heavy`/`positive_unicode_fullwidth` cases failing.
+  Narrowed the cue list to `stipend`/`collaboration`/`vpn`/`protocol`/
+  `allowance` — words unambiguous in this context, rejecting
+  `tool`/`tools`/`software`/`equipment`/`access` as too generic and
+  title-collision-prone.
+- Verification: `ruff format --check`, `ruff check`, `mypy` all pass on the
+  four new files; the two targeted test modules directly (**43 passed**);
+  genuine external `python scripts/verify.py --level routine` (full run) —
+  all **9 steps PASS**, **1538 full-suite tests** (was 1495; +43),
+  temp-directory cleanup, ~100-107s across reruns. `check_repo.py` and
+  `git diff --check` both exit 0 standalone. No database/migration/schema
+  touched by this slice at all (pure Python, no `--focus` needed since
+  nothing here exercises PostgreSQL).
+- Adversarial self-review (abbreviated, proportionate to Class R): four
+  targeted breaks, each reverted cleanly (`git diff --stat` empty
+  afterward) and each proven to fail the specific test(s) designed to
+  catch it. (1) Disabled exclusion-span masking — the three
+  `false_positive_remote_*` cases failed, each leaking an unmasked
+  "remote" instead of `None`. (2) Reverted negation from
+  nearest-candidate-only to suppress-every-candidate-in-window — exactly
+  `negation_nearest_only_comma_onsite` failed (`"Not remote, onsite."`
+  incorrectly became `unavailable` instead of `onsite`), while the other
+  two negation cases were unaffected (correctly, since neither
+  distinguishes the two behaviors). (3) Removed the `isinstance(provenance,
+  Provenance)` guard — all three `test_non_enum_provenance_...` cases
+  failed; critically, `NormalizationResult(value="remote",
+  provenance="inferred")` (a raw string) then constructed with **no error
+  at all**, proving this is exactly the invariant-bypass the guard exists
+  to prevent. (4) Disabled sentence-splitting and additionally treated `.`
+  as an ordinary token boundary (simulating a period treated as just
+  another separator) — `sentence_boundary_prevents_cross_sentence_phrase_
+  match` failed, with "on"/"site" now incorrectly combining across the
+  removed boundary into a spurious "onsite" match that conflicted with the
+  later "remote", producing `unavailable` instead of the expected clean
+  `remote`.
+- Deviations/known limitations: the pre-existing `alembic check`
+  substitution (unrelated, recorded previously, and not applicable here
+  since no schema/migration was touched). The documented, accepted
+  negation-window limitation (a negator more than 3 tokens from its target
+  is not recognized) — stated in `remote.py`'s own module docstring, not
+  silently handled.
+- STOP — awaiting Codex review. Do not merge, begin another Phase 3 parser,
+  wire into ingestion/persistence, contact providers, or create a migration.

@@ -1,0 +1,245 @@
+[
+  {
+    "id": "positive_title_only_remote",
+    "origin": "synthetic_representative",
+    "title": "Senior Backend Engineer (Remote)",
+    "description": null,
+    "expected_value": "remote",
+    "expected_provenance": "inferred",
+    "note": "Title-only signal, no description at all."
+  },
+  {
+    "id": "positive_description_only_onsite",
+    "origin": "synthetic_representative",
+    "title": "Warehouse Associate",
+    "description": "This is an on-site position based at our Columbus distribution center. No remote work is available for this role.",
+    "expected_value": "onsite",
+    "expected_provenance": "parsed_description",
+    "note": "Description-only signal; the negated 'remote' in the second sentence contributes nothing, leaving the separate 'on-site' match from the first sentence."
+  },
+  {
+    "id": "positive_matching_title_and_description",
+    "origin": "synthetic_representative",
+    "title": "Product Designer - Fully Remote",
+    "description": "This fully remote role allows you to work from anywhere in the US.",
+    "expected_value": "remote",
+    "expected_provenance": "parsed_description",
+    "note": "Title and description agree; agreement escalates to parsed_description even though the title alone would only be inferred."
+  },
+  {
+    "id": "conflicting_title_vs_description",
+    "origin": "synthetic_adversarial",
+    "title": "Remote Customer Support Specialist",
+    "description": "Candidates must relocate and work on-site five days a week at our headquarters.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Cross-field conflict (title says remote, description says onsite) always resolves to unavailable."
+  },
+  {
+    "id": "no_signal_missing_description",
+    "origin": "synthetic_representative",
+    "title": "Accountant",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "No catalog phrase anywhere; absence of remote language never implies onsite."
+  },
+  {
+    "id": "ambiguous_flexible_alone",
+    "origin": "synthetic_adversarial",
+    "title": "Marketing Coordinator",
+    "description": "We offer flexible work arrangements and a supportive team culture.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "'flexible' is on no catalog list at all (positive, negation, or exclusion) and must never mean hybrid alone."
+  },
+  {
+    "id": "negation_not_remote",
+    "origin": "synthetic_adversarial",
+    "title": "Data Entry Clerk",
+    "description": "Please note this position is not remote.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Negated remote with no other positive signal must not become onsite by default."
+  },
+  {
+    "id": "negation_remote_work_not_available",
+    "origin": "synthetic_adversarial",
+    "title": "Office Administrator",
+    "description": "Remote work not available for this position; on-site attendance is mandatory.",
+    "expected_value": "onsite",
+    "expected_provenance": "parsed_description",
+    "note": "The semicolon splits this into two sentences; 'remote' is negated in the first, and the separate 'on-site' phrase in the second independently survives."
+  },
+  {
+    "id": "false_positive_remote_sensing",
+    "origin": "synthetic_adversarial",
+    "title": "Remote Sensing Engineer",
+    "description": "Analyze satellite imagery and remote sensing datasets for climate research.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Domain-collision exclusion phrase masks the embedded 'remote' token in both title and description."
+  },
+  {
+    "id": "false_positive_remote_desktop",
+    "origin": "synthetic_adversarial",
+    "title": "IT Support Specialist",
+    "description": "Provide Remote Desktop support and troubleshoot VPN connectivity issues.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "'Remote Desktop' is an exclusion phrase, masked entirely."
+  },
+  {
+    "id": "false_positive_remote_location_geographic",
+    "origin": "synthetic_adversarial",
+    "title": "Field Technician",
+    "description": "This role is based in a remote location in northern Alaska and requires travel by small aircraft.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "'remote location' is treated as geographic remoteness, not work-remote, and is masked."
+  },
+  {
+    "id": "false_positive_benefit_context_stipend",
+    "origin": "synthetic_adversarial",
+    "title": "Sales Representative",
+    "description": "We offer a monthly remote work stipend to help cover your home office setup, along with health insurance and 401k matching.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "'stipend' within the context-exclusion window suppresses the nearby 'remote' match — a benefit mention, not a position descriptor."
+  },
+  {
+    "id": "positive_punctuation_heavy",
+    "origin": "synthetic_representative",
+    "title": "Software Engineer — 100%-Remote (US-Based)",
+    "description": null,
+    "expected_value": "remote",
+    "expected_provenance": "inferred",
+    "note": "Em-dash, percent sign, hyphen, and parentheses around the keyword must not prevent a match."
+  },
+  {
+    "id": "positive_unicode_fullwidth",
+    "origin": "synthetic_adversarial",
+    "title": "Software Engineer (Ｒｅｍｏｔｅ)",
+    "description": null,
+    "expected_value": "remote",
+    "expected_provenance": "inferred",
+    "note": "Full-width Latin 'Remote' NFKC-normalizes to ASCII before matching."
+  },
+  {
+    "id": "adversarial_zero_width_exclusion_bypass",
+    "origin": "synthetic_adversarial",
+    "title": "Remote​Sensing Engineer",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "A zero-width space glued between 'Remote' and 'Sensing' breaks both the exclusion phrase and the standalone 'remote' match — never stripped, never a valid boundary, so neither can fire. Safe failure, not a false positive."
+  },
+  {
+    "id": "two_classes_one_field_conflict",
+    "origin": "synthetic_adversarial",
+    "title": "Data Analyst",
+    "description": "This hybrid role also allows fully remote work for some team members.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Two distinct positive classes surviving within one field is itself a conflict, resolved the same as a cross-field conflict."
+  },
+  {
+    "id": "repeated_aliases_same_class",
+    "origin": "synthetic_adversarial",
+    "title": "Data Analyst",
+    "description": "This is a remote position; you may work remotely from anywhere.",
+    "expected_value": "remote",
+    "expected_provenance": "parsed_description",
+    "note": "Multiple aliases of the same class in one field ('remote', 'remotely') collapse to that one class, never a conflict."
+  },
+  {
+    "id": "agreement_uses_description_provenance",
+    "origin": "synthetic_representative",
+    "title": "Hybrid Product Manager",
+    "description": "This hybrid position requires 2 days per week in our downtown office.",
+    "expected_value": "hybrid",
+    "expected_provenance": "parsed_description",
+    "note": "Second worked example of title/description agreement, distinct from the remote case above."
+  },
+  {
+    "id": "negated_remote_then_explicit_onsite",
+    "origin": "synthetic_adversarial",
+    "title": "Support Specialist",
+    "description": "This role is not remote — it is fully on-site at our headquarters.",
+    "expected_value": "onsite",
+    "expected_provenance": "parsed_description",
+    "note": "The negator's nearest candidate is 'remote' (distance 1); 'on-site' is 5 tokens away, outside the negation window, and survives untouched."
+  },
+  {
+    "id": "negation_nearest_only_comma_onsite",
+    "origin": "synthetic_adversarial",
+    "title": "Data Analyst",
+    "description": "Not remote, onsite.",
+    "expected_value": "onsite",
+    "expected_provenance": "parsed_description",
+    "note": "Binding proof case: negation suppresses only the nearer candidate (remote, distance 1), never the farther one (onsite, distance 2)."
+  },
+  {
+    "id": "negation_tie_break_suppresses_both",
+    "origin": "synthetic_adversarial",
+    "title": "Data Analyst",
+    "description": "Remote not onsite.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Binding proof case: remote and onsite are equidistant (1 token) from the negator on either side — both are suppressed, failing closed rather than guessing."
+  },
+  {
+    "id": "contraction_isnt_negation_straight_apostrophe",
+    "origin": "synthetic_adversarial",
+    "title": "Data Analyst",
+    "description": "This isn't a remote position.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "The straight-apostrophe contraction 'isn't' is one token after tokenization and functions as a negation cue."
+  },
+  {
+    "id": "contraction_isnt_negation_curly_apostrophe",
+    "origin": "synthetic_adversarial",
+    "title": "Data Analyst",
+    "description": "This isn’t a remote position.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Identical to the straight-apostrophe case; the curly apostrophe (U+2019) is folded to straight before tokenizing."
+  },
+  {
+    "id": "context_exclusion_window_three_tokens",
+    "origin": "synthetic_adversarial",
+    "title": "Data Analyst",
+    "description": "We provide a generous stipend for remote employees.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Minimal direct proof of the 3-token context-exclusion window: 'stipend' is 2 tokens from 'remote'."
+  },
+  {
+    "id": "sentence_boundary_prevents_cross_sentence_phrase_match",
+    "origin": "synthetic_adversarial",
+    "title": "Data Analyst",
+    "description": "This role is on. Site coordination happens elsewhere. It is fully remote.",
+    "expected_value": "remote",
+    "expected_provenance": "parsed_description",
+    "note": "'on' and 'site' fall in different sentences and must not combine into an 'onsite' match across the period; only the clean 'remote' in the third sentence survives."
+  },
+  {
+    "id": "unsupported_phrase_telecommute_returns_unavailable",
+    "origin": "synthetic_adversarial",
+    "title": "Data Analyst",
+    "description": "This is a telecommute opportunity.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "'telecommute' is not on any catalog list in this initial slice and must not be guessed; adding it requires its own reviewed change."
+  },
+  {
+    "id": "zero_width_inside_keyword",
+    "origin": "synthetic_adversarial",
+    "title": "Data Scientist",
+    "description": "This is a re​mote position.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "A zero-width space embedded inside the keyword itself prevents the match; the character is never stripped."
+  }
+]
