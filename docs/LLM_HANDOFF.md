@@ -315,3 +315,25 @@ that detail.
 - STOP — awaiting Codex re-review. Do not merge, begin another Phase 3
   parser, wire into ingestion/persistence, contact providers, or create a
   migration.
+
+### Work review
+
+- Date/reviewer: 2026-09-07, Codex.
+- Diff reviewed: `db1805f..428703f` on `phase-3/employment-classifier`.
+- Verdict: **Approved.** No executable findings.
+- The two requested corrections are closed. Direct adversarial replay confirms the
+  three reported article-bearing coordination cases now fail closed, while the
+  extension remains limited to `or`/`nor` followed by at most one approved
+  determiner. Double/triple hyphens and prefix/suffix chains such as
+  `non-full-time` and `full-time-ish` no longer create positive evidence; ordinary
+  approved `full-time`/`part-time` spellings and the two approved cross-axis mask
+  compounds remain functional.
+- Independent verification: all three normalization modules pass (**173 tests**);
+  the canonical focused verifier passes all **10 steps** (**85 focused / 1668 full
+  suite**), including Ruff, mypy, repository checks, test-database safety and
+  cleanup. `git diff --check` is clean. No schema or migration changed.
+- Scope is appropriately bounded to `employment.py`, the fixture corpus, and this
+  handoff ledger. The existing design choice not to coordinate across arbitrary
+  intervening prose is documented and is not expanded by this correction.
+- The employment classifier correction pass is accepted. Do not merge or begin
+  another Phase 3 parser until the user explicitly authorizes that action.
