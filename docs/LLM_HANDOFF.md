@@ -337,3 +337,43 @@ that detail.
   intervening prose is documented and is not expanded by this correction.
 - The employment classifier correction pass is accepted. Do not merge or begin
   another Phase 3 parser until the user explicitly authorizes that action.
+
+### Merge record
+
+- Date: 2026-09-07. User authorized merging `phase-3/employment-classifier`
+  into `main` following Codex's Approved review (no executable findings;
+  approval commit `67cf09b`) above.
+- Pre-merge state: `main` and `origin/main` both at `243a78a`; feature
+  branch `phase-3/employment-classifier` and its origin both clean and
+  synced at `67cf09b` (containing implementation/correction commits
+  `cee74e5`, `db1805f`, `428703f`, and the review-approval commit
+  `67cf09b`).
+- Merge: `git merge --no-ff phase-3/employment-classifier` on `main` —
+  merge commit `8e136c0`. `git diff phase-3/employment-classifier HEAD`
+  is empty (zero content difference); `git diff --check` and
+  `check_repo.py` both exit 0; working tree clean.
+- Post-merge verification: genuine external `python scripts/verify.py
+  --level routine` (full run, no `--focus`) — all **9 steps PASS** (Ruff
+  format/check, mypy, `check_repo.py`, `git diff --check`,
+  disposable-database URL/reachability, **1668 full-suite tests**,
+  temp-directory cleanup).
+- Pushed: `main` at `8e136c0`, matching `origin/main`.
+- Rollback boundary: to revert this slice, reset `main` to `243a78a` (the
+  commit immediately before this merge) — this removes
+  `app/normalization/employment.py`, both new test/fixture files, and the
+  `docs/ROADMAP.md`/`docs/LLM_HANDOFF.md` wording changes cleanly, with
+  no migration to reverse and no data written by this slice to any
+  environment (pure Python, never wired into ingestion/persistence).
+- **Phase 3's second parser slice is merged, not Phase 3 itself.** The
+  deterministic full_time/part_time/seasonal/internship classifier
+  (`jobs.employment_type` only — `jobs.contract_type` and `jobs.shift`
+  remain untouched, deferred/unplanned respectively) is now on `main`,
+  reviewed across two correction rounds with no remaining executable
+  findings. The other six required Phase 3 parsers (title, salary,
+  location, seniority, experience, skill) remain unstarted; this
+  classifier is not wired into `ingestion/pipeline.py` or
+  `ingestion/persistence.py`, and no `parser_version`/`field_provenance`
+  write exists yet — those remain Phase 4+ concerns.
+- STOP — do not begin or propose another Phase 3 parser, wire this
+  classifier into ingestion/persistence, contact providers, or create a
+  migration without separate authorization.
