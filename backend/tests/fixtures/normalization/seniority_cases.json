@@ -1,0 +1,758 @@
+[
+  {
+    "id": "structural_matrix_whole_title_senior",
+    "origin": "synthetic_representative",
+    "title": "Senior",
+    "description": null,
+    "expected_value": "senior",
+    "expected_provenance": "inferred",
+    "note": "Whole-title bare marker for senior."
+  },
+  {
+    "id": "structural_matrix_parenthesized_senior",
+    "origin": "synthetic_representative",
+    "title": "Software Engineer (Senior)",
+    "description": null,
+    "expected_value": "senior",
+    "expected_provenance": "inferred",
+    "note": "Parenthesized structural marker for senior."
+  },
+  {
+    "id": "structural_matrix_bracketed_senior",
+    "origin": "synthetic_representative",
+    "title": "Software Engineer [Senior]",
+    "description": null,
+    "expected_value": "senior",
+    "expected_provenance": "inferred",
+    "note": "Bracketed structural marker for senior."
+  },
+  {
+    "id": "structural_matrix_delimiter_segment_senior",
+    "origin": "synthetic_representative",
+    "title": "Software Engineer - Senior",
+    "description": null,
+    "expected_value": "senior",
+    "expected_provenance": "inferred",
+    "note": "Delimiter-segment structural marker for senior."
+  },
+  {
+    "id": "positive_prefix_anywhere_senior_software_engineer",
+    "origin": "synthetic_representative",
+    "title": "Senior Software Engineer",
+    "description": null,
+    "expected_value": "senior",
+    "expected_provenance": "inferred",
+    "note": "The core prefix-anywhere case this parser's title grammar exists for: 'senior' occupies the leading position, trailing occupational text is unconstrained."
+  },
+  {
+    "id": "positive_prefix_anywhere_sr_data_analyst",
+    "origin": "synthetic_representative",
+    "title": "Sr. Data Analyst",
+    "description": null,
+    "expected_value": "senior",
+    "expected_provenance": "inferred",
+    "note": "'Sr.' abbreviation with trailing period, title-only (description drops this alias)."
+  },
+  {
+    "id": "structural_matrix_whole_title_staff",
+    "origin": "synthetic_representative",
+    "title": "Staff",
+    "description": null,
+    "expected_value": "staff",
+    "expected_provenance": "inferred",
+    "note": "Whole-title bare marker for staff."
+  },
+  {
+    "id": "structural_matrix_parenthesized_staff",
+    "origin": "synthetic_representative",
+    "title": "Software Engineer (Staff)",
+    "description": null,
+    "expected_value": "staff",
+    "expected_provenance": "inferred",
+    "note": "Parenthesized structural marker for staff."
+  },
+  {
+    "id": "structural_matrix_bracketed_staff",
+    "origin": "synthetic_representative",
+    "title": "Software Engineer [Staff]",
+    "description": null,
+    "expected_value": "staff",
+    "expected_provenance": "inferred",
+    "note": "Bracketed structural marker for staff."
+  },
+  {
+    "id": "structural_matrix_delimiter_segment_staff",
+    "origin": "synthetic_representative",
+    "title": "Software Engineer - Staff",
+    "description": null,
+    "expected_value": "staff",
+    "expected_provenance": "inferred",
+    "note": "Delimiter-segment structural marker for staff."
+  },
+  {
+    "id": "positive_prefix_anywhere_staff_engineer",
+    "origin": "synthetic_representative",
+    "title": "Staff Engineer",
+    "description": null,
+    "expected_value": "staff",
+    "expected_provenance": "inferred",
+    "note": "Prefix-anywhere positive control matching the approved proposal's named example."
+  },
+  {
+    "id": "structural_matrix_whole_title_entry_level",
+    "origin": "synthetic_representative",
+    "title": "Entry-Level",
+    "description": null,
+    "expected_value": "entry_level",
+    "expected_provenance": "inferred",
+    "note": "Whole-title bare marker for entry_level, glued-hyphen spelling."
+  },
+  {
+    "id": "structural_matrix_parenthesized_entry_level",
+    "origin": "synthetic_representative",
+    "title": "Data Analyst (Entry Level)",
+    "description": null,
+    "expected_value": "entry_level",
+    "expected_provenance": "inferred",
+    "note": "Parenthesized structural marker, space-separated spelling."
+  },
+  {
+    "id": "structural_matrix_bracketed_entry_level",
+    "origin": "synthetic_representative",
+    "title": "Data Analyst [Entry-Level]",
+    "description": null,
+    "expected_value": "entry_level",
+    "expected_provenance": "inferred",
+    "note": "Bracketed structural marker, glued-hyphen spelling."
+  },
+  {
+    "id": "structural_matrix_delimiter_segment_entry_level",
+    "origin": "synthetic_representative",
+    "title": "Data Analyst - Entry-Level",
+    "description": null,
+    "expected_value": "entry_level",
+    "expected_provenance": "inferred",
+    "note": "Delimiter-segment structural marker for entry_level."
+  },
+  {
+    "id": "positive_prefix_anywhere_entry_level_analyst",
+    "origin": "synthetic_representative",
+    "title": "Entry-Level Analyst",
+    "description": null,
+    "expected_value": "entry_level",
+    "expected_provenance": "inferred",
+    "note": "Prefix-anywhere positive control matching the approved proposal's named example."
+  },
+  {
+    "id": "positive_junior_alias_entry_level",
+    "origin": "synthetic_representative",
+    "title": "Junior Software Engineer",
+    "description": null,
+    "expected_value": "entry_level",
+    "expected_provenance": "inferred",
+    "note": "'junior' is folded into entry_level per the accepted decision, not a seventh value."
+  },
+  {
+    "id": "positive_jr_alias_entry_level",
+    "origin": "synthetic_representative",
+    "title": "Jr. Software Engineer",
+    "description": null,
+    "expected_value": "entry_level",
+    "expected_provenance": "inferred",
+    "note": "'Jr.' abbreviation, title-only alias of entry_level."
+  },
+  {
+    "id": "structural_matrix_whole_title_mid_level",
+    "origin": "synthetic_representative",
+    "title": "Mid-Level",
+    "description": null,
+    "expected_value": "mid_level",
+    "expected_provenance": "inferred",
+    "note": "Whole-title bare marker for mid_level, glued-hyphen spelling."
+  },
+  {
+    "id": "structural_matrix_parenthesized_mid_level",
+    "origin": "synthetic_representative",
+    "title": "Analyst (Mid Level)",
+    "description": null,
+    "expected_value": "mid_level",
+    "expected_provenance": "inferred",
+    "note": "Parenthesized structural marker, space-separated spelling."
+  },
+  {
+    "id": "structural_matrix_bracketed_mid_level",
+    "origin": "synthetic_representative",
+    "title": "Analyst [Mid-Level]",
+    "description": null,
+    "expected_value": "mid_level",
+    "expected_provenance": "inferred",
+    "note": "Bracketed structural marker, glued-hyphen spelling."
+  },
+  {
+    "id": "structural_matrix_delimiter_segment_mid_level",
+    "origin": "synthetic_representative",
+    "title": "Analyst - Mid-Level",
+    "description": null,
+    "expected_value": "mid_level",
+    "expected_provenance": "inferred",
+    "note": "Delimiter-segment structural marker for mid_level."
+  },
+  {
+    "id": "structural_matrix_whole_title_principal",
+    "origin": "synthetic_representative",
+    "title": "Principal Engineer",
+    "description": null,
+    "expected_value": "principal",
+    "expected_provenance": "inferred",
+    "note": "Whole-title anchored-phrase form for principal."
+  },
+  {
+    "id": "structural_matrix_parenthesized_principal",
+    "origin": "synthetic_representative",
+    "title": "(Principal Engineer)",
+    "description": null,
+    "expected_value": "principal",
+    "expected_provenance": "inferred",
+    "note": "Parenthesized anchored-phrase form for principal."
+  },
+  {
+    "id": "structural_matrix_bracketed_principal",
+    "origin": "synthetic_representative",
+    "title": "[Principal Architect]",
+    "description": null,
+    "expected_value": "principal",
+    "expected_provenance": "inferred",
+    "note": "Bracketed anchored-phrase form for principal."
+  },
+  {
+    "id": "structural_matrix_delimiter_segment_principal",
+    "origin": "synthetic_representative",
+    "title": "Team - Principal Consultant",
+    "description": null,
+    "expected_value": "principal",
+    "expected_provenance": "inferred",
+    "note": "Delimiter-segment anchored-phrase form for principal."
+  },
+  {
+    "id": "positive_principal_software_engineer",
+    "origin": "synthetic_representative",
+    "title": "Principal Software Engineer",
+    "description": null,
+    "expected_value": "principal",
+    "expected_provenance": "inferred",
+    "note": "Preserved valid leading form named explicitly in the approved proposal."
+  },
+  {
+    "id": "structural_matrix_whole_title_director",
+    "origin": "synthetic_representative",
+    "title": "Director of Engineering",
+    "description": null,
+    "expected_value": "director",
+    "expected_provenance": "inferred",
+    "note": "Preserved valid leading form named explicitly in the approved proposal."
+  },
+  {
+    "id": "structural_matrix_parenthesized_director",
+    "origin": "synthetic_representative",
+    "title": "(Director of Product)",
+    "description": null,
+    "expected_value": "director",
+    "expected_provenance": "inferred",
+    "note": "Parenthesized anchored-phrase form for director."
+  },
+  {
+    "id": "structural_matrix_bracketed_director",
+    "origin": "synthetic_representative",
+    "title": "[Engineering Director]",
+    "description": null,
+    "expected_value": "director",
+    "expected_provenance": "inferred",
+    "note": "Bracketed anchored-phrase form for director, suffix-shaped approved phrase."
+  },
+  {
+    "id": "structural_matrix_delimiter_segment_director",
+    "origin": "synthetic_representative",
+    "title": "Software Team - Director of Engineering",
+    "description": null,
+    "expected_value": "director",
+    "expected_provenance": "inferred",
+    "note": "Delimiter-segment anchored-phrase form for director."
+  },
+  {
+    "id": "anchor_negative_assistant_to_director_of_engineering",
+    "origin": "synthetic_adversarial",
+    "title": "Assistant to the Director of Engineering",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Binding correction 2 required negative: 'director of engineering' appears in the string but never occupies the segment's leading position ('assistant' does), so it is never checked, not merely excluded."
+  },
+  {
+    "id": "anchor_negative_office_of_director_of_operations",
+    "origin": "synthetic_adversarial",
+    "title": "Office of the Director of Operations",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Binding correction 2 required negative: 'director of operations' is one of the 8 approved phrases, but is not anchored at the leading position here ('office' is)."
+  },
+  {
+    "id": "anchor_negative_assistant_to_principal_engineer",
+    "origin": "synthetic_adversarial",
+    "title": "Assistant to the Principal Engineer",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Third prefix-wrapped negative added per binding correction 2, mirroring the two director examples for principal."
+  },
+  {
+    "id": "exclusion_senior_living_coordinator",
+    "origin": "synthetic_adversarial",
+    "title": "Senior Living Coordinator",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "'senior living' is masked entirely before qualifier matching runs."
+  },
+  {
+    "id": "exclusion_senior_center_director",
+    "origin": "synthetic_adversarial",
+    "title": "Senior Center Program Assistant",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "'senior center' masked; remaining 'program assistant' matches nothing."
+  },
+  {
+    "id": "exclusion_art_director",
+    "origin": "synthetic_adversarial",
+    "title": "Art Director",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "'Art Director' is not one of director's 8 approved phrases at all, so it never matches — no exclusion phrase was even required for this one."
+  },
+  {
+    "id": "exclusion_funeral_director",
+    "origin": "synthetic_adversarial",
+    "title": "Funeral Director",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Same reasoning as Art Director — not in the closed positive phrase list."
+  },
+  {
+    "id": "exclusion_school_principal_bare",
+    "origin": "synthetic_adversarial",
+    "title": "Principal",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "A bare 'Principal' (school administrator or shorthand for a corporate tier — genuinely undecidable from text alone) never matches, since principal has no bare-word form at all, only the 8 explicit phrases."
+  },
+  {
+    "id": "exclusion_senior_executive_assistant",
+    "origin": "synthetic_adversarial",
+    "title": "Senior Executive Assistant",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Binding correction 2, exact required outcome: 'senior executive assistant' is masked as one 3-token exclusion phrase, leaving nothing behind."
+  },
+  {
+    "id": "exclusion_senior_vice_president",
+    "origin": "synthetic_adversarial",
+    "title": "Senior Vice President",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Binding correction 2, exact required outcome: 'senior vice president' masked as its own 3-token exclusion phrase."
+  },
+  {
+    "id": "exclusion_senior_vp",
+    "origin": "synthetic_adversarial",
+    "title": "Senior VP",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Binding correction 2, exact required outcome: 'senior vp' masked as its own 2-token exclusion phrase, distinct spelling from 'senior vice president'."
+  },
+  {
+    "id": "senior_manager_still_fires",
+    "origin": "synthetic_adversarial",
+    "title": "Senior Manager",
+    "description": null,
+    "expected_value": "senior",
+    "expected_provenance": "inferred",
+    "note": "Binding correction 2, exact required outcome: 'manager' is in no catalog and is not masked here, so it contributes nothing itself but does not block 'senior' from firing independently."
+  },
+  {
+    "id": "lead_senior_engineer_unavailable",
+    "origin": "synthetic_adversarial",
+    "title": "Lead Senior Engineer",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "'lead' occupies the leading position and is unrecognized; the leading-position rule never looks past it to find 'senior' at index 1 — a direct, stated consequence of 'leading, not anywhere', not a bug."
+  },
+  {
+    "id": "associate_director_of_engineering_unavailable",
+    "origin": "synthetic_adversarial",
+    "title": "Associate Director of Engineering",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "'associate' occupies the leading position, blocking director's anchored-phrase check — correctly distinct from plain 'Director of Engineering', since Associate Director is a genuinely different (lower) real title."
+  },
+  {
+    "id": "compound_sr_staff_engineer",
+    "origin": "synthetic_adversarial",
+    "title": "Sr. Staff Engineer",
+    "description": null,
+    "expected_value": "staff",
+    "expected_provenance": "inferred",
+    "note": "Binding correction 7 required case: the 'sr.'+'staff' compound resolves deterministically to staff, trailing 'engineer' ignored."
+  },
+  {
+    "id": "compound_senior_principal_engineer",
+    "origin": "synthetic_adversarial",
+    "title": "Senior Principal Engineer",
+    "description": null,
+    "expected_value": "principal",
+    "expected_provenance": "inferred",
+    "note": "Binding correction 7 required case: the 'senior'+'principal' compound resolves deterministically to principal."
+  },
+  {
+    "id": "conflict_senior_director_not_a_compound",
+    "origin": "synthetic_adversarial",
+    "title": "Senior Director",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Director is deliberately excluded from the compound rule (Senior Art/Creative/Managing Director are real, differently-meaning titles); 'senior' matches as the leading qualifier, and bare 'director' in the trailing text trips the conflict-scan."
+  },
+  {
+    "id": "conflict_staff_slash_principal_engineer",
+    "origin": "synthetic_adversarial",
+    "title": "Staff/Principal Engineer",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "'/' is its own hard token, not a segment delimiter; 'staff' matches as the leading qualifier, and bare 'principal' in the trailing text trips the conflict-scan — a genuine either/or range, not a compound."
+  },
+  {
+    "id": "conflict_comma_delimited_senior_staff",
+    "origin": "synthetic_adversarial",
+    "title": "Senior, Staff Engineer",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Binding correction 7 punctuation/delimiter variant: the comma splits this into two separate segments ('Senior', 'Staff Engineer'), each independently resolving to a distinct value; the compound rule cannot fire across segments, only within one — deterministically different from the undelimited 'Senior Staff Engineer'."
+  },
+  {
+    "id": "conflict_parenthesized_senior_staff",
+    "origin": "synthetic_adversarial",
+    "title": "(Senior) Staff Engineer",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Same reasoning as the comma case: parens force 'Senior' into its own segment, defeating the compound rule."
+  },
+  {
+    "id": "conflict_junior_senior_analyst",
+    "origin": "synthetic_adversarial",
+    "title": "Junior Senior Analyst",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Binding correction 7 required case: 'junior' matches leading (entry_level); bare 'senior' in the trailing text trips the conflict-scan."
+  },
+  {
+    "id": "numeric_level_roman_ii_unhandled",
+    "origin": "synthetic_adversarial",
+    "title": "Software Engineer II",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Numeric/roman levels are deliberately unhandled in v1 — no catalog entry matches 'II', so it produces no signal, not a silent guess at which tier it means."
+  },
+  {
+    "id": "numeric_level_arabic_unhandled",
+    "origin": "synthetic_adversarial",
+    "title": "Engineer 2",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Same deliberate deferral for an Arabic-numeral level."
+  },
+  {
+    "id": "unicode_fullwidth_senior_title",
+    "origin": "synthetic_adversarial",
+    "title": "Software Engineer (Ｓｅｎｉｏｒ)",
+    "description": null,
+    "expected_value": "senior",
+    "expected_provenance": "inferred",
+    "note": "Full-width Latin 'Senior' NFKC-normalizes to ASCII before matching, same as remote.py/employment.py's analogous unicode-robustness case."
+  },
+  {
+    "id": "whitespace_robustness_multiple_spaces",
+    "origin": "synthetic_adversarial",
+    "title": "Senior   Software   Engineer",
+    "description": null,
+    "expected_value": "senior",
+    "expected_provenance": "inferred",
+    "note": "Multiple consecutive spaces behave identically to single spaces."
+  },
+  {
+    "id": "case_fold_all_caps_title",
+    "origin": "synthetic_adversarial",
+    "title": "SENIOR SOFTWARE ENGINEER",
+    "description": null,
+    "expected_value": "senior",
+    "expected_provenance": "inferred",
+    "note": "Casefold handles all-caps input identically to mixed case."
+  },
+  {
+    "id": "malformed_double_hyphen_glued_prefix_eligible",
+    "origin": "synthetic_adversarial",
+    "title": "Senior--Engineer",
+    "description": null,
+    "expected_value": "senior",
+    "expected_provenance": "inferred",
+    "note": "Unlike the two-token entry-level/mid-level compounds, a bare prefix-eligible qualifier like 'senior' already allows unconstrained trailing text by design, so unusual punctuation immediately after it does not change the result."
+  },
+  {
+    "id": "malformed_leading_unrecognized_word_blocks_leading_position",
+    "origin": "synthetic_adversarial",
+    "title": "Full/Time Senior Engineer",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "'full' (irrelevant to this vocabulary) occupies the leading position and is unrecognized; the leading-position rule never looks further to find 'senior' at a later index — same consistent behavior as Lead Senior Engineer."
+  },
+  {
+    "id": "sanitized_capture_greenhouse_manager_title_negative",
+    "origin": "sanitized_capture",
+    "title": "Manager, Solutions Architects - San Francisco ",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "The one real sample available in this repo: backend/tests/fixtures/discovery/greenhouse_live_canary.json's job.title, documented there as a sanitized_derived_sample of one real Greenhouse job. A single negative-control data point, not broad realistic-positive coverage — see the module docstring's honest evidence-gap statement. Comma and the whitespace-surrounded hyphen both split this into three segments ('Manager', 'Solutions Architects', 'San Francisco'), none of which match any catalog phrase at their leading position."
+  },
+  {
+    "id": "description_anchor_adjacency_negative_supported_by",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "This role is supported by a senior engineer.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Binding correction 1 required negative: the anchor 'this role is' matches, but 'supported' (immediately following) is neither an approved grammatical prefix nor a candidate — the rule does not search arbitrarily later to find 'a senior engineer'."
+  },
+  {
+    "id": "description_anchor_adjacency_negative_reporting_to",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "This position is reporting to the Director of Engineering.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Binding correction 1 required negative: 'this position is' anchors, but 'reporting' immediately after is not an approved prefix — 'the Director of Engineering' later in the sentence is never reached."
+  },
+  {
+    "id": "description_anchor_adjacency_negative_hiring_alongside",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "We are hiring alongside a staff engineer.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Binding correction 1 required negative: 'we are hiring' anchors, but 'alongside' immediately after is not an approved prefix."
+  },
+  {
+    "id": "description_no_anchor_reports_to_director",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "Reports to the Director of Engineering.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "No self-referential anchor at all at the sentence's leading position — a mere reporting relationship is not evidence about the advertised position."
+  },
+  {
+    "id": "description_no_anchor_collaborates_with_principal_engineers",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "Collaborates with Principal Engineers.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "No anchor present; also plural 'Engineers' would not match the singular phrase regardless."
+  },
+  {
+    "id": "description_no_anchor_mentored_by_staff_engineer",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "Mentored by a Staff Engineer.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "No anchor present — a mention of a mentor's title is not evidence about the advertised position."
+  },
+  {
+    "id": "description_no_anchor_supports_senior_roles",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "Supports senior roles across the company.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "No anchor present — describes something the company does broadly, not this specific advertised position."
+  },
+  {
+    "id": "description_positive_director_this_is_a",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "This is a director of engineering position.",
+    "expected_value": "director",
+    "expected_provenance": "parsed_description",
+    "note": "Ordinary article-bearing positive: anchor 'this is' + article 'a' + the anchored director phrase."
+  },
+  {
+    "id": "description_positive_principal_we_are_hiring_a",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "We are hiring a principal engineer.",
+    "expected_value": "principal",
+    "expected_provenance": "parsed_description",
+    "note": "Ordinary article-bearing positive using the 'we are hiring' anchor."
+  },
+  {
+    "id": "description_positive_staff_this_is_a",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "This is a staff role.",
+    "expected_value": "staff",
+    "expected_provenance": "parsed_description",
+    "note": "Ordinary article-bearing positive for staff."
+  },
+  {
+    "id": "description_positive_senior_the_position_is",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "The position is senior.",
+    "expected_value": "senior",
+    "expected_provenance": "parsed_description",
+    "note": "Zero-token (empty) prefix case: no article or negator between the anchor and the candidate."
+  },
+  {
+    "id": "description_positive_senior_this_is_the",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "This is the senior role.",
+    "expected_value": "senior",
+    "expected_provenance": "parsed_description",
+    "note": "Article-bearing positive using 'the' specifically, distinct from the 'a'/'an' cases."
+  },
+  {
+    "id": "description_positive_entry_level_this_is_an",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "This is an entry-level role.",
+    "expected_value": "entry_level",
+    "expected_provenance": "parsed_description",
+    "note": "Article-bearing positive using 'an' specifically."
+  },
+  {
+    "id": "description_positive_mid_level_this_role_is",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "This role is mid-level.",
+    "expected_value": "mid_level",
+    "expected_provenance": "parsed_description",
+    "note": "Zero-token prefix case for mid_level via the 'this role is' anchor."
+  },
+  {
+    "id": "description_positive_staff_seeking_a",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "Seeking a staff engineer for our platform team.",
+    "expected_value": "staff",
+    "expected_provenance": "parsed_description",
+    "note": "Positive control for the 'seeking' verb-anchor, with unconstrained trailing text after the candidate."
+  },
+  {
+    "id": "description_negated_director_this_is_not_a",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "This is not a director of engineering position.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Immediate negation: the 'not a' prefix marks the following director phrase as negated."
+  },
+  {
+    "id": "description_negated_senior_the_position_is_not",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "The position is not senior.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Immediate negation with the bare 'not' prefix (no article) preceding a bare qualifier."
+  },
+  {
+    "id": "description_negated_staff_this_is_not_a",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "This is not a staff role.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Immediate negation for staff."
+  },
+  {
+    "id": "description_negated_entry_level_this_is_not_an",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "This is not an entry-level role.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Immediate negation with the 'not an' prefix."
+  },
+  {
+    "id": "description_negated_mid_level_this_role_is_not",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "This role is not mid-level.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Immediate negation with the bare 'not' prefix for mid_level."
+  },
+  {
+    "id": "description_neither_nor_a_coordinated",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "This is neither senior nor a staff position.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Binding correction 3 required coordinated case: 'neither' negates 'senior' directly; the 'nor a' gap (coordinator + determiner) propagates the same suppression to 'staff' — both suppressed, not merely the first."
+  },
+  {
+    "id": "agreement_title_and_description_senior",
+    "origin": "synthetic_representative",
+    "title": "Senior Software Engineer",
+    "description": "This is a senior role.",
+    "expected_value": "senior",
+    "expected_provenance": "parsed_description",
+    "note": "Title and description independently agree on senior; agreement escalates provenance to parsed_description, matching remote.py/employment.py's precedence rule."
+  },
+  {
+    "id": "cross_field_conflict_senior_vs_staff",
+    "origin": "synthetic_adversarial",
+    "title": "Senior Software Engineer",
+    "description": "This is a staff role.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Cross-field disagreement (title says senior, description says staff) always yields unavailable rather than guessing which field to trust."
+  },
+  {
+    "id": "no_signal_missing_both_fields",
+    "origin": "synthetic_representative",
+    "title": "Accountant",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "No catalog phrase anywhere in either field."
+  }
+]
