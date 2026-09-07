@@ -265,7 +265,7 @@ that detail.
   file touched.
 - Verification: both targeted modules directly (**88 passed**, was 85);
   genuine external `python scripts/verify.py --level routine` (full run) —
-  all **9 steps PASS**, **1583 full-suite tests** (was 1580; +3). `ruff
+  all **10 steps PASS**, **1583 full-suite tests** (was 1580; +3). `ruff
   format --check`/`ruff check`/`mypy` all pass. `check_repo.py` and `git
   diff --check` both pass as part of the verifier. No database/migration/
   schema touched.
@@ -285,3 +285,28 @@ that detail.
 - STOP — awaiting Codex re-review. Do not merge, begin another Phase 3
   parser, wire into ingestion/persistence, contact providers, or create a
   migration.
+
+### Work review
+
+- Date/reviewer: 2026-09-06, Codex.
+- Diff reviewed: `3a8cc70..7c0bd05` on `phase-3/remote-classifier`.
+- Verdict: **Approved with one documentation-only binding clarification.** The
+  paired-delimiter defect is closed and there are no remaining executable findings.
+- Independent verification: inspected the three-file correction; directly replayed
+  both crossed forms (now `unavailable`), valid `(...)` and `[...]` controls (still
+  `remote/inferred`), and the prior arbitrary-leading-title regression; reran both
+  targeted modules (**88 passed**); and ran the canonical verifier (**all 10 checks
+  PASS, 1583 full-suite tests**). Ruff, mypy, repository checks, database safety,
+  focused/full pytest, and temporary-directory cleanup all passed.
+- Finding disposition: `_PAREN_BRACKET_RE` now encodes `(...)` and `[...]` as separate
+  alternatives, and `_title_segments` selects the populated capture group. Neither
+  crossed form can be extracted as a structural segment, while both valid pair types
+  remain supported. The change is bounded to the requested parser, corpus, and ledger
+  files; no other parser, database, migration, provider, or ingestion code changed.
+- Documentation-only clarification: Iteration 2's `Work done` says the canonical
+  verifier passed “all 9 steps,” but the genuine verifier output reports **10** steps
+  (the tenth is temporary-directory cleanup). Correct this current claim to “all 10
+  steps” before merge. This is mechanical, does not require another test run, and does
+  not require another Codex re-review.
+- Merge remains a separate user authorization. Do not begin another parser or wire
+  Phase 3 behavior into ingestion as part of that merge.
