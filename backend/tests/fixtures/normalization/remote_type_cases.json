@@ -29,11 +29,11 @@
   {
     "id": "conflicting_title_vs_description",
     "origin": "synthetic_adversarial",
-    "title": "Remote Customer Support Specialist",
+    "title": "Customer Support Specialist (Remote)",
     "description": "Candidates must relocate to an on-site position, working five days a week at our headquarters.",
     "expected_value": null,
     "expected_provenance": "unavailable",
-    "note": "Cross-field conflict (title says remote, description's 'on-site position' is a qualified onsite phrase) always resolves to unavailable."
+    "note": "Cross-field conflict using an explicit structural title marker (parenthesized 'Remote'), not an ambiguous leading adjective, so the conflict tests genuine cross-field disagreement rather than depending on unsafe title matching."
   },
   {
     "id": "no_signal_missing_description",
@@ -529,5 +529,77 @@
     "expected_value": "onsite",
     "expected_provenance": "parsed_description",
     "note": "Positive control for the self-sufficient 'work in the office' phrase."
+  },
+  {
+    "id": "title_remote_infrastructure_engineer_structural_rejection",
+    "origin": "synthetic_adversarial",
+    "title": "Remote Infrastructure Engineer",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review reproduction: a leading 'Remote' directly modifying an occupational/domain noun, with no delimiter, parenthetical, or explicit phrase, fails every structural title-marker case."
+  },
+  {
+    "id": "title_remote_client_success_manager_structural_rejection",
+    "origin": "synthetic_adversarial",
+    "title": "Remote Client Success Manager",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review reproduction: same structural failure as Remote Infrastructure Engineer — the bare word fills only part of one undelimited segment."
+  },
+  {
+    "id": "title_hybrid_network_specialist_structural_rejection",
+    "origin": "synthetic_adversarial",
+    "title": "Hybrid Network Specialist",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review reproduction: a leading 'Hybrid' directly modifying a domain noun fails the same structural rule."
+  },
+  {
+    "id": "comma_contrast_positive_exact_comma",
+    "origin": "synthetic_adversarial",
+    "title": "Data Analyst",
+    "description": "Not remote, onsite.",
+    "expected_value": "onsite",
+    "expected_provenance": "parsed_description",
+    "note": "The raw substring between the negated 'remote' and 'onsite' is exactly a comma — the only separator that rescues a bare candidate."
+  },
+  {
+    "id": "comma_contrast_rejects_bare_whitespace",
+    "origin": "synthetic_adversarial",
+    "title": "Data Analyst",
+    "description": "Not remote onsite.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review reproduction: no comma at all, only whitespace between the tokens — the tokenizer alone cannot distinguish this from the comma case, so the separator-exact check must reject it."
+  },
+  {
+    "id": "comma_contrast_rejects_hyphen",
+    "origin": "synthetic_adversarial",
+    "title": "Data Analyst",
+    "description": "Not remote - onsite.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review reproduction: a hyphen, not a comma, between the tokens — must not rescue the bare 'onsite' candidate."
+  },
+  {
+    "id": "comma_contrast_rejects_slash",
+    "origin": "synthetic_adversarial",
+    "title": "Data Analyst",
+    "description": "Not remote / onsite.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review reproduction: a slash, not a comma, between the tokens — must not rescue the bare 'onsite' candidate."
+  },
+  {
+    "id": "comma_contrast_rejects_em_dash",
+    "origin": "synthetic_adversarial",
+    "title": "Data Analyst",
+    "description": "Not remote — onsite.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review reproduction: an em-dash, not a comma, between the tokens — must not rescue the bare 'onsite' candidate."
   }
 ]

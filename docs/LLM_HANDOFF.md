@@ -99,193 +99,17 @@ that detail.
 ### Work done
 
 - Date/agent: 2026-09-06, Claude Code (Sonnet 5). Risk class R correction
-  pass on `phase-3/remote-classifier` for the three findings from the
-  original implementation's review (that original implementation and its
-  review are now rotated out of this ledger per the two-iteration rule;
-  both remain in Git history at commit `cba5b14` and its review commit).
-  Base: `cba5b14` plus the uncommitted review. Preserved:
-  `NormalizationResult`/`Provenance`, the public
-  `classify_remote_type(title, description)` signature, the pure/offline
-  boundary, unsupported-phrase behavior, and every previously-passing
-  safety case (all reconfirmed still passing, unchanged expected values).
-  No ingestion/persistence/providers/models/migration or other parser
-  touched.
-- Outcome, addressing each finding exactly:
-  1. **Generic tokens treated as evidence without context; negation could
-     fail open.** Resolved via three additions, all scoped to
-     `remote.py`, without a broad "positive arrangement requirement" that
-     would have (and, in an earlier draft, did) broken the already-correct
-     `"Not remote, onsite."` case:
-     - New exclusion phrase `"hybrid cloud"` (masked in both fields) —
-       closes the `Hybrid Cloud Engineer`/`Build hybrid cloud
-       infrastructure` false positives, including the title-only case,
-       which the description-only mechanisms below cannot reach.
-     - New **description-only** context-cue set (`team`/`teams`/
-       `system`/`systems`/`device`/`devices`/`interview`/`meeting`/
-       `meetings`), applied only when processing `description`, never
-       `title` — closes `Manage remote teams...`, `Troubleshoot remote
-       systems and devices`, `...an in-person interview`, and `...quarterly
-       in-person meetings` by suppressing the nearby positive match, the
-       same 3-token-window mechanism the existing universal context cues
-       already used, just field-scoped. `title` keeps only the universal
-       cues and exclusion phrases, per the review's own distinction
-       ("title markers may remain narrowly supported with domain
-       exclusions, while description matches must express an
-       arrangement").
-     - **Negation coordination + unresolved-negation poisoning**: negation
-       suppression now propagates transitively to any candidate directly
-       coordinated with an already-suppressed one via exactly one
-       `"or"`/`"nor"` token between their spans (never a bare
-       comma-adjacent gap — verified this distinction explicitly, see
-       below) — closes `This position is not remote or hybrid`. Separately,
-       if a negation cue is present in a sentence containing a candidate
-       anywhere, but its own nearest-candidate search finds nothing within
-       its 3-token window (an "unresolved" negator), that sentence's
-       candidates are now discarded entirely rather than left positive —
-       closes `This is not, under any circumstances, a remote position`
-       (previously a documented "accepted limitation"; now genuinely
-       fixed, not merely relabeled).
-     - Module docstring corrected: the old "fail-closed" claim for
-       long-distance negation (which actually preserved a positive match)
-       is removed; the new unresolved-negation-poisoning behavior is
-       documented as what it actually is.
-  2. **AST deny-list, not fail-closed.** Replaced `_DISALLOWED_IMPORT_
-     PREFIXES` with an exact `_ALLOWED_IMPORTS` dict (one entry per file,
-     naming every import actually present — stdlib only, plus
-     `app.normalization.types` for `remote.py`); anything not explicitly
-     listed now fails. Added
-     `test_import_boundary_rejects_unrecognized_import`, a synthetic
-     regression parsing a fabricated `"import requests"` snippet (not a
-     real file) and asserting it is correctly rejected by the same
-     allow-list check — proving the mechanism itself is fail-closed, not
-     only that the two real files happen to pass it today.
-  3. **ROADMAP's stale Phase 2 status.** The `phase-2/closure` paragraph
-     now states it was approved, merged at `d4bd606`, recorded at
-     `199eb00`, and that Phase 2 is officially complete — replacing the
-     old "pending Codex's independent exit-gate review" wording. The
-     adjacent Phase 3 paragraph (already accurate — first slice
-     implemented, pending review, not complete) is untouched.
-- New/changed fixture cases (14 added to the corpus, now 41 total): the
-  seven reproduced strings verbatim (`hybrid_cloud_title_and_description_
-  exclusion`, `hybrid_cloud_title_only_exclusion`, `description_only_
-  remote_team_mention_not_arrangement`, `description_only_remote_systems_
-  mention_not_arrangement`, `description_only_in_person_interview_event_
-  not_arrangement`, `description_only_in_person_meetings_event_not_
-  arrangement`, `unresolved_long_distance_negation_forces_unavailable`,
-  `negation_coordinated_or_alternative_forces_unavailable`), one extra
-  coordination case isolating the or/nor mechanism from every other
-  protection (`negation_coordination_propagates_independent_of_other_
-  protections`), an explicit duplicate recording that comma-adjacency
-  must never coordinate (`negation_preserves_uncoordinated_alternative`),
-  and four positive controls (`positive_control_work_from_home`,
-  `positive_control_wfh`, `positive_control_in_office`,
-  `positive_control_onsite_bare`) covering every retained catalog phrase
-  not already exercised elsewhere.
-- Files changed: `backend/app/normalization/remote.py` (all corrections;
-  docstring rewritten to match), `backend/tests/test_normalization_
-  remote.py` (allow-list import-boundary tests replacing the deny-list
-  test), `backend/tests/fixtures/normalization/remote_type_cases.json`
-  (14 new cases), `docs/ROADMAP.md` (Phase 2 status correction), this
-  handoff entry. `app/normalization/types.py` and `test_normalization_
-  types.py` untouched — no finding required changing them.
-- Verification: the two targeted modules directly (**59 passed**, was 43);
-  genuine external `python scripts/verify.py --level routine` (full run) —
-  all **9 steps PASS**, **1554 full-suite tests** (was 1538; +16, i.e. +14
-  corpus cases and +2 import-boundary tests replacing the 1 old deny-list
-  test), ~120-126s across reruns. `ruff format --check`, `ruff check`, and
-  `mypy` all pass on the changed files individually before the full run.
-  `check_repo.py` and `git diff --check` both pass as part of the
-  verifier. No database/migration/schema touched.
-- Adversarial self-review (abbreviated, proportionate to Class R): replayed
-  all seven reproduced false-positive strings against the corrected
-  implementation (all now `unavailable`, confirmed via the passing corpus
-  tests above), then four targeted breaks against the new protections,
-  each reverted cleanly (`git diff --stat` empty afterward). (1) Disabled
-  the description-only context cues — exactly the four non-hybrid-cloud
-  reproduction cases failed, each leaking its false-positive value again.
-  (2) Removed `"hybrid cloud"` from the exclusion phrases — both
-  hybrid-cloud cases (title+description, and title-only) failed, leaking
-  `hybrid`. (3) Disabled unresolved-negation poisoning — exactly the
-  long-distance-negation case failed, leaking `remote`. (4) Disabled
-  or/nor coordination propagation — both coordination-dependent cases
-  failed, leaking `hybrid`, while `negation_preserves_uncoordinated_
-  alternative` (`"Not remote, onsite."`) **still passed** even with
-  coordination disabled — direct proof that the comma-adjacent case never
-  relied on coordination, and that the two mechanisms are genuinely
-  independent as designed.
-- Deviations/known limitations: the pre-existing `alembic check`
-  substitution (unrelated, recorded previously, not applicable — no
-  schema/migration touched). The module docstring's remaining accepted
-  limitation (two separate, unconnected negators/candidates coincidentally
-  sharing one sentence could still cross-poison) is stated explicitly, not
-  silently handled — narrower in scope than the original long-distance
-  case, which is now fixed.
-- STOP — awaiting Codex re-review. Do not merge, begin another Phase 3
-  parser, wire into ingestion/persistence, contact providers, or create a
-  migration.
-
-### Work review
-
-- Date/reviewer: 2026-09-06, Codex.
-- Diff reviewed: `cba5b14..21f55ae` on `phase-3/remote-classifier`.
-- Verdict: **Changes requested.** The prior negation defect is fixed, the
-  import-boundary check is now fail-closed, and ROADMAP correctly records Phase 2
-  completion. The High semantic finding is only partially closed: the implementation
-  still treats bare `remote`/`hybrid`/`in person` tokens in descriptions as affirmative
-  work-arrangement evidence and attempts to enumerate nearby counterexamples.
-- Independent verification: inspected the five-file correction diff; reran both
-  targeted modules (**59 passed**) and the canonical routine verifier (**all 9 checks
-  PASS, 1554 full-suite tests**). Replayed all seven originally reported strings and
-  confirmed they now return unavailable. Then exercised nearby ordinary constructions
-  not present in the expanded corpus.
-- Finding:
-  1. **High — the description path remains fail-open for unenumerated non-arrangement
-     uses of the same generic words.** The committed implementation returns
-     `remote/PARSED_DESCRIPTION` for `Serve remote customers across several regions`,
-     `Monitor and maintain remote servers around the clock`, and `Travel regularly to
-     remote sites in northern Alaska`; `hybrid/PARSED_DESCRIPTION` for `Design and
-     operate hybrid databases for enterprise clients`; and
-     `onsite/PARSED_DESCRIPTION` for `Conduct in-person demonstrations for prospective
-     clients`. The title path likewise returns `remote/INFERRED` for `Remote Systems
-     Administrator` and `Remote Team Manager`, both ambiguous domain/subject titles.
-     Adding `team/system/device/interview/meeting` cues closed the cited examples but
-     not the unsafe rule that produced them. This contradicts the requested boundary
-     that description evidence express the position's arrangement and the Phase 3 rule
-     to prefer unknown over a false fact.
-- Exact requested correction: use separate, explicit positive catalogs for title and
-  description. In descriptions, accept only arrangement-bearing phrases (for example
-  remote/hybrid/onsite role, position, job, work arrangement or schedule; work
-  remotely/from home/from anywhere; onsite attendance or work in office), rather than
-  accepting a bare generic token and trying to enumerate every non-arrangement noun.
-  Retain context/exclusion cues as defense in depth, not as the primary semantic gate.
-  A bare candidate may survive only under a separately tested, structurally explicit
-  contrast rule needed for cases such as `Not remote, onsite`; do not weaken that
-  accepted behavior. Add the seven newly reproduced strings above as unavailable
-  regressions and positive controls for every retained description phrase. Add title
-  domain exclusions sufficient for the two reproduced ambiguous titles while
-  preserving `Software Engineer (Remote)` and other explicit title markers. Update the
-  module contract and handoff claims accordingly. Preserve the completed negation,
-  import-boundary, provenance, ROADMAP, pure/offline, and public-signature fixes. Run
-  targeted and canonical verification and adversarially test unseen remote/hybrid/
-  in-person subject-matter phrases. Do not merge or begin another parser pending
-  re-review.
-
----
-
-## Iteration 2
-
-### Work done
-
-- Date/agent: 2026-09-06, Claude Code (Sonnet 5). Risk class R correction
   pass on `phase-3/remote-classifier` for the one remaining High finding
-  from Iteration 1's `Work review` above. Base: commit `21f55ae` plus the
-  uncommitted review. Preserved: `NormalizationResult`/`Provenance`, the
-  public signature, the pure/offline boundary, unsupported-phrase
-  behavior, the completed negation/import-boundary/ROADMAP fixes, and
-  every previously-passing safety case (all reconfirmed, including
-  `"Not remote, onsite." -> onsite` and `"Software Engineer (Remote)" ->
-  remote`). No ingestion/persistence/providers/models/migration or other
-  parser touched.
+  from the prior iteration's `Work review` (that prior iteration's own
+  Work done and review are now rotated out of this ledger per the
+  two-iteration rule; both remain in Git history at commit `21f55ae` and
+  its review commit). Base: `21f55ae` plus the uncommitted review.
+  Preserved: `NormalizationResult`/`Provenance`, the public signature, the
+  pure/offline boundary, unsupported-phrase behavior, the completed
+  negation/import-boundary/ROADMAP fixes, and every previously-passing
+  safety case (all reconfirmed, including `"Not remote, onsite." ->
+  onsite"` and `"Software Engineer (Remote)" -> remote`). No ingestion/
+  persistence/providers/models/migration or other parser touched.
 - Outcome — replaced the bare-token-plus-deny-list design with genuinely
   separate positive catalogs per field:
   - **`title`** keeps the bare marker catalog unchanged (`_BARE_TOKEN_
@@ -312,11 +136,10 @@ that detail.
     `_extract_description_signal()`; `_extract_title_signal()` is
     unaffected (title never needed this exception).
   - Existing negation/coordination/unresolved-negation/exclusion/context-
-    cue mechanics from Iteration 1 are unchanged in mechanism, just now
-    operate over two field-specific candidate pools (`qualified` and
-    `bare`) instead of one shared pool, with context/exclusion cues kept
-    explicitly as defense in depth, not the primary gate, per the review's
-    instruction.
+    cue mechanics are unchanged in mechanism, just now operate over two
+    field-specific candidate pools (`qualified` and `bare`) instead of one
+    shared pool, with context/exclusion cues kept explicitly as defense in
+    depth, not the primary gate, per the review's instruction.
   - Module docstring rewritten top-to-bottom to describe the actual
     field-specific positive-evidence contract, replacing every reference
     to the old shared bare-token design.
@@ -366,14 +189,12 @@ that detail.
   ambiguous titles (`"Remote Infrastructure Engineer"`, `"Remote Client
   Success Manager"`, `"Hybrid Network Specialist"`) — **all three still
   leak a false positive**, an honestly-discovered, narrower limitation of
-  title's still-enumerated exclusion design (which the review's own
-  guidance sanctions as acceptable — "title markers may remain narrowly
-  supported with domain exclusions"); documented explicitly in the module
-  docstring rather than silently left implicit, not fixed in this pass.
-  Then four targeted breaks against the new mechanisms, each reverted
-  cleanly (`git diff --stat` empty afterward): (1) disabled the positive-
-  catalog gate entirely (every candidate counts, qualified or not) —
-  exactly the five reproduced description regressions failed, each
+  title's still-enumerated exclusion design, documented explicitly in the
+  module docstring rather than silently left implicit, not fixed in this
+  pass. Then four targeted breaks against the new mechanisms, each
+  reverted cleanly (`git diff --stat` empty afterward): (1) disabled the
+  positive-catalog gate entirely (every candidate counts, qualified or
+  not) — exactly the five reproduced description regressions failed, each
   leaking its bare-token value again; (2) disabled `_is_comma_contrast`
   (forced `False`) — both comma-contrast-dependent cases failed, `"Not
   remote, onsite."` incorrectly became `unavailable`; (3) removed the two
@@ -384,12 +205,184 @@ that detail.
   coordination-adjacent cases were correctly unaffected.
 - Deviations/known limitations: the pre-existing `alembic check`
   substitution (unrelated, not applicable). The negation-window and dual-
-  unconnected-negator limitations from Iteration 1, unchanged. **New**:
-  title's exclusion-list approach does not generalize to arbitrary
-  ambiguous domain/subject titles beyond the two reproduced strings (see
+  unconnected-negator limitations, unchanged. **New**: title's
+  exclusion-list approach does not generalize to arbitrary ambiguous
+  domain/subject titles beyond the two reproduced strings (see
   adversarial self-review above and the module docstring) — an accepted,
   documented limitation of the "narrow exclusions" design the review
   itself sanctioned for `title`, not silently discovered-and-hidden.
+- STOP — awaiting Codex re-review. Do not merge, begin another Phase 3
+  parser, wire into ingestion/persistence, contact providers, or create a
+  migration.
+
+### Work review
+
+- Date/reviewer: 2026-09-06, Codex.
+- Diff reviewed: `21f55ae..c8a1217` on `phase-3/remote-classifier`.
+- Verdict: **Changes requested.** The description-side positive-evidence redesign
+  closes the prior reproduced false positives and generalizes across additional subject-
+  matter prose. Two remaining issues block approval: known title false positives were
+  documented as "accepted" without user/reviewer approval, and the supposedly comma-
+  specific contrast rule cannot distinguish a comma from other discarded separators.
+- Independent verification: inspected the three-file executable/corpus correction and
+  handoff rotation; reran both targeted modules (**77 passed**) and the canonical
+  verifier (**all 9 checks PASS, 1572 full-suite tests**). Replayed the prior description
+  cases successfully, then directly exercised title and separator variants.
+- Findings:
+  1. **High — the title path knowingly emits false work-arrangement facts from bare
+     subject/domain modifiers.** The implementation and handoff acknowledge that
+     `Remote Infrastructure Engineer`, `Remote Client Success Manager`, and `Hybrid
+     Network Specialist` still return confident `remote`/`hybrid` values, then label
+     this an accepted limitation. The prior review allowed narrow title markers with
+     domain exclusions; it did not authorize knowingly retaining newly discovered false
+     facts. Replace arbitrary bare-token-anywhere matching in titles with conservative
+     structural markers: an exact marker title, a parenthesized/bracketed marker, a
+     delimiter-separated marker segment, or an explicit arrangement-bearing phrase
+     such as `fully remote`/`100% remote`/`work from home`. A leading adjective attached
+     directly to an occupational/domain noun must remain unknown. Preserve explicit
+     cases such as `Software Engineer (Remote)`, punctuation/full-width variants, WFH,
+     and `(In Office)`. Update the existing title-vs-description conflict fixture to use
+     an unambiguously structural remote title marker if necessary; do not preserve an
+     ambiguous leading `Remote ...` title merely to keep that test unchanged. Add the
+     three acknowledged titles as unavailable regressions and adversarially test unseen
+     remote/hybrid domain titles.
+  2. **Medium — `_is_comma_contrast` does not establish that a comma exists.** The
+     tokenizer removes commas, whitespace, hyphens, slashes, and dashes before
+     `_gap_between` runs, so all of those separators produce the same zero-token gap.
+     Direct execution returns `onsite/PARSED_DESCRIPTION` not only for the authorized
+     `Not remote, onsite`, but also for `Not remote onsite`, `Not remote - onsite`, and
+     `Not remote / onsite`. Preserve separator/span information (or inspect the original
+     normalized substring using character spans) and require the exact documented comma
+     contrast, with optional surrounding whitespace only. Add one positive comma case
+     and explicit unavailable regressions for whitespace-only, hyphen, slash, and dash
+     variants. Do not broaden the exception implicitly.
+- Prior-finding disposition: the description path now requires arrangement-bearing
+  positives; long/unresolved and coordinated negation remain fail-closed; the exact AST
+  allow-list and ROADMAP correction remain accepted. Preserve those mechanisms,
+  `NormalizationResult`/`Provenance`, the public signature, and the pure/offline scope.
+- Exact requested correction: change only title-evidence semantics/documentation,
+  separator-aware comma contrast, the regression corpus/tests, and this ledger. Run the
+  targeted modules and canonical verifier; adversarially prove arbitrary adjacency can
+  no longer trigger the contrast exception and unstructured leading title modifiers no
+  longer classify. Do not merge or begin another parser pending re-review.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-09-06, Claude Code (Sonnet 5). Risk class R correction
+  pass on `phase-3/remote-classifier` for the two remaining findings from
+  Iteration 1's `Work review` above. Base: commit `c8a1217` plus the
+  uncommitted review. Preserved: the accepted description positive
+  catalog and context protections, coordinated/unresolved negation, the
+  fail-closed import allow-list, `NormalizationResult`/`Provenance`, the
+  public signature, and the pure/offline scope. No ingestion/persistence/
+  providers/models/migration or other parser touched. **Note on this
+  ledger's own structure**: Codex's Iteration-1 `Work review` above (diff
+  `21f55ae..c8a1217`) was found misplaced on disk — inserted ahead of the
+  now-superseded original review under the wrong heading, with its
+  matching `Work done` appearing only afterward. Its content is
+  reproduced above byte-for-byte, unchanged; only its position was moved
+  so it sits paired with the `Work done` it actually reviews, per this
+  file's own stated purpose. Flagging this rather than silently leaving
+  the ledger self-contradictory.
+- Outcome, addressing each finding exactly:
+  1. **Title false positives from bare subject/domain modifiers.**
+     Replaced `title`'s "bare marker matches anywhere" rule with a
+     conservative structural rule (`_extract_title_signal`): a bare marker
+     counts only when it is (a) the complete title, (b) parenthesized or
+     bracketed, or (c) its own delimiter-separated segment (split on
+     comma/pipe/colon, or a hyphen/en-dash/em-dash surrounded by
+     whitespace — never one glued inside a word like "on-site").
+     Separately, explicit multi-word phrases (`"fully remote"`, `"100%
+     remote"`, `"work remotely"`, `"work from home"`, `"work from
+     anywhere"`, `"wfh"`, `"work in the office"`) count anywhere in the
+     title, since they are inherently unambiguous. A leading `Remote`/
+     `Hybrid` directly modifying an occupational/domain noun now fails
+     every case and returns `unavailable`. Title negation support was not
+     reintroduced — the structural rule needed it for nothing in this
+     catalog's scope, and adding it back would reopen the exact
+     "matches anywhere" risk this closes. `_extract_title_signal` no
+     longer takes a `require_arrangement_context`-style parameter; it is
+     its own dedicated function, structurally simpler than `description`'s.
+  2. **`_is_comma_contrast` couldn't distinguish a comma from other
+     separators.** The tokenizer (`_tokenize`) previously discarded the
+     *identity* of whatever sat between two tokens — a comma, a hyphen, a
+     slash, an em-dash, and plain whitespace all produced the same "zero
+     tokens in between" gap. Added `_tokenize_with_spans`, which returns
+     each token's character offsets alongside its text; `_is_comma_
+     contrast` now looks at the **raw substring** between two candidates'
+     original character spans and requires it to match
+     `_EXACT_COMMA_GAP_RE` (`\A\s*,\s*\Z`) — exactly one comma, optionally
+     surrounded by whitespace, and nothing else. A hyphen, slash, em-dash,
+     tab, or bare space between the tokens no longer satisfies the
+     exception.
+  3. **Removed the false "accepted limitation" claim.** The module
+     docstring's "title still uses an enumerated exclusion list" section
+     is deleted entirely (title no longer works that way) and replaced
+     with a full description of the actual structural-marker contract;
+     the "separator-exact comma-contrast" behavior is documented in place
+     of the old ambiguous "zero-token gap" description.
+- New fixture cases (corpus now 67 total, +8 net): the three reproduced
+  ambiguous titles as unavailable regressions
+  (`title_remote_infrastructure_engineer_structural_rejection`,
+  `title_remote_client_success_manager_structural_rejection`,
+  `title_hybrid_network_specialist_structural_rejection`), one positive
+  exact-comma control (`comma_contrast_positive_exact_comma`), and three
+  separator-rejection regressions (`comma_contrast_rejects_bare_
+  whitespace`, `comma_contrast_rejects_hyphen`, `comma_contrast_rejects_
+  slash`, `comma_contrast_rejects_em_dash` — four, not three; whitespace,
+  hyphen, slash, and em-dash). `conflicting_title_vs_description`'s title
+  reworded from the ambiguous `"Remote Customer Support Specialist"` to
+  the explicit structural marker `"Customer Support Specialist
+  (Remote)"`, per the review's own instruction, so the fixture continues
+  testing a genuine cross-field conflict rather than depending on the
+  now-rejected unsafe title behavior.
+- Files changed: `backend/app/normalization/remote.py` (title-signal
+  redesign, span-aware tokenizer, comma-contrast rule, docstring
+  rewritten), `backend/tests/fixtures/normalization/remote_type_cases.json`
+  (8 new cases, 1 reworded), this handoff entry (including the structural
+  correction noted above). `app/normalization/types.py`, both test files,
+  and `docs/ROADMAP.md` untouched — no finding required changing them.
+- Verification: both targeted modules directly (**85 passed**, was 77);
+  genuine external `python scripts/verify.py --level routine` (full run) —
+  all **9 steps PASS**, **1580 full-suite tests** (was 1572; +8),
+  ~117-126s across reruns. `ruff format --check`/`ruff check`/`mypy` all
+  pass. `check_repo.py` and `git diff --check` both pass as part of the
+  verifier. No database/migration/schema touched.
+- Adversarial self-review (abbreviated, proportionate to Class R): probed
+  **ten entirely unseen** ambiguous titles beyond the three reproduced
+  strings (`Remote Sales Executive`, `Remote Marketing Specialist`,
+  `Hybrid Finance Analyst`, `Remote Product Owner`, `Hybrid Legal
+  Counsel`, `Remote Data Engineer`, `Remote-First Software Engineer`,
+  `Hybrid Operations Coordinator`, `Remote HR Business Partner`, `Remote
+  Talent Acquisition Partner`) — **all ten correctly returned
+  `unavailable`**, including the hyphen-glued `"Remote-First"` case,
+  confirming the structural rule generalizes rather than only covering
+  the three named strings. Separately probed comma-boundary edge cases
+  directly (no space around the comma, extra whitespace around the
+  comma, a double comma, and a bare tab with no comma) — every variant
+  behaved exactly as the exact-comma regex specifies: any single comma
+  with arbitrary surrounding whitespace rescues; a double comma or a
+  comma-free separator does not. Then two targeted breaks, each reverted
+  cleanly (`git diff --stat` empty afterward): (1) reverted title matching
+  to "bare marker found anywhere in the whole-title token stream" (the
+  pre-fix design) — exactly the three reproduced title regressions
+  failed, each leaking its bare value again; (2) reverted the comma check
+  to a token-gap-only test that could not see separator identity — all
+  four separator-rejection regressions failed (whitespace, hyphen, slash,
+  em-dash all incorrectly rescued `onsite`), while the exact-comma
+  positive control and `negation_nearest_only_comma_onsite` remained
+  correctly unaffected, isolating the separator-exactness check as the
+  specific mechanism responsible.
+- Deviations/known limitations: the pre-existing `alembic check`
+  substitution (unrelated, not applicable). The negation-window and
+  dual-unconnected-negator limitations, unchanged. No remaining title
+  false-positive limitation is claimed — the structural rule was tested
+  against 13 total ambiguous titles (3 reproduced + 10 unseen) and none
+  leaked.
 - STOP — awaiting Codex re-review. Do not merge, begin another Phase 3
   parser, wire into ingestion/persistence, contact providers, or create a
   migration.
