@@ -98,153 +98,6 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-09-07, Claude Code (Sonnet 5). Risk class R correction
-  pass on `phase-3/employment-classifier` for both remaining findings in
-  Iteration 1's `Work review` above. Base: commit `db1805f` plus the
-  uncommitted review. Preserved: every already-accepted correction
-  (direction/clause-aware negation, the 16-cell structural-title matrix,
-  the ROADMAP Phase 4 wording, axis split/scope, `EmploymentType`
-  vocabulary, same-axis-conflict rule, fail-closed import allow-list,
-  `NormalizationResult`/`Provenance`, public signature, pure/offline
-  scope). Modified only `employment.py`, its corpus/tests, and this
-  handoff entry — `docs/ROADMAP.md` untouched this pass, per instruction.
-- Outcome, addressing each finding exactly:
-  1. **Article-bearing `neither…nor`/`either…or` coordination.**
-     `_is_coordinated` now accepts a gap of exactly one coordinating
-     token (`"or"`/`"nor"`, unchanged) **or** exactly one coordinating
-     token followed by exactly one determiner (`"a"`, `"an"`, `"the"`) —
-     never arbitrary intervening prose (verified adversarially: an extra
-     word between the determiner and the candidate, e.g. `"or a very
-     full-time position"`, correctly still fails to coordinate). Fixes
-     all three reproduced leaks (`"neither seasonal nor a full-time
-     position"`, `"neither a seasonal role nor a full-time position"`,
-     `"not either a seasonal role or a full-time position"`) -> all now
-     `unavailable`. 6 new `coordination_determiner_*`/`coordination_
-     preserves_*` regressions, including an `"an"` form, a `"the"` form,
-     and one proving a non-coordinated (`"and"`-joined) independent
-     candidate still survives untouched.
-  2. **Glued-hyphen normalization was global, not boundary-aware.**
-     Replaced the blanket `_GLUED_HYPHEN_RE` (any hyphen between
-     non-whitespace characters) with
-     `_canonicalize_approved_hyphen_compounds`: an explicit, small list
-     of exactly four approved compound spellings (`full-time`,
-     `part-time`, `contract-to-hire`, `temp-to-perm`), each matched only
-     at a genuine word boundary and only when **not** immediately
-     preceded or followed by another hyphen. `"Full--Time"`/
-     `"Full---Time"` never match the literal single-hyphen pattern at
-     all; `"non-full-time"`/`"full-time-ish"` are blocked by the adjacent-
-     hyphen lookaround. Any hyphen surviving this step is tokenized as
-     its own hard token (`_TOKEN_RE`, unchanged from the prior pass). 9
-     new `hyphen_boundary_*` regressions: double/triple hyphen (title),
-     `non-`/`-ish` chains (description), and positive controls for
-     ordinary `full-time`, `full time`, and both approved masked
-     compounds.
-- Files changed: `backend/app/normalization/employment.py`
-  (`_is_coordinated`, `_canonicalize_approved_hyphen_compounds` replacing
-  `_GLUED_HYPHEN_RE`, docstring), `backend/tests/fixtures/normalization/
-  employment_type_cases.json` (14 new cases — 6 coordination + 8
-  hyphen-boundary —, 80 total, was 66), this handoff entry.
-  `backend/tests/test_normalization_employment.py`, `docs/ROADMAP.md`,
-  `app/normalization/types.py`, `app/normalization/remote.py` untouched.
-- Verification: targeted employment module alone (**85 passed**, was 71
-  — 80 fixture cases + 5 code-level tests); all three normalization
-  modules together (**173 passed**). `ruff format --check`/`ruff
-  check`/`mypy` all pass. Genuine external `python scripts/verify.py
-  --level routine` (full run) — all **9 steps PASS**, **1668 full-suite
-  tests** (was 1654; +14, exactly matching the 14 net-new fixture cases).
-  No database/migration/schema touched.
-- Adversarial testing of coordination determiners and hyphen-chain
-  boundaries (required this round): probed 14 unseen cases beyond the
-  fixture corpus. Confirmed the determiner extension stays narrow — an
-  extra word between the coordinator/determiner and the candidate
-  (`"or a very full-time position"`, `"or perhaps a full-time
-  position"`) correctly fails to coordinate, leaving the farther
-  candidate to survive on its own merits rather than being wrongly
-  suppressed. Confirmed the hyphen-boundary fix generalizes beyond the
-  two reported prefixes/suffixes (`"quasi-full-time"`,
-  `"full-time-equivalent"`, `"Part--Time"` all correctly rejected) and
-  handles degenerate stray-hyphen inputs (`"-full-time"`, `"full-time-
-  position"` typo-shaped forms) conservatively (unavailable, not a
-  guess). No new issues found.
-- Deviations/known limitations: none new. The pre-existing `alembic
-  check` substitution remains, unrelated to this slice. The
-  coordination-adjacency gap noted in the prior pass (an intervening
-  article breaking plain `"or"/"nor"` propagation) is now closed for the
-  single-determiner case; arbitrary multi-word intervening prose between
-  a coordinator and a candidate is still not coordinated, by design, not
-  as a remaining defect.
-- STOP — awaiting Codex re-review. Do not merge, begin another Phase 3
-  parser, wire into ingestion/persistence, contact providers, or create a
-  migration.
-
-### Work review
-
-- Date/reviewer: 2026-09-07, Codex.
-- Diff reviewed: `db1805f..428703f` on `phase-3/employment-classifier`.
-- Verdict: **Approved.** No executable findings.
-- The two requested corrections are closed. Direct adversarial replay confirms the
-  three reported article-bearing coordination cases now fail closed, while the
-  extension remains limited to `or`/`nor` followed by at most one approved
-  determiner. Double/triple hyphens and prefix/suffix chains such as
-  `non-full-time` and `full-time-ish` no longer create positive evidence; ordinary
-  approved `full-time`/`part-time` spellings and the two approved cross-axis mask
-  compounds remain functional.
-- Independent verification: all three normalization modules pass (**173 tests**);
-  the canonical focused verifier passes all **10 steps** (**85 focused / 1668 full
-  suite**), including Ruff, mypy, repository checks, test-database safety and
-  cleanup. `git diff --check` is clean. No schema or migration changed.
-- Scope is appropriately bounded to `employment.py`, the fixture corpus, and this
-  handoff ledger. The existing design choice not to coordinate across arbitrary
-  intervening prose is documented and is not expanded by this correction.
-- The employment classifier correction pass is accepted. Do not merge or begin
-  another Phase 3 parser until the user explicitly authorizes that action.
-
-### Merge record
-
-- Date: 2026-09-07. User authorized merging `phase-3/employment-classifier`
-  into `main` following Codex's Approved review (no executable findings;
-  approval commit `67cf09b`) above.
-- Pre-merge state: `main` and `origin/main` both at `243a78a`; feature
-  branch `phase-3/employment-classifier` and its origin both clean and
-  synced at `67cf09b` (containing implementation/correction commits
-  `cee74e5`, `db1805f`, `428703f`, and the review-approval commit
-  `67cf09b`).
-- Merge: `git merge --no-ff phase-3/employment-classifier` on `main` —
-  merge commit `8e136c0`. `git diff phase-3/employment-classifier HEAD`
-  is empty (zero content difference); `git diff --check` and
-  `check_repo.py` both exit 0; working tree clean.
-- Post-merge verification: genuine external `python scripts/verify.py
-  --level routine` (full run, no `--focus`) — all **9 steps PASS** (Ruff
-  format/check, mypy, `check_repo.py`, `git diff --check`,
-  disposable-database URL/reachability, **1668 full-suite tests**,
-  temp-directory cleanup).
-- Pushed: `main` at `8e136c0`, matching `origin/main`.
-- Rollback boundary: to revert this slice, reset `main` to `243a78a` (the
-  commit immediately before this merge) — this removes
-  `app/normalization/employment.py`, both new test/fixture files, and the
-  `docs/ROADMAP.md`/`docs/LLM_HANDOFF.md` wording changes cleanly, with
-  no migration to reverse and no data written by this slice to any
-  environment (pure Python, never wired into ingestion/persistence).
-- **Phase 3's second parser slice is merged, not Phase 3 itself.** The
-  deterministic full_time/part_time/seasonal/internship classifier
-  (`jobs.employment_type` only — `jobs.contract_type` and `jobs.shift`
-  remain untouched, deferred/unplanned respectively) is now on `main`,
-  reviewed across two correction rounds with no remaining executable
-  findings. The other six required Phase 3 parsers (title, salary,
-  location, seniority, experience, skill) remain unstarted; this
-  classifier is not wired into `ingestion/pipeline.py` or
-  `ingestion/persistence.py`, and no `parser_version`/`field_provenance`
-  write exists yet — those remain Phase 4+ concerns.
-- STOP — do not begin or propose another Phase 3 parser, wire this
-  classifier into ingestion/persistence, contact providers, or create a
-  migration without separate authorization.
-
----
-
-## Iteration 2
-
-### Work done
-
 - Date/agent: 2026-09-07, Claude Code (Sonnet 5). Risk class R (Class
   R-plus-adversarial per the approved proposal). New bounded slice on new
   branch `phase-3/seniority-classifier`, base: clean `main@7a90282` (the
@@ -302,7 +155,7 @@ that detail.
   undelimited `Senior Staff Engineer` by defeating the compound rule.
 - Files changed: `backend/app/normalization/seniority.py` (new),
   `backend/tests/test_normalization_seniority.py` (new),
-  `backend/tests/fixtures/normalization/seniority_cases.json` (new, 89
+  `backend/tests/fixtures/normalization/seniority_cases.json` (new, 84
   cases), `docs/ARCHITECTURE.md` (annotated `seniority.yaml` as planned
   future enrichment, not implemented by this slice, per the accepted
   decision), `docs/ROADMAP.md` (Phase 3 bullet — also corrected a
@@ -401,3 +254,82 @@ that detail.
   targeted normalization tests and canonical verifier, adversarially replay the three
   reproduced conflicts plus preserved compound/single-value controls, commit and push
   the feature branch, then stop for re-review.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-09-07, Claude Code (Sonnet 5). Risk class R correction
+  pass on `phase-3/seniority-classifier` for both findings in Iteration
+  1's `Work review` above. Base: commit `1ac2b81` plus the uncommitted
+  review. Preserved: the anchored title grammar, the anchor-adjacent
+  description entry grammar, the exact executive/support exclusions, the
+  compound rule (`senior`+`staff`/`principal`), the independent import
+  boundary, the locally-implemented hyphen handling, the taxonomy
+  annotation, and the honest evidence-gap statement. Modified only
+  `seniority.py`, its fixture corpus, and this handoff entry.
+- Finding 1 (High — description conflict check was missing): added
+  `_immediate_trailing_conflict`, a description-safe conflict check
+  distinct from title's `_trailing_conflict_labels`. Unlike title's
+  mechanism (which scans the *entire* trailing token list), this only
+  checks the position immediately after the just-matched candidate —
+  skipping a leading run of pure-punctuation hard tokens (`,`, `/`, `&`,
+  `-`, `–`, `—`, which are formatting, not relational prose) — and never
+  scans further. This is what makes `"This is a senior director
+  position."`, `"This is a junior senior analyst role."`, and `"This is a
+  staff/principal engineer position."` all now correctly resolve to
+  `unavailable` (all three reproduced by Codex's review), while `"This is
+  a senior role reporting to the director of engineering."` still
+  correctly resolves to `senior` — the real relational prose ("reporting
+  to the") after the immediate position is never scanned into. The check
+  only runs in the non-negated branch (a negated first candidate already
+  suppresses the whole phrase via the existing prefix grammar; adding a
+  second conflict check there would be redundant, not protective).
+- Finding 2 (Low — fixture count documentation error): corrected
+  `docs/LLM_HANDOFF.md`'s prior Iteration 1 entry, which read "89 cases"
+  for the fixture corpus — the JSON file has always had 84 cases; 89 was
+  always the module's total test count (84 parametrized + 5 code-level).
+  Fixed the file-count claim only; the historical verification totals
+  (89/173/1757 etc.) were already correct and are unchanged.
+- No vocabulary, alias, anchor, explicit principal/director phrase, or
+  exclusion catalog expansion — confirmed by inspection of the diff
+  before committing.
+- Files changed: `backend/app/normalization/seniority.py`
+  (`_immediate_trailing_conflict`, `_PUNCTUATION_HARD_TOKENS`, and the
+  `_extract_description_signal` call site), `backend/tests/fixtures/
+  normalization/seniority_cases.json` (7 new cases, 91 total, was 84),
+  this handoff entry (both the count correction in Iteration 1's already-
+  rotated-out text and this new entry). `backend/tests/
+  test_normalization_seniority.py`, `docs/ARCHITECTURE.md`,
+  `docs/ROADMAP.md`, `app/normalization/employment.py`,
+  `app/normalization/remote.py`, `app/normalization/types.py` untouched.
+- Verification: targeted seniority module alone (**96 passed** — 91
+  fixture cases + 5 code-level tests, was 89); all four normalization
+  modules together (**269 passed**). `ruff format --check`/`ruff
+  check`/`mypy` all pass. Genuine external `python scripts/verify.py
+  --level routine` (full run) — all **9 steps PASS**, **1764 full-suite
+  tests** (was 1757; +7, exactly matching the 7 net-new fixture cases).
+  No database/migration/schema touched.
+- Focused adversarial replay (required this round): beyond the fixture
+  corpus, probed 9 unseen cases — additional immediately-joined pairs not
+  literally matching the three reproduced forms (`"director staff"`,
+  `"principal senior"`, comma-joined and ampersand-joined variants, all
+  correctly `unavailable`); confirmed the compound rule still takes
+  precedence over the new conflict check (`"senior staff engineer
+  position"` still resolves to `staff`, since the compound consumes both
+  tokens before the conflict check ever runs on the remainder);
+  confirmed negated immediately-joined phrases still resolve safely via
+  the existing negation grammar with no crash; and confirmed a longer,
+  more elaborate relational-prose sentence (`"...that occasionally
+  supports our director of engineering initiatives"`) still does not
+  produce a false conflict. No new issues found.
+- Deviations/known limitations: none new. The two adversarial
+  observations recorded in the prior iteration (coordination-adjacency
+  requiring direct adjacency; a title ending in a literal period) remain
+  unchanged, out of scope for this pass. The pre-existing `alembic check`
+  substitution remains, unrelated.
+- STOP — awaiting Codex re-review. Do not merge, begin another Phase 3
+  parser, wire into ingestion/persistence, contact providers, or create a
+  migration.

@@ -754,5 +754,68 @@
     "expected_value": null,
     "expected_provenance": "unavailable",
     "note": "No catalog phrase anywhere in either field."
+  },
+  {
+    "id": "description_conflict_senior_director_immediately_joined",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "This is a senior director position.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review finding 1 (reproduced): 'senior' matches as the candidate; bare 'director' immediately joined right after it (not a recognized compound, since director is excluded from the compound rule) trips the new description-safe immediate-trailing conflict check."
+  },
+  {
+    "id": "description_conflict_junior_senior_analyst_immediately_joined",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "This is a junior senior analyst role.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review finding 1 (reproduced): 'junior' matches as the candidate (entry_level); bare 'senior' immediately joined right after it trips the conflict check."
+  },
+  {
+    "id": "description_conflict_staff_slash_principal_immediately_joined",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "This is a staff/principal engineer position.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review finding 1 (reproduced): 'staff' matches as the candidate; the immediate-conflict check skips the leading '/' (a pure formatting separator, not relational prose) and finds 'principal' directly behind it, tripping the conflict check — mirrors title's Staff/Principal Engineer conflict, via a narrower, description-safe mechanism."
+  },
+  {
+    "id": "description_preserved_senior_staff_compound_unaffected",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "This is a senior staff role.",
+    "expected_value": "staff",
+    "expected_provenance": "parsed_description",
+    "note": "Preserved control: the senior+staff compound consumes both tokens as one unit before the new conflict check ever runs on the remaining trailing text ('role', which matches nothing)."
+  },
+  {
+    "id": "description_preserved_senior_principal_compound_unaffected",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "This is a senior principal role.",
+    "expected_value": "principal",
+    "expected_provenance": "parsed_description",
+    "note": "Preserved control: the senior+principal compound is unaffected by the new conflict check for the same reason as the senior+staff case."
+  },
+  {
+    "id": "description_preserved_ordinary_single_value_after_conflict_check_added",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "This is a staff role.",
+    "expected_value": "staff",
+    "expected_provenance": "parsed_description",
+    "note": "Preserved control: an ordinary single-value description with nothing but a noun after the candidate is unaffected by the new conflict check ('role' matches no other value's root word)."
+  },
+  {
+    "id": "description_preserved_later_relational_prose_not_a_false_conflict",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "This is a senior role reporting to the director of engineering.",
+    "expected_value": "senior",
+    "expected_provenance": "parsed_description",
+    "note": "Proves the new conflict check is narrower than title's broad trailing scan: 'role' (immediately after 'senior', no punctuation to skip) is not another value's root word, so the check stops there — 'director of engineering' later in the same sentence, separated by real relational prose ('reporting to the'), never causes a false conflict."
   }
 ]

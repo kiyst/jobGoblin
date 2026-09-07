@@ -462,6 +462,39 @@ def _trailing_conflict_labels(trailing: list[str], matched_value: Seniority) -> 
     return found
 
 
+# Pure formatting separators — not "relational prose" — that a second,
+# immediately-joined qualifier may sit directly behind, e.g. the "/" in
+# "staff/principal engineer".
+_PUNCTUATION_HARD_TOKENS = frozenset({",", "/", "&", "-", "–", "—"})
+
+
+def _immediate_trailing_conflict(trailing: list[str], matched_value: Seniority) -> Seniority | None:
+    """Description-safe conflict check: unlike title's
+    `_trailing_conflict_labels` (which scans the entire trailing token
+    list), this only checks the position immediately after the just-
+    matched candidate — skipping a leading run of pure-punctuation hard
+    tokens, never actual words — so a second qualifier's root word
+    directly joined there (`"senior director"`, `"junior senior
+    analyst"`, `"staff/principal engineer"`) is caught, while later
+    relational prose in the same sentence (e.g. "...reporting to the
+    director of engineering") is never mistaken for the posting's own
+    tier."""
+    index = 0
+    while index < len(trailing) and trailing[index] in _PUNCTUATION_HARD_TOKENS:
+        index += 1
+    immediate = trailing[index:]
+    if not immediate:
+        return None
+    for label, phrases in _ROOT_TOKENS_BY_VALUE.items():
+        if label == matched_value:
+            continue
+        for phrase in phrases:
+            n = len(phrase)
+            if tuple(immediate[:n]) == phrase:
+                return label
+    return None
+
+
 def _extract_title_signal(text: str | None) -> Seniority | Literal["conflict"] | None:
     if text is None or not text.strip():
         return None
@@ -550,10 +583,15 @@ def _extract_description_signal(text: str | None) -> Seniority | Literal["confli
         if match is None:
             continue
         value, consumed = match
+        after_candidate = after_prefix[consumed:]
+
         if not negated:
             survivors.add(value)
+            conflict_value = _immediate_trailing_conflict(after_candidate, value)
+            if conflict_value is not None:
+                survivors.add(conflict_value)
+                continue
 
-        after_candidate = after_prefix[consumed:]
         gap = _match_coordination_gap(after_candidate)
         if gap is None:
             continue
