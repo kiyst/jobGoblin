@@ -601,5 +601,32 @@
     "expected_value": null,
     "expected_provenance": "unavailable",
     "note": "Codex review reproduction: an em-dash, not a comma, between the tokens — must not rescue the bare 'onsite' candidate."
+  },
+  {
+    "id": "title_crossed_paren_then_bracket_rejected",
+    "origin": "synthetic_adversarial",
+    "title": "(Remote] Infrastructure Engineer",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review reproduction: an opening parenthesis paired with a closing bracket is not a valid structural marker; the mismatched delimiters must not be treated as a parenthesized/bracketed group."
+  },
+  {
+    "id": "title_crossed_bracket_then_paren_rejected",
+    "origin": "synthetic_adversarial",
+    "title": "[Remote) Infrastructure Engineer",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review reproduction: an opening bracket paired with a closing parenthesis is not a valid structural marker; the mismatched delimiters must not be treated as a parenthesized/bracketed group."
+  },
+  {
+    "id": "positive_control_valid_matched_bracket_marker",
+    "origin": "synthetic_representative",
+    "title": "Facilities Coordinator [Remote]",
+    "description": null,
+    "expected_value": "remote",
+    "expected_provenance": "inferred",
+    "note": "Positive control proving a properly paired bracket marker ([Remote]) is still accepted as a structural marker, distinct from the two crossed-delimiter regressions above."
   }
 ]

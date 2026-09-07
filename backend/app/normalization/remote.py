@@ -238,7 +238,7 @@ _TITLE_EXPLICIT_PHRASES: dict[RemoteType, frozenset[tuple[str, ...]]] = {
 # whitespace* (never one glued inside a word, like "on-site" or "100%-
 # remote", which must stay a single token).
 _TITLE_SEGMENT_DELIMITER_RE = re.compile(r"\s[-–—]\s|[,|:]")
-_PAREN_BRACKET_RE = re.compile(r"[(\[]([^()\[\]]*)[)\]]")
+_PAREN_BRACKET_RE = re.compile(r"\(([^()\[\]]*)\)|\[([^()\[\]]*)\]")
 
 # ---------------------------------------------------------------------------
 # Description's positive catalog — arrangement-bearing phrases only. Built
@@ -409,12 +409,23 @@ def _is_comma_contrast(
 
 
 def _title_segments(text: str) -> list[str]:
-    """Every structurally distinct segment of a title: each parenthesized
-    or bracketed group's inner content, plus each delimiter-separated
-    segment of the remaining text (with those groups removed first). With
-    no parentheses/brackets/delimiters at all, this returns exactly one
-    segment — the complete title."""
-    segments = [match.group(1) for match in _PAREN_BRACKET_RE.finditer(text)]
+    """Every structurally distinct segment of a title: each *properly
+    paired* parenthesized `(...)` or bracketed `[...]` group's inner
+    content, plus each delimiter-separated segment of the remaining text
+    (with those groups removed first). With no parentheses/brackets/
+    delimiters at all, this returns exactly one segment — the complete
+    title.
+
+    `_PAREN_BRACKET_RE` matches `(...)` and `[...]` as two entirely
+    separate alternatives — never a mix of the two — so a crossed form
+    like `"(Remote]"` or `"[Remote)"` matches neither alternative and is
+    not treated as a structural marker at all; the mismatched delimiters
+    stay in the plain delimiter-split remainder instead, same as any other
+    stray punctuation."""
+    segments = [
+        match.group(1) if match.group(1) is not None else match.group(2)
+        for match in _PAREN_BRACKET_RE.finditer(text)
+    ]
     remainder = _PAREN_BRACKET_RE.sub(" ", text)
     segments.extend(_TITLE_SEGMENT_DELIMITER_RE.split(remainder))
     return segments
