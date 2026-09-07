@@ -411,15 +411,28 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   `tests/test_ingestion_pipeline.py`. This closure was reviewed and approved by Codex,
   merged into `main` at `d4bd606` (merge record committed at `199eb00`), and **Phase 2
   is officially complete.**
-- **Phase 3: first slice implemented on `phase-3/remote-classifier`, pending Codex
-  review — not merged, not complete.** `app/normalization/remote.py`'s deterministic
-  remote/hybrid/onsite classifier and the shared `app/normalization/types.py`
-  (`NormalizationResult[T]`/`Provenance`) are implemented and tested against a
-  fixture-driven regression corpus, with an automated import-boundary proof (no
-  database/ORM/provider/network dependency). Not wired into ingestion/persistence, no
-  `parser_version` threading, and no other Phase 3 parser (title, salary, location,
-  employment, seniority, experience, skill) has been started — this is one bounded
-  slice, not a Phase 3 completion claim.
-- **Phases 4-14: not started.** Begin each phase only after completing its preflight in
+- **Phase 3: first slice (remote/hybrid/onsite classifier) merged into `main` at
+  `1bc8247` (approval commit `fecbcec`, merge record in
+  [LLM_HANDOFF.md](LLM_HANDOFF.md)) — not a Phase 3 completion claim.**
+  `app/normalization/remote.py`'s deterministic remote/hybrid/onsite classifier and
+  the shared `app/normalization/types.py` (`NormalizationResult[T]`/`Provenance`) are
+  tested against a fixture-driven regression corpus, with an automated import-boundary
+  proof (no database/ORM/provider/network dependency). Not wired into
+  ingestion/persistence, no `parser_version` threading.
+  A second slice (full_time/part_time/seasonal/internship classifier) is implemented
+  on `phase-3/employment-classifier`, pending Codex review — not merged, not
+  complete. `app/normalization/employment.py` deliberately covers only the
+  `jobs.employment_type` schedule/commitment axis; `jobs.contract_type` (deferred to
+  its own future slice) and `jobs.shift` (no parser currently planned) are untouched.
+  No other Phase 3 parser (title, salary, location, seniority, experience, skill) has
+  been started — this is one more bounded slice, not a Phase 3 completion claim.
+- **Phase 4: two bounded read-only prework proofs merged into `main`; the production
+  `AtsScrapersProvider` adapter is not started and Phase 4 is not complete.** The
+  Greenhouse live ATS canary (`phase-4/greenhouse-canary`, merged at `64a3534`) and the
+  Greenhouse live-to-disposable-database ingestion proof (`phase-4/greenhouse-live-proof`,
+  merged at `907b3f0`) both exist; neither is the production `DiscoveryProvider`-wrapping
+  `AtsScrapersProvider` adapter described in this section's own header, which remains
+  unstarted.
+- **Phases 5-14: not started.** Begin each phase only after completing its preflight in
   [PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md) and receiving approval for the next
   smallest slice.
