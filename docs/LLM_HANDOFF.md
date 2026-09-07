@@ -99,135 +99,6 @@ that detail.
 ### Work done
 
 - Date/agent: 2026-09-06, Claude Code (Sonnet 5). Risk class R correction
-  pass on `phase-3/remote-classifier` for the two remaining findings from
-  the prior iteration's `Work review` (that prior iteration's own Work
-  done and review are now rotated out of this ledger per the
-  two-iteration rule; both remain in Git history at commit `c8a1217` and
-  its review commit). Base: commit `c8a1217` plus the uncommitted review.
-  Preserved: the accepted description positive catalog and context
-  protections, coordinated/unresolved negation, the fail-closed import
-  allow-list, `NormalizationResult`/`Provenance`, the public signature,
-  and the pure/offline scope. No ingestion/persistence/providers/models/
-  migration or other parser touched. **Note on this ledger's own
-  structure**: the prior iteration's `Work review` was found misplaced on
-  disk — inserted ahead of the now-superseded original review under the
-  wrong heading, with its matching `Work done` appearing only afterward.
-  Its content was reproduced byte-for-byte, unchanged; only its position
-  was moved so it sits paired with the `Work done` it actually reviews,
-  per this file's own stated purpose. Flagged rather than silently
-  leaving the ledger self-contradictory.
-- Outcome, addressing each finding exactly:
-  1. **Title false positives from bare subject/domain modifiers.**
-     Replaced `title`'s "bare marker matches anywhere" rule with a
-     conservative structural rule (`_extract_title_signal`): a bare marker
-     counts only when it is (a) the complete title, (b) parenthesized or
-     bracketed, or (c) its own delimiter-separated segment (split on
-     comma/pipe/colon, or a hyphen/en-dash/em-dash surrounded by
-     whitespace — never one glued inside a word like "on-site").
-     Separately, explicit multi-word phrases (`"fully remote"`, `"100%
-     remote"`, `"work remotely"`, `"work from home"`, `"work from
-     anywhere"`, `"wfh"`, `"work in the office"`) count anywhere in the
-     title, since they are inherently unambiguous. A leading `Remote`/
-     `Hybrid` directly modifying an occupational/domain noun now fails
-     every case and returns `unavailable`. Title negation support was not
-     reintroduced — the structural rule needed it for nothing in this
-     catalog's scope, and adding it back would reopen the exact
-     "matches anywhere" risk this closes.
-  2. **`_is_comma_contrast` couldn't distinguish a comma from other
-     separators.** The tokenizer (`_tokenize`) previously discarded the
-     *identity* of whatever sat between two tokens — a comma, a hyphen, a
-     slash, an em-dash, and plain whitespace all produced the same "zero
-     tokens in between" gap. Added `_tokenize_with_spans`, which returns
-     each token's character offsets alongside its text; `_is_comma_
-     contrast` now looks at the **raw substring** between two candidates'
-     original character spans and requires it to match
-     `_EXACT_COMMA_GAP_RE` (`\A\s*,\s*\Z`) — exactly one comma, optionally
-     surrounded by whitespace, and nothing else.
-  3. **Removed the false "accepted limitation" claim.** The module
-     docstring's "title still uses an enumerated exclusion list" section
-     is deleted entirely and replaced with a full description of the
-     actual structural-marker contract.
-- New fixture cases (corpus now 67 total, +8 net): the three reproduced
-  ambiguous titles as unavailable regressions, one positive exact-comma
-  control, and four separator-rejection regressions (whitespace, hyphen,
-  slash, em-dash). `conflicting_title_vs_description`'s title reworded
-  from the ambiguous `"Remote Customer Support Specialist"` to the
-  explicit structural marker `"Customer Support Specialist (Remote)"`,
-  per the review's own instruction.
-- Files changed: `backend/app/normalization/remote.py` (title-signal
-  redesign, span-aware tokenizer, comma-contrast rule, docstring
-  rewritten), `backend/tests/fixtures/normalization/remote_type_cases.json`
-  (8 new cases, 1 reworded), this handoff entry. `app/normalization/
-  types.py`, both test files, and `docs/ROADMAP.md` untouched.
-- Verification: both targeted modules directly (**85 passed**, was 77);
-  genuine external `python scripts/verify.py --level routine` (full run) —
-  all **9 steps PASS**, **1580 full-suite tests** (was 1572; +8). No
-  database/migration/schema touched.
-- Adversarial self-review (abbreviated, proportionate to Class R): probed
-  ten entirely unseen ambiguous titles beyond the three reproduced
-  strings — all ten correctly returned `unavailable`, including a
-  hyphen-glued `"Remote-First"` case. Separately probed comma-boundary
-  edge cases (spacing variants, a double comma, a bare tab) — every
-  variant behaved exactly as the exact-comma regex specifies. Two
-  targeted breaks, each reverted cleanly: (1) reverted title matching to
-  "bare marker found anywhere" — the three reproduced regressions failed,
-  each leaking again; (2) reverted the comma check to token-gap-only —
-  all four separator-rejection regressions failed, while the exact-comma
-  positive control remained correctly unaffected.
-- Deviations/known limitations: the pre-existing `alembic check`
-  substitution. The negation-window and dual-unconnected-negator
-  limitations, unchanged. No remaining title false-positive limitation is
-  claimed — tested against 13 total ambiguous titles and none leaked.
-- STOP — awaiting Codex re-review. Do not merge, begin another Phase 3
-  parser, wire into ingestion/persistence, contact providers, or create a
-  migration.
-
-### Work review
-
-- Date/reviewer: 2026-09-06, Codex.
-- Diff reviewed: `c8a1217..3a8cc70` on `phase-3/remote-classifier`.
-- Verdict: **Changes requested.** Both prior findings are substantively closed: title
-  evidence is now structural rather than bare-token-anywhere, and comma contrast is
-  derived from the original character gap rather than a punctuation-blind token gap.
-  One narrow fail-closed defect remains in the new structural-title implementation.
-- Independent verification: inspected the three-file correction and handoff
-  rearrangement; directly reran both targeted modules (**85 passed**); ran the
-  canonical verifier (**all 10 checks PASS, 1580 full-suite tests**); replayed the
-  three previously leaking domain titles and the comma/whitespace/hyphen/slash/dash
-  matrix successfully; and exercised malformed delimiter pairs directly.
-- Finding:
-  1. **Low — mismatched bracket types are accepted as a valid structural title
-     marker.** `_PAREN_BRACKET_RE` uses a combined opening class and combined closing
-     class, so it does not require matching pairs. Consequently both `(Remote]
-     Infrastructure Engineer` and `[Remote) Infrastructure Engineer` currently return
-     `remote/inferred`, even though neither contains a valid parenthesized or bracketed
-     segment. This conflicts with the classifier's conservative, fail-closed contract
-     and with the documented structural-marker rule. Parse `(...)` and `[...]` as
-     separate alternatives (or otherwise enforce paired delimiter types), preserve
-     valid matched-parenthesis/bracket behavior, and add unavailable regressions for
-     both crossed forms.
-- Prior-finding disposition: the acknowledged arbitrary-leading-title false positives
-  now return unavailable; valid exact/parenthesized/bracketed/delimited and explicit-
-  phrase title cases remain supported; `_is_comma_contrast` now requires exactly one
-  raw comma with optional surrounding whitespace and rejects the requested alternative
-  separators. The description catalog, negation protections, import allow-list,
-  `NormalizationResult`/`Provenance`, public signature, and pure/offline boundary
-  remain accepted.
-- Mechanical ledger note: Iteration 2 did not contain its required `Work review`
-  heading/pending placeholder after the implementer rearranged the historical blocks.
-  This review adds the missing heading in its proper paired location; no historical
-  review wording was altered.
-- Exact requested correction: change only the paired-delimiter extraction and its
-  regression corpus/tests, plus the next handoff entry. Run the targeted modules and
-  canonical verifier. Do not merge or begin another parser pending re-review.
-
----
-
-## Iteration 2
-
-### Work done
-
-- Date/agent: 2026-09-06, Claude Code (Sonnet 5). Risk class R correction
   pass on `phase-3/remote-classifier` for the single Low finding from
   Iteration 1's `Work review` above. Base: commit `3a8cc70` plus the
   uncommitted review. Preserved: the structural title-marker rule, the
@@ -353,3 +224,109 @@ that detail.
 - STOP — do not begin or propose another Phase 3 parser, wire this
   classifier into ingestion/persistence, contact providers, or create a
   migration without separate authorization.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-09-07, Claude Code (Sonnet 5). Risk class R. New,
+  read-only-audit-then-approved bounded slice on new branch
+  `phase-3/employment-classifier`, base: clean `main@243a78a` (the
+  remote-classifier merge commit). Second Phase 3 parser:
+  `classify_employment_type(title, description) ->
+  NormalizationResult[EmploymentType]` where `EmploymentType = full_time |
+  part_time | seasonal | internship`.
+- Scope boundary (per approved proposal, revised after a binding
+  correction caught the original proposal conflating axes): this slice
+  covers only `jobs.employment_type` (schedule/commitment). It never
+  reads, writes, or reasons about `jobs.contract_type` (engagement/
+  payroll axis — `contract`, `temporary`, `contract_to_hire`, `1099`,
+  `W2`; deferred to its own future slice) or `jobs.shift` (no parser
+  currently planned for it at all). Cross-axis vocabulary is cross-axis
+  masked as inert (small, closed, explicitly enumerated list —
+  `contract`, `temporary`/`temp`, `contract to hire`/`temp to perm`,
+  `1099`, `w2`, `per diem`) so it can never falsely conflict with an
+  `employment_type` value (e.g. `"Full-Time Contract"` ->
+  `full_time`/`inferred`, "Contract" contributing nothing). `per_diem` is
+  unsupported in v1 by design — no evidence, not silently assigned to
+  either axis. Two distinct `employment_type` values detected in one
+  field (e.g. `"Seasonal, Full-Time"`) are `unavailable`, even though both
+  may be true in reality — documented as a limitation of the existing
+  scalar column, not of the parser.
+- Independent implementation, not a `remote.py` import: no cross-module
+  private-helper import (proven by `test_import_boundary_allow_list` plus
+  a new regression, `test_import_boundary_rejects_cross_parser_private_
+  helper_import`, asserting `app.normalization.remote` specifically is
+  rejected by this module's own allow-list). Smaller than `remote.py` by
+  design — no comma-contrast rescue, so no character-span tracking at
+  all, only token-index tracking.
+- Files changed: `backend/app/normalization/employment.py` (new),
+  `backend/tests/test_normalization_employment.py` (new),
+  `backend/tests/fixtures/normalization/employment_type_cases.json` (new,
+  40 cases), `docs/ROADMAP.md` (Phase 3 bullet updated — also corrected a
+  pre-existing staleness: it still said the remote-classifier slice was
+  "pending review, not merged" despite the merge already recorded above
+  at `1bc8247`), this handoff entry. `app/normalization/types.py`,
+  `app/normalization/remote.py`, and both of its test/fixture files
+  untouched.
+- Verification: targeted `test_normalization_employment.py` plus the two
+  existing modules explicitly rerun together (`test_normalization_remote.
+  py`, `test_normalization_types.py`) — **133 passed** (45 new in the
+  employment module; the existing 88 remote/types tests unchanged). `ruff
+  format --check`, `ruff check`, `mypy` all pass. Genuine external `python
+  scripts/verify.py --level routine` (full run) — all **9 steps PASS**,
+  **1628 full-suite tests** (was 1583; +45). `check_repo.py` and `git diff
+  --check` both pass as part of the verifier. No database/migration/
+  schema touched.
+- Full fresh-context adversarial review (not abbreviated, per explicit
+  instruction): probed ~15 unseen phrasings beyond the fixture corpus
+  (undelimited same-axis compounds, cross-axis compounds, case-folding,
+  occupational-prefix internship titles, `"neither...nor"`, comma-
+  separated negation-contrast). Found and fixed three real issues before
+  they reached the corpus:
+  1. **`"neither"` was missing from the negation cue list**, letting a
+     genuinely-negated qualified candidate survive
+     (`"neither a full-time position nor anything else"` incorrectly
+     returned `full_time`). Added `"neither"`; regression added
+     (`negation_neither_nor_full_time`).
+  2. **`temp`/`temp-to-perm` were not cross-axis masked**, an internal-
+     consistency gap versus the already-approved `temporary`/
+     `contract_to_hire`. Added both as aliases of the approved terms;
+     regressions added (`cross_axis_description_temp_abbreviation`,
+     `cross_axis_title_temp_to_perm`).
+  3. **Masking-order bug, caught by the new fixture in (2) itself**:
+     `_mask_other_axis_tokens` iterated a `frozenset` with no defined
+     order, so the 1-token `"temp"` phrase could claim a token before the
+     3-token `"temp to perm"` phrase got a chance, blocking it via the
+     overlap-skip guard. Fixed by sorting mask phrases longest-first
+     before matching (`_OTHER_AXIS_MASK_PHRASES_BY_LENGTH`).
+- **One known, discovered limitation left undecided rather than
+  guess-fixed** (documented in the module docstring and pinned by
+  `known_limitation_backward_bare_beats_forward_qualified_across_comma`):
+  the nearest-candidate negation window has no clause-boundary awareness,
+  so `"This is a paid internship, not a full-time position."` currently
+  returns `full_time`/`parsed_description` rather than `unavailable` — a
+  closer *backward* bare candidate (`"internship"`, distance 1, before
+  `"not"`) wins the "nearest" slot over the actually-negated *forward*
+  qualified candidate (`"full-time position"`, distance 2, after `"not"`,
+  in a separate clause). A "qualified candidates always win" tie-break
+  was tried and rejected: it fixes this sentence but breaks the
+  symmetric, already-correct `"Not internship, full-time position
+  available."` (bare `"internship"` is directly, canonically negated;
+  the qualified candidate is a later, separate clause that must not be
+  suppressed). The two patterns are only distinguishable by whether a
+  comma separates the negator from a backward candidate, which needs
+  character-span tracking this slice deliberately omits (no comma-
+  contrast, per binding correction). Flagged for explicit user/Codex
+  decision rather than silently left undiscovered or patched with an
+  unproven heuristic.
+- Deviations/known limitations: the one above, plus the pre-existing
+  `alembic check` substitution (unchanged, unrelated to this slice).
+  Comma contrast remains omitted, per instruction, since no fixture
+  demonstrated it was necessary for a *different* reason than the one
+  documented above.
+- STOP — awaiting Codex review. Do not merge, begin another Phase 3
+  parser, wire into ingestion/persistence, contact providers, or create a
+  migration.
