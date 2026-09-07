@@ -281,6 +281,8 @@ jobGoblin/
 │   │   │   ├── location.py
 │   │   │   ├── employment.py
 │   │   │   ├── seniority.py
+│   │   │   ├── remote.py               # remote/hybrid/onsite classifier (Phase 3, first parser slice)
+│   │   │   ├── types.py                # NormalizationResult[T]/Provenance shared by every parser above
 │   │   │   ├── company.py
 │   │   │   └── url.py                  # canonical URL normalization (ADR 0004)
 │   │   │

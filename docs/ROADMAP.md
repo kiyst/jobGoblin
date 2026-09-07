@@ -408,8 +408,18 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   corrects both — the §11 wording, and two new fixture-driven tests
   (`test_two_distinct_tenants_sharing_source_job_id_produce_two_jobs`,
   `test_null_tenant_natural_key_collision_resolves_to_one_occurrence`) in
-  `tests/test_ingestion_pipeline.py`. This is the **Phase 2 closure candidate**, pending
-  Codex's independent exit-gate review and sign-off — not yet a declared-complete phase.
-- **Phases 3-14: not started.** Begin each phase only after completing its preflight in
+  `tests/test_ingestion_pipeline.py`. This closure was reviewed and approved by Codex,
+  merged into `main` at `d4bd606` (merge record committed at `199eb00`), and **Phase 2
+  is officially complete.**
+- **Phase 3: first slice implemented on `phase-3/remote-classifier`, pending Codex
+  review — not merged, not complete.** `app/normalization/remote.py`'s deterministic
+  remote/hybrid/onsite classifier and the shared `app/normalization/types.py`
+  (`NormalizationResult[T]`/`Provenance`) are implemented and tested against a
+  fixture-driven regression corpus, with an automated import-boundary proof (no
+  database/ORM/provider/network dependency). Not wired into ingestion/persistence, no
+  `parser_version` threading, and no other Phase 3 parser (title, salary, location,
+  employment, seniority, experience, skill) has been started — this is one bounded
+  slice, not a Phase 3 completion claim.
+- **Phases 4-14: not started.** Begin each phase only after completing its preflight in
   [PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md) and receiving approval for the next
   smallest slice.
