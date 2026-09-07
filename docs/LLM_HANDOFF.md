@@ -310,3 +310,46 @@ that detail.
   not require another Codex re-review.
 - Merge remains a separate user authorization. Do not begin another parser or wire
   Phase 3 behavior into ingestion as part of that merge.
+
+### Merge record
+
+- Date: 2026-09-07. User authorized merging `phase-3/remote-classifier`
+  into `main` following Codex's Approved review (no executable findings;
+  approval commit `fecbcec`) above.
+- Pre-merge state: `main` and `origin/main` both at `199eb00`; feature
+  branch `phase-3/remote-classifier` pushed and clean at `fecbcec`
+  (containing implementation commits `21f55ae`, `c8a1217`, `3a8cc70`,
+  `7c0bd05`, and the documentation-correction/approval-recording commit
+  `fecbcec`).
+- Merge: `git merge --no-ff phase-3/remote-classifier` on `main` — merge
+  commit `1bc8247`. `git diff phase-3/remote-classifier HEAD` is empty
+  (zero content difference); `git diff --check` and `check_repo.py` both
+  exit 0; working tree clean.
+- Post-merge verification: genuine external `python scripts/verify.py
+  --level routine` (full run, no `--focus`, since this is the first Phase
+  3 production slice) — all **9 steps PASS** (Ruff format/check, mypy,
+  `check_repo.py`, `git diff --check`, disposable-database URL/
+  reachability, **1583 full-suite tests**, temp-directory cleanup) — 9,
+  not 10, because this run has no separate focused-test step; Codex's
+  10-step count in its own review was from a `--focus`-scoped run, a
+  different invocation shape, not a discrepancy.
+- Pushed: `main` at `1bc8247`, matching `origin/main`.
+- Rollback boundary: to revert this slice, reset `main` to `199eb00` (the
+  commit immediately before this merge) — this removes
+  `app/normalization/remote.py`, `app/normalization/types.py`, both new
+  test files, the fixture corpus, and the ARCHITECTURE.md/ROADMAP.md
+  wording changes cleanly, with no migration to reverse and no data
+  written by this slice to any environment (pure Python, never wired into
+  ingestion/persistence).
+- **Phase 3's first parser slice is merged, not Phase 3 itself.** The
+  deterministic remote/hybrid/onsite classifier and its shared
+  `NormalizationResult`/`Provenance` types are now on `main`, reviewed
+  across four correction rounds with no remaining executable findings.
+  The other seven required Phase 3 parsers (title, salary, location,
+  employment, seniority, experience, skill) remain unstarted; this
+  classifier is not wired into `ingestion/pipeline.py` or
+  `ingestion/persistence.py`, and no `parser_version`/`field_provenance`
+  write exists yet — those remain Phase 4+ concerns.
+- STOP — do not begin or propose another Phase 3 parser, wire this
+  classifier into ingestion/persistence, contact providers, or create a
+  migration without separate authorization.
