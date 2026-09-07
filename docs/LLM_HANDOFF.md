@@ -356,3 +356,48 @@ that detail.
 - STOP — awaiting Codex review. Do not merge, begin another Phase 3
   parser, wire into ingestion/persistence, contact providers, or create a
   migration.
+
+### Work review
+
+- Date/reviewer: 2026-09-07, Codex.
+- Diff reviewed: `7a90282..1ac2b81` on `phase-3/seniority-classifier`.
+- Verdict: **Changes requested.** One executable finding and one documentation
+  correction remain.
+- Independent verification: the targeted seniority module passes (**89 tests**), and
+  the canonical focused verifier passes all **10 steps** (**89 focused / 1757 full
+  suite**), including Ruff, mypy, repository checks, test-database safety, and cleanup.
+  `git diff --check` is clean. These green results do not cover the missing description
+  conflict behavior below.
+- Findings:
+  1. **High — description parsing omits the approved multiple-level conflict check.**
+     `seniority.py:525-565` adds the first positive candidate and examines only a
+     directly adjacent `or`/`nor` candidate. Unlike the title path at
+     `seniority.py:453-490`, it never calls `_trailing_conflict_labels` or an equivalent
+     description-safe mechanism. Direct execution therefore returns
+     `senior/parsed_description` for `This is a senior director position.`,
+     `entry_level/parsed_description` for `This is a junior senior analyst role.`, and
+     `staff/parsed_description` for `This is a staff/principal engineer position.` The
+     approved proposal said the description conflict rule would fail closed on two
+     distinct values; the new `Work done` entry instead relabels the omission as an
+     intentional boundary. Implement a description-safe immediate-title-phrase conflict
+     check. It may be narrower than title's broad trailing scan so later relational prose
+     is not mistaken for the posting's tier, but it must reject the three reproduced
+     forms and equivalent immediately joined distinct levels. Preserve the approved
+     `senior staff -> staff` and `senior principal -> principal` compounds and ordinary
+     single-value descriptions. Add direct regressions for all of those outcomes.
+  2. **Low — the handoff gives the fixture count as 89.** The JSON corpus contains 84
+     cases; 89 is the module's total test count (84 parametrized corpus cases plus five
+     code-level tests). Correct `docs/LLM_HANDOFF.md:305-306` without rewriting the
+     historical verification totals.
+- Accepted portions: the anchored title grammar, anchor-adjacent description entry
+  grammar, exact executive/support exclusions, compound precedence on the covered path,
+  independent import boundary, locally implemented hyphen handling, taxonomy
+  annotation, merge-state-aware ROADMAP wording, and honest real-fixture evidence gap
+  all match the approved scope.
+- Exact requested correction: modify only `seniority.py`, its fixture corpus/tests, and
+  the next handoff entry (including the count correction). Do not expand the canonical
+  vocabulary, aliases, anchors, explicit principal/director phrases, exclusion catalog,
+  taxonomy work, ingestion wiring, schemas, providers, or another parser. Run the
+  targeted normalization tests and canonical verifier, adversarially replay the three
+  reproduced conflicts plus preserved compound/single-value controls, commit and push
+  the feature branch, then stop for re-review.
