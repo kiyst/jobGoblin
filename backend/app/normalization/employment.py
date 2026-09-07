@@ -153,24 +153,32 @@ needed at all, only token-index tracking):
 2. `title`: split into structural segments (paired-parenthesis/bracket
    groups, then delimiter-split the remainder). `description`: split into
    sentences on `. ; : ! ?`.
-3. A hyphen glued directly between two non-whitespace characters (as in
-   `"full-time"`) is first normalized to a plain space during step 1
-   (`_GLUED_HYPHEN_RE`), making it identical to the other
-   explicitly-supported spelling, `"full time"`. Tokenize on whitespace and
-   `,()[]{}"/&-–—`. Whitespace is the only remaining **transparent**
-   separator. Comma, slash, ampersand, en-dash, em-dash, and any
-   *surviving* hyphen (one with whitespace on at least one side — a prose
-   dash, not a compound-word joiner) are **not** transparent: each becomes
-   its own standalone one-character token, so `"Full/Time"`,
-   `"full, time"`, `"full & time"`, `"full - time"`, and a glued
-   `"full—time"` each produce a longer, non-matching token sequence
-   instead of silently collapsing to the same phrase as the two accepted
-   spellings. This applies uniformly to every catalog phrase, including
-   multi-token cross-axis mask phrases (`"contract to hire"` still matches
-   its hyphenated/spaced forms, but not `"contract/to/hire"`). Parens/
-   brackets/braces/quote remain transparent — title's own structural
-   extraction and segment-delimiter split already consume them before
-   tokenization runs on a given segment.
+3. Exactly four glued-hyphen compound spellings — `"full-time"`,
+   `"part-time"`, `"contract-to-hire"`, `"temp-to-perm"` — are
+   canonicalized to their space-separated form during step 1
+   (`_canonicalize_approved_hyphen_compounds`), each only when it sits at
+   a genuine word boundary and is neither immediately preceded nor
+   immediately followed by another hyphen. This is exact, boundary-aware
+   canonicalization of a small named list, never a blanket "any glued
+   hyphen is transparent" rule: `"non-full-time"`, `"full-time-ish"`, and
+   `"Full--Time"`/`"Full---Time"` are none of them canonicalized, since
+   each either has an adjacent hyphen just outside the compound or doesn't
+   contain the literal single-hyphen substring at all. Tokenize on
+   whitespace and `,()[]{}"/&-–—`. Whitespace is the only remaining
+   **transparent** separator. Comma, slash, ampersand, en-dash, em-dash,
+   and any *surviving* hyphen (one that was not part of an approved
+   compound, or that had whitespace on at least one side — a prose dash,
+   not a compound-word joiner) are **not** transparent: each becomes its
+   own standalone one-character token, so `"Full/Time"`, `"full, time"`,
+   `"full & time"`, `"full - time"`, a glued `"full—time"`, `"non-full-
+   time"`, and `"Full--Time"` each produce a longer, non-matching token
+   sequence instead of silently collapsing to the same phrase as the two
+   accepted spellings. This applies uniformly to every catalog phrase,
+   including multi-token cross-axis mask phrases (`"contract to hire"`
+   still matches its hyphenated/spaced forms, but not
+   `"contract/to/hire"`). Parens/brackets/braces/quote remain transparent
+   — title's own structural extraction and segment-delimiter split already
+   consume them before tokenization runs on a given segment.
 4. **Cross-axis mask-and-compact**: find every `_OTHER_AXIS_MASK_PHRASES`
    span in the token list and remove those tokens entirely, producing a
    compacted sequence with no other-axis noise in it at all.
@@ -202,15 +210,23 @@ needed at all, only token-index tracking):
    is not available."` -> `UNAVAILABLE` (no forward candidate at all, so
    the backward-tier fallback still suppresses the qualified candidate,
    preserving `remote.py`-style trailing negation). Suppression propagates
-   transitively to any candidate coordinated with an already-suppressed one
-   via exactly one `"or"`/`"nor"` token between their spans — proven by
-   `"This is not a full-time position or a part-time role."` (both
-   qualified, only the first is within the negator's direct window; `"or"`
-   propagates suppression to the second) and, degenerately, by `"This
-   position is not full-time or part-time."` (neither is qualified at all
-   in this word order, so both already contribute nothing regardless of
-   suppression — included as an explicit regression, not because
-   coordination changes its outcome here).
+   transitively to any candidate coordinated with an already-suppressed
+   one via exactly one `"or"`/`"nor"` token, **optionally followed by
+   exactly one determiner** (`"a"`, `"an"`, or `"the"`), between their
+   spans — never arbitrary intervening prose. Proven by `"This is not a
+   full-time position or part-time role."` (both qualified, only the
+   first is within the negator's direct window; `"or"` propagates
+   suppression to the second); by `"This is neither seasonal nor a
+   full-time position."` and `"This is not either a seasonal role or a
+   full-time position."` (the determiner-tolerant extension — without it,
+   the coordinated qualified candidate would incorrectly survive); and,
+   degenerately, by `"This position is not full-time or part-time."`
+   (neither is qualified at all in this word order, so both already
+   contribute nothing regardless of suppression — included as an explicit
+   regression, not because coordination changes its outcome here). A
+   non-coordinated, independently-asserted candidate elsewhere in the same
+   sentence (joined by `"and"`, or simply unconnected) is never suppressed
+   by this propagation.
 7. **Unresolved-negation poisoning**: a negation cue present in a sentence
    containing at least one candidate, whose own nearest-candidate search
    finds nothing within its window, discards that whole sentence's
@@ -281,19 +297,38 @@ _SENTENCE_SPLIT_RE = re.compile(r"[.;:!?]+")
 # ever runs on a given segment.
 _TOKEN_RE = re.compile(r"[^\s,()\[\]{}\"/&\-–—]+|[,/&\-–—]")
 
-# A hyphen glued directly between two non-whitespace characters ("full-
-# time") is a compound-word joiner and normalizes to a plain space, making
-# it identical to the other explicitly-supported spelling ("full time").
-# A hyphen with whitespace on either side ("full - time", "full- time",
-# "full -time") is *not* glued — it is being used as a prose dash, exactly
-# like en-dash/em-dash — and is deliberately left alone here so `_TOKEN_RE`
-# tokenizes it as its own hard, non-transparent token.
-_GLUED_HYPHEN_RE = re.compile(r"(?<=\S)-(?=\S)")
+# Exact, boundary-aware canonicalization of only the small, explicitly-
+# approved glued-hyphen compound spellings — never a blanket "any glued
+# hyphen is transparent" rule. Each entry's compiled pattern requires the
+# literal compound (with its single internal hyphen) to sit at a genuine
+# word boundary on both ends (`\b`) and to be neither immediately preceded
+# nor immediately followed by another hyphen — so `"non-full-time"` and
+# `"full-time-ish"` never match (the hyphen adjacent to "full"/"time" on
+# the outside blocks it), and `"Full--Time"`/`"Full---Time"` never match
+# either (the literal single-hyphen substring "full-time" does not appear
+# inside a double/triple-hyphen run at all). Any hyphen that survives this
+# step — a double/triple hyphen, a chain like "non-full-time", or a prose
+# dash — is left for `_TOKEN_RE` to tokenize as its own hard, non-
+# transparent token, same as comma/slash/ampersand/en-dash/em-dash.
+_APPROVED_HYPHEN_COMPOUNDS = ("full-time", "part-time", "contract-to-hire", "temp-to-perm")
+_APPROVED_HYPHEN_COMPOUND_PATTERNS = tuple(
+    (re.compile(r"(?<!-)\b" + re.escape(compound) + r"\b(?!-)"), compound.replace("-", " "))
+    for compound in _APPROVED_HYPHEN_COMPOUNDS
+)
+
+
+def _canonicalize_approved_hyphen_compounds(text: str) -> str:
+    result = text
+    for pattern, spaced in _APPROVED_HYPHEN_COMPOUND_PATTERNS:
+        result = pattern.sub(spaced, result)
+    return result
+
 
 _CURLY_APOSTROPHES = ("‘", "’")
 
 _NEGATION_WINDOW = 3
 _COORDINATING_CONJUNCTIONS = frozenset({"or", "nor"})
+_COORDINATION_DETERMINERS = frozenset({"a", "an", "the"})
 
 # Comma/pipe/colon anywhere, or a hyphen/en-dash/em-dash *surrounded by
 # whitespace* (never glued inside a word) — same structural-segment
@@ -311,7 +346,7 @@ def _normalize_text(text: str) -> str:
     for curly in _CURLY_APOSTROPHES:
         normalized = normalized.replace(curly, "'")
     normalized = normalized.casefold()
-    return _GLUED_HYPHEN_RE.sub(" ", normalized)
+    return _canonicalize_approved_hyphen_compounds(normalized)
 
 
 def _tokenize(sentence: str) -> list[str]:
@@ -446,14 +481,22 @@ def _distance(pivot: int, start: int, end: int) -> int:
 
 def _is_coordinated(a_start: int, a_end: int, b_start: int, b_end: int, tokens: list[str]) -> bool:
     """True only if the two spans are joined by exactly one coordinating
-    conjunction token ("or"/"nor") and nothing else between them."""
+    conjunction token ("or"/"nor"), optionally followed by exactly one
+    determiner ("a"/"an"/"the"), and nothing else between them — narrow
+    enough to bind "neither seasonal nor a full-time position" and "not
+    either a seasonal role or a full-time position", but never an
+    arbitrary intervening phrase."""
     if b_start > a_end:
         gap = tokens[a_end + 1 : b_start]
     elif a_start > b_end:
         gap = tokens[b_end + 1 : a_start]
     else:
         return False
-    return len(gap) == 1 and gap[0] in _COORDINATING_CONJUNCTIONS
+    if len(gap) == 1:
+        return gap[0] in _COORDINATING_CONJUNCTIONS
+    if len(gap) == 2:
+        return gap[0] in _COORDINATING_CONJUNCTIONS and gap[1] in _COORDINATION_DETERMINERS
+    return False
 
 
 def _title_segments(text: str) -> list[str]:

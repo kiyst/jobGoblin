@@ -592,5 +592,131 @@
     "expected_value": "seasonal",
     "expected_provenance": "inferred",
     "note": "Structural-title matrix: delimiter-segment form for seasonal. (part_time's delimiter-segment form is covered by positive_title_only_part_time; internship's by positive_title_only_internship.) This completes the 4-structural-form x 4-value = 16-cell matrix across the full corpus."
+  },
+  {
+    "id": "coordination_determiner_neither_seasonal_nor_a_full_time",
+    "origin": "synthetic_adversarial",
+    "title": "Retail Team Lead",
+    "description": "This is neither seasonal nor a full-time position.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review finding 1: the coordinator 'nor' followed by exactly one determiner 'a' now propagates suppression from the negated bare 'seasonal' to the qualified 'full-time position', instead of letting it survive as a false fact."
+  },
+  {
+    "id": "coordination_determiner_neither_a_seasonal_role_nor_a_full_time",
+    "origin": "synthetic_adversarial",
+    "title": "Retail Team Lead",
+    "description": "This is neither a seasonal role nor a full-time position.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review finding 1: both candidates are qualified here, isolating determiner-tolerant 'nor a' coordination as the only reason the second is suppressed (the negator's own window reaches only the first)."
+  },
+  {
+    "id": "coordination_determiner_not_either_a_seasonal_role_or_a_full_time",
+    "origin": "synthetic_adversarial",
+    "title": "Retail Team Lead",
+    "description": "This is not either a seasonal role or a full-time position.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review finding 1: 'either...or' phrasing, with the coordinator 'or' followed by exactly one determiner 'a'."
+  },
+  {
+    "id": "coordination_determiner_neither_an_internship_nor_a_full_time",
+    "origin": "synthetic_adversarial",
+    "title": "Program Assistant",
+    "description": "This is neither an internship nor a full-time position.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review finding 1: the 'an' determiner form, distinct from 'a'."
+  },
+  {
+    "id": "coordination_determiner_neither_seasonal_nor_the_full_time",
+    "origin": "synthetic_adversarial",
+    "title": "Retail Team Lead",
+    "description": "This is neither seasonal nor the full-time position.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review finding 1: the 'the' determiner form, distinct from 'a'/'an'."
+  },
+  {
+    "id": "coordination_preserves_independent_candidate_not_coordinated",
+    "origin": "synthetic_adversarial",
+    "title": "Retail Team Lead",
+    "description": "This is not a seasonal role, and it is a full-time position.",
+    "expected_value": "full_time",
+    "expected_provenance": "parsed_description",
+    "note": "Preserve genuinely independent candidates: 'and' is not a coordinating conjunction this parser recognizes, so 'full-time position' is never swept into the 'seasonal role' negation's propagation and survives as its own independent, un-negated assertion."
+  },
+  {
+    "id": "hyphen_boundary_rejects_double_hyphen_title",
+    "origin": "synthetic_adversarial",
+    "title": "Full--Time",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review finding 2: the literal single-hyphen substring 'full-time' does not occur inside a double-hyphen run at all, so no canonicalization pattern matches; both hyphens survive as their own hard tokens, producing a 4-token sequence that matches no catalog phrase."
+  },
+  {
+    "id": "hyphen_boundary_rejects_triple_hyphen_title",
+    "origin": "synthetic_adversarial",
+    "title": "Full---Time",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review finding 2: same reasoning as the double-hyphen case, one hyphen further."
+  },
+  {
+    "id": "hyphen_boundary_rejects_non_prefix_description",
+    "origin": "synthetic_adversarial",
+    "title": "HR Generalist",
+    "description": "This is a non-full-time position.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review finding 2: matches the reported false positive exactly. 'full-time' is immediately preceded by a hyphen (the one joining 'non' and 'full'), so the boundary-aware pattern's negative lookbehind blocks canonicalization; all three hyphens survive as hard tokens, and 'full'/'time'/'position' are never contiguous."
+  },
+  {
+    "id": "hyphen_boundary_rejects_suffix_description",
+    "origin": "synthetic_adversarial",
+    "title": "HR Generalist",
+    "description": "This is a full-time-ish position.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review finding 2: 'full-time' is immediately followed by a hyphen (joining 'time' and 'ish'), so the boundary-aware pattern's negative lookahead blocks canonicalization; a recognized spelling embedded in a larger hyphen chain must not be normalized as an independent positive."
+  },
+  {
+    "id": "hyphen_boundary_positive_control_ordinary_full_time",
+    "origin": "synthetic_representative",
+    "title": "HR Generalist",
+    "description": "This is a full-time position.",
+    "expected_value": "full_time",
+    "expected_provenance": "parsed_description",
+    "note": "Positive control: an ordinary, non-chained 'full-time' (whitespace or string boundary on both sides) still canonicalizes and matches after the boundary-aware fix."
+  },
+  {
+    "id": "hyphen_boundary_positive_control_space_separated",
+    "origin": "synthetic_representative",
+    "title": "HR Generalist",
+    "description": "This is a full time position.",
+    "expected_value": "full_time",
+    "expected_provenance": "parsed_description",
+    "note": "Positive control: the plain-space spelling never involved hyphen canonicalization at all and is unaffected by this fix."
+  },
+  {
+    "id": "hyphen_boundary_positive_control_masked_contract_to_hire",
+    "origin": "synthetic_representative",
+    "title": "Contract-to-Hire Software Engineer",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Positive control confirming the approved masked cross-axis compound 'contract-to-hire' still canonicalizes correctly after the boundary-aware fix (masked as inert; no employment_type catalog word present, so the correct result is unavailable, not a false match)."
+  },
+  {
+    "id": "hyphen_boundary_positive_control_masked_temp_to_perm",
+    "origin": "synthetic_representative",
+    "title": "Temp-to-Perm Full-Time",
+    "description": null,
+    "expected_value": "full_time",
+    "expected_provenance": "inferred",
+    "note": "Positive control confirming the approved masked cross-axis compound 'temp-to-perm' still canonicalizes and masks correctly after the boundary-aware fix, leaving 'Full-Time' (itself independently canonicalized) as an exact structural match."
   }
 ]
