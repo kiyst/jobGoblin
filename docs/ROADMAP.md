@@ -426,6 +426,13 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   its own future slice) and `jobs.shift` (no parser currently planned) are untouched.
   No other Phase 3 parser (title, salary, location, seniority, experience, skill) has
   been started — this is one more bounded slice, not a Phase 3 completion claim.
-- **Phases 4-14: not started.** Begin each phase only after completing its preflight in
+- **Phase 4: two bounded read-only prework proofs merged into `main`; the production
+  `AtsScrapersProvider` adapter is not started and Phase 4 is not complete.** The
+  Greenhouse live ATS canary (`phase-4/greenhouse-canary`, merged at `64a3534`) and the
+  Greenhouse live-to-disposable-database ingestion proof (`phase-4/greenhouse-live-proof`,
+  merged at `907b3f0`) both exist; neither is the production `DiscoveryProvider`-wrapping
+  `AtsScrapersProvider` adapter described in this section's own header, which remains
+  unstarted.
+- **Phases 5-14: not started.** Begin each phase only after completing its preflight in
   [PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md) and receiving approval for the next
   smallest slice.

@@ -102,7 +102,18 @@ needed at all, only token-index tracking):
   or cross-axis-masked companion (e.g. `"Full-Time Equivalent Analyst"`,
   `"Seasonal Produce Manager"`) therefore never qualifies — "Analyst"/
   "Produce Manager" are not on the closed other-axis mask, so they still
-  break exact-segment-equality, precisely as intended.
+  break exact-segment-equality, precisely as intended. **There is no
+  "explicit phrase anywhere" mechanism for `title` in this slice** —
+  unlike `remote.py`'s `_TITLE_EXPLICIT_PHRASES` (which recognizes
+  inherently-unambiguous multi-word phrases like `"fully remote"`
+  anywhere in a title, regardless of segment boundaries), no such catalog
+  exists here. None of the four `employment_type` values had a compelling,
+  safe multi-word phrase that needed to match outside the four structural
+  forms above; the structural-marker rule alone, applied identically to
+  all four values, is the complete title contract for this slice. The
+  fixture corpus's `structural_matrix_*` cases exhaustively cover all four
+  structural forms (whole-title, parenthesized, bracketed,
+  delimiter-segment) for all four values.
 - **`description`** matches only **arrangement-bearing phrases**
   (`_DESCRIPTION_QUALIFIED_PHRASES`): each bare prefix combined with one of
   `position`, `role`, `job`, `basis`, `employment` (plus `work` for
@@ -142,9 +153,24 @@ needed at all, only token-index tracking):
 2. `title`: split into structural segments (paired-parenthesis/bracket
    groups, then delimiter-split the remainder). `description`: split into
    sentences on `. ; : ! ?`.
-3. Tokenize on whitespace and `,()[]{}"/&-` (en/em dash included) — a
-   hyphen is always a token boundary, so `"full-time"` and `"full time"`
-   tokenize identically.
+3. A hyphen glued directly between two non-whitespace characters (as in
+   `"full-time"`) is first normalized to a plain space during step 1
+   (`_GLUED_HYPHEN_RE`), making it identical to the other
+   explicitly-supported spelling, `"full time"`. Tokenize on whitespace and
+   `,()[]{}"/&-–—`. Whitespace is the only remaining **transparent**
+   separator. Comma, slash, ampersand, en-dash, em-dash, and any
+   *surviving* hyphen (one with whitespace on at least one side — a prose
+   dash, not a compound-word joiner) are **not** transparent: each becomes
+   its own standalone one-character token, so `"Full/Time"`,
+   `"full, time"`, `"full & time"`, `"full - time"`, and a glued
+   `"full—time"` each produce a longer, non-matching token sequence
+   instead of silently collapsing to the same phrase as the two accepted
+   spellings. This applies uniformly to every catalog phrase, including
+   multi-token cross-axis mask phrases (`"contract to hire"` still matches
+   its hyphenated/spaced forms, but not `"contract/to/hire"`). Parens/
+   brackets/braces/quote remain transparent — title's own structural
+   extraction and segment-delimiter split already consume them before
+   tokenization runs on a given segment.
 4. **Cross-axis mask-and-compact**: find every `_OTHER_AXIS_MASK_PHRASES`
    span in the token list and remove those tokens entirely, producing a
    compacted sequence with no other-axis noise in it at all.
@@ -156,8 +182,26 @@ needed at all, only token-index tracking):
 6. **Negation** (`description` only, `title` has none — same reasoning as
    `remote.py`: the structural rule is already conservative enough):
    for each negation cue (`not`, `no`, `neither`, `isn't`, `aren't`,
-   `without`, `unavailable`), suppress its nearest surviving candidate(s)
-   within a 3-token window (a tie suppresses both). Suppression propagates
+   `without`, `unavailable`), find its nearest surviving candidate(s)
+   within a 3-token window and suppress them (a tie suppresses both).
+   **Direction/clause-aware binding**: the search always tries the
+   *forward* tier (candidates after the negator) first, and only falls
+   back to the *backward* tier (candidates before the negator) when no
+   forward candidate exists in-window at all — a negator overwhelmingly
+   negates what grammatically follows it ("not X"), so a closer backward
+   candidate, often sitting in an entirely separate clause, must never
+   preempt an in-window forward candidate. This resolves the asymmetric
+   matrix: `"This is a part-time role, not a full-time position."` ->
+   `part_time` (forward `"full-time position"` is negated; backward
+   `"part-time role"` is untouched since a forward candidate existed);
+   the symmetric swap -> `full_time`; `"This is seasonal work, not a
+   full-time position."` -> `seasonal`; `"Not internship, full-time
+   position available."` -> `full_time` (both candidates are forward
+   here — nearest-forward-only picks `"internship"`, leaving the farther
+   forward `"full-time position"` untouched); and `"A full-time position
+   is not available."` -> `UNAVAILABLE` (no forward candidate at all, so
+   the backward-tier fallback still suppresses the qualified candidate,
+   preserving `remote.py`-style trailing negation). Suppression propagates
    transitively to any candidate coordinated with an already-suppressed one
    via exactly one `"or"`/`"nor"` token between their spans — proven by
    `"This is not a full-time position or a part-time role."` (both
@@ -187,31 +231,24 @@ slice's vocabulary at all (per the approved proposal): it contributes no
 signal under any circumstance, resolving to `UNAVAILABLE` exactly like any
 other unrecognized phrase — not silently assigned to either axis.
 
-**Known, discovered limitation (fresh-context adversarial review):** the
-nearest-candidate negation window has no notion of clause boundaries, so a
-*backward* (before-the-negator) bare candidate can occasionally win the
-"nearest" slot over a *forward* (after-the-negator) qualified candidate in
-a different clause, even when the qualified candidate is the one a human
-reader would recognize as actually negated — e.g. `"This is a paid
-internship, not a full-time position."` currently returns `full_time`
-rather than the arguably-more-correct `UNAVAILABLE`, because bare
-`"internship"` (distance 1, before `"not"`) is nearer than qualified
-`"full-time position"` (distance 2, after `"not"`), and only one of them
-can occupy the "nearest" slot. A "qualified candidates always take
-priority over bare ones" tie-break was considered and rejected: it fixes
-this case but breaks the opposite, already-correctly-handled pattern
-`"Not internship, full-time position available."` (bare `"internship"` is
-directly, canonically negated by the immediately-preceding `"not"`; the
-qualified candidate is a separate, later clause that must not be
-suppressed) — the two patterns are only distinguishable by whether a
-clause boundary (a comma) separates the negator from a backward candidate,
-which requires character-span tracking this slice deliberately omits (no
-comma-contrast mechanism, per the approved proposal). Recorded as an
-explicit regression (`tests/fixtures/normalization/
-employment_type_cases.json`'s `known_limitation_backward_bare_beats_forward_
-qualified_across_comma` case) rather than silently left undiscovered;
-resolving it properly is a reviewed follow-up decision, not something this
-slice should invent an unproven heuristic for.
+**Fixed (was a known, discovered limitation in the prior iteration):** an
+earlier draft's nearest-candidate negation window had no notion of
+direction, so a closer *backward* candidate could win the "nearest" slot
+over the actually-negated *forward* candidate in a separate clause —
+`"This is a paid internship, not a full-time position."` incorrectly
+returned `full_time`. Codex's review confirmed this generalized beyond the
+originally-pinned example (also reproducing it with `"part-time role... not
+a full-time position"`, its symmetric swap, and `"seasonal work... not a
+full-time position"`) and required a real fix rather than a documented
+limitation, since it let the parser confidently return a value the text
+explicitly contradicts. Fixed via the direction/clause-aware binding
+described in step 6 above; no cross-module comma-contrast/character-span
+mechanism was needed — plain forward-tier-then-backward-tier-fallback
+token-index comparison was sufficient, and was verified against the full
+asymmetric matrix (see the `negation_direction_*` fixture cases) including
+the two patterns that must still resolve the *other* way (`"Not
+internship, full-time position available."` -> `full_time`; trailing
+backward-only negation with no forward candidate at all -> `UNAVAILABLE`).
 """
 
 from __future__ import annotations
@@ -227,7 +264,31 @@ EmploymentType = Literal["full_time", "part_time", "seasonal", "internship"]
 _CONFLICT: Literal["conflict"] = "conflict"
 
 _SENTENCE_SPLIT_RE = re.compile(r"[.;:!?]+")
-_TOKEN_RE = re.compile(r"[^\s,()\[\]{}\"/&\-–—]+")
+
+# Two alternatives, deliberately asymmetric: a "word" run (first
+# alternative) treats whitespace *and the plain ASCII hyphen* as
+# invisible/transparent — the only two separators an explicitly-supported
+# catalog spelling ("full-time" / "full time") ever uses — while comma,
+# slash, ampersand, en-dash, and em-dash (second alternative) are matched
+# as their own standalone one-character tokens, never silently discarded.
+# This is what makes `"full-time"`/`"full time"` tokenize identically to
+# `("full", "time")` while `"Full/Time"`, `"full, time"`, `"full & time"`,
+# and a glued `"full—time"` each produce a *longer*, non-matching token
+# sequence (e.g. `("full", "/", "time")`) instead of silently collapsing
+# to the same two-token phrase. Parens/brackets/braces/quote remain
+# transparent here too — title's own paren/bracket structural extraction
+# and segment-delimiter split already consume them before tokenization
+# ever runs on a given segment.
+_TOKEN_RE = re.compile(r"[^\s,()\[\]{}\"/&\-–—]+|[,/&\-–—]")
+
+# A hyphen glued directly between two non-whitespace characters ("full-
+# time") is a compound-word joiner and normalizes to a plain space, making
+# it identical to the other explicitly-supported spelling ("full time").
+# A hyphen with whitespace on either side ("full - time", "full- time",
+# "full -time") is *not* glued — it is being used as a prose dash, exactly
+# like en-dash/em-dash — and is deliberately left alone here so `_TOKEN_RE`
+# tokenizes it as its own hard, non-transparent token.
+_GLUED_HYPHEN_RE = re.compile(r"(?<=\S)-(?=\S)")
 
 _CURLY_APOSTROPHES = ("‘", "’")
 
@@ -249,7 +310,8 @@ def _normalize_text(text: str) -> str:
     normalized = unicodedata.normalize("NFKC", text)
     for curly in _CURLY_APOSTROPHES:
         normalized = normalized.replace(curly, "'")
-    return normalized.casefold()
+    normalized = normalized.casefold()
+    return _GLUED_HYPHEN_RE.sub(" ", normalized)
 
 
 def _tokenize(sentence: str) -> list[str]:
@@ -480,17 +542,32 @@ def _extract_description_signal(text: str | None) -> EmploymentType | Literal["c
 
         negation_positions = [i for i, token in enumerate(compacted) if token in _NEGATION_CUES]
         for neg_pos in negation_positions:
+            # Direction/clause-aware binding: a negator overwhelmingly
+            # negates what *follows* it ("not X") in English, not what
+            # precedes it — so the forward tier is searched first, and a
+            # backward candidate is only ever considered as a fallback
+            # when no forward candidate exists within the window at all.
+            # This prevents a closer *backward* candidate (often in an
+            # entirely separate, comma-delimited clause) from stealing the
+            # "nearest" slot from the actually-negated forward candidate —
+            # see docs/LLM_HANDOFF.md's Iteration 2 review, finding 1.
             nearest_distance: int | None = None
             nearest_indices: list[int] = []
-            for idx, (start, end, _label, _qualified) in enumerate(candidates):
-                distance = _distance(neg_pos, start, end)
-                if distance > _NEGATION_WINDOW:
-                    continue
-                if nearest_distance is None or distance < nearest_distance:
-                    nearest_distance = distance
-                    nearest_indices = [idx]
-                elif distance == nearest_distance:
-                    nearest_indices.append(idx)
+            for prefer_forward in (True, False):
+                for idx, (start, end, _label, _qualified) in enumerate(candidates):
+                    is_forward = neg_pos < start
+                    if is_forward is not prefer_forward:
+                        continue
+                    distance = _distance(neg_pos, start, end)
+                    if distance > _NEGATION_WINDOW:
+                        continue
+                    if nearest_distance is None or distance < nearest_distance:
+                        nearest_distance = distance
+                        nearest_indices = [idx]
+                    elif distance == nearest_distance:
+                        nearest_indices.append(idx)
+                if nearest_indices:
+                    break
 
             if not nearest_indices:
                 if candidates:

@@ -351,12 +351,246 @@
     "note": "'temp-to-perm' (the same transitional-arrangement concept as the approved-inert 'contract_to_hire') is cross-axis masked as a 3-token phrase, leaving 'Full-Time' as an exact structural segment match."
   },
   {
-    "id": "known_limitation_backward_bare_beats_forward_qualified_across_comma",
+    "id": "negation_direction_prefers_forward_across_comma_internship",
     "origin": "synthetic_adversarial",
     "title": "University Relations Coordinator",
     "description": "This is a paid internship, not a full-time position.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "FIXED (was a known limitation): direction-aware binding suppresses the forward, in-window, actually-negated qualified candidate ('full-time position') rather than letting a closer backward bare candidate ('internship', a separate clause) steal the nearest-slot. Bare 'internship' never counted as signal anyway; survivors end empty."
+  },
+  {
+    "id": "negation_direction_prefers_forward_part_time_role_vs_full_time",
+    "origin": "synthetic_adversarial",
+    "title": "Client Services Representative",
+    "description": "This is a part-time role, not a full-time position.",
+    "expected_value": "part_time",
+    "expected_provenance": "parsed_description",
+    "note": "Asymmetric matrix case (Codex review finding 1): the forward, in-window qualified candidate ('full-time position') is the one actually negated and is suppressed; the backward qualified candidate ('part-time role') is untouched because a forward candidate existed, and survives as the correct signal."
+  },
+  {
+    "id": "negation_direction_prefers_forward_full_time_role_vs_part_time",
+    "origin": "synthetic_adversarial",
+    "title": "Client Services Representative",
+    "description": "This is a full-time role, not a part-time position.",
     "expected_value": "full_time",
     "expected_provenance": "parsed_description",
-    "note": "KNOWN, DOCUMENTED LIMITATION (see module docstring): pins the current actual behavior, not the ideal one. Bare 'internship' (distance 1, before 'not') wins the nearest-candidate slot over qualified 'full-time position' (distance 2, after 'not', in a separate clause), so the genuinely-negated qualified candidate incorrectly survives. A 'qualified always wins' tie-break was considered and rejected because it breaks the symmetric, already-correct 'Not internship, full-time position available.' pattern. Flagged for Codex/user review rather than silently left undiscovered."
+    "note": "Symmetric swap of the previous case, proving the direction preference is not hard-coded to one specific pair of labels."
+  },
+  {
+    "id": "negation_direction_prefers_forward_seasonal_survives",
+    "origin": "synthetic_adversarial",
+    "title": "Retail Team Lead",
+    "description": "This is seasonal work, not a full-time position.",
+    "expected_value": "seasonal",
+    "expected_provenance": "parsed_description",
+    "note": "Asymmetric matrix case: the forward qualified candidate ('full-time position') is negated and suppressed; the backward qualified candidate ('seasonal work') is an independent, un-negated assertion and survives."
+  },
+  {
+    "id": "negation_direction_nearest_forward_preserved_not_internship_comma_full_time",
+    "origin": "synthetic_adversarial",
+    "title": "Program Assistant",
+    "description": "Not internship, full-time position available.",
+    "expected_value": "full_time",
+    "expected_provenance": "parsed_description",
+    "note": "Must-preserve case (Codex review finding 1): both candidates are forward of the negator here. Nearest-forward-only selection suppresses the closer bare 'internship' (distance 1) and leaves the farther forward qualified 'full-time position' (distance 3) untouched, since only the nearest forward candidate is bound, not every forward candidate within window."
+  },
+  {
+    "id": "negation_direction_trailing_backward_fallback",
+    "origin": "synthetic_adversarial",
+    "title": "Office Coordinator",
+    "description": "A full-time position is not available.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Must-preserve case (Codex review finding 1): no forward candidate exists at all, so the backward-tier fallback still binds and suppresses the qualified candidate, preserving remote.py-style trailing negation ('X is not available')."
+  },
+  {
+    "id": "separator_exactness_rejects_slash_title",
+    "origin": "synthetic_adversarial",
+    "title": "Full/Time",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review finding 2: a slash is not a transparent separator; it tokenizes as its own token, so 'Full/Time' produces a 3-token sequence that does not equal the 2-token full_time bare phrase, unlike the accepted 'Full-Time'/'Full Time' spellings."
+  },
+  {
+    "id": "separator_exactness_rejects_glued_em_dash_title",
+    "origin": "synthetic_adversarial",
+    "title": "Full—Time",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review finding 2: a glued (no surrounding whitespace) em-dash never reaches the title segment-delimiter split, and is not a transparent tokenizer separator either, so it produces a non-matching 3-token sequence rather than silently behaving like a hyphen."
+  },
+  {
+    "id": "separator_exactness_rejects_comma_title_segment_split",
+    "origin": "synthetic_adversarial",
+    "title": "Part,Time",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "A bare comma in title is already rejected by a different, pre-existing mechanism (comma is a segment delimiter, splitting this into 'Part' and 'Time' as two separate one-word segments, neither a complete catalog phrase alone) rather than by the tokenizer fix — recorded explicitly so the two distinct safety mechanisms are not confused."
+  },
+  {
+    "id": "separator_exactness_rejects_comma_description",
+    "origin": "synthetic_adversarial",
+    "title": "Billing Associate",
+    "description": "This is a full, time position.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review finding 2: a comma is not a transparent separator in description prose; 'full, time position' tokenizes with the comma as its own token, breaking the contiguous 3-gram the qualified phrase search requires."
+  },
+  {
+    "id": "separator_exactness_rejects_slash_description",
+    "origin": "synthetic_adversarial",
+    "title": "Billing Associate",
+    "description": "This is a full/time position.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review finding 2: matches the reported false positive exactly ('This is a full/time position.' previously produced a confident full_time value)."
+  },
+  {
+    "id": "separator_exactness_rejects_ampersand_description",
+    "origin": "synthetic_adversarial",
+    "title": "Billing Associate",
+    "description": "This is a full & time position.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Ampersand is not a transparent separator either, for the same reason as slash/comma/dash."
+  },
+  {
+    "id": "separator_exactness_rejects_en_dash_description",
+    "origin": "synthetic_adversarial",
+    "title": "Billing Associate",
+    "description": "This is a full–time position.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "A glued en-dash between the two words is not a transparent separator, unlike the accepted plain-ASCII-hyphen spelling."
+  },
+  {
+    "id": "separator_exactness_rejects_whitespace_surrounded_hyphen_description",
+    "origin": "synthetic_adversarial",
+    "title": "Billing Associate",
+    "description": "This is a full - time position.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "A hyphen with whitespace on both sides is a prose dash, not the glued compound-word joiner in the accepted 'full-time' spelling; it is left un-normalized and tokenizes as its own hard token, breaking the match, unlike 'full-time' (glued) or 'full time' (plain space, no hyphen at all)."
+  },
+  {
+    "id": "separator_exactness_accepts_space_separated_positive_control",
+    "origin": "synthetic_representative",
+    "title": "Billing Associate",
+    "description": "This is a full time position.",
+    "expected_value": "full_time",
+    "expected_provenance": "parsed_description",
+    "note": "Positive control proving the space-separated spelling (the second explicitly-supported form, alongside the hyphenated one) still matches after the separator-exactness fix."
+  },
+  {
+    "id": "separator_exactness_rejects_slash_in_cross_axis_mask_phrase",
+    "origin": "synthetic_adversarial",
+    "title": "Operations Lead",
+    "description": "This is a full-time contract/to/hire position.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review finding 2, multi-token mask exactness: slashes prevent 'contract/to/hire' from matching the 3-token 'contract to hire' mask phrase, so it is never masked; the un-masked tokens sit between 'time' and 'position', breaking the contiguous qualified-phrase match that the properly-hyphenated 'contract-to-hire' form (see cross_axis_title_temp_to_perm's sibling coverage) would not break."
+  },
+  {
+    "id": "structural_matrix_whole_title_full_time",
+    "origin": "synthetic_representative",
+    "title": "Full-Time",
+    "description": null,
+    "expected_value": "full_time",
+    "expected_provenance": "inferred",
+    "note": "Structural-title matrix (Codex review finding 3): whole-title form for full_time."
+  },
+  {
+    "id": "structural_matrix_whole_title_part_time",
+    "origin": "synthetic_representative",
+    "title": "Part-Time",
+    "description": null,
+    "expected_value": "part_time",
+    "expected_provenance": "inferred",
+    "note": "Structural-title matrix: whole-title form for part_time."
+  },
+  {
+    "id": "structural_matrix_whole_title_seasonal",
+    "origin": "synthetic_representative",
+    "title": "Seasonal",
+    "description": null,
+    "expected_value": "seasonal",
+    "expected_provenance": "inferred",
+    "note": "Structural-title matrix: whole-title form for seasonal."
+  },
+  {
+    "id": "structural_matrix_whole_title_internship",
+    "origin": "synthetic_representative",
+    "title": "Internship",
+    "description": null,
+    "expected_value": "internship",
+    "expected_provenance": "inferred",
+    "note": "Structural-title matrix: whole-title form for internship."
+  },
+  {
+    "id": "structural_matrix_parenthesized_part_time",
+    "origin": "synthetic_representative",
+    "title": "Billing Clerk (Part-Time)",
+    "description": null,
+    "expected_value": "part_time",
+    "expected_provenance": "inferred",
+    "note": "Structural-title matrix: parenthesized form for part_time."
+  },
+  {
+    "id": "structural_matrix_parenthesized_seasonal",
+    "origin": "synthetic_representative",
+    "title": "Retail Clerk (Seasonal)",
+    "description": null,
+    "expected_value": "seasonal",
+    "expected_provenance": "inferred",
+    "note": "Structural-title matrix: parenthesized form for seasonal."
+  },
+  {
+    "id": "structural_matrix_parenthesized_internship",
+    "origin": "synthetic_representative",
+    "title": "Marketing Assistant (Internship)",
+    "description": null,
+    "expected_value": "internship",
+    "expected_provenance": "inferred",
+    "note": "Structural-title matrix: parenthesized form for internship. (full_time's parenthesized form is covered by positive_title_only_full_time.)"
+  },
+  {
+    "id": "structural_matrix_bracketed_part_time",
+    "origin": "synthetic_representative",
+    "title": "Front Desk [Part-Time]",
+    "description": null,
+    "expected_value": "part_time",
+    "expected_provenance": "inferred",
+    "note": "Structural-title matrix: bracketed form for part_time."
+  },
+  {
+    "id": "structural_matrix_bracketed_internship",
+    "origin": "synthetic_representative",
+    "title": "Design Team [Internship]",
+    "description": null,
+    "expected_value": "internship",
+    "expected_provenance": "inferred",
+    "note": "Structural-title matrix: bracketed form for internship. (full_time's bracketed form is covered by positive_control_valid_bracket_marker; seasonal's by positive_title_only_seasonal.)"
+  },
+  {
+    "id": "structural_matrix_delimiter_segment_full_time",
+    "origin": "synthetic_representative",
+    "title": "Support Specialist - Full-Time",
+    "description": null,
+    "expected_value": "full_time",
+    "expected_provenance": "inferred",
+    "note": "Structural-title matrix: delimiter-segment form for full_time, isolated from cross_axis_title_full_time_contract's additional masking concern."
+  },
+  {
+    "id": "structural_matrix_delimiter_segment_seasonal",
+    "origin": "synthetic_representative",
+    "title": "Retail Associate - Seasonal",
+    "description": null,
+    "expected_value": "seasonal",
+    "expected_provenance": "inferred",
+    "note": "Structural-title matrix: delimiter-segment form for seasonal. (part_time's delimiter-segment form is covered by positive_title_only_part_time; internship's by positive_title_only_internship.) This completes the 4-structural-form x 4-value = 16-cell matrix across the full corpus."
   }
 ]
