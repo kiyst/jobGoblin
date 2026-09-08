@@ -321,3 +321,58 @@ full_suite_count: 1846
 - The Workflow v3.1 handoff-metadata tooling slice and its correction passes are
   accepted. Do not merge or begin `classify_experience` until the user explicitly
   authorizes the next action.
+
+### Merge record
+
+- Date: 2026-09-08. User authorized merging
+  `tooling/workflow-v3.1-handoff-metadata` into `main` following Codex's
+  Approved review (no executable findings; approval commit `bf1104b`)
+  above.
+- Pre-merge state: `main` and `origin/main` both at `f003595`; feature
+  branch `tooling/workflow-v3.1-handoff-metadata` and its origin both
+  clean and synced at `bf1104b` (containing implementation commit
+  `62fe128`, the base->ending-commit fix `d8db682`, two correction
+  passes `41b3f70`/`0c271d4`, and review commits `38ed0a2`/`d5fec38`/
+  `bf1104b`).
+- Merge: `git merge --no-ff tooling/workflow-v3.1-handoff-metadata` on
+  `main` — merge commit `a3a2226`. `git diff
+  tooling/workflow-v3.1-handoff-metadata HEAD` is empty (zero content
+  difference); `git diff --check` and `check_repo.py` both exit 0;
+  working tree clean.
+- Post-merge verification: genuine external `python scripts/verify.py
+  --level routine --focus tests/test_check_handoff.py
+  tests/test_verify.py tests/test_compact_checkpoint.py` (full run) —
+  all **11 steps PASS** (Ruff format/check, mypy, `check_repo.py`, `git
+  diff --check`, disposable-database URL/reachability, **172 focused /
+  1846 full-suite tests**, handoff metadata validation, temp-directory
+  cleanup). A prior run without `--focus` correctly FAILed only the
+  handoff-metadata step (`"this invocation was not given --focus, but
+  the handoff metadata declares a numeric focused_test_count"`) —
+  expected behavior of the validator cross-checking this entry's own
+  declared selector, not a regression; the full 1846-test suite passed
+  in that run too.
+- Migration/database state: unchanged. `git diff main
+  tooling/workflow-v3.1-handoff-metadata -- backend/alembic
+  backend/app/db` is empty — no migration or database-layer file is
+  part of this diff, so no migration was run and no schema changed.
+- Pushed: `main` at `a3a2226`, matching `origin/main`.
+- Rollback boundary: to revert this slice, reset `main` to `f003595`
+  (the commit immediately before this merge) — this removes
+  `backend/scripts/check_handoff.py`, its test file, the `verify.py`
+  handoff-metadata step and `--docs-only` mode (and their tests), the
+  `compact_checkpoint.py` workflow-version marker (and its test), and
+  the `docs/LLM_WORKFLOW.md`/`CLAUDE.md` Workflow v3.1 pilot text,
+  cleanly, with no migration to reverse and no data written by this
+  slice to any environment (pure tooling/process changes, never wired
+  into ingestion/persistence or any database).
+- **The Workflow v3.1 pilot's enabling tooling slice is merged, not a
+  counted pilot slice itself.** Per `docs/LLM_WORKFLOW.md`'s corrected
+  "Workflow v3.1 pilot" section, the three-slice measurement window
+  starts with `classify_experience` as pilot slice 1 of 3 — this
+  handoff-metadata validator and `--docs-only` mode are the
+  infrastructure that makes that measurement possible, not one of the
+  three counted slices. The mandatory retrospective still triggers after
+  the third counted **parser** slice's `Work review`, not after this one.
+- STOP — do not begin or propose `classify_experience` or any other
+  Phase 3 parser, or start pilot slice 2/3 of Workflow v3.1, without
+  separate authorization.
