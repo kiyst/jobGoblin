@@ -1,0 +1,722 @@
+[
+  {
+    "id": "positive_title_only_full_time",
+    "origin": "synthetic_representative",
+    "title": "Senior Analyst (Full-Time)",
+    "description": null,
+    "expected_value": "full_time",
+    "expected_provenance": "inferred",
+    "note": "Parenthesized structural title marker, title-only signal."
+  },
+  {
+    "id": "positive_title_only_part_time",
+    "origin": "synthetic_representative",
+    "title": "Warehouse Associate - Part-Time",
+    "description": null,
+    "expected_value": "part_time",
+    "expected_provenance": "inferred",
+    "note": "Whitespace-surrounded-hyphen delimited segment, title-only signal."
+  },
+  {
+    "id": "positive_title_only_seasonal",
+    "origin": "synthetic_representative",
+    "title": "Retail Associate [Seasonal]",
+    "description": null,
+    "expected_value": "seasonal",
+    "expected_provenance": "inferred",
+    "note": "Bracketed structural title marker, title-only signal."
+  },
+  {
+    "id": "positive_title_only_internship",
+    "origin": "synthetic_representative",
+    "title": "Marketing — Internship",
+    "description": null,
+    "expected_value": "internship",
+    "expected_provenance": "inferred",
+    "note": "Em-dash delimited segment, title-only signal."
+  },
+  {
+    "id": "title_bare_suffix_intern_conservative_rejection",
+    "origin": "synthetic_adversarial",
+    "title": "Software Engineering Intern",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Documented limitation: a bare 'Intern' suffix glued to an undelimited occupational phrase, with no delimiter/parenthetical, fails the same structural segment-exactness rule as every other value — uniform conservatism across all four values, not a special case for internship. A delimited or parenthesized form is recognized; see positive_title_only_internship."
+  },
+  {
+    "id": "description_qualified_full_time_positive",
+    "origin": "synthetic_representative",
+    "title": "Billing Coordinator",
+    "description": "This is a full-time position with benefits.",
+    "expected_value": "full_time",
+    "expected_provenance": "parsed_description",
+    "note": "'full-time position' is an arrangement-bearing qualified phrase."
+  },
+  {
+    "id": "description_qualified_part_time_positive",
+    "origin": "synthetic_representative",
+    "title": "Front Desk Associate",
+    "description": "This part-time role requires 20 hours per week.",
+    "expected_value": "part_time",
+    "expected_provenance": "parsed_description",
+    "note": "'part-time role' is an arrangement-bearing qualified phrase."
+  },
+  {
+    "id": "description_qualified_seasonal_positive",
+    "origin": "synthetic_representative",
+    "title": "Retail Team Member",
+    "description": "This seasonal position runs from November through January.",
+    "expected_value": "seasonal",
+    "expected_provenance": "parsed_description",
+    "note": "'seasonal position' is an arrangement-bearing qualified phrase."
+  },
+  {
+    "id": "description_qualified_internship_positive",
+    "origin": "synthetic_representative",
+    "title": "Product Team",
+    "description": "This internship position runs for 12 weeks over the summer.",
+    "expected_value": "internship",
+    "expected_provenance": "parsed_description",
+    "note": "'internship position' is an arrangement-bearing qualified phrase."
+  },
+  {
+    "id": "description_benefits_language_full_time_negative",
+    "origin": "synthetic_adversarial",
+    "title": "HR Generalist",
+    "description": "Employees receive full-time equivalent benefits calculations regardless of actual hours worked.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Bare 'full-time' immediately followed by 'equivalent', not an arrangement noun; must not be guessed as full_time. Reproduces the 'Full-Time Equivalent Analyst' collision named in the binding corrections."
+  },
+  {
+    "id": "description_benefits_language_part_time_negative",
+    "origin": "synthetic_adversarial",
+    "title": "Student Programs Coordinator",
+    "description": "This opportunity remains open to part-time students currently enrolled in an accredited program.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Bare 'part-time' describing a candidate's other status ('part-time students'), not this posting's own schedule; 'students' is not an arrangement noun."
+  },
+  {
+    "id": "description_benefits_language_seasonal_negative",
+    "origin": "synthetic_adversarial",
+    "title": "Farm Operations Manager",
+    "description": "We source seasonal produce from local farms for our cafeteria program.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Bare 'seasonal' describing produce, not this position's own arrangement; 'produce' is not an arrangement noun."
+  },
+  {
+    "id": "description_benefits_language_internship_negative",
+    "origin": "synthetic_adversarial",
+    "title": "University Relations Specialist",
+    "description": "Prior internship experience is required for this role.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Binding-correction counterexample: bare 'internship' describing a candidate requirement ('internship experience required'), not this posting's own type; 'experience' is not an arrangement noun, and 'role' appears too far away to combine."
+  },
+  {
+    "id": "negation_full_time",
+    "origin": "synthetic_adversarial",
+    "title": "Client Success Manager",
+    "description": "This is not a full-time position.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Negation suppresses the qualified 'full-time position' candidate regardless of qualification."
+  },
+  {
+    "id": "negation_part_time",
+    "origin": "synthetic_adversarial",
+    "title": "Retail Sales Associate",
+    "description": "This is not a part-time position.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Negation suppresses the qualified 'part-time position' candidate."
+  },
+  {
+    "id": "negation_seasonal",
+    "origin": "synthetic_adversarial",
+    "title": "Operations Assistant",
+    "description": "This role is not seasonal.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Negation suppresses the bare 'seasonal' candidate; it would have contributed nothing anyway since it is unqualified, but negation still applies."
+  },
+  {
+    "id": "negation_internship",
+    "origin": "synthetic_adversarial",
+    "title": "Program Assistant",
+    "description": "This is not an internship position.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Negation suppresses the qualified 'internship position' candidate."
+  },
+  {
+    "id": "crossed_delimiter_paren_then_bracket_rejected",
+    "origin": "synthetic_adversarial",
+    "title": "(Full-Time] Software Engineer",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "An opening parenthesis paired with a closing bracket is not a valid structural marker; the mismatched delimiters fall through to the plain-segment tokens, which no longer exactly equal the bare phrase once 'Software Engineer' is included."
+  },
+  {
+    "id": "crossed_delimiter_bracket_then_paren_rejected",
+    "origin": "synthetic_adversarial",
+    "title": "[Full-Time) Software Engineer",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "An opening bracket paired with a closing parenthesis is not a valid structural marker, symmetric to the previous case."
+  },
+  {
+    "id": "positive_control_valid_bracket_marker",
+    "origin": "synthetic_representative",
+    "title": "Software Engineer [Full-Time]",
+    "description": null,
+    "expected_value": "full_time",
+    "expected_provenance": "inferred",
+    "note": "Positive control proving a properly paired bracket marker is still accepted, distinct from the two crossed-delimiter regressions above."
+  },
+  {
+    "id": "cross_axis_title_full_time_contract",
+    "origin": "synthetic_adversarial",
+    "title": "Software Engineer — Full-Time Contract",
+    "description": null,
+    "expected_value": "full_time",
+    "expected_provenance": "inferred",
+    "note": "Binding-correction cross-axis control: 'Contract' is contract_type vocabulary, cross-axis masked as inert, leaving 'Full-Time' as an exact structural segment match. No conflict, because 'contract' is not part of this parser's vocabulary at all."
+  },
+  {
+    "id": "cross_axis_title_part_time_temporary",
+    "origin": "synthetic_adversarial",
+    "title": "Support Specialist — Part-Time Temporary",
+    "description": null,
+    "expected_value": "part_time",
+    "expected_provenance": "inferred",
+    "note": "Same cross-axis masking mechanism as the Full-Time Contract case, with 'Temporary' as the masked inert companion."
+  },
+  {
+    "id": "cross_axis_description_full_time_contract",
+    "origin": "synthetic_adversarial",
+    "title": "Operations Lead",
+    "description": "This is a full-time contract position based in our downtown office.",
+    "expected_value": "full_time",
+    "expected_provenance": "parsed_description",
+    "note": "Cross-axis masking removes 'contract' from the compacted sentence before phrase search, so 'full-time' and 'position' become contiguous and match."
+  },
+  {
+    "id": "same_axis_conflict_seasonal_full_time_title",
+    "origin": "synthetic_adversarial",
+    "title": "Seasonal, Full-Time",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Binding decision #5, exact required regression: two comma-delimited segments each independently match a distinct value (seasonal, full_time); two distinct labels is a conflict, even though both may be true in reality — jobs.employment_type is a single scalar column, documented as a limitation of that column, not of this parser."
+  },
+  {
+    "id": "same_axis_conflict_part_time_internship_title",
+    "origin": "synthetic_adversarial",
+    "title": "Part-Time Internship",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Binding decision #5, exact required regression: one undelimited 3-token segment does not exactly equal either the 2-token full/part-time phrase or the 1-token internship phrase, so no structural title signal is produced at all. Still unavailable, via 'no exact match' rather than a detected conflict — an intentional, documented asymmetry with the comma-delimited case above, not a special case for internship (internship is never masked or treated as inert here)."
+  },
+  {
+    "id": "qualified_coordination_negation_full_time_or_part_time_description",
+    "origin": "synthetic_adversarial",
+    "title": "Data Coordinator",
+    "description": "This is not a full-time position or part-time role.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Both 'full-time position' and 'part-time role' are qualified phrases; negation directly suppresses the nearer one and propagates across the coordinated 'or' (exactly one token between the spans) to suppress the farther one too, mirroring remote.py's proven or/nor coordination proof case."
+  },
+  {
+    "id": "bare_leak_regression_not_full_time_or_part_time",
+    "origin": "synthetic_adversarial",
+    "title": "Operations Associate",
+    "description": "This position is not full-time or part-time.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Binding-correction exact required regression: neither bare candidate is qualified in this word order ('position' precedes rather than follows them), so both already contribute nothing regardless of negation; negation and or/nor coordination are still exercised but do not change the outcome. Proves 'not full-time or part-time' cannot leak part_time."
+  },
+  {
+    "id": "unresolved_negation_long_distance_full_time",
+    "origin": "synthetic_adversarial",
+    "title": "Client Relations Specialist",
+    "description": "This is not, under any circumstances, a full-time position.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "'full-time position' is qualified, but the negator is 5 tokens away, outside the 3-token window; the unresolved-negation rule discards the whole sentence's candidates rather than leaving it as a confident positive."
+  },
+  {
+    "id": "contract_type_inert_w2_reporting",
+    "origin": "synthetic_adversarial",
+    "title": "Payroll Assistant",
+    "description": "Please submit your W2 reporting information by January 31st.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Binding-correction counterexample: 'W2' is contract_type/tax-classification vocabulary, entirely absent from this parser's catalog; masked as an inert cross-axis token and contributes zero evidence."
+  },
+  {
+    "id": "contract_type_inert_1099_tax_form",
+    "origin": "synthetic_adversarial",
+    "title": "Finance Clerk",
+    "description": "Attach a completed 1099 tax form to your application.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Binding-correction counterexample: '1099' is contract_type/tax-classification vocabulary, masked as an inert cross-axis token."
+  },
+  {
+    "id": "contract_type_inert_contract_to_hire_title",
+    "origin": "synthetic_adversarial",
+    "title": "Contract-to-Hire Software Engineer",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "'Contract-to-hire' is purely contract_type vocabulary and carries no employment_type schedule information at all; masked as an inert cross-axis phrase, leaving only occupational words that do not match any catalog phrase."
+  },
+  {
+    "id": "per_diem_inert_title",
+    "origin": "synthetic_adversarial",
+    "title": "Per Diem Nurse",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Binding decision #4: 'per diem' is unsupported in v1 and resolves to no evidence — masked as an inert cross-axis phrase, not silently assigned to either axis."
+  },
+  {
+    "id": "agreement_title_and_description_internship",
+    "origin": "synthetic_representative",
+    "title": "Software Engineering — Internship",
+    "description": "This internship position runs for 10 weeks during the summer.",
+    "expected_value": "internship",
+    "expected_provenance": "parsed_description",
+    "note": "Title and description independently agree on internship; agreement escalates provenance to parsed_description, matching remote.py's precedence rule."
+  },
+  {
+    "id": "cross_field_conflict_full_time_vs_part_time",
+    "origin": "synthetic_adversarial",
+    "title": "Analyst (Full-Time)",
+    "description": "This is a part-time position requiring 20 hours weekly.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Cross-field disagreement (title says full_time, description says part_time) always yields unavailable rather than guessing which field to trust."
+  },
+  {
+    "id": "unicode_fullwidth_internship_title",
+    "origin": "synthetic_adversarial",
+    "title": "Software Engineer (Ｉｎｔｅｒｎｓｈｉｐ)",
+    "description": null,
+    "expected_value": "internship",
+    "expected_provenance": "inferred",
+    "note": "Full-width Latin 'Internship' NFKC-normalizes to ASCII before matching, same as remote.py's analogous unicode-robustness case."
+  },
+  {
+    "id": "sentence_boundary_prevents_full_time_cross_sentence_match",
+    "origin": "synthetic_adversarial",
+    "title": "Operations Analyst",
+    "description": "We value your full commitment. Time management skills are essential for this role.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "'full' ends the first sentence and 'time' begins the second; sentence-splitting happens before tokenization and phrase search, so they can never combine into the full_time bare phrase across the period."
+  },
+  {
+    "id": "negation_neither_nor_full_time",
+    "origin": "synthetic_adversarial",
+    "title": "Program Coordinator",
+    "description": "This is neither a full-time position nor anything else notable.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Fresh-context adversarial finding: 'neither' was missing from the negation cue list in the initial draft, which let a genuinely-negated qualified candidate ('full-time position') survive as a false positive. Added 'neither' as a negation cue to close this gap; this regression pins the fix."
+  },
+  {
+    "id": "cross_axis_description_temp_abbreviation",
+    "origin": "synthetic_adversarial",
+    "title": "Warehouse Lead",
+    "description": "We are hiring for a temp full-time role during the holiday rush.",
+    "expected_value": "full_time",
+    "expected_provenance": "parsed_description",
+    "note": "'temp' (the common abbreviation of the approved-inert 'temporary') is cross-axis masked, same as 'contract'/'temporary' themselves."
+  },
+  {
+    "id": "cross_axis_title_temp_to_perm",
+    "origin": "synthetic_adversarial",
+    "title": "Support Specialist — Temp-to-Perm Full-Time",
+    "description": null,
+    "expected_value": "full_time",
+    "expected_provenance": "inferred",
+    "note": "'temp-to-perm' (the same transitional-arrangement concept as the approved-inert 'contract_to_hire') is cross-axis masked as a 3-token phrase, leaving 'Full-Time' as an exact structural segment match."
+  },
+  {
+    "id": "negation_direction_prefers_forward_across_comma_internship",
+    "origin": "synthetic_adversarial",
+    "title": "University Relations Coordinator",
+    "description": "This is a paid internship, not a full-time position.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "FIXED (was a known limitation): direction-aware binding suppresses the forward, in-window, actually-negated qualified candidate ('full-time position') rather than letting a closer backward bare candidate ('internship', a separate clause) steal the nearest-slot. Bare 'internship' never counted as signal anyway; survivors end empty."
+  },
+  {
+    "id": "negation_direction_prefers_forward_part_time_role_vs_full_time",
+    "origin": "synthetic_adversarial",
+    "title": "Client Services Representative",
+    "description": "This is a part-time role, not a full-time position.",
+    "expected_value": "part_time",
+    "expected_provenance": "parsed_description",
+    "note": "Asymmetric matrix case (Codex review finding 1): the forward, in-window qualified candidate ('full-time position') is the one actually negated and is suppressed; the backward qualified candidate ('part-time role') is untouched because a forward candidate existed, and survives as the correct signal."
+  },
+  {
+    "id": "negation_direction_prefers_forward_full_time_role_vs_part_time",
+    "origin": "synthetic_adversarial",
+    "title": "Client Services Representative",
+    "description": "This is a full-time role, not a part-time position.",
+    "expected_value": "full_time",
+    "expected_provenance": "parsed_description",
+    "note": "Symmetric swap of the previous case, proving the direction preference is not hard-coded to one specific pair of labels."
+  },
+  {
+    "id": "negation_direction_prefers_forward_seasonal_survives",
+    "origin": "synthetic_adversarial",
+    "title": "Retail Team Lead",
+    "description": "This is seasonal work, not a full-time position.",
+    "expected_value": "seasonal",
+    "expected_provenance": "parsed_description",
+    "note": "Asymmetric matrix case: the forward qualified candidate ('full-time position') is negated and suppressed; the backward qualified candidate ('seasonal work') is an independent, un-negated assertion and survives."
+  },
+  {
+    "id": "negation_direction_nearest_forward_preserved_not_internship_comma_full_time",
+    "origin": "synthetic_adversarial",
+    "title": "Program Assistant",
+    "description": "Not internship, full-time position available.",
+    "expected_value": "full_time",
+    "expected_provenance": "parsed_description",
+    "note": "Must-preserve case (Codex review finding 1): both candidates are forward of the negator here. Nearest-forward-only selection suppresses the closer bare 'internship' (distance 1) and leaves the farther forward qualified 'full-time position' (distance 3) untouched, since only the nearest forward candidate is bound, not every forward candidate within window."
+  },
+  {
+    "id": "negation_direction_trailing_backward_fallback",
+    "origin": "synthetic_adversarial",
+    "title": "Office Coordinator",
+    "description": "A full-time position is not available.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Must-preserve case (Codex review finding 1): no forward candidate exists at all, so the backward-tier fallback still binds and suppresses the qualified candidate, preserving remote.py-style trailing negation ('X is not available')."
+  },
+  {
+    "id": "separator_exactness_rejects_slash_title",
+    "origin": "synthetic_adversarial",
+    "title": "Full/Time",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review finding 2: a slash is not a transparent separator; it tokenizes as its own token, so 'Full/Time' produces a 3-token sequence that does not equal the 2-token full_time bare phrase, unlike the accepted 'Full-Time'/'Full Time' spellings."
+  },
+  {
+    "id": "separator_exactness_rejects_glued_em_dash_title",
+    "origin": "synthetic_adversarial",
+    "title": "Full—Time",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review finding 2: a glued (no surrounding whitespace) em-dash never reaches the title segment-delimiter split, and is not a transparent tokenizer separator either, so it produces a non-matching 3-token sequence rather than silently behaving like a hyphen."
+  },
+  {
+    "id": "separator_exactness_rejects_comma_title_segment_split",
+    "origin": "synthetic_adversarial",
+    "title": "Part,Time",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "A bare comma in title is already rejected by a different, pre-existing mechanism (comma is a segment delimiter, splitting this into 'Part' and 'Time' as two separate one-word segments, neither a complete catalog phrase alone) rather than by the tokenizer fix — recorded explicitly so the two distinct safety mechanisms are not confused."
+  },
+  {
+    "id": "separator_exactness_rejects_comma_description",
+    "origin": "synthetic_adversarial",
+    "title": "Billing Associate",
+    "description": "This is a full, time position.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review finding 2: a comma is not a transparent separator in description prose; 'full, time position' tokenizes with the comma as its own token, breaking the contiguous 3-gram the qualified phrase search requires."
+  },
+  {
+    "id": "separator_exactness_rejects_slash_description",
+    "origin": "synthetic_adversarial",
+    "title": "Billing Associate",
+    "description": "This is a full/time position.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review finding 2: matches the reported false positive exactly ('This is a full/time position.' previously produced a confident full_time value)."
+  },
+  {
+    "id": "separator_exactness_rejects_ampersand_description",
+    "origin": "synthetic_adversarial",
+    "title": "Billing Associate",
+    "description": "This is a full & time position.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Ampersand is not a transparent separator either, for the same reason as slash/comma/dash."
+  },
+  {
+    "id": "separator_exactness_rejects_en_dash_description",
+    "origin": "synthetic_adversarial",
+    "title": "Billing Associate",
+    "description": "This is a full–time position.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "A glued en-dash between the two words is not a transparent separator, unlike the accepted plain-ASCII-hyphen spelling."
+  },
+  {
+    "id": "separator_exactness_rejects_whitespace_surrounded_hyphen_description",
+    "origin": "synthetic_adversarial",
+    "title": "Billing Associate",
+    "description": "This is a full - time position.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "A hyphen with whitespace on both sides is a prose dash, not the glued compound-word joiner in the accepted 'full-time' spelling; it is left un-normalized and tokenizes as its own hard token, breaking the match, unlike 'full-time' (glued) or 'full time' (plain space, no hyphen at all)."
+  },
+  {
+    "id": "separator_exactness_accepts_space_separated_positive_control",
+    "origin": "synthetic_representative",
+    "title": "Billing Associate",
+    "description": "This is a full time position.",
+    "expected_value": "full_time",
+    "expected_provenance": "parsed_description",
+    "note": "Positive control proving the space-separated spelling (the second explicitly-supported form, alongside the hyphenated one) still matches after the separator-exactness fix."
+  },
+  {
+    "id": "separator_exactness_rejects_slash_in_cross_axis_mask_phrase",
+    "origin": "synthetic_adversarial",
+    "title": "Operations Lead",
+    "description": "This is a full-time contract/to/hire position.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review finding 2, multi-token mask exactness: slashes prevent 'contract/to/hire' from matching the 3-token 'contract to hire' mask phrase, so it is never masked; the un-masked tokens sit between 'time' and 'position', breaking the contiguous qualified-phrase match that the properly-hyphenated 'contract-to-hire' form (see cross_axis_title_temp_to_perm's sibling coverage) would not break."
+  },
+  {
+    "id": "structural_matrix_whole_title_full_time",
+    "origin": "synthetic_representative",
+    "title": "Full-Time",
+    "description": null,
+    "expected_value": "full_time",
+    "expected_provenance": "inferred",
+    "note": "Structural-title matrix (Codex review finding 3): whole-title form for full_time."
+  },
+  {
+    "id": "structural_matrix_whole_title_part_time",
+    "origin": "synthetic_representative",
+    "title": "Part-Time",
+    "description": null,
+    "expected_value": "part_time",
+    "expected_provenance": "inferred",
+    "note": "Structural-title matrix: whole-title form for part_time."
+  },
+  {
+    "id": "structural_matrix_whole_title_seasonal",
+    "origin": "synthetic_representative",
+    "title": "Seasonal",
+    "description": null,
+    "expected_value": "seasonal",
+    "expected_provenance": "inferred",
+    "note": "Structural-title matrix: whole-title form for seasonal."
+  },
+  {
+    "id": "structural_matrix_whole_title_internship",
+    "origin": "synthetic_representative",
+    "title": "Internship",
+    "description": null,
+    "expected_value": "internship",
+    "expected_provenance": "inferred",
+    "note": "Structural-title matrix: whole-title form for internship."
+  },
+  {
+    "id": "structural_matrix_parenthesized_part_time",
+    "origin": "synthetic_representative",
+    "title": "Billing Clerk (Part-Time)",
+    "description": null,
+    "expected_value": "part_time",
+    "expected_provenance": "inferred",
+    "note": "Structural-title matrix: parenthesized form for part_time."
+  },
+  {
+    "id": "structural_matrix_parenthesized_seasonal",
+    "origin": "synthetic_representative",
+    "title": "Retail Clerk (Seasonal)",
+    "description": null,
+    "expected_value": "seasonal",
+    "expected_provenance": "inferred",
+    "note": "Structural-title matrix: parenthesized form for seasonal."
+  },
+  {
+    "id": "structural_matrix_parenthesized_internship",
+    "origin": "synthetic_representative",
+    "title": "Marketing Assistant (Internship)",
+    "description": null,
+    "expected_value": "internship",
+    "expected_provenance": "inferred",
+    "note": "Structural-title matrix: parenthesized form for internship. (full_time's parenthesized form is covered by positive_title_only_full_time.)"
+  },
+  {
+    "id": "structural_matrix_bracketed_part_time",
+    "origin": "synthetic_representative",
+    "title": "Front Desk [Part-Time]",
+    "description": null,
+    "expected_value": "part_time",
+    "expected_provenance": "inferred",
+    "note": "Structural-title matrix: bracketed form for part_time."
+  },
+  {
+    "id": "structural_matrix_bracketed_internship",
+    "origin": "synthetic_representative",
+    "title": "Design Team [Internship]",
+    "description": null,
+    "expected_value": "internship",
+    "expected_provenance": "inferred",
+    "note": "Structural-title matrix: bracketed form for internship. (full_time's bracketed form is covered by positive_control_valid_bracket_marker; seasonal's by positive_title_only_seasonal.)"
+  },
+  {
+    "id": "structural_matrix_delimiter_segment_full_time",
+    "origin": "synthetic_representative",
+    "title": "Support Specialist - Full-Time",
+    "description": null,
+    "expected_value": "full_time",
+    "expected_provenance": "inferred",
+    "note": "Structural-title matrix: delimiter-segment form for full_time, isolated from cross_axis_title_full_time_contract's additional masking concern."
+  },
+  {
+    "id": "structural_matrix_delimiter_segment_seasonal",
+    "origin": "synthetic_representative",
+    "title": "Retail Associate - Seasonal",
+    "description": null,
+    "expected_value": "seasonal",
+    "expected_provenance": "inferred",
+    "note": "Structural-title matrix: delimiter-segment form for seasonal. (part_time's delimiter-segment form is covered by positive_title_only_part_time; internship's by positive_title_only_internship.) This completes the 4-structural-form x 4-value = 16-cell matrix across the full corpus."
+  },
+  {
+    "id": "coordination_determiner_neither_seasonal_nor_a_full_time",
+    "origin": "synthetic_adversarial",
+    "title": "Retail Team Lead",
+    "description": "This is neither seasonal nor a full-time position.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review finding 1: the coordinator 'nor' followed by exactly one determiner 'a' now propagates suppression from the negated bare 'seasonal' to the qualified 'full-time position', instead of letting it survive as a false fact."
+  },
+  {
+    "id": "coordination_determiner_neither_a_seasonal_role_nor_a_full_time",
+    "origin": "synthetic_adversarial",
+    "title": "Retail Team Lead",
+    "description": "This is neither a seasonal role nor a full-time position.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review finding 1: both candidates are qualified here, isolating determiner-tolerant 'nor a' coordination as the only reason the second is suppressed (the negator's own window reaches only the first)."
+  },
+  {
+    "id": "coordination_determiner_not_either_a_seasonal_role_or_a_full_time",
+    "origin": "synthetic_adversarial",
+    "title": "Retail Team Lead",
+    "description": "This is not either a seasonal role or a full-time position.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review finding 1: 'either...or' phrasing, with the coordinator 'or' followed by exactly one determiner 'a'."
+  },
+  {
+    "id": "coordination_determiner_neither_an_internship_nor_a_full_time",
+    "origin": "synthetic_adversarial",
+    "title": "Program Assistant",
+    "description": "This is neither an internship nor a full-time position.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review finding 1: the 'an' determiner form, distinct from 'a'."
+  },
+  {
+    "id": "coordination_determiner_neither_seasonal_nor_the_full_time",
+    "origin": "synthetic_adversarial",
+    "title": "Retail Team Lead",
+    "description": "This is neither seasonal nor the full-time position.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review finding 1: the 'the' determiner form, distinct from 'a'/'an'."
+  },
+  {
+    "id": "coordination_preserves_independent_candidate_not_coordinated",
+    "origin": "synthetic_adversarial",
+    "title": "Retail Team Lead",
+    "description": "This is not a seasonal role, and it is a full-time position.",
+    "expected_value": "full_time",
+    "expected_provenance": "parsed_description",
+    "note": "Preserve genuinely independent candidates: 'and' is not a coordinating conjunction this parser recognizes, so 'full-time position' is never swept into the 'seasonal role' negation's propagation and survives as its own independent, un-negated assertion."
+  },
+  {
+    "id": "hyphen_boundary_rejects_double_hyphen_title",
+    "origin": "synthetic_adversarial",
+    "title": "Full--Time",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review finding 2: the literal single-hyphen substring 'full-time' does not occur inside a double-hyphen run at all, so no canonicalization pattern matches; both hyphens survive as their own hard tokens, producing a 4-token sequence that matches no catalog phrase."
+  },
+  {
+    "id": "hyphen_boundary_rejects_triple_hyphen_title",
+    "origin": "synthetic_adversarial",
+    "title": "Full---Time",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review finding 2: same reasoning as the double-hyphen case, one hyphen further."
+  },
+  {
+    "id": "hyphen_boundary_rejects_non_prefix_description",
+    "origin": "synthetic_adversarial",
+    "title": "HR Generalist",
+    "description": "This is a non-full-time position.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review finding 2: matches the reported false positive exactly. 'full-time' is immediately preceded by a hyphen (the one joining 'non' and 'full'), so the boundary-aware pattern's negative lookbehind blocks canonicalization; all three hyphens survive as hard tokens, and 'full'/'time'/'position' are never contiguous."
+  },
+  {
+    "id": "hyphen_boundary_rejects_suffix_description",
+    "origin": "synthetic_adversarial",
+    "title": "HR Generalist",
+    "description": "This is a full-time-ish position.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Codex review finding 2: 'full-time' is immediately followed by a hyphen (joining 'time' and 'ish'), so the boundary-aware pattern's negative lookahead blocks canonicalization; a recognized spelling embedded in a larger hyphen chain must not be normalized as an independent positive."
+  },
+  {
+    "id": "hyphen_boundary_positive_control_ordinary_full_time",
+    "origin": "synthetic_representative",
+    "title": "HR Generalist",
+    "description": "This is a full-time position.",
+    "expected_value": "full_time",
+    "expected_provenance": "parsed_description",
+    "note": "Positive control: an ordinary, non-chained 'full-time' (whitespace or string boundary on both sides) still canonicalizes and matches after the boundary-aware fix."
+  },
+  {
+    "id": "hyphen_boundary_positive_control_space_separated",
+    "origin": "synthetic_representative",
+    "title": "HR Generalist",
+    "description": "This is a full time position.",
+    "expected_value": "full_time",
+    "expected_provenance": "parsed_description",
+    "note": "Positive control: the plain-space spelling never involved hyphen canonicalization at all and is unaffected by this fix."
+  },
+  {
+    "id": "hyphen_boundary_positive_control_masked_contract_to_hire",
+    "origin": "synthetic_representative",
+    "title": "Contract-to-Hire Software Engineer",
+    "description": null,
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Positive control confirming the approved masked cross-axis compound 'contract-to-hire' still canonicalizes correctly after the boundary-aware fix (masked as inert; no employment_type catalog word present, so the correct result is unavailable, not a false match)."
+  },
+  {
+    "id": "hyphen_boundary_positive_control_masked_temp_to_perm",
+    "origin": "synthetic_representative",
+    "title": "Temp-to-Perm Full-Time",
+    "description": null,
+    "expected_value": "full_time",
+    "expected_provenance": "inferred",
+    "note": "Positive control confirming the approved masked cross-axis compound 'temp-to-perm' still canonicalizes and masks correctly after the boundary-aware fix, leaving 'Full-Time' (itself independently canonicalized) as an exact structural match."
+  }
+]

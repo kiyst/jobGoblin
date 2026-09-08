@@ -98,202 +98,162 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-09-05, Claude Code (Sonnet 5). Class H correction pass on
-  `phase-2/orchestration` for the five bounded findings from the original
-  implementation's review (that original implementation and its review are
-  now rotated out of this ledger per the two-iteration rule; both remain in
-  Git history at commit `63e16ef` and its review commit). Base: `63e16ef`
-  plus the uncommitted review. No product code beyond the five corrections
-  requested: live providers, parallelism, scheduler, API routes, Tier 4,
-  Phase 3, migration, and `ProviderRegistry` production composition all
-  remain untouched.
-- Outcome, addressing each finding exactly:
-  1. **Cancellation after `_begin_provider_attempt()` commits, before
-     `current_attempt_ids` is assigned.** New `_fetch_running_attempts()`
-     queries `collection_run_provider_attempts` directly for
-     `status='running'` rows scoped to this run — the durable, authoritative
-     source of truth the abort handler now consults *instead of* trusting
-     `current_attempt_ids`/`current_state` as the sole gate. A row genuinely
-     still `'running'` is always found and finalized to `'failed'`
-     regardless of whether the Python variables ever got assigned.
-  2. **Cancellation after `_finalize_provider_success()` commits, before
-     `current_attempt_ids`/`current_state` reset to `None`.** Same
-     `_fetch_running_attempts()` mechanism closes this window too: a
-     provider whose rows already reached a terminal status is never
-     rediscovered (its rows are no longer `'running'`), so
-     `_finalize_running_attempts_aborted()` (renamed from
-     `_finalize_provider_aborted`) never re-touches it. `state` is only
-     "trusted" for telemetry/`failures`-merging when the durable set of
-     still-running attempt ids exactly equals `current_attempt_ids`'s
-     values — never merely `state is not None` — so a stale reference to an
-     already-committed provider can never duplicate its `failures` entry or
-     overwrite its completed attempt back to `'failed'`. The `UPDATE` itself
-     repeats the `WHERE status = 'running'` guard (not just the discovery
-     `SELECT`), defense-in-depth against a row turning terminal between the
-     two.
-  3. **A `ProviderError` on a `completed=True` source was invisible to run
-     status.** Replaced `any_attempt_not_completed` (derived only from
-     `resolve_attempt_status() != "completed"`) with `run_had_source_issue`,
-     aggregated from each provider's own `state.possibly_incomplete` —
-     mirroring `DiscoveryResult.possibly_incomplete` exactly (any source not
-     completed, any incomplete results, *or* any `ProviderError` at all).
-     This subsumes the narrower check it replaces and additionally catches
-     the missed case: a source that stays `completed=True`/
-     `incomplete_results=False` despite carrying a real `ProviderError`
-     (e.g. "succeeded after a retry") now correctly forces
-     `'completed_with_errors'`.
-  4. **Assertion-before-ID-capture leak risk.** Audited the entire test
-     file, not just the cited line ranges — every test that can produce a
-     `CollectionRun`/`Job`/`RawJobIngestion` row now captures its cleanup id
-     immediately after the relevant query/operation, before any assertion
-     that could fail, including tests Codex's review didn't explicitly cite
-     (e.g. the two-providers-succeed happy path, the `None`-skip test, both
-     planning-failure/graceful-error sibling tests, both
-     `providers_enforced_locally`/timestamp tests, both explicit/`NULL`
-     provider-order sub-tests). The partial-progress test's block was
-     restructured most substantially: all three cleanup queries (run,
-     `JobOccurrence`, `RawJobIngestion`) now run as one contiguous block
-     immediately after the run raises, before any of its many content
-     assertions.
-  5. **Deletion-race test proved a copied SQL sequence, not
-     `run_saved_search()` itself.** Added a narrow, private, no-op-by-
-     default keyword-only parameter to `run_saved_search()` itself,
-     `_after_saved_search_locked: Callable[[], Awaitable[None]] | None =
-     None`, awaited once immediately after the real `FOR SHARE` lock is
-     confirmed and the row validated, inside the real initialization
-     transaction. The test now calls the *real* `run_saved_search()`,
-     passing a callback that starts a genuinely concurrent `DELETE` and
-     waits (bounded, `asyncio.wait_for(..., timeout=...)`) for it to
-     actually reach PostgreSQL and block on the real lock, before letting
-     the real transaction proceed to commit — proven (below) to fail loudly
-     with a foreign-key violation if the real lock is ever removed, rather
-     than staying silently green.
-- Files changed: `backend/app/ingestion/orchestrator.py` (all five
-  corrections: `_fetch_running_attempts`, renamed
-  `_finalize_running_attempts_aborted`, `run_had_source_issue`,
-  `_after_saved_search_locked` seam; docstring rewritten to match),
-  `backend/tests/test_orchestrator.py` (3 new regression tests; the
-  deletion-race test rewritten to use the real function via the new seam;
-  cleanup-ordering fixes across the file), `docs/ARCHITECTURE.md` §6.8
-  (abort-mechanics and status-aggregation prose corrected to match; new
-  sentence on the test-only seam), this handoff entry. No `db/models/`,
-  `enabled_providers` semantics, `CollectionRun` schema, migration,
-  provider-contact, or other-slice file touched.
-- New tests (3): `test_cancellation_after_begin_attempt_commit_leaves_no_row_running`,
-  `test_cancellation_after_success_finalization_commit_does_not_duplicate_or_overwrite`
-  (both wrap the *real* `_begin_provider_attempt`/`_finalize_provider_success`
-  via `monkeypatch`, let it genuinely commit, then raise `CancelledError`
-  immediately after — simulating the exact commit/cancellation windows
-  Codex identified, deterministically, without relying on real asyncio
-  scheduling races), and
-  `test_provider_error_on_completed_source_forces_completed_with_errors`
-  (the exact missing case Codex named: `completed=True`,
-  `incomplete_results=False`, one real `ProviderError`, successful
-  sibling).
-- Verification: genuine external `python scripts/verify.py --level routine
-  --focus tests/test_orchestrator.py` — all **10 steps PASS**: Ruff
-  format/check, mypy (51 source files), `check_repo.py`, `git diff --check`,
-  database-URL safety, real test-database reachability, **26 focused
-  tests** (was 23; +3), **1493 full-suite tests** (was 1490; +3),
-  temp-directory cleanup, ~121-149s across reruns. `alembic heads` confirms
-  `0017` remains the sole head; `git diff --stat -- backend/migrations/` is
-  empty. Dev database (`jobgoblin`) confirmed unchanged at the pre-existing
-  `0006`. A direct disposable-database row-count check confirmed 0 before
-  and 0 after the full suite, both before and after the adversarial
-  stress-testing described below — no leaked rows at any point.
-- Adversarial self-review: dispatched a fresh-context subagent against the
-  actual diff, instructed to *prove* — not merely read — that each of the
-  five corrections is load-bearing. For each finding, it temporarily
-  reverted the specific fixed mechanism (finding 1/2: swapped
-  `_fetch_running_attempts()` back for the old
-  `current_attempt_ids is not None and current_state is not None` gate;
-  finding 3: swapped `run_had_source_issue` back for the old
-  `any_attempt_not_completed`; finding 5: removed `.with_for_update(read=
-  True)` from the real `SELECT`), reran that finding's specific regression
-  test, and confirmed it failed in exactly the predicted way (attempt stuck
-  `'running'`; `failures` duplicated to length 2; status stayed
-  `'completed'` instead of `'completed_with_errors'`; a real
-  `ForeignKeyViolationError` on the `CollectionRun` insert), then reverted
-  its own temporary edit and confirmed `git diff`/`git status` matched the
-  pre-stress-test state exactly. For finding 4, it re-scanned the *entire*
-  test file (not only the cited tests) for the same assertion-before-
-  capture pattern and found none remaining anywhere. It additionally
-  confirmed `run_saved_search()` has zero production callers yet (so the
-  new test-only seam cannot activate outside a test), reran
-  `test_ingestion_pipeline.py`/`test_ingestion_concurrency.py`/
-  `test_live_proof_greenhouse_adapter.py` explicitly (95 passed, confirming
-  `pipeline.run()` is still unaffected), and reran the full suite plus a
-  fresh row-count check after all stress-testing to confirm no residue.
-  No further findings.
-- Deviations/known limitations: none beyond the already-recorded,
-  pre-existing `alembic check` substitution.
-- STOP — awaiting Codex re-review. Do not merge or begin live-provider
-  contact, parallel/concurrent provider execution, the scheduler, API
-  routes, Tier 4, Phase 3, `ProviderRegistry` production composition, or any
+- Date/agent: 2026-09-07, Claude Code (Sonnet 5). Risk class R (Class
+  R-plus-adversarial per the approved proposal). New bounded slice on new
+  branch `phase-3/seniority-classifier`, base: clean `main@7a90282` (the
+  employment-classifier merge commit). Third Phase 3 parser:
+  `classify_seniority(title, description) -> NormalizationResult[Seniority]`
+  where `Seniority = entry_level | mid_level | senior | staff | principal |
+  director`. Implements the third, twice-revised proposal exactly, plus
+  five binding clarifications from the approval message.
+- Independent implementation, not an `employment.py`/`remote.py` import:
+  its own tokenizer, its own two-entry hyphen-compound canonicalization
+  (`entry-level`, `mid-level` only), its own segment extraction, its own
+  negation grammar — none shared or imported (proven by
+  `test_import_boundary_allow_list` plus a regression asserting both
+  `app.normalization.employment` and `app.normalization.remote` are
+  specifically rejected by this module's own allow-list).
+- Title grammar (binding clarification 2): `principal`/`director` phrases
+  must be anchored at a structural segment's leading position, never
+  matched anywhere inside it — `Director of Engineering`/`Principal
+  Software Engineer` match; `Assistant to the Director of Engineering`,
+  `Office of the Director of Operations`, and `Assistant to the Principal
+  Engineer` (the required third prefix-wrapped negative) do not, since an
+  unrecognized word occupies the leading position instead.
+- Description grammar (binding clarification 1, the most novel mechanism
+  in this slice): after a self-referential anchor (`this is`, `it is`,
+  `the position is`, `this position is`, `the role is`, `this role is`,
+  `we are hiring`, `seeking`), the first candidate must begin immediately
+  after only an approved grammatical prefix — optional `a`/`an`/`the`; or
+  `not`/`no`/`neither`/`not either` plus an optional article — never
+  searched for further into the sentence. This is why `This role is
+  supported by a senior engineer.`, `This position is reporting to the
+  Director of Engineering.`, and `We are hiring alongside a staff
+  engineer.` all resolve to `unavailable`: the token immediately after
+  each anchor (`supported`, `reporting`, `alongside`) is neither a valid
+  prefix nor a candidate. This entirely replaces `employment.py`'s
+  nearest-candidate-window negation mechanism with a simpler, local
+  grammar — a deliberate, narrower design suited to this parser's own
+  requirement, not a partial reuse.
+- Corrected excluded-term claim (binding clarification 5, corrected again
+  by clarification 2 of the final approval): `manager`/`lead`/
+  `associate`/`executive`/`vp`/C-level remain in no catalog, but three
+  exact exclusion phrases were added for the specific required outcomes —
+  `senior executive assistant`, `senior vice president`, `senior vp` —
+  masked entirely so `senior` cannot leak through them either. `Senior
+  Manager` deliberately still resolves to `senior` (manager contributes
+  nothing but does not block a different, actually-recognized qualifier).
+  `Lead Senior Engineer`/`Associate Director of Engineering` remain
+  `unavailable` via the pre-existing leading-position rule, needing no new
+  exclusion.
+- Compound/conflict precedence (binding clarification 7): `Sr. Staff
+  Engineer` -> `staff`, `Senior Principal Engineer` -> `principal`
+  (compound rule, `director` deliberately excluded from it), `Senior
+  Director`/`Staff/Principal Engineer`/`Junior Senior Analyst` -> conflict
+  -> `unavailable`, and `Senior, Staff Engineer`/`(Senior) Staff Engineer`
+  (comma/parens forcing two segments) differ deterministically from the
+  undelimited `Senior Staff Engineer` by defeating the compound rule.
+- Files changed: `backend/app/normalization/seniority.py` (new),
+  `backend/tests/test_normalization_seniority.py` (new),
+  `backend/tests/fixtures/normalization/seniority_cases.json` (new, 84
+  cases), `docs/ARCHITECTURE.md` (annotated `seniority.yaml` as planned
+  future enrichment, not implemented by this slice, per the accepted
+  decision), `docs/ROADMAP.md` (Phase 3 bullet — also corrected a
+  pre-existing staleness: it still said the employment-classifier slice
+  was "pending review, not merged" despite the merge already recorded
+  above at `8e136c0`), this handoff entry. `app/normalization/
+  employment.py`, `app/normalization/remote.py`, `app/normalization/
+  types.py` untouched.
+- Honest evidence-gap statement preserved (binding clarification 5 of the
+  final approval): the corpus contains exactly one `sanitized_capture`
+  fixture (the real Greenhouse-derived title from `backend/tests/
+  fixtures/discovery/greenhouse_live_canary.json`, a negative control) —
+  a single data point, not broad realistic-positive coverage. Recorded in
+  both the module docstring and a dedicated test
+  (`test_corpus_origin_values_are_honestly_labeled`, asserting exactly
+  one `sanitized_capture` case) as an acknowledged, open Phase 3
+  exit-gate gap, not something this slice claims to satisfy.
+- Verification: targeted seniority module alone (**89 passed** — 84
+  fixture cases + 5 code-level tests); all four normalization modules
+  together (**262 passed**). `ruff format --check`/`ruff check`/`mypy`
+  all pass. Genuine external `python scripts/verify.py --level routine`
+  (full run) — all **9 steps PASS**, **1757 full-suite tests** (was 1668;
+  +89). No database/migration/schema touched.
+- Deeper adversarial verification (Class-R-plus-adversarial, required by
+  the approved proposal): beyond the fixture corpus, probed ~16 unseen
+  cases — additional negator forms (`no`, `neither...the...nor...the`,
+  `not either...the...or...the`), plain (non-negated) `or` coordination,
+  a mid-sentence anchor (correctly not recognized — anchors are
+  sentence-initial only, an intentional scope limit), multi-sentence
+  descriptions, the compound rule inside description, and a later
+  unrelated qualifier-shaped phrase after an already-found candidate
+  (`"...staff-level collaboration"` — correctly never reached, since
+  description has no broad trailing conflict-scan the way title does,
+  only the tight coordination-adjacent check). All resolved correctly or
+  to an already-documented, intentional scope boundary. Two minor,
+  out-of-scope observations reported rather than fixed: (1) coordination
+  propagation only fires when the second candidate is directly adjacent
+  to the coordinator with no intervening noun — a sentence like `"This is
+  neither the senior role nor the staff position."` still reaches the
+  correct final `unavailable`, but via the second candidate never being
+  examined rather than via successful coordination-propagation; (2) a
+  title ending in a literal period (e.g. `"Senior."`) fails to match,
+  since the period stays glued to the token (unlike a comma, an
+  established segment delimiter) — a rare input shape, not one of the
+  required cases, and not fixed here since doing so risks the `sr.`/`jr.`
+  abbreviation handling this slice depends on.
+- Deviations/known limitations: the two adversarial observations above
+  (both out of scope, not fixed); the pre-existing `alembic check`
+  substitution (unrelated); the honest evidence-gap statement (not a
+  limitation of the code, a limitation of the evidence base).
+- STOP — awaiting Codex review. Do not merge, begin another Phase 3
+  parser, wire into ingestion/persistence, contact providers, or create a
   migration.
 
 ### Work review
 
-- Date/agent: 2026-09-05, Codex. Correction diff independently reviewed:
-  `63e16ef..7384be5` on `phase-2/orchestration`.
-- Independent verification: inspected the corrected abort discovery/finalization flow,
-  source-issue aggregation, cleanup ordering, real initialization seam, associated tests,
-  and documentation. Ran the three timing-sensitive regressions five consecutive times
-  against PostgreSQL (**15/15 executions passed**), then the complete focused file
-  (**26 passed**). Ran the genuine canonical verifier focused on
-  `tests/test_orchestrator.py`: all **10 steps PASS**, including Ruff, mypy,
-  repository/diff checks, disposable-database safety/reachability, **26 focused tests**,
-  **1493 full-suite tests**, and temporary-directory cleanup.
-- Finding disposition: **all five prior findings are closed.** Abort recovery now queries
-  durable `status='running'` attempt rows by `collection_run_id`, closing the post-begin
-  commit window. It trusts the in-memory execution state only when its durable attempt-id
-  set exactly matches those running rows; an already-committed success is therefore not
-  re-finalized, its errors are not duplicated, and its terminal attempts are not
-  overwritten. The run rollup remains an absolute SQL-SUM reconciliation over attempt
-  rows. `state.possibly_incomplete` is now aggregated across providers, covering the
-  completed-source-plus-ProviderError case while leaving that source's attempt completed.
-  Cleanup identifiers are captured before assertions throughout the new test file. The
-  deletion race now invokes the real `run_saved_search()` initialization through a narrow
-  no-op-by-default coordination seam, with bounded waits and failure-safe task cleanup.
-- Scope/documentation: only the authorized orchestrator, tests, architecture text, and
-  handoff ledger changed; no model, migration, live provider, parallel execution,
-  scheduler, API, Tier 4, Phase 3, or production composition entered the pass. No further
-  findings.
-- Verdict: **Approved.** The bounded multi-provider orchestration slice and its correction
-  pass are accepted; no additional correction is required.
-- Exact requested corrections: none.
-- STOP — do not merge to `main` or begin another slice until the user explicitly
-  authorizes it.
-
-### Merge record
-
-- Date: 2026-09-06. User authorized merging `phase-2/orchestration` into
-  `main` following Codex's final Approved re-review (no findings) above.
-- Pre-merge state: `main` and `origin/main` both at `9f4c921`; feature
-  branch pushed and clean at `f0fe7cd` (merge-base `9f4c921` — no
-  divergence), containing correction commit `7384be5` plus the review
-  commit.
-- Merge: `git merge --no-ff phase-2/orchestration` on `main` — merge commit
-  `7959a2e`. Post-merge diff against the feature branch's tip is empty
-  (zero content difference); `check_repo.py` and `git diff --check` both
-  exit 0; working tree clean.
-- Post-merge verification: genuine external `verify.py --level routine
-  --focus tests/test_orchestrator.py` — all **10 steps PASS** (Ruff
-  format/check, mypy, `check_repo.py`, `git diff --check`, disposable-
-  database URL/reachability, **26 focused tests**, **1493 full-suite
-  tests**, temp-directory cleanup). `alembic heads` confirms `0017` remains
-  the sole head; no migration files touched by the merge. Dev database
-  (`jobgoblin`) confirmed unchanged at `0006` — untouched throughout.
-- Pushed: `main` at `7959a2e`, matching `origin/main`.
-- Rollback boundary: to revert this slice, reset `main` to `9f4c921` (the
-  commit immediately before this merge) — this removes `run_saved_search()`,
-  `provider_execution.py`, the `pipeline.py` extraction refactor, and their
-  tests/docs cleanly, with no migration to reverse and no data written by
-  this slice to any environment.
-- STOP — do not begin live-provider integration, production
-  `ProviderRegistry` composition, parallel/concurrent provider execution,
-  the scheduler, API routes, Tier 4, Phase 3, or migrations without separate
-  authorization.
+- Date/reviewer: 2026-09-07, Codex.
+- Diff reviewed: `7a90282..1ac2b81` on `phase-3/seniority-classifier`.
+- Verdict: **Changes requested.** One executable finding and one documentation
+  correction remain.
+- Independent verification: the targeted seniority module passes (**89 tests**), and
+  the canonical focused verifier passes all **10 steps** (**89 focused / 1757 full
+  suite**), including Ruff, mypy, repository checks, test-database safety, and cleanup.
+  `git diff --check` is clean. These green results do not cover the missing description
+  conflict behavior below.
+- Findings:
+  1. **High — description parsing omits the approved multiple-level conflict check.**
+     `seniority.py:525-565` adds the first positive candidate and examines only a
+     directly adjacent `or`/`nor` candidate. Unlike the title path at
+     `seniority.py:453-490`, it never calls `_trailing_conflict_labels` or an equivalent
+     description-safe mechanism. Direct execution therefore returns
+     `senior/parsed_description` for `This is a senior director position.`,
+     `entry_level/parsed_description` for `This is a junior senior analyst role.`, and
+     `staff/parsed_description` for `This is a staff/principal engineer position.` The
+     approved proposal said the description conflict rule would fail closed on two
+     distinct values; the new `Work done` entry instead relabels the omission as an
+     intentional boundary. Implement a description-safe immediate-title-phrase conflict
+     check. It may be narrower than title's broad trailing scan so later relational prose
+     is not mistaken for the posting's tier, but it must reject the three reproduced
+     forms and equivalent immediately joined distinct levels. Preserve the approved
+     `senior staff -> staff` and `senior principal -> principal` compounds and ordinary
+     single-value descriptions. Add direct regressions for all of those outcomes.
+  2. **Low — the handoff gives the fixture count as 89.** The JSON corpus contains 84
+     cases; 89 is the module's total test count (84 parametrized corpus cases plus five
+     code-level tests). Correct `docs/LLM_HANDOFF.md:305-306` without rewriting the
+     historical verification totals.
+- Accepted portions: the anchored title grammar, anchor-adjacent description entry
+  grammar, exact executive/support exclusions, compound precedence on the covered path,
+  independent import boundary, locally implemented hyphen handling, taxonomy
+  annotation, merge-state-aware ROADMAP wording, and honest real-fixture evidence gap
+  all match the approved scope.
+- Exact requested correction: modify only `seniority.py`, its fixture corpus/tests, and
+  the next handoff entry (including the count correction). Do not expand the canonical
+  vocabulary, aliases, anchors, explicit principal/director phrases, exclusion catalog,
+  taxonomy work, ingestion wiring, schemas, providers, or another parser. Run the
+  targeted normalization tests and canonical verifier, adversarially replay the three
+  reproduced conflicts plus preserved compound/single-value controls, commit and push
+  the feature branch, then stop for re-review.
 
 ---
 
@@ -301,89 +261,100 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-09-05, Claude Code (Sonnet 5). Risk class R Phase 2
-  closure pass on `phase-2/closure`, based on clean `main@4db557c`,
-  implementing the smallest bounded closure identified by a prior read-only
-  Phase 2 exit-gate audit (also this session). The audit found no
-  unsatisfied Phase 2 requirement and no blocking gap; it found exactly two
-  bounded documentation/test-coverage discrepancies, both closed here. Full
-  suite and real-PostgreSQL verification were run (a heavier bar than R's
-  default) at the user's explicit direction, since the new tests exercise
-  identity behavior. No live providers, Tier 4, Phase 3, migration, or
-  production behavior touched.
-- Findings closed:
-  1. **ARCHITECTURE.md §11 cited an unimplemented Tier 4 path as the
-     required `ambiguous_match` fixture case.** Reworded to state the
-     conflict type is proven through the implemented Tier 2/3
-     candidate-resolution paths; Tier 4 remains explicitly deferred per
-     [ADR 0004](DECISIONS/0004-scoped-deterministic-identity.md) pending a
-     company-text-to-`company_id` resolution capability that does not exist.
-     No implication that Tier 4 is implemented or required for closure.
-  2. **Two of §11's required fixture-driven pipeline cases were previously
-     proven only at the Phase 1 database-constraint level**
-     (`test_job_occurrences.py`), not through the actual `pipeline.run()`
-     path §11 specifies. Added two new fixtures under
-     `tests/fixtures/discovery/` (`two_tenants_shared_source_job_id_primary/
-     secondary.json`, `null_tenant_collision_primary/secondary.json`) and two
-     new tests in `tests/test_ingestion_pipeline.py`:
-     `test_two_distinct_tenants_sharing_source_job_id_produce_two_jobs`
-     (same `source_job_id`, two distinct non-null tenants, distinct
-     canonical URLs/requisition ids so Tier 2/3 cannot accidentally attach
-     them — proves two `Job`s/two `JobOccurrence`s, exact run/attempt
-     counters, both raw rows normalized) and
-     `test_null_tenant_natural_key_collision_resolves_to_one_occurrence`
-     (same `source_job_id`, `source_tenant_id = NULL` in two genuinely
-     distinct payloads — identical canonical URL so this is a clean
-     re-observation, not `evidence_mismatch`; differ only in
-     `compensation_text` — proves one `Job`/one `JobOccurrence`, both raw
-     rows normalized, `first_seen_at` frozen, `last_seen_at` advances, exact
-     insert/update counters, zero `IdentityConflict` rows, and that the
-     differing descriptive field stays frozen on replay, not silently
-     proving nothing changed).
-- Files changed: `docs/ARCHITECTURE.md` §11 (wording fix only),
-  `docs/ROADMAP.md` (Phase 2 status: audit summary and closure-candidate
-  note appended), `backend/tests/fixtures/discovery/` (4 new JSON files),
-  `backend/tests/test_ingestion_pipeline.py` (2 new tests), this handoff
-  entry. No model, schema, migration, provider-contact, or
-  production-behavior file touched.
-- Verification: genuine external `python scripts/verify.py --level routine`
-  (full run, no `--focus`, since this closure spans the whole Phase 2
-  fixture-proof surface) — all **9 steps PASS**: Ruff format/check, mypy,
-  `check_repo.py`, `git diff --check`, disposable-database URL/reachability,
-  **1495 full-suite tests** (was 1493; +2), temp-directory cleanup, ~137s.
-  Also ran the full relevant ingestion/identity suites directly
-  (`test_ingestion_pipeline.py`, `test_ingestion_concurrency.py`,
-  `test_ingestion_natural_key.py`, `test_job_occurrences.py`,
-  `test_orchestrator.py`): **250 passed**. `alembic heads` confirms `0017`
-  remains the sole head; `git diff --stat origin/main -- migrations/` is
-  empty. Dev database (`jobgoblin`) confirmed unchanged at the pre-existing
-  `0006`. A direct disposable-database row-count check (`jobs`,
-  `job_occurrences`, `raw_job_ingestions`, `collection_runs`,
-  `collection_run_provider_attempts`, `identity_conflicts`, `users`,
-  `user_jobs`) confirmed 0 before and 0 after the full suite.
-- Adversarial self-review (abbreviated, proportionate to Class R per
-  `LLM_WORKFLOW.md`): temporarily broke each new test's own invariant in
-  `app/ingestion/persistence.py::_existing_occurrence_conditions()` and
-  confirmed the corresponding new test failed for the intended reason, then
-  reverted cleanly (`git diff --stat` empty afterward). (1) Removed the
-  `TENANT`-domain `source_tenant_id` equality condition — the two-tenants
-  test failed exactly at `_job_count(db_engine) == 2` (got `1`), with the
-  second payload incorrectly colliding into the first tenant's occurrence
-  and raising an `evidence_mismatch` conflict, proving tenant scoping is
-  load-bearing. (2) Inverted the `NO_TENANT`-domain condition from
-  `.is_(None)` to `.isnot(None)` — the NULL-tenant-collision test failed
-  with a real `UniqueViolationError` on `uq_job_occurrences_no_tenant_natural_key`
-  (the lookup could no longer find the existing row, so the second
-  submission attempted a raw `INSERT`), proving the application-side lookup
-  — not just the underlying constraint — is what makes this a clean
-  idempotent upsert. Both breaks left transient rows in the disposable test
-  database (from the crashed second run in case 2); both were identified
-  and deleted before continuing, and a fresh row-count check confirmed 0
-  rows across all affected tables before the final verification run above.
-- Deviations/known limitations: none beyond the already-recorded,
-  pre-existing `alembic check` substitution. This closure pass does not
-  declare Phase 2 complete — that determination is Codex's, on independent
-  exit-gate review.
-- STOP — awaiting Codex's independent exit-gate review and sign-off. Do not
-  merge, begin Phase 3, contact providers, add production behavior, or
-  create a migration.
+- Date/agent: 2026-09-07, Claude Code (Sonnet 5). Risk class R correction
+  pass on `phase-3/seniority-classifier` for both findings in Iteration
+  1's `Work review` above. Base: commit `1ac2b81` plus the uncommitted
+  review. Preserved: the anchored title grammar, the anchor-adjacent
+  description entry grammar, the exact executive/support exclusions, the
+  compound rule (`senior`+`staff`/`principal`), the independent import
+  boundary, the locally-implemented hyphen handling, the taxonomy
+  annotation, and the honest evidence-gap statement. Modified only
+  `seniority.py`, its fixture corpus, and this handoff entry.
+- Finding 1 (High — description conflict check was missing): added
+  `_immediate_trailing_conflict`, a description-safe conflict check
+  distinct from title's `_trailing_conflict_labels`. Unlike title's
+  mechanism (which scans the *entire* trailing token list), this only
+  checks the position immediately after the just-matched candidate —
+  skipping a leading run of pure-punctuation hard tokens (`,`, `/`, `&`,
+  `-`, `–`, `—`, which are formatting, not relational prose) — and never
+  scans further. This is what makes `"This is a senior director
+  position."`, `"This is a junior senior analyst role."`, and `"This is a
+  staff/principal engineer position."` all now correctly resolve to
+  `unavailable` (all three reproduced by Codex's review), while `"This is
+  a senior role reporting to the director of engineering."` still
+  correctly resolves to `senior` — the real relational prose ("reporting
+  to the") after the immediate position is never scanned into. The check
+  only runs in the non-negated branch (a negated first candidate already
+  suppresses the whole phrase via the existing prefix grammar; adding a
+  second conflict check there would be redundant, not protective).
+- Finding 2 (Low — fixture count documentation error): corrected
+  `docs/LLM_HANDOFF.md`'s prior Iteration 1 entry, which read "89 cases"
+  for the fixture corpus — the JSON file has always had 84 cases; 89 was
+  always the module's total test count (84 parametrized + 5 code-level).
+  Fixed the file-count claim only; the historical verification totals
+  (89/173/1757 etc.) were already correct and are unchanged.
+- No vocabulary, alias, anchor, explicit principal/director phrase, or
+  exclusion catalog expansion — confirmed by inspection of the diff
+  before committing.
+- Files changed: `backend/app/normalization/seniority.py`
+  (`_immediate_trailing_conflict`, `_PUNCTUATION_HARD_TOKENS`, and the
+  `_extract_description_signal` call site), `backend/tests/fixtures/
+  normalization/seniority_cases.json` (7 new cases, 91 total, was 84),
+  this handoff entry (both the count correction in Iteration 1's already-
+  rotated-out text and this new entry). `backend/tests/
+  test_normalization_seniority.py`, `docs/ARCHITECTURE.md`,
+  `docs/ROADMAP.md`, `app/normalization/employment.py`,
+  `app/normalization/remote.py`, `app/normalization/types.py` untouched.
+- Verification: targeted seniority module alone (**96 passed** — 91
+  fixture cases + 5 code-level tests, was 89); all four normalization
+  modules together (**269 passed**). `ruff format --check`/`ruff
+  check`/`mypy` all pass. Genuine external `python scripts/verify.py
+  --level routine` (full run) — all **9 steps PASS**, **1764 full-suite
+  tests** (was 1757; +7, exactly matching the 7 net-new fixture cases).
+  No database/migration/schema touched.
+- Focused adversarial replay (required this round): beyond the fixture
+  corpus, probed 9 unseen cases — additional immediately-joined pairs not
+  literally matching the three reproduced forms (`"director staff"`,
+  `"principal senior"`, comma-joined and ampersand-joined variants, all
+  correctly `unavailable`); confirmed the compound rule still takes
+  precedence over the new conflict check (`"senior staff engineer
+  position"` still resolves to `staff`, since the compound consumes both
+  tokens before the conflict check ever runs on the remainder);
+  confirmed negated immediately-joined phrases still resolve safely via
+  the existing negation grammar with no crash; and confirmed a longer,
+  more elaborate relational-prose sentence (`"...that occasionally
+  supports our director of engineering initiatives"`) still does not
+  produce a false conflict. No new issues found.
+- Deviations/known limitations: none new. The two adversarial
+  observations recorded in the prior iteration (coordination-adjacency
+  requiring direct adjacency; a title ending in a literal period) remain
+  unchanged, out of scope for this pass. The pre-existing `alembic check`
+  substitution remains, unrelated.
+- STOP — awaiting Codex re-review. Do not merge, begin another Phase 3
+  parser, wire into ingestion/persistence, contact providers, or create a
+  migration.
+
+### Work review
+
+- Date/reviewer: 2026-09-07, Codex.
+- Diff reviewed: `976abaa..5186598` on `phase-3/seniority-classifier`.
+- Verdict: **Approved.** No executable findings.
+- The High description-conflict finding is closed. Independent direct replay confirms
+  `senior director`, `junior senior`, and `staff/principal` descriptions now fail
+  closed, including comma/ampersand/dash variants, while `senior staff -> staff`,
+  `senior principal -> principal`, ordinary single-value descriptions, negated forms,
+  and later reporting/collaboration prose retain their approved behavior. The new
+  immediate-only mechanism satisfies the invariant without importing title's broad
+  trailing scan into description prose.
+- The documentation correction is also closed: the historical entry now accurately
+  distinguishes 84 original fixture cases from 89 original module tests; this pass adds
+  seven fixtures for 91 cases and 96 module tests.
+- Independent verification: all four normalization modules pass (**269 tests**); the
+  canonical focused verifier passes all **10 steps** (**96 focused / 1764 full suite**),
+  including Ruff, mypy, repository checks, test-database safety, and cleanup.
+  `git diff --check` is clean. No schema or migration changed.
+- Scope remained exactly bounded to `seniority.py`, its fixture corpus, and the handoff
+  ledger. No vocabulary, aliases, anchors, principal/director phrases, exclusions,
+  taxonomy implementation, ingestion wiring, provider behavior, or other parser changed.
+- The seniority-classifier slice and its correction pass are accepted. Do not merge or
+  begin another Phase 3 parser until the user explicitly authorizes that action.

@@ -281,6 +281,8 @@ jobGoblin/
 │   │   │   ├── location.py
 │   │   │   ├── employment.py
 │   │   │   ├── seniority.py
+│   │   │   ├── remote.py               # remote/hybrid/onsite classifier (Phase 3, first parser slice)
+│   │   │   ├── types.py                # NormalizationResult[T]/Provenance shared by every parser above
 │   │   │   ├── company.py
 │   │   │   └── url.py                  # canonical URL normalization (ADR 0004)
 │   │   │
@@ -288,7 +290,9 @@ jobGoblin/
 │   │   │   ├── skills.yaml
 │   │   │   ├── titles.yaml
 │   │   │   ├── industries.yaml
-│   │   │   ├── seniority.yaml
+│   │   │   ├── seniority.yaml           # planned future enrichment — normalization/seniority.py's
+│   │   │   │                            # Phase 3 v1 slice is code-defined (small closed vocabulary,
+│   │   │   │                            # no taxonomy file), not blocked on this file existing
 │   │   │   └── aliases.yaml
 │   │   │
 │   │   ├── matching/

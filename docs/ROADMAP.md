@@ -408,8 +408,37 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   corrects both — the §11 wording, and two new fixture-driven tests
   (`test_two_distinct_tenants_sharing_source_job_id_produce_two_jobs`,
   `test_null_tenant_natural_key_collision_resolves_to_one_occurrence`) in
-  `tests/test_ingestion_pipeline.py`. This is the **Phase 2 closure candidate**, pending
-  Codex's independent exit-gate review and sign-off — not yet a declared-complete phase.
-- **Phases 3-14: not started.** Begin each phase only after completing its preflight in
+  `tests/test_ingestion_pipeline.py`. This closure was reviewed and approved by Codex,
+  merged into `main` at `d4bd606` (merge record committed at `199eb00`), and **Phase 2
+  is officially complete.**
+- **Phase 3: first slice (remote/hybrid/onsite classifier) merged into `main` at
+  `1bc8247` (approval commit `fecbcec`, merge record in
+  [LLM_HANDOFF.md](LLM_HANDOFF.md)) — not a Phase 3 completion claim.**
+  `app/normalization/remote.py`'s deterministic remote/hybrid/onsite classifier and
+  the shared `app/normalization/types.py` (`NormalizationResult[T]`/`Provenance`) are
+  tested against a fixture-driven regression corpus, with an automated import-boundary
+  proof (no database/ORM/provider/network dependency). Not wired into
+  ingestion/persistence, no `parser_version` threading.
+  A second slice (full_time/part_time/seasonal/internship classifier) merged into
+  `main` at `8e136c0` (approval commit `67cf09b`, merge record in
+  [LLM_HANDOFF.md](LLM_HANDOFF.md)). `app/normalization/employment.py` deliberately
+  covers only the `jobs.employment_type` schedule/commitment axis; `jobs.contract_type`
+  (deferred to its own future slice) and `jobs.shift` (no parser currently planned) are
+  untouched.
+  A third slice (entry_level/mid_level/senior/staff/principal/director classifier) is
+  implemented on `phase-3/seniority-classifier`, pending Codex review — not merged,
+  not complete. `app/normalization/seniority.py` is code-defined and bounded — no
+  `taxonomy/` directory or YAML file created; `docs/ARCHITECTURE.md`'s `seniority.yaml`
+  entry is annotated as planned future enrichment, not implemented by this slice.
+  No other Phase 3 parser (title, salary, location, experience, skill) has been
+  started — this is one more bounded slice, not a Phase 3 completion claim.
+- **Phase 4: two bounded read-only prework proofs merged into `main`; the production
+  `AtsScrapersProvider` adapter is not started and Phase 4 is not complete.** The
+  Greenhouse live ATS canary (`phase-4/greenhouse-canary`, merged at `64a3534`) and the
+  Greenhouse live-to-disposable-database ingestion proof (`phase-4/greenhouse-live-proof`,
+  merged at `907b3f0`) both exist; neither is the production `DiscoveryProvider`-wrapping
+  `AtsScrapersProvider` adapter described in this section's own header, which remains
+  unstarted.
+- **Phases 5-14: not started.** Begin each phase only after completing its preflight in
   [PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md) and receiving approval for the next
   smallest slice.
