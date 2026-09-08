@@ -351,3 +351,68 @@ focused_test_selector: tests/test_check_handoff.py tests/test_verify.py tests/te
 focused_test_count: 146
 full_suite_count: 1820
 ```
+
+### Work review
+
+- Date/reviewer: 2026-09-08, Codex. Diff reviewed: `f003595..d8db682` on
+  `tooling/workflow-v3.1-handoff-metadata` (including `62fe128`).
+- Verdict: **Approved with binding clarifications.** Five bounded corrections
+  below are required before merge; the overall design can remain.
+- Independent verification: canonical routine verifier with the three declared
+  focus files passes all **11 steps**, **146 focused / 1820 full-suite tests**,
+  including static checks, metadata validation, and temporary-directory cleanup.
+  Read-only database inspection confirms development `0006`, test `0017`.
+  No implementation, test, migration, or hook file changed during this review.
+- **1 — Medium: docs-only bypasses parser/tooling verification.**
+  `backend/scripts/check_handoff.py:172` returns from `not_run` validation without
+  requiring `slice_kind: docs`; `:263` likewise accepts docs-only by level alone.
+  Direct probes accept both parser and tooling `not_run` declarations; the real
+  `verify.handoff_metadata_step` returns PASS for tooling with no observed tests.
+  Require `not_run` to be docs-only and `focused_test_selector: none`; independently
+  reject non-docs entries when `docs_only=True`. Add end-to-end metadata/step tests
+  for parser/tooling rejection and docs acceptance. No Git-diff classifier is required.
+- **2 — Medium: focused-run evidence can be false.**
+  `check_handoff.py:287` treats an unparseable executed focus run as an omitted run;
+  `:311` checks selector identity only for parsers. Reproduced PASS with an executed
+  focus whose parsed counts are None and metadata claiming not_run; also reproduced
+  tooling PASS when declared and actual selectors differ but both counts equal 3.
+  Use actual selector presence to distinguish omitted from unparseable focus;
+  when focus ran, require readable counts, a numeric declaration, and matching
+  selectors for every slice kind. Add both regressions and an omitted-focus control.
+- **3 — Medium: malformed metadata can silently pass.**
+  `check_handoff.py:129` overwrites duplicate keys; `:143` checks workflow_version
+  presence but never its value. Reproduced acceptance of workflow_version=garbage
+  and conflicting duplicate full_suite_count declarations (last one silently wins).
+  Require the supported version, reject duplicate/empty/unknown keys and multiple
+  metadata blocks in the selected Work done section, and reject empty required
+  selectors/paths. Add focused positive/negative tests without inspecting old entries.
+- **4 — Low: malformed input escapes the reported validation failure path.**
+  `check_handoff.py:133` uses isdigit() before int(): the value U+00B2 passes the
+  predicate and raises ValueError. Missing handoff files also raise FileNotFoundError
+  through `verify.handoff_metadata_step`, bypassing its StepResult/summary handling.
+  Validate ASCII integer syntax and translate expected conversion/read/decode failures
+  into HandoffValidationError at the input boundary, for both standalone and verifier
+  entry points. Report concise errors without echoing file contents. Test malformed
+  counts, missing/unreadable handoff, and invalid UTF-8; retain cleanup on failure.
+- **5 — Medium: durable pilot rules omit the approved experiment.**
+  `docs/LLM_WORKFLOW.md:301` replaces the promised pre-review implementation
+  contract/counterexample passes with two Class-H-only proposal passes. The Class-R
+  experience parser therefore misses the intended requirement. The implementation
+  also omits the mutation-proof rule and numerical success thresholds, and counts
+  tooling as pilot slice 1 although the approved proposal makes experience slice 1.
+  Restore both implementation self-review passes for applicable pilot parser slices,
+  proposal preflight for new parsing forms/invariants, the load-bearing regression
+  mutation proof, and the three-applicable-slice measurement window starting with
+  experience. Record the agreed targets: at most one correction round per slice,
+  zero confidently-wrong review findings, zero handoff count defects, and zero
+  regressions that pass with their required guard disabled. Preserve proportional
+  docs verification; clarify that docs may truthfully record routine tests if run
+  (the existing test permits this despite the docs saying not_run is required).
+  Align CLAUDE.md and the retrospective trigger. Record deviations in the new entry;
+  preserve historical Work done/review text. No extra automation is requested.
+- Correction verification: targeted checker/verifier/hook tests and one canonical
+  focused run with updated actual metadata counts; no migration round-trip needed.
+  Add a concise new Work done entry recording the final successful run rather than
+  leaving final success as an expectation for the reviewer to establish.
+- STOP: user authorizes the bounded correction pass; no merge, experience
+  implementation, other parser, or provider contact is approved by this review.
