@@ -333,3 +333,28 @@ that detail.
 - STOP — awaiting Codex re-review. Do not merge, begin another Phase 3
   parser, wire into ingestion/persistence, contact providers, or create a
   migration.
+
+### Work review
+
+- Date/reviewer: 2026-09-07, Codex.
+- Diff reviewed: `976abaa..5186598` on `phase-3/seniority-classifier`.
+- Verdict: **Approved.** No executable findings.
+- The High description-conflict finding is closed. Independent direct replay confirms
+  `senior director`, `junior senior`, and `staff/principal` descriptions now fail
+  closed, including comma/ampersand/dash variants, while `senior staff -> staff`,
+  `senior principal -> principal`, ordinary single-value descriptions, negated forms,
+  and later reporting/collaboration prose retain their approved behavior. The new
+  immediate-only mechanism satisfies the invariant without importing title's broad
+  trailing scan into description prose.
+- The documentation correction is also closed: the historical entry now accurately
+  distinguishes 84 original fixture cases from 89 original module tests; this pass adds
+  seven fixtures for 91 cases and 96 module tests.
+- Independent verification: all four normalization modules pass (**269 tests**); the
+  canonical focused verifier passes all **10 steps** (**96 focused / 1764 full suite**),
+  including Ruff, mypy, repository checks, test-database safety, and cleanup.
+  `git diff --check` is clean. No schema or migration changed.
+- Scope remained exactly bounded to `seniority.py`, its fixture corpus, and the handoff
+  ledger. No vocabulary, aliases, anchors, principal/director phrases, exclusions,
+  taxonomy implementation, ingestion wiring, provider behavior, or other parser changed.
+- The seniority-classifier slice and its correction pass are accepted. Do not merge or
+  begin another Phase 3 parser until the user explicitly authorizes that action.
