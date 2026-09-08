@@ -1,5 +1,6 @@
 """Canonical routine verification entry point (Workflow v3 tooling program,
-slice 1: routine-verifier foundation).
+slice 1: routine-verifier foundation; extended by the Workflow v3.1 pilot's
+handoff-metadata validation, slice 0 of the pilot's own three-slice trial).
 
 Runs, in a fixed order, the checks `docs/LLM_WORKFLOW.md`'s verification
 matrix already requires by hand for a "Python without schema" change
@@ -9,7 +10,8 @@ merely because `tests/test_check_repo.py` also exercises its functions),
 `git diff --check` (with a command-local `safe.directory` override — see
 `git_diff_check_command`), a disposable-test-database URL safety check, a
 real test-database reachability preflight, an optional focused pytest
-selection, then the full pytest suite — and, finally, this invocation's own
+selection, the full pytest suite, this pilot's own handoff-metadata
+validation step (see below), and, finally, this invocation's own
 temporary-directory cleanup, itself reported as a PASS/FAIL step rather than
 performed silently outside the result set (see `cleanup_run_dir_step`).
 
@@ -19,11 +21,34 @@ though it lives outside `backend/` and outside the shipped `app` package.
 
     cd backend && python scripts/verify.py --level routine
     cd backend && python scripts/verify.py --level routine --focus tests/test_x.py::test_y
+    cd backend && python scripts/verify.py --level routine --docs-only
 
 Only `--level routine` exists in this slice; `schema` and `high-risk` are
 later, separately authorized slices (see docs/ROADMAP.md's revised
 sequence) — passing any other value is an argparse usage error, never a
 silent no-op.
+
+**`--docs-only`** (Workflow v3.1 pilot): for a genuinely documentation-only
+change, skips the disposable-database steps and the full/focused pytest
+steps entirely (reported `NOT RUN`, never silently omitted) — `--focus`
+and `--docs-only` are mutually exclusive, since focusing tests implies
+running them. The handoff-metadata step (below) then requires
+`docs/LLM_HANDOFF.md`'s newest `Work done` entry to declare
+`verification_level: not_run`, so a docs-only invocation can never be used
+to silently paper over a stale or fabricated test count.
+
+**Handoff-metadata validation** (Workflow v3.1 pilot, `scripts/
+check_handoff.py`): a required step (never optional, never skippable) that
+reads `docs/LLM_HANDOFF.md`'s newest `Work done` entry's structured
+`workflow-metadata` block and cross-checks it against what *this exact
+invocation* just observed — the full-suite count, the focused-test count
+and selector (when `--focus` was used), and (for `slice_kind: parser`) that
+`--focus` was used at all and its selector matches the declared one. This
+comparison reuses the counts this same run's own pytest step(s) already
+parsed — it never launches a second pytest or `verify.py` subprocess to
+re-derive them, and it never asserts anything about the underlying slice's
+semantic correctness, only whether the block's mechanically-derivable
+claims match reality.
 
 Every step that runs a separate tool is invoked as `[sys.executable, "-m",
 ...]` — never a bare `ruff`/`mypy`/`pytest` resolved from `PATH`, never
@@ -86,6 +111,7 @@ if str(BACKEND_DIR) not in sys.path:
 
 from app.config import Settings, get_settings  # noqa: E402
 from app.db.session import check_database_connection  # noqa: E402
+from scripts import check_handoff  # noqa: E402
 from scripts.db_safety import (  # noqa: E402
     assert_is_disposable_test_database,
     redact_database_url,
@@ -262,14 +288,28 @@ def _format_counts(counts: dict[str, int] | None) -> str:
 
 
 def run_pytest_step(
-    name: str, targets: list[str], basetemp: Path, runner: SubprocessRunner = _default_runner
+    name: str,
+    targets: list[str],
+    basetemp: Path,
+    runner: SubprocessRunner = _default_runner,
+    *,
+    counts_sink: dict[str, dict[str, int] | None] | None = None,
+    counts_key: str = "",
 ) -> StepResult:
+    """`counts_sink`/`counts_key` are an optional side-channel: when given,
+    this step's parsed pytest counts are also written into
+    `counts_sink[counts_key]` (as `None` if the summary line couldn't be
+    parsed) — how the handoff-metadata step below reads *this same run's*
+    actual counts without launching a second pytest subprocess to re-derive
+    them."""
     command = pytest_command(targets, basetemp)
     start = time.monotonic()
     try:
         proc = runner(command, BACKEND_DIR)
     except OSError as exc:
         duration = time.monotonic() - start
+        if counts_sink is not None:
+            counts_sink[counts_key] = None
         return StepResult(
             name,
             StepStatus.FAIL,
@@ -279,6 +319,8 @@ def run_pytest_step(
         )
     duration = time.monotonic() - start
     counts = parse_pytest_summary(proc.stdout or "")
+    if counts_sink is not None:
+        counts_sink[counts_key] = counts
     detail = _format_counts(counts)
     if proc.returncode == 0:
         return StepResult(name, StepStatus.PASS, duration, detail)
@@ -352,6 +394,40 @@ def db_reachability_step(
         )
     duration = time.monotonic() - start
     return StepResult(name, StepStatus.PASS, duration, f"{redact_database_url(test_url)} reachable")
+
+
+def handoff_metadata_step(
+    *,
+    docs_only: bool,
+    pytest_counts: dict[str, dict[str, int] | None],
+    focus_targets: list[str],
+) -> StepResult:
+    """Workflow v3.1 pilot: validates `docs/LLM_HANDOFF.md`'s newest `Work
+    done` entry's structured metadata block against what *this invocation*
+    actually observed. Never launches a subprocess — `pytest_counts` is
+    populated by this same run's own pytest step(s) via `run_pytest_step`'s
+    `counts_sink`, and `check_handoff.validate_handoff` only ever reads
+    `docs/LLM_HANDOFF.md` and (for a parser slice) the declared fixture
+    file directly."""
+    name = "handoff metadata validation"
+    start = time.monotonic()
+    full_counts = pytest_counts.get("full")
+    focused_counts = pytest_counts.get("focused")
+    actual_full = full_counts.get("passed") if full_counts else None
+    actual_focused = focused_counts.get("passed") if focused_counts else None
+    actual_selector = " ".join(focus_targets) if focus_targets else None
+    try:
+        check_handoff.validate_handoff(
+            docs_only=docs_only,
+            actual_full_suite_count=actual_full,
+            actual_focused_count=actual_focused,
+            actual_focus_selector=actual_selector,
+        )
+    except check_handoff.HandoffValidationError as exc:
+        duration = time.monotonic() - start
+        return StepResult(name, StepStatus.FAIL, duration, str(exc))
+    duration = time.monotonic() - start
+    return StepResult(name, StepStatus.PASS, duration, "ok")
 
 
 def _run_steps(steps: list[Step]) -> list[StepResult]:
@@ -496,9 +572,16 @@ def _build_steps(
     test_url: str,
     run_dir: Path,
     *,
+    docs_only: bool = False,
     runner: SubprocessRunner = _default_runner,
     connectivity_check: Callable[[str], None] = _real_connectivity_check,
 ) -> list[Step]:
+    # Shared across the focused/full pytest steps below and the trailing
+    # handoff-metadata step — populated as a side effect of `run_pytest_step`
+    # (via `counts_sink`), so the handoff-metadata step reads *this same
+    # run's* actual counts without launching a second pytest subprocess.
+    pytest_counts: dict[str, dict[str, int] | None] = {}
+
     steps = [
         Step(
             "ruff format --check",
@@ -521,24 +604,56 @@ def _build_steps(
                 "git diff --check", git_diff_check_command(), REPO_ROOT, runner
             ),
         ),
-        Step(
-            "disposable test-database URL validation",
-            lambda: db_url_validation_step(dev_url, test_url),
-        ),
-        Step(
-            "test-database reachability preflight",
-            lambda: db_reachability_step(test_url, connectivity_check),
-        ),
     ]
-    if focus_targets:
+    if not docs_only:
         steps.append(
             Step(
-                "focused pytest",
-                lambda: run_pytest_step("focused pytest", focus_targets, run_dir, runner),
+                "disposable test-database URL validation",
+                lambda: db_url_validation_step(dev_url, test_url),
+            )
+        )
+        steps.append(
+            Step(
+                "test-database reachability preflight",
+                lambda: db_reachability_step(test_url, connectivity_check),
+            )
+        )
+        if focus_targets:
+            steps.append(
+                Step(
+                    "focused pytest",
+                    lambda: run_pytest_step(
+                        "focused pytest",
+                        focus_targets,
+                        run_dir,
+                        runner,
+                        counts_sink=pytest_counts,
+                        counts_key="focused",
+                    ),
+                )
+            )
+        steps.append(
+            Step(
+                "full pytest suite",
+                lambda: run_pytest_step(
+                    "full pytest suite",
+                    [],
+                    run_dir,
+                    runner,
+                    counts_sink=pytest_counts,
+                    counts_key="full",
+                ),
             )
         )
     steps.append(
-        Step("full pytest suite", lambda: run_pytest_step("full pytest suite", [], run_dir, runner))
+        Step(
+            "handoff metadata validation",
+            lambda: handoff_metadata_step(
+                docs_only=docs_only,
+                pytest_counts=pytest_counts,
+                focus_targets=focus_targets,
+            ),
+        )
     )
     return steps
 
@@ -566,7 +681,20 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         metavar="TARGET",
         help="Optional pytest file paths and/or node IDs to run before the full suite.",
     )
-    return parser.parse_args(argv)
+    parser.add_argument(
+        "--docs-only",
+        action="store_true",
+        help=(
+            "Workflow v3.1 pilot: for a genuinely documentation-only change, skips the "
+            "disposable-database steps and the full/focused pytest steps entirely (reported "
+            "NOT RUN). Mutually exclusive with --focus, since focusing tests implies running "
+            "them."
+        ),
+    )
+    args = parser.parse_args(argv)
+    if args.docs_only and args.focus:
+        parser.error("--docs-only and --focus are mutually exclusive")
+    return args
 
 
 def create_run_dir() -> Path:
@@ -611,7 +739,7 @@ def main(argv: list[str] | None = None) -> int:
     test_url = resolve_test_database_url(settings.test_database_url)
 
     run_dir = create_run_dir()
-    steps = _build_steps(focus_targets, dev_url, test_url, run_dir)
+    steps = _build_steps(focus_targets, dev_url, test_url, run_dir, docs_only=args.docs_only)
     results = _execute_and_cleanup(steps, run_dir)
 
     _print_summary(results)

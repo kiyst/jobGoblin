@@ -284,6 +284,51 @@ def test_run_pytest_step_passes_focus_targets_as_argv_elements() -> None:
     assert "tests/test_x.py::test_y" in captured_command
 
 
+def test_run_pytest_step_writes_parsed_counts_into_the_counts_sink() -> None:
+    def fake_runner(command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+        return _fake_completed_process(0, stdout="7 passed in 1.00s")
+
+    sink: dict[str, dict[str, int] | None] = {}
+    verify.run_pytest_step(
+        "full pytest suite", [], Path("/tmp/x"), fake_runner, counts_sink=sink, counts_key="full"
+    )
+    assert sink == {"full": {"passed": 7}}
+
+
+def test_run_pytest_step_writes_none_into_the_counts_sink_when_the_summary_is_unparseable() -> None:
+    def fake_runner(command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+        return _fake_completed_process(0, stdout="totally unrecognized output")
+
+    sink: dict[str, dict[str, int] | None] = {}
+    verify.run_pytest_step(
+        "full pytest suite", [], Path("/tmp/x"), fake_runner, counts_sink=sink, counts_key="full"
+    )
+    assert sink == {"full": None}
+
+
+def test_run_pytest_step_writes_none_into_the_counts_sink_when_launch_fails() -> None:
+    def failing_runner(command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+        raise OSError("no such file")
+
+    sink: dict[str, dict[str, int] | None] = {}
+    result = verify.run_pytest_step(
+        "full pytest suite", [], Path("/tmp/x"), failing_runner, counts_sink=sink, counts_key="full"
+    )
+    assert result.status is verify.StepStatus.FAIL
+    assert sink == {"full": None}
+
+
+def test_run_pytest_step_never_touches_the_sink_when_none_is_given() -> None:
+    """`counts_sink=None` (the default) must not raise — every existing call
+    site that predates this side channel must keep working unmodified."""
+
+    def fake_runner(command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+        return _fake_completed_process(0, stdout="1 passed in 0.01s")
+
+    result = verify.run_pytest_step("full pytest suite", [], Path("/tmp/x"), fake_runner)
+    assert result.status is verify.StepStatus.PASS
+
+
 # --------------------------------------------------------------------------
 # db_url_validation_step / db_reachability_step — URL safety and redaction
 # --------------------------------------------------------------------------
@@ -393,6 +438,71 @@ def test_db_reachability_step_only_ever_receives_the_test_url_never_the_dev_url(
 
 
 # --------------------------------------------------------------------------
+# handoff_metadata_step — Workflow v3.1 pilot
+# --------------------------------------------------------------------------
+
+
+def test_handoff_metadata_step_passes_when_validate_handoff_does_not_raise(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(verify.check_handoff, "validate_handoff", lambda **kwargs: None)
+    result = verify.handoff_metadata_step(docs_only=False, pytest_counts={}, focus_targets=[])
+    assert result.status is verify.StepStatus.PASS
+
+
+def test_handoff_metadata_step_fails_when_validate_handoff_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def raising(**kwargs: object) -> None:
+        raise verify.check_handoff.HandoffValidationError("declared count does not match")
+
+    monkeypatch.setattr(verify.check_handoff, "validate_handoff", raising)
+    result = verify.handoff_metadata_step(docs_only=False, pytest_counts={}, focus_targets=[])
+    assert result.status is verify.StepStatus.FAIL
+    assert "declared count does not match" in result.detail
+
+
+def test_handoff_metadata_step_passes_through_observed_counts_and_selector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def recording(**kwargs: object) -> None:
+        captured.update(kwargs)
+
+    monkeypatch.setattr(verify.check_handoff, "validate_handoff", recording)
+    verify.handoff_metadata_step(
+        docs_only=False,
+        pytest_counts={"full": {"passed": 12}, "focused": {"passed": 2}},
+        focus_targets=["tests/test_x.py::test_y"],
+    )
+    assert captured == {
+        "docs_only": False,
+        "actual_full_suite_count": 12,
+        "actual_focused_count": 2,
+        "actual_focus_selector": "tests/test_x.py::test_y",
+    }
+
+
+def test_handoff_metadata_step_reports_unavailable_counts_as_none_not_zero(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A pytest step whose summary line couldn't be parsed writes `None`
+    into the sink (see `run_pytest_step`'s own tests above) — this step must
+    forward that `None` unchanged, never coerce it to `0`."""
+    captured: dict[str, object] = {}
+
+    def recording(**kwargs: object) -> None:
+        captured.update(kwargs)
+
+    monkeypatch.setattr(verify.check_handoff, "validate_handoff", recording)
+    verify.handoff_metadata_step(docs_only=False, pytest_counts={"full": None}, focus_targets=[])
+    assert captured["actual_full_suite_count"] is None
+    assert captured["actual_focused_count"] is None
+    assert captured["actual_focus_selector"] is None
+
+
+# --------------------------------------------------------------------------
 # _run_steps — ordering, aggregation, fail-fast NOT RUN behavior
 # --------------------------------------------------------------------------
 
@@ -475,6 +585,7 @@ def test_build_steps_without_focus_has_the_required_order_and_no_focused_step() 
         "disposable test-database URL validation",
         "test-database reachability preflight",
         "full pytest suite",
+        "handoff metadata validation",
     ]
 
 
@@ -488,8 +599,81 @@ def test_build_steps_with_focus_inserts_focused_pytest_before_full_suite() -> No
         connectivity_check=_unused_connectivity_check,
     )
     names = [s.name for s in steps]
-    assert names[-2:] == ["focused pytest", "full pytest suite"]
+    assert names[-3:] == ["focused pytest", "full pytest suite", "handoff metadata validation"]
     assert names.count("focused pytest") == 1
+
+
+def test_build_steps_docs_only_skips_database_and_pytest_steps() -> None:
+    """Workflow v3.1 pilot: `--docs-only` must skip the disposable-database
+    steps and both pytest steps entirely — never attempt to construct them,
+    since `_unused_runner`/`_unused_connectivity_check` would raise if
+    called — while still ending in the required handoff-metadata step."""
+    steps = verify._build_steps(
+        ["tests/test_x.py::test_y"],
+        _DEV_URL,
+        _TEST_URL,
+        Path("/tmp/run-dir"),
+        docs_only=True,
+        runner=_unused_runner,
+        connectivity_check=_unused_connectivity_check,
+    )
+    assert [s.name for s in steps] == [
+        "ruff format --check",
+        "ruff check",
+        "mypy",
+        "check_repo.py",
+        "git diff --check",
+        "handoff metadata validation",
+    ]
+
+
+def test_build_steps_handoff_metadata_step_reflects_docs_only_and_observed_counts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The trailing step's own closure must be wired to the same `docs_only`
+    flag and to a `pytest_counts` sink populated by the full/focused pytest
+    steps that ran earlier in the same `_build_steps` call — proven here by
+    running the whole step list through a fake runner and confirming the
+    handoff-metadata step sees real, non-placeholder counts."""
+
+    def fake_runner(command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+        joined = " ".join(command)
+        if "pytest" not in joined:
+            return _fake_completed_process(0)
+        return _fake_completed_process(0, stdout="3 passed in 0.10s")
+
+    def fake_validate_handoff(
+        *,
+        docs_only: bool,
+        actual_full_suite_count: int | None,
+        actual_focused_count: int | None,
+        actual_focus_selector: str | None,
+    ) -> None:
+        observed["docs_only"] = docs_only
+        observed["actual_full_suite_count"] = actual_full_suite_count
+        observed["actual_focused_count"] = actual_focused_count
+        observed["actual_focus_selector"] = actual_focus_selector
+
+    observed: dict[str, object] = {}
+    monkeypatch.setattr(verify.check_handoff, "validate_handoff", fake_validate_handoff)
+
+    steps = verify._build_steps(
+        ["tests/test_x.py::test_y"],
+        _DEV_URL,
+        _TEST_URL,
+        Path("/tmp/run-dir"),
+        runner=fake_runner,
+        connectivity_check=lambda url: None,
+    )
+    for step in steps:
+        step.run()
+
+    assert observed == {
+        "docs_only": False,
+        "actual_full_suite_count": 3,
+        "actual_focused_count": 3,
+        "actual_focus_selector": "tests/test_x.py::test_y",
+    }
 
 
 # --------------------------------------------------------------------------
@@ -807,6 +991,24 @@ def test_parse_args_collects_multiple_focus_targets() -> None:
         ["--level", "routine", "--focus", "tests/test_a.py::test_x", "tests/test_b.py"]
     )
     assert args.focus == ["tests/test_a.py::test_x", "tests/test_b.py"]
+
+
+def test_parse_args_accepts_docs_only_alone() -> None:
+    args = verify._parse_args(["--level", "routine", "--docs-only"])
+    assert args.docs_only is True
+    assert args.focus is None
+
+
+def test_parse_args_defaults_docs_only_to_false() -> None:
+    args = verify._parse_args(["--level", "routine"])
+    assert args.docs_only is False
+
+
+def test_parse_args_rejects_docs_only_combined_with_focus() -> None:
+    with pytest.raises(SystemExit):
+        verify._parse_args(
+            ["--level", "routine", "--docs-only", "--focus", "tests/test_a.py::test_x"]
+        )
 
 
 # --------------------------------------------------------------------------

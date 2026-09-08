@@ -19,6 +19,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RUNTIME_DIR = REPO_ROOT / ".claude" / "runtime"
 CHECKPOINT_PATH = RUNTIME_DIR / "compact-checkpoint.md"
+WORKFLOW_VERSION = "v3.1-pilot"
 RECOVERY_DOCS = (
     "docs/LLM_WORKFLOW.md",
     "docs/LLM_HANDOFF.md",
@@ -116,6 +117,7 @@ def render_checkpoint(snapshot: GitSnapshot, *, trigger: str) -> str:
 
 Generated: {datetime.now(UTC).isoformat()}
 Trigger: {trigger}
+Workflow version: {WORKFLOW_VERSION}
 Classification: **{classification}** - {reason}
 
 ## Git state at PreCompact

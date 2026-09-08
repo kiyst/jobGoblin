@@ -6,6 +6,21 @@ read that file, `docs/PHASE_RISK_CHECKLIST.md`, the latest two iterations in
 Conversation history and compacted summaries are navigation aids, never authority over
 the repository.
 
+## Workflow v3.1 (pilot)
+
+`docs/LLM_WORKFLOW.md`'s "Workflow v3.1 pilot" section is in effect: a claim-to-evidence
+matrix and a historical-defect checklist self-review before implementing a Class H
+proposal introducing a new parsing form/invariant; for parser slices, two further
+implementation-time self-review passes (contract-conformance, counterexample) plus a
+load-bearing mutation proof for every regression test added; a rule that a
+confidently-wrong case can never be an "accepted limitation" without explicit written user
+approval; and a `slice_kind`/`verification_level` metadata block in every `Work done`
+entry, validated by `scripts/check_handoff.py` and required by `scripts/verify.py`. This is
+a measured three-**parser**-slice pilot starting with `classify_experience` — the
+handoff-metadata tooling itself does not count as one of the three — not a permanent
+process change; see that section's mandatory retrospective trigger and numerical
+thresholds.
+
 ## Compact instructions
 
 When Claude Code compacts this conversation, preserve only the information needed to
@@ -15,6 +30,8 @@ resume safely:
 - current branch, HEAD, upstream state, and whether the working tree is clean;
 - the active phase/slice, risk class, latest `Work done`/`Work review` verdict, and
   whether implementation, correction, review, or merge is the next permitted action;
+- the active workflow version (e.g. `v3.1-pilot`, as recorded by the compaction hook) and
+  the active slice's `slice_kind`/`verification_level`, when applicable;
 - unresolved decisions, known limitations, failed/inconclusive verification, and any
   external side effect already performed;
 - applicable identity, normalization, transaction, locking, database-safety, privacy,
