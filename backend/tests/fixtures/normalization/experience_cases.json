@@ -1,0 +1,497 @@
+[
+  {
+    "id": "bare_number_min_only",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "This role requires 5 years of experience.",
+    "expected_min": 5, "expected_min_provenance": "parsed_description",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Bare number convention: min-only, at-least reading."
+  },
+  {
+    "id": "zero_phrase_frame_positive_control",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "This position requires no experience.",
+    "expected_min": 0, "expected_min_provenance": "parsed_description",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Approved positive control preserved from the proposal review."
+  },
+  {
+    "id": "range_hyphen_basic",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "This role requires 3-5 years of experience.",
+    "expected_min": 3, "expected_min_provenance": "parsed_description",
+    "expected_max": 5, "expected_max_provenance": "parsed_description",
+    "note": "Hyphen range form."
+  },
+  {
+    "id": "range_to_form",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "This role requires 3 to 5 years of experience.",
+    "expected_min": 3, "expected_min_provenance": "parsed_description",
+    "expected_max": 5, "expected_max_provenance": "parsed_description",
+    "note": "\"to\" range form."
+  },
+  {
+    "id": "range_between_and",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "This role requires between 3 and 5 years of experience.",
+    "expected_min": 3, "expected_min_provenance": "parsed_description",
+    "expected_max": 5, "expected_max_provenance": "parsed_description",
+    "note": "\"between...and\" range form; includes literal \"experience\" outside the title-only short-form waiver."
+  },
+  {
+    "id": "open_lower_at_least",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "This role requires at least 5 years of experience.",
+    "expected_min": 5, "expected_min_provenance": "parsed_description",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Open-lower prefix marker never infers a cap."
+  },
+  {
+    "id": "open_lower_plus_suffix",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "This role requires 5+ years of experience.",
+    "expected_min": 5, "expected_min_provenance": "parsed_description",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Open-lower plus-suffix marker."
+  },
+  {
+    "id": "open_upper_up_to",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "This role requires up to 10 years of experience.",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": 10, "expected_max_provenance": "parsed_description",
+    "note": "Open-upper prefix marker never infers minimum=0. Isolated with an admissible attribution frame (Astra review finding 7)."
+  },
+  {
+    "id": "adjacency_missing_experience_word",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "This role requires 5 years managing teams.",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Closed adjacency grammar: no literal \"experience\" word adjacent to the number, even inside an otherwise-valid attribution frame."
+  },
+  {
+    "id": "reversed_label_value_bare",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "Experience: 5+ years",
+    "expected_min": 5, "expected_min_provenance": "parsed_description",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Reversed label:value order, inherently role-scoped like a structured field."
+  },
+  {
+    "id": "reversed_label_value_range",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "Experience: 3-5 years",
+    "expected_min": 3, "expected_min_provenance": "parsed_description",
+    "expected_max": 5, "expected_max_provenance": "parsed_description",
+    "note": "Reversed label:value order, range form."
+  },
+  {
+    "id": "frame_this_role_requires",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "This role requires 5+ years of experience.",
+    "expected_min": 5, "expected_min_provenance": "parsed_description",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Requirement-frame positive control."
+  },
+  {
+    "id": "frame_candidates_with_object",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "Candidates with 5 years of experience are encouraged to apply.",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "\"Candidates with\" is not an ALLOWED_SUBJECT+REQUIRE_VERB frame (no require-verb at all) — safe miss, not a wrong value. Documents a real grammar boundary, not a defect."
+  },
+  {
+    "id": "frame_we_are_looking_for",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "We are looking for 5 years of experience.",
+    "expected_min": 5, "expected_min_provenance": "parsed_description",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "ALLOWED_SUBJECT \"we\" + REQUIRE_VERB \"are looking for\"."
+  },
+  {
+    "id": "risk1_bare_required_insufficient",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "The project required 5 years of experience.",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Risk 1: bare required/requires/require cannot establish applicant attribution; \"the project\" is not in ALLOWED_SUBJECT."
+  },
+  {
+    "id": "amendment2_vendors_with_third_party",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "We require vendors with 5 years of experience.",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Astra review finding 2: subject/verb adjacency alone is insufficient; \"vendors with\" is not a closed ATTRIBUTION_OBJECT, so the frame never reaches the number."
+  },
+  {
+    "id": "amendment2_zero_frame_third_party",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "We require no experience to use our platform.",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Astra review finding 2: zero-phrase via the frame still requires an empty (sentence-ending) remainder; \"to use our platform\" is an unrecognized trailing continuation."
+  },
+  {
+    "id": "risk2_platform_continuation_closed_terminal",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "No experience required to use our platform.",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Risk 2, whole-sentence (not suffix) template match: this sentence is not a member of the closed zero-template set."
+  },
+  {
+    "id": "amendment3_negation_continuation",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "This role requires 5 years of experience, but that experience is not mandatory.",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Astra review finding 3: description negation scope, distinct from attribution. Recognized negation continuation suppresses the otherwise-valid frame."
+  },
+  {
+    "id": "amendment3_unrecognized_hedge_fails_closed",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "This role requires 5 years of experience, however this is negotiable.",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Astra review finding 3: an unsupported/unrecognized trailing hedge must not silently become a positive requirement — the general continuation-boundary rule rejects it, the same as a catalogued negation."
+  },
+  {
+    "id": "amendment3_no_more_than_precedence",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "This role requires no more than 5 years of experience.",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": 5, "expected_max_provenance": "parsed_description",
+    "note": "Astra review finding 3: precedence between negation and upper-bound syntax. \"no more than\" is consumed whole by the open-upper production; the remainder is empty, so this is accepted, not negated."
+  },
+  {
+    "id": "amendment4_decimal_range_malformed",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "This role requires 3.5-5 years of experience.",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Astra review finding 4: a decimal beside a range hyphen must not emit a suffix integer (never 5, never a fabricated bound)."
+  },
+  {
+    "id": "amendment4_fraction_malformed",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "This role requires 1/2 years of experience.",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Astra review finding 4: a fraction must not emit either operand as an integer candidate."
+  },
+  {
+    "id": "amendment4_negative_number_malformed",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "This role requires -5 years of experience.",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Astra review finding 4: a free-standing negative number must not emit the digit ignoring the sign."
+  },
+  {
+    "id": "risk3_decimal_alone",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "This role requires 3.5 years of experience.",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Risk 3, isolated with an admissible attribution frame (Astra review finding 7): decimal poisoning alone is the only guard under test here."
+  },
+  {
+    "id": "risk4_title_not_required_suppressed",
+    "origin": "synthetic_representative",
+    "title": "5 Years Experience Not Required",
+    "description": null,
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Risk 4: title-side non-required marker co-occurring with a numeric candidate suppresses the whole segment."
+  },
+  {
+    "id": "risk4_control_title_zero_unaffected",
+    "origin": "synthetic_representative",
+    "title": "No Experience Required",
+    "description": null,
+    "expected_min": 0, "expected_min_provenance": "inferred",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Risk 4 contrast: the bare zero-phrase production is a separate, unaffected grammar rule — no numeric candidate is present to suppress."
+  },
+  {
+    "id": "risk5_hyphen_range_not_delimiter",
+    "origin": "synthetic_representative",
+    "title": "3-5 Years Experience Required",
+    "description": null,
+    "expected_min": 3, "expected_min_provenance": "inferred",
+    "expected_max": 5, "expected_max_provenance": "inferred",
+    "note": "Risk 5: a digit-hyphen-digit range is never a segment delimiter, even though whitespace-surrounded hyphens still split segments elsewhere."
+  },
+  {
+    "id": "risk5_control_whitespace_hyphen_still_delimits",
+    "origin": "synthetic_representative",
+    "title": "Software Engineer - Senior",
+    "description": null,
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Risk 5 contrast: a whitespace-surrounded hyphen still delimits segments normally (no numeric content here at all, confirming no accidental cross-segment leakage)."
+  },
+  {
+    "id": "amendment4_title_decimal_range_malformed",
+    "origin": "synthetic_representative",
+    "title": "3.5-5 Years Experience Required",
+    "description": null,
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Astra review finding 4, title-side isolation: unlike description, title extraction has no match-start-zero or continuation-boundary check, so this case exercises numeric-rejection redaction as the sole guard against a fabricated min=5/max=5."
+  },
+  {
+    "id": "amendment4_title_fraction_malformed",
+    "origin": "synthetic_representative",
+    "title": "1/2 Years Experience Required",
+    "description": null,
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Astra review finding 4, title-side isolation: without redaction this would fabricate min=2 from the fraction's second operand."
+  },
+  {
+    "id": "amendment4_title_negative_number_malformed",
+    "origin": "synthetic_representative",
+    "title": "-5 Years Experience Required",
+    "description": null,
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Astra review finding 4, title-side isolation: without redaction this would fabricate min=5, silently dropping the negative sign."
+  },
+  {
+    "id": "amendment4_title_decimal_alone_malformed",
+    "origin": "synthetic_representative",
+    "title": "3.5 Years Experience Required",
+    "description": null,
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Astra review finding 4, title-side isolation: without redaction this would fabricate min=5 from the decimal's fractional digit."
+  },
+  {
+    "id": "amendment5_ideal_candidate_subject_positive",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "The ideal candidate must have 5 years of experience.",
+    "expected_min": 5, "expected_min_provenance": "parsed_description",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Astra review finding 5: \"ideal\" as part of the closed subject phrase \"the ideal candidate\" must not be mistaken for the preference marker — resolved positionally."
+  },
+  {
+    "id": "amendment5_preference_trailing_title",
+    "origin": "synthetic_representative",
+    "title": "5+ years of experience preferred.",
+    "description": null,
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Astra review finding 7 isolation: title-only example so the preference-suppression guard is tested without any attribution-frame confound."
+  },
+  {
+    "id": "amendment5_preference_leading_ideally",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "Ideally, the candidate has 5+ years of experience.",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Sentence-initial \"Ideally,\" suppresses the whole sentence, before any frame is even attempted."
+  },
+  {
+    "id": "amendment5_unsupported_preferably_hedge",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "This role requires 5 years of experience, preferably.",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Explicitly allowed to remain unsupported per the review: covered by the general continuation-boundary fail-closed rule, not a dedicated preference-continuation rule."
+  },
+  {
+    "id": "shortform_isolated_waiver_positive",
+    "origin": "synthetic_representative",
+    "title": "Software Engineer - 5+ yrs",
+    "description": null,
+    "expected_min": 5, "expected_min_provenance": "inferred",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Isolated-title-segment short-form waiver: segment content is exactly the short form, no literal \"experience\" word required."
+  },
+  {
+    "id": "shortform_isolated_waiver_range",
+    "origin": "synthetic_representative",
+    "title": "Software Engineer - 3-5 yrs",
+    "description": null,
+    "expected_min": 3, "expected_min_provenance": "inferred",
+    "expected_max": 5, "expected_max_provenance": "inferred",
+    "note": "Isolated short-form waiver, range variant."
+  },
+  {
+    "id": "shortform_not_isolated_negative",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "5+ yrs of coding",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Short-form waiver must not over-trigger: segment content is not exactly the short form (trailing \"of coding\"), and \"coding\" is not \"experience\"."
+  },
+  {
+    "id": "multivalue_collapse_identical",
+    "origin": "synthetic_representative",
+    "title": "5+ Years Experience",
+    "description": "This role requires 5 years of experience.",
+    "expected_min": 5, "expected_min_provenance": "parsed_description",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Cross-source collapse when title and description agree, mirroring seniority.py's exact precedence."
+  },
+  {
+    "id": "multivalue_conflict_cross_source",
+    "origin": "synthetic_representative",
+    "title": "5+ Years Experience",
+    "description": "This role requires 7 years of experience.",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Cross-source conflict when title and description disagree."
+  },
+  {
+    "id": "amendment6_title_internal_conflict_beats_description_agreement",
+    "origin": "synthetic_representative",
+    "title": "5-7 Years Experience, 10 Years Experience",
+    "description": null,
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": 7, "expected_max_provenance": "inferred",
+    "note": "Astra review finding 6: two distinct title minima (5 and 10) remain internally conflicting for minimum, independent of maximum (7, cleanly resolved from the same \"5-7\" segment) — proves bound independence."
+  },
+  {
+    "id": "amendment6_description_internal_conflict_beats_title_agreement",
+    "origin": "synthetic_representative",
+    "title": "5+ Years Experience",
+    "description": "This role requires 5 years of experience. This role requires 8 years of experience.",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Astra review finding 6, symmetric case: description-internal conflict (5 vs 8) for minimum wins over title agreeing with one of the two values (5) — internal conflict is checked before cross-source reconciliation."
+  },
+  {
+    "id": "amendment6_bound_independence_internal_conflict_plus_clean_bound",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "This role requires 5 years of experience. This role requires 8 years of experience. This role requires no more than 10 years of experience.",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": 10, "expected_max_provenance": "parsed_description",
+    "note": "Astra review finding 6: minimum's internal conflict (5 vs 8) does not suppress maximum, which resolves cleanly from a third, independent sentence."
+  },
+  {
+    "id": "consistency_invariant_inverted_range",
+    "origin": "synthetic_representative",
+    "title": "7+ Years Experience",
+    "description": "This role requires no more than 5 years of experience.",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Independently-reconciled minimum=7 (title) and maximum=5 (description) are individually valid but mutually inconsistent — both forced to unavailable."
+  },
+  {
+    "id": "negative_calendar_year_not_experience",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "This role requires employment since 2015.",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Historical-defect checklist category 3: a calendar year has no adjacent \"experience\" word and is never mistaken for an experience count."
+  },
+  {
+    "id": "negative_age_not_experience",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "Candidates must be 21 years of age.",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Historical-defect checklist category 3: \"years of age\" is not \"years of experience\" — adjacency grammar requires the literal word \"experience\"."
+  },
+  {
+    "id": "negative_education_duration_not_experience",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "This role requires a 4-year degree.",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Historical-defect checklist category 3: an education duration has no adjacent \"experience\" word."
+  },
+  {
+    "id": "negative_product_version_not_experience",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "This role requires familiarity with Windows Server 2016.",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Historical-defect checklist category 3: a product version number has no adjacent \"experience\" word."
+  },
+  {
+    "id": "negative_unrelated_number_not_experience",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "This role requires managing a team of 5 people.",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Historical-defect checklist category 3: an unrelated count has no adjacent \"experience\" word."
+  },
+  {
+    "id": "title_only_bare_number",
+    "origin": "synthetic_representative",
+    "title": "5+ Years Experience",
+    "description": null,
+    "expected_min": 5, "expected_min_provenance": "inferred",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Title-only signal provenance is INFERRED, mirroring seniority.py's precedent exactly."
+  },
+  {
+    "id": "description_only_open_upper_suffix",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "This role requires 10 or fewer years of experience.",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": 10, "expected_max_provenance": "parsed_description",
+    "note": "Open-upper suffix marker form."
+  },
+  {
+    "id": "no_title_no_description",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": null,
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Absent input on both fields resolves to double-unavailable, never a crash."
+  },
+  {
+    "id": "empty_string_title_and_description",
+    "origin": "synthetic_representative",
+    "title": "",
+    "description": "",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Empty (non-None) strings resolve identically to None input."
+  }
+]

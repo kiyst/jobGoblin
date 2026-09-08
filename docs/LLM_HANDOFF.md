@@ -100,157 +100,6 @@ that detail.
 
 - Date/agent: 2026-09-08, Claude Code (Sonnet 5). Risk class R (tooling)
   correction pass on `tooling/workflow-v3.1-handoff-metadata` addressing
-  all five findings in Iteration 1's `Work review` (commit `38ed0a2`)
-  above. Base -> ending commit: `38ed0a2` -> this commit; same branch.
-  Preserved the overall design (Approved with binding clarifications) —
-  every correction below is bounded to the five findings, no scope
-  expansion.
-- Finding 1 (Medium — docs-only bypassed parser/tooling verification):
-  `check_handoff.py`'s `validate_structure` now rejects
-  `verification_level: not_run` unless `slice_kind: docs` (structural,
-  independent of invocation), and also requires `focused_test_selector:
-  none` whenever `not_run` applies. `validate_against_run` independently
-  rejects `docs_only=True` when the declared `slice_kind` isn't `docs`,
-  as its own defense-in-depth. Added 4 unit tests plus 3 end-to-end
-  `validate_handoff` tests covering parser rejection, tooling rejection,
-  and docs acceptance.
-- Finding 2 (Medium — focused-run evidence could be false): rewrote
-  `validate_against_run`'s focus handling to use
-  `actual_focus_selector is not None` (not `actual_focused_count is
-  None`) as the *omitted* signal, distinguishing it from focus having
-  run with an unparseable summary — a declared `not_run` with focus
-  actually used is now rejected. The focus-selector match check now
-  applies to every `slice_kind`, not only `parser`. Added 5 tests: the
-  reproduced not_run-with-executed-focus case, an unparseable-focused-
-  count-with-numeric-declaration case, a tooling selector-mismatch case,
-  and an omitted-focus control.
-- Finding 3 (Medium — malformed metadata could silently pass):
-  `parse_metadata_fields` now rejects a duplicate key and an empty key
-  (previously last-one-wins); `extract_latest_work_done_metadata_text`
-  rejects more than one `workflow-metadata` block in the same `Work
-  done` section (previously `.search` silently took the first);
-  `validate_structure` now checks `workflow_version`'s actual value
-  (`v3.1-pilot` only) and rejects any empty required field or an empty
-  `fixture_path`. Added 7 tests.
-- Finding 4 (Low — malformed input escaped the reported failure path):
-  `_require_int` now matches `^[0-9]+$` before calling `int()` (plain
-  `str.isdigit()` accepted non-ASCII "digit" characters, e.g. `²`, that
-  `int()` itself then rejected with an unhandled `ValueError`). Added
-  `_read_handoff_text`, converting a missing/unreadable file or invalid
-  UTF-8 into `HandoffValidationError` at the read boundary, used by both
-  `validate_handoff` (the verifier entry point) and `main()` (the
-  standalone entry point) — neither `check_handoff.py` call site can
-  crash `verify.py`'s `handoff_metadata_step` with an uncaught OS-level
-  exception any longer. Added 6 tests (direct `_require_int` probe,
-  `validate_structure`-level integration, missing-file and invalid-UTF-8
-  cases at both the `_read_handoff_text` and `validate_handoff`/`main()`
-  levels).
-- Finding 5 (Medium — durable pilot rules omitted the approved
-  experiment, docs-only): `docs/LLM_WORKFLOW.md`'s pilot section now
-  restores, as a distinct "Implementation self-review passes (parser
-  slices)" section, the contract-conformance and counterexample passes
-  for parser-slice implementations (separate from the proposal-time
-  claim-to-evidence/historical-defect preflight, which is unchanged);
-  added the load-bearing regression mutation-proof rule as its own
-  section; corrected the pilot's counted-slice window to three **parser**
-  slices starting with `classify_experience` (this tooling slice is
-  enabling infrastructure, not one of the three); replaced the
-  retrospective's vague qualitative-only criteria with the agreed
-  numerical thresholds (at most one correction round per slice, zero
-  confidently-wrong findings, zero handoff count defects, zero
-  regressions passing with their guard disabled); and corrected the
-  `docs` slice_kind wording — `not_run` is permitted for docs, never
-  mandatory (a docs slice that actually ran tests truthfully records
-  `routine` with real counts; the existing code already allowed this,
-  only the prose was wrong). `CLAUDE.md`'s pilot marker and this file's
-  intro line updated to match. No code change for this finding.
-- Files changed: `backend/scripts/check_handoff.py`, `backend/tests/
-  test_check_handoff.py` (+25 tests, 68 total), `docs/LLM_WORKFLOW.md`,
-  `CLAUDE.md`, this handoff entry. `backend/scripts/verify.py` and its
-  tests, `.claude/hooks/compact_checkpoint.py` and its test: unchanged —
-  none of the five findings required a change there (`handoff_metadata_step`
-  already just forwards to `check_handoff.validate_handoff`, whose
-  internal logic is what changed).
-- Mutation-proof (Workflow v3.1 pilot's own newly-added rule, applied to
-  this correction pass itself): for a representative set spanning all
-  five findings (12 individual checks: Finding 1's slice_kind guard x4
-  tests, Finding 2's omitted/unparseable distinction and universal
-  selector-match x3 tests, Finding 3's duplicate-key and multi-block
-  guards x2 tests, Finding 4's ASCII-int check x2 tests and file-read
-  boundary x1 test), the specific fix was temporarily reverted, the
-  corresponding new test(s) were confirmed to fail (reproducing the
-  original defect, including one genuine uncaught `FileNotFoundError`
-  and one uncaught `ValueError` escaping past `HandoffValidationError`),
-  then the fix was restored and the tests reconfirmed passing. Not every
-  one of the 25 new tests was individually mutation-tested — the
-  remaining ones are structural variations (different slice_kind, field
-  combinations) exercising the same guarded branches already proven
-  load-bearing above.
-- Verification: `ruff format --check`/`ruff check`/`mypy` all pass (104
-  source files). `python -m scripts.check_repo` exits 0. Genuine
-  external `python scripts/verify.py --level routine --focus
-  tests/test_check_handoff.py tests/test_verify.py
-  tests/test_compact_checkpoint.py` (full run) — **171 focused / 1845
-  full-suite tests** (was 146/1820; +25 focused from the new
-  `check_handoff` tests, +25 full-suite matching exactly). All 11 steps
-  PASS, including `handoff metadata validation` against this entry's own
-  metadata block below.
-- Deviations/known limitations: none new. Finding 5 is documentation-only
-  by its own nature; no code changed for it. The mutation-proof scope
-  above is representative, not exhaustive, as stated.
-- STOP — awaiting Codex re-review. Do not merge, begin `classify_experience`
-  or any other Phase 3 parser, or start pilot slice 2/3 of Workflow v3.1
-  without separate authorization.
-
-```workflow-metadata
-workflow_version: v3.1-pilot
-slice_kind: tooling
-verification_level: routine
-focused_test_selector: tests/test_check_handoff.py tests/test_verify.py tests/test_compact_checkpoint.py
-focused_test_count: 171
-full_suite_count: 1845
-```
-
-### Work review
-
-- Date/reviewer: 2026-09-08, Codex.
-- Diff reviewed: `38ed0a2..41b3f70` on
-  `tooling/workflow-v3.1-handoff-metadata`.
-- Verdict: **Changes requested.** Findings 1, 2, 4, and 5 are closed. Finding 3
-  is substantially corrected, but one explicitly requested malformed-metadata case
-  remains accepted.
-- Independent verification: `git diff --check` is clean; the three focused modules pass
-  **171/171 tests** with a workspace-local pytest base directory. The default pytest temp
-  root was inaccessible to this reviewer account (`PermissionError`) and is an
-  environment issue, not a product/test failure. A direct executable probe reproduced
-  the remaining issue below. The full 1845-test suite was not rerun because this bounded
-  structural defect is already independently demonstrated.
-- **Medium — unknown metadata keys still pass validation.** The Iteration 1 correction
-  explicitly required rejecting duplicate, empty, **and unknown** keys. The new parser
-  rejects duplicates and empty keys, while `validate_structure()` checks required and
-  conditional fields but never compares the supplied key set against the closed metadata
-  schema (`backend/scripts/check_handoff.py:87`, `:171`). Directly adding
-  `typo_full_sute_count: 1` to an otherwise-valid tooling block still returns normally;
-  `backend/tests/test_check_handoff.py` has no unknown-key regression. This leaves typos
-  and unsupported fields silently ignored, contrary to the validator's fail-closed goal.
-- Bounded correction: define the complete allowed field-name set (the six required fields
-  plus `lightweight_checks`, `fixture_path`, and `fixture_count`) and have structural
-  validation reject every supplied key outside it before conditional checks. Add a
-  regression proving an otherwise-valid block with an invented/typo key fails, mutation-
-  prove that test, then rerun the focused checker/verifier/hook tests and canonical
-  verifier with updated metadata counts. No verifier orchestration, hook, product,
-  migration, or pilot-policy change is requested.
-- STOP: do not merge or begin `classify_experience` or another parser until this bounded
-  correction is implemented and re-reviewed.
-
----
-
-## Iteration 2
-
-### Work done
-
-- Date/agent: 2026-09-08, Claude Code (Sonnet 5). Risk class R (tooling)
-  correction pass on `tooling/workflow-v3.1-handoff-metadata` addressing
   the single remaining bounded finding in Iteration 1's `Work review`
   (commit `d5fec38`) above. Base -> ending commit: `d5fec38` -> this
   commit; same branch. Scope held exactly to the requested correction —
@@ -376,3 +225,116 @@ full_suite_count: 1846
 - STOP — do not begin or propose `classify_experience` or any other
   Phase 3 parser, or start pilot slice 2/3 of Workflow v3.1, without
   separate authorization.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-09-08, Claude Code (Sonnet 5). Risk class R
+  (R-plus-adversarial, matching `seniority.py`'s precedent — deterministic
+  pure-function text classifier, no identity/concurrency/security/
+  external/destructive surface). Base -> ending commit: `ddb427d` -> this
+  commit; new branch `phase-3/experience-classifier`. Workflow v3.1 pilot
+  parser slice 1 of 3. Implements the fresh proposal Astra approved with
+  binding clarifications, incorporating every amendment below exactly.
+- `app/normalization/experience.py` (new): `classify_experience(title,
+  description) -> ExperienceRange`, the first parser needing `types.py`'s
+  deferred composite-result case — two independently-provenanced
+  `NormalizationResult[int]` bounds (`minimum`, `maximum`). Independent
+  implementation (own regex grammar, own segment/sentence splitting,
+  no import from `seniority.py`/`employment.py`/`remote.py`), proven by
+  the same AST-inspection allow-list pattern as the other three parsers.
+- Astra review amendments incorporated (all from the `604213a` proposal
+  review): **(2)** applicant attribution is a closed
+  `ALLOWED_SUBJECT REQUIRE_VERB [ATTRIBUTION_OBJECT] <phrase> END` frame,
+  not subject/verb adjacency alone — `"We require vendors with 5 years of
+  experience."` and `"We require no experience to use our platform."`
+  both correctly reject. **(3)** the continuation-boundary rule is
+  uniform: only an empty remainder accepts; a recognized negation and a
+  wholly unrecognized hedge both reject identically, so unsupported
+  negation can never silently become a positive requirement, while
+  `"no more than 5 years"` still correctly yields `maximum=5` (consumed
+  whole by the open-upper production, never reaching the boundary check
+  as trailing text). **(4)** numeric rejection is atomic: a single
+  text-wide redaction pass (decimal-beside-range, fraction, free-standing
+  negative, bare decimal) runs before any sentence/segment splitting, so
+  a poisoned digit can never resurface via a narrower production —
+  proven necessary specifically on the *title* path (no redundant
+  match-start/continuation-boundary guard there), where four new fixtures
+  demonstrate the old (mutated-off) behavior fabricating `min=5`, `min=2`,
+  etc. **(5)** preference-marker suppression is positional, not lexical:
+  `"the ideal candidate"` (a closed subject phrase) is never confused with
+  the `"ideal"/"ideally"` preference marker, since the marker check only
+  ever inspects a sentence-initial `"Ideally,"` or an immediate trailing
+  tag after an already-matched number — never the subject position.
+  **(6)** internal (within-source) conflict is checked, and wins, before
+  cross-source reconciliation, independently per bound — mirrors
+  `seniority.py`'s exact `_CONFLICT`-before-agreement precedence.
+- Files changed: `backend/app/normalization/experience.py` (new),
+  `backend/tests/test_normalization_experience.py` (new, 63 tests),
+  `backend/tests/fixtures/normalization/experience_cases.json` (new, 55
+  cases), `docs/ROADMAP.md` (Phase 3 bullet — also corrected a
+  pre-existing staleness: the seniority-classifier bullet still said
+  "pending Codex review — not merged" despite that merge already existing
+  at `92fcefc`), `docs/ARCHITECTURE.md` (annotated `experience.py`'s
+  status), this handoff entry (two-iteration rotation). No other file
+  touched; no schema, migration, or ingestion/persistence wiring.
+- Contract-conformance pass (Workflow v3.1, required for parser slices):
+  walked every claim in the approved proposal plus every Astra amendment
+  individually against the implementation via direct manual traces
+  (documented above and in the module docstring) before writing the
+  fixture corpus — all confirmed enforced, not merely fixture-satisfied.
+- Counterexample pass (Workflow v3.1, required for parser slices): probed
+  ~25 new inputs not in the fixture corpus across the historical-defect
+  checklist's nine categories (disallowed subjects beyond the reviewed
+  examples — "the client", "our previous engineer"; non-adjacent
+  "requires" separated from its subject by other clauses; an inverted
+  raw range "7-3 years" correctly caught by the same consistency
+  invariant that catches cross-bound inversion; a hyphenated compound
+  "5-Year Minimum..." that doesn't match any production). No confidently-
+  wrong output found; every excluded case resolved to `UNAVAILABLE`. Two
+  new safe-miss scope boundaries noted, not fixed: a "5-Year" hyphenated-
+  compound adjective form, and a `REQUIRE_VERB` frame requiring direct
+  subject-verb adjacency (no intervening clause) — both documented
+  limitations, not confidently-wrong cases.
+- Load-bearing regression mutation proofs (Workflow v3.1, required):
+  individually reverted and reconfirmed 8 fixes — amendment 2's
+  attribution-object gate, amendment 3's uniform continuation-boundary
+  rule, amendment 4's redaction mechanism (isolated via 4 new title-side
+  fixtures after discovering the original description-side fixtures were
+  masked by amendment 2/3's own guards — a real gap this pass itself
+  caught and closed), amendment 5's positional preference check, amendment
+  6's internal-conflict precedence, and Risk 5's hyphen disambiguation.
+  Every mutation reproduced the exact pre-fix defect (a fabricated value
+  or a crash); every fix, once restored, passed again.
+- Verification: `ruff format --check`/`ruff check`/`mypy` all pass (106
+  source files). `python -m scripts.check_repo` exits 0. Genuine external
+  `python scripts/verify.py --level routine --focus
+  tests/test_normalization_experience.py` (full run) — **63 focused /
+  1909 full-suite tests** (was 1846; +63 from the three targeted
+  normalization suites run together plus the new module, net +63 to the
+  full suite). All 11 steps PASS, including `handoff metadata validation`
+  against this entry's own metadata block below.
+- Deviations/known limitations: explicit exclusions carried from the
+  approved proposal (no `"Requirements:"`-header-scoped attribution, no
+  `exp` unit abbreviation, negation-marker catalog acknowledged
+  non-exhaustive) plus the two new counterexample-pass findings above
+  (hyphenated-compound numbers, non-adjacent requirement clauses) — all
+  safe misses (`UNAVAILABLE`), none confidently wrong, none requiring
+  user approval under the confidently-wrong blocking rule.
+- STOP — awaiting Astra's implementation review. Do not merge, begin
+  another Phase 3 parser, wire into ingestion/persistence, contact
+  providers, or create a migration.
+
+```workflow-metadata
+workflow_version: v3.1-pilot
+slice_kind: parser
+verification_level: routine
+focused_test_selector: tests/test_normalization_experience.py
+focused_test_count: 63
+full_suite_count: 1909
+fixture_path: backend/tests/fixtures/normalization/experience_cases.json
+fixture_count: 55
+```

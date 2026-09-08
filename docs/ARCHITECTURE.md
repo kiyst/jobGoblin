@@ -277,7 +277,9 @@ jobGoblin/
 │   │   │   ├── titles.py
 │   │   │   ├── skills.py
 │   │   │   ├── salary.py
-│   │   │   ├── experience.py
+│   │   │   ├── experience.py            # years-of-experience range classifier (Phase 3, fourth
+│   │   │   │                            # parser slice) — implemented on phase-3/experience-classifier,
+│   │   │   │                            # pending Astra review, not merged (see docs/ROADMAP.md)
 │   │   │   ├── location.py
 │   │   │   ├── employment.py
 │   │   │   ├── seniority.py
