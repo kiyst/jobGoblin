@@ -419,13 +419,19 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   tested against a fixture-driven regression corpus, with an automated import-boundary
   proof (no database/ORM/provider/network dependency). Not wired into
   ingestion/persistence, no `parser_version` threading.
-  A second slice (full_time/part_time/seasonal/internship classifier) is implemented
-  on `phase-3/employment-classifier`, pending Codex review — not merged, not
-  complete. `app/normalization/employment.py` deliberately covers only the
-  `jobs.employment_type` schedule/commitment axis; `jobs.contract_type` (deferred to
-  its own future slice) and `jobs.shift` (no parser currently planned) are untouched.
-  No other Phase 3 parser (title, salary, location, seniority, experience, skill) has
-  been started — this is one more bounded slice, not a Phase 3 completion claim.
+  A second slice (full_time/part_time/seasonal/internship classifier) merged into
+  `main` at `8e136c0` (approval commit `67cf09b`, merge record in
+  [LLM_HANDOFF.md](LLM_HANDOFF.md)). `app/normalization/employment.py` deliberately
+  covers only the `jobs.employment_type` schedule/commitment axis; `jobs.contract_type`
+  (deferred to its own future slice) and `jobs.shift` (no parser currently planned) are
+  untouched.
+  A third slice (entry_level/mid_level/senior/staff/principal/director classifier) is
+  implemented on `phase-3/seniority-classifier`, pending Codex review — not merged,
+  not complete. `app/normalization/seniority.py` is code-defined and bounded — no
+  `taxonomy/` directory or YAML file created; `docs/ARCHITECTURE.md`'s `seniority.yaml`
+  entry is annotated as planned future enrichment, not implemented by this slice.
+  No other Phase 3 parser (title, salary, location, experience, skill) has been
+  started — this is one more bounded slice, not a Phase 3 completion claim.
 - **Phase 4: two bounded read-only prework proofs merged into `main`; the production
   `AtsScrapersProvider` adapter is not started and Phase 4 is not complete.** The
   Greenhouse live ATS canary (`phase-4/greenhouse-canary`, merged at `64a3534`) and the
