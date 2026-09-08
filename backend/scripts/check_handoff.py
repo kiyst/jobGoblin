@@ -42,13 +42,25 @@ and that is not this tool's concern.
 must be *absent* otherwise — a stray, inapplicable field is itself a
 structural error, not silently tolerated. `verification_level: not_run`
 exists specifically for a genuinely docs-only slice that intentionally did
-not run the test suite: `full_suite_count` and `focused_test_count` must
-then both be the literal string `not_run` (never a fabricated or
-copy-pasted number), and `lightweight_checks` must name what was actually
-done instead (e.g. `"ruff format --check, check_repo.py, git diff
---check"`). `slice_kind: parser` additionally requires an actual
-(non-`not_run`) `focused_test_count` — a parser slice must be
-focus-tested, not merely full-suite-tested.
+not run the test suite, and is **only permitted when `slice_kind: docs`** —
+a `parser`/`tooling` slice may never declare `not_run`, even structurally,
+independent of how `verify.py` was invoked. When `not_run` applies,
+`full_suite_count` and `focused_test_count` must both be the literal
+string `not_run` (never a fabricated or copy-pasted number),
+`focused_test_selector` must be `none`, and `lightweight_checks` must name
+what was actually done instead (e.g. `"ruff format --check,
+check_repo.py, git diff --check"`). A `docs` slice that *did* actually run
+the test suite instead truthfully records `verification_level: routine`
+with real counts, exactly like any other slice kind — `not_run` is
+permitted for docs, never mandatory. `slice_kind: parser` additionally
+requires an actual (non-`not_run`) `focused_test_count` — a parser slice
+must be focus-tested, not merely full-suite-tested. Cross-checking against
+an actual invocation (`validate_against_run`) distinguishes a genuinely
+*omitted* `--focus` (no cross-check possible) from one that ran but whose
+summary line could not be parsed (a hard failure, never silently treated
+as omitted) — and requires the declared `focused_test_selector` to match
+the `--focus` value actually used whenever focus ran, for every
+`slice_kind`, not only `parser`.
 """
 
 from __future__ import annotations
@@ -67,8 +79,10 @@ _METADATA_BLOCK_RE = re.compile(r"```workflow-metadata\n(.*?)\n```", re.DOTALL)
 
 _NOT_RUN = "not_run"
 _NONE_SELECTOR = "none"
+_SUPPORTED_WORKFLOW_VERSION = "v3.1-pilot"
 _VALID_SLICE_KINDS = frozenset({"parser", "tooling", "docs"})
 _VALID_VERIFICATION_LEVELS = frozenset({"routine", _NOT_RUN})
+_ASCII_INT_RE = re.compile(r"^[0-9]+$")
 
 _REQUIRED_FIELDS = (
     "workflow_version",
@@ -104,18 +118,24 @@ def extract_latest_work_done_metadata_text(handoff_text: str) -> str:
     work_done_end = next_heading.start() if next_heading else len(latest_section)
     work_done_text = latest_section[work_done_start:work_done_end]
 
-    block_match = _METADATA_BLOCK_RE.search(work_done_text)
-    if not block_match:
+    block_matches = list(_METADATA_BLOCK_RE.finditer(work_done_text))
+    if not block_matches:
         raise HandoffValidationError(
             "the newest 'Work done' section has no 'workflow-metadata' block"
         )
-    return block_match.group(1)
+    if len(block_matches) > 1:
+        raise HandoffValidationError(
+            "the newest 'Work done' section has more than one 'workflow-metadata' block"
+        )
+    return block_matches[0].group(1)
 
 
 def parse_metadata_fields(raw: str) -> dict[str, str]:
     """Parses `key: value` lines into a dict of raw string values. Blank
-    lines are ignored; any other non-`key: value` line is a structural
-    error, not silently skipped."""
+    lines are ignored; any other non-`key: value` line, an empty key, or a
+    key repeated more than once (a silently-last-wins overwrite would
+    otherwise hide a conflicting declaration) is a structural error, never
+    silently skipped or resolved by picking one."""
     fields: dict[str, str] = {}
     for line in raw.splitlines():
         stripped = line.strip()
@@ -126,13 +146,24 @@ def parse_metadata_fields(raw: str) -> dict[str, str]:
                 f"malformed metadata line (expected 'key: value'): {stripped!r}"
             )
         key, _, value = stripped.partition(":")
-        fields[key.strip()] = value.strip()
+        key = key.strip()
+        value = value.strip()
+        if not key:
+            raise HandoffValidationError(f"malformed metadata line (empty key): {stripped!r}")
+        if key in fields:
+            raise HandoffValidationError(f"duplicate metadata key {key!r}")
+        fields[key] = value
     return fields
 
 
 def _require_int(fields: dict[str, str], key: str) -> int:
+    """Requires an ASCII-digit-only string before calling `int()` — plain
+    `str.isdigit()` also accepts non-ASCII "digit" characters (e.g. the
+    superscript `²`) that `int()` itself then rejects with an
+    unhandled `ValueError`, a real defect found by probing this function
+    directly."""
     value = fields[key]
-    if not value.isdigit():
+    if not _ASCII_INT_RE.match(value):
         raise HandoffValidationError(f"{key!r} must be a non-negative integer, got {value!r}")
     return int(value)
 
@@ -143,6 +174,17 @@ def validate_structure(fields: dict[str, str]) -> None:
     missing = [key for key in _REQUIRED_FIELDS if key not in fields]
     if missing:
         raise HandoffValidationError(f"metadata block is missing required field(s): {missing}")
+
+    empty = [key for key in _REQUIRED_FIELDS if not fields[key]]
+    if empty:
+        raise HandoffValidationError(f"metadata block has empty required field(s): {empty}")
+
+    workflow_version = fields["workflow_version"]
+    if workflow_version != _SUPPORTED_WORKFLOW_VERSION:
+        raise HandoffValidationError(
+            f"'workflow_version' must be {_SUPPORTED_WORKFLOW_VERSION!r}, "
+            f"got {workflow_version!r}"
+        )
 
     slice_kind = fields["slice_kind"]
     if slice_kind not in _VALID_SLICE_KINDS:
@@ -164,16 +206,27 @@ def validate_structure(fields: dict[str, str]) -> None:
             raise HandoffValidationError(
                 "slice_kind: parser requires both 'fixture_path' and 'fixture_count'"
             )
+        if not fields["fixture_path"]:
+            raise HandoffValidationError("'fixture_path' must not be empty")
     elif has_fixture_path or has_fixture_count:
         raise HandoffValidationError(
             f"'fixture_path'/'fixture_count' are not applicable when slice_kind: {slice_kind}"
         )
 
     if verification_level == _NOT_RUN:
+        if slice_kind != "docs":
+            raise HandoffValidationError(
+                "verification_level: not_run is only permitted when slice_kind: docs — "
+                f"got slice_kind: {slice_kind!r}"
+            )
         if fields["full_suite_count"] != _NOT_RUN or fields["focused_test_count"] != _NOT_RUN:
             raise HandoffValidationError(
                 "verification_level: not_run requires both 'full_suite_count' and "
                 "'focused_test_count' to literally be 'not_run', never a fabricated number"
+            )
+        if fields["focused_test_selector"] != _NONE_SELECTOR:
+            raise HandoffValidationError(
+                "verification_level: not_run requires 'focused_test_selector: none'"
             )
         if not fields.get("lightweight_checks"):
             raise HandoffValidationError(
@@ -213,6 +266,28 @@ def validate_structure(fields: dict[str, str]) -> None:
                 "a numeric 'focused_test_count' requires a real 'focused_test_selector', "
                 "not 'none'"
             )
+
+
+def _read_handoff_text(handoff_path: Path) -> str:
+    """Reads `handoff_path`, converting every expected failure mode into
+    `HandoffValidationError` at this input boundary — a missing file
+    (`FileNotFoundError`), a permissions/IO failure (other `OSError`
+    subclasses), or invalid UTF-8 (`UnicodeDecodeError`, a `ValueError`
+    subclass) would otherwise propagate uncaught through both
+    `verify.py`'s `handoff_metadata_step` (which only catches
+    `HandoffValidationError`) and this module's own `main()` — a real
+    defect found by probing a missing handoff path directly. Never echoes
+    the exception's own message, only its type name."""
+    try:
+        return handoff_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise HandoffValidationError(
+            f"{handoff_path} could not be read: {type(exc).__name__}"
+        ) from exc
+    except ValueError as exc:  # covers UnicodeDecodeError
+        raise HandoffValidationError(
+            f"{handoff_path} could not be decoded as UTF-8: {type(exc).__name__}"
+        ) from exc
 
 
 def validate_fixture_count(fields: dict[str, str], *, repo_root: Path = REPO_ROOT) -> None:
@@ -261,6 +336,12 @@ def validate_against_run(
     verification_level = fields["verification_level"]
 
     if docs_only:
+        if fields["slice_kind"] != "docs":
+            raise HandoffValidationError(
+                "verify.py was invoked with --docs-only, but the handoff metadata declares "
+                f"slice_kind: {fields['slice_kind']!r}, not 'docs' — --docs-only is never "
+                "valid for a parser or tooling slice"
+            )
         if verification_level != _NOT_RUN:
             raise HandoffValidationError(
                 "verify.py was invoked with --docs-only (the full suite did not run), "
@@ -288,7 +369,16 @@ def validate_against_run(
         )
 
     focused_count_field = fields["focused_test_count"]
-    if actual_focused_count is None:
+    # `actual_focus_selector` is `None` exactly when `--focus` was never given to this
+    # invocation (see `verify.handoff_metadata_step`) — this is the only reliable signal
+    # that focus was genuinely *omitted*, as distinct from focus having *run* but its
+    # pytest summary being unparseable (`actual_focused_count is None` for a different
+    # reason). Conflating the two previously let a declared `not_run` pass silently even
+    # when this invocation actually executed a focused run whose output just couldn't be
+    # parsed — a real defect found by probing this function directly.
+    focus_was_used = actual_focus_selector is not None
+
+    if not focus_was_used:
         if focused_count_field != _NOT_RUN:
             raise HandoffValidationError(
                 "this invocation was not given --focus, but the handoff metadata declares "
@@ -301,6 +391,17 @@ def validate_against_run(
             )
         return
 
+    # This invocation was actually given --focus, regardless of slice_kind.
+    if focused_count_field == _NOT_RUN:
+        raise HandoffValidationError(
+            "this invocation was run with --focus, but the handoff metadata declares "
+            "focused_test_count: not_run"
+        )
+    if actual_focused_count is None:
+        raise HandoffValidationError(
+            "this run's focused pytest summary could not be parsed, so the declared "
+            "focused_test_count cannot be cross-checked"
+        )
     declared_focused = _require_int(fields, "focused_test_count")
     if declared_focused != actual_focused_count:
         raise HandoffValidationError(
@@ -308,7 +409,7 @@ def validate_against_run(
             f"actual {actual_focused_count}"
         )
     declared_selector = fields["focused_test_selector"]
-    if fields["slice_kind"] == "parser" and declared_selector != actual_focus_selector:
+    if declared_selector != actual_focus_selector:
         raise HandoffValidationError(
             f"declared focused_test_selector {declared_selector!r} does not match the "
             f"--focus value actually used ({actual_focus_selector!r})"
@@ -328,7 +429,7 @@ def validate_handoff(
     `HandoffValidationError` with a precise, actionable message on any
     failure; returns `None` on success. Never launches a subprocess, never
     re-runs pytest or `verify.py` itself."""
-    handoff_text = handoff_path.read_text(encoding="utf-8")
+    handoff_text = _read_handoff_text(handoff_path)
     metadata_text = extract_latest_work_done_metadata_text(handoff_text)
     fields = parse_metadata_fields(metadata_text)
     validate_structure(fields)
@@ -347,7 +448,7 @@ def main() -> int:
     check against) — a quick sanity check of the handoff file's metadata
     block on its own, independent of the full verifier."""
     try:
-        handoff_text = HANDOFF_PATH.read_text(encoding="utf-8")
+        handoff_text = _read_handoff_text(HANDOFF_PATH)
         metadata_text = extract_latest_work_done_metadata_text(handoff_text)
         fields = parse_metadata_fields(metadata_text)
         validate_structure(fields)

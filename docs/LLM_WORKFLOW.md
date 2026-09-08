@@ -4,8 +4,10 @@ Status: active as of 2026-08-30. This is the operating process for Claude Code a
 primary implementer and Codex as the independent reviewer. Product requirements remain
 authoritative in the master guide, architecture, data model, roadmap, and accepted ADRs.
 The user remains the scope and merge authority. A Workflow v3.1 pilot layer (see "Workflow
-v3.1 pilot" below) is being trialed across three slices starting 2026-09-08; it is
-additive to everything in this file unless a section says otherwise.
+v3.1 pilot" below) is being trialed across three parser slices starting with
+`classify_experience`; its enabling tooling (metadata validation, `--docs-only`) shipped
+2026-09-08 but is not itself one of the three counted slices. It is additive to everything
+in this file unless a section says otherwise.
 
 v3 persists, as durable process rather than conversational instruction, the practices
 that emerged across Phase 2's identity-resolution slices: a `Definition of Ready` gate
@@ -248,9 +250,13 @@ documentation without explicit user authorization.
 
 ## Workflow v3.1 pilot (three-slice trial)
 
-Status: piloted starting with this tooling slice (`tooling/workflow-v3.1-handoff-metadata`),
-itself pilot slice 1 of 3. v3.1 is a measurable trial layered on v3, not an assumed
-improvement — a mandatory retrospective follows the third piloted slice (see below), and
+Status: the approved pilot proposal counts three **parser** slices as its measurement
+window, starting with `classify_experience` as pilot slice 1 of 3 (slices 2/3 unstarted).
+`tooling/workflow-v3.1-handoff-metadata` (this branch) is the enabling infrastructure that
+makes the pilot measurable — it is not itself one of the three counted slices, since it
+has no parsing form/invariant for the claim-to-evidence matrix or historical-defect
+checklist to apply to. v3.1 is a measurable trial layered on v3, not an assumed
+improvement — a mandatory retrospective follows the third counted slice (see below), and
 any element that does not earn its cost may be dropped rather than kept by default.
 
 ### Claim-to-evidence matrix
@@ -298,13 +304,40 @@ explicitly approves it in writing for that specific case. A case that safely ret
 *unavailable* (no extraction, no invented value) may be documented as a limitation without
 blocking.
 
-### Two-pass requirement
+### Two-pass requirement (proposal preflight)
 
-A Class H proposal receives two self-review passes before implementation, both performed
-on the proposal itself, before any repository file changes: the claim-to-evidence matrix
-first, then the historical-defect checklist, with the proposal revised between passes
-when either surfaces a gap. Both passes are reported in the proposal, not merely asserted
-complete.
+A Class H proposal introducing a new parsing form or invariant receives two self-review
+passes before implementation, both performed on the proposal itself, before any repository
+file changes: the claim-to-evidence matrix first, then the historical-defect checklist,
+with the proposal revised between passes when either surfaces a gap. Both passes are
+reported in the proposal, not merely asserted complete.
+
+### Implementation self-review passes (parser slices)
+
+Distinct from the proposal preflight above, and required in addition to it for every
+piloted **parser** slice's actual implementation (not merely its proposal): after code is
+written, before committing, run two further passes over the diff itself:
+
+1. **Contract-conformance pass** — walk the proposal's stated invariants one at a time and
+   confirm the implementation actually enforces each one, not merely that it handles the
+   examples in the fixture corpus.
+2. **Counterexample pass** — actively construct new inputs designed to break each
+   invariant (not drawn from the existing fixture corpus), grounded in the
+   historical-defect checklist's nine categories, and confirm the implementation handles
+   them correctly or fails safely to *unavailable* (never confidently wrong).
+
+Findings from either pass are fixed before commit, with a regression test added for each,
+subject to the mutation-proof rule below. These two passes supplement, and never replace,
+the general adversarial implementer self-review already required above for Class H slices.
+
+### Load-bearing regression mutation proof
+
+Every regression test added specifically to close a self-review or review finding (from
+either the passes above or Codex's `Work review`) must be proven load-bearing before it is
+counted as covering that finding: temporarily revert or disable the specific fix, confirm
+the new test actually fails without it, then restore the fix and confirm the test passes
+again. A regression test that still passes with its guard disabled is not evidence of
+anything and must not be reported as closing the finding it was added for.
 
 ### `slice_kind` and the handoff metadata block
 
@@ -321,21 +354,41 @@ that same invocation observed — never a second subprocess, never a re-derived 
   verification is required the same as `parser`; focused testing is optional; no fixture
   fields apply.
 - **`docs`** — genuinely documentation-only work. `verification_level: not_run` is
-  permitted and required — `full_suite_count`/`focused_test_count` must then literally be
-  `not_run`, never a fabricated or copy-pasted number, and `lightweight_checks` must name
+  permitted *only* for `slice_kind: docs` (`scripts/check_handoff.py` rejects it
+  structurally for `parser`/`tooling`, independent of how `verify.py` was invoked) but is
+  never mandatory: if a docs slice actually ran the test suite, it truthfully records
+  `verification_level: routine` with real counts like any other slice kind. When
+  `not_run` genuinely applies, `full_suite_count`/`focused_test_count` must literally be
+  `not_run`, `focused_test_selector` must be `none`, and `lightweight_checks` must name
   what was actually done instead (e.g. `git diff --check`, `check_repo.py`). `--docs-only`
   on `verify.py` enforces this at the tool level: it skips the database and pytest steps
-  and requires the handoff to declare `not_run`, so a docs-only run can never silently
-  paper over a stale or missing test count.
+  and independently requires both the handoff to declare `not_run` *and* `slice_kind:
+  docs`, so a docs-only run can never silently paper over a stale or missing test count,
+  and `--docs-only` can never be used to bypass verification for a parser or tooling
+  slice.
 
 ### Mandatory retrospective
 
-After the third piloted slice's `Work review` is recorded, before starting a fourth slice
-under v3.1, the user and the implementer jointly assess: did the claim-to-evidence matrix
-or historical-defect checklist catch a genuine defect before code was written on any of
-the three slices (the first `classify_experience` preflight already did, prior to this
-tooling slice existing); did `check_handoff.py` ever block a fabricated or stale count; did
-either self-review pass meaningfully slow a slice without finding anything. The retrospective
+After the third counted parser slice's `Work review` is recorded (measurement window:
+`classify_experience` plus two more parser slices, not this enabling tooling slice), before
+starting a fourth slice under v3.1, the user and the implementer jointly assess against
+these agreed targets:
+
+- **At most one correction round per slice** — a slice needing two or more `Work review`
+  correction rounds counts against the pilot.
+- **Zero confidently-wrong review findings** — no case where a piloted slice's shipped
+  behavior produced a confident value contradicted by its input (the harm the
+  confidently-wrong blocking rule exists to prevent).
+- **Zero handoff count defects** — no fabricated, stale, or mismatched
+  `full_suite_count`/`focused_test_count` reaching a merged `Work done` entry undetected.
+- **Zero regressions that pass with their required guard disabled** — every regression test
+  added under a piloted slice actually satisfies the mutation-proof rule above.
+
+The retrospective also records, qualitatively: did the claim-to-evidence matrix or
+historical-defect checklist catch a genuine defect before code was written on any of the
+three slices (the first `classify_experience` preflight already did, prior to this tooling
+slice existing); did `check_handoff.py` ever block a fabricated or stale count; did any
+self-review pass meaningfully slow a slice without finding anything. The retrospective
 decides, per element, whether to keep it as standing process, narrow it, or drop it — v3.1
 is not retained by default merely because it shipped.
 
