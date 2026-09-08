@@ -358,3 +358,43 @@ that detail.
   taxonomy implementation, ingestion wiring, provider behavior, or other parser changed.
 - The seniority-classifier slice and its correction pass are accepted. Do not merge or
   begin another Phase 3 parser until the user explicitly authorizes that action.
+
+### Merge record
+
+- Date: 2026-09-07. User authorized merging `phase-3/seniority-classifier`
+  into `main` following Codex's Approved review (no executable findings;
+  approval commit `0c92b7d`) above.
+- Pre-merge state: `main` and `origin/main` both at `7a90282`; feature
+  branch `phase-3/seniority-classifier` and its origin both clean and
+  synced at `0c92b7d` (containing implementation/correction commits
+  `1ac2b81`, `5186598`, and the review-approval commit `0c92b7d`).
+- Merge: `git merge --no-ff phase-3/seniority-classifier` on `main` —
+  merge commit `92fcefc`. `git diff phase-3/seniority-classifier HEAD`
+  is empty (zero content difference); `git diff --check` and
+  `check_repo.py` both exit 0; working tree clean.
+- Post-merge verification: genuine external `python scripts/verify.py
+  --level routine` (full run, no `--focus`) — all **9 steps PASS** (Ruff
+  format/check, mypy, `check_repo.py`, `git diff --check`,
+  disposable-database URL/reachability, **1764 full-suite tests**,
+  temp-directory cleanup).
+- Pushed: `main` at `92fcefc`, matching `origin/main`.
+- Rollback boundary: to revert this slice, reset `main` to `7a90282` (the
+  commit immediately before this merge) — this removes
+  `app/normalization/seniority.py`, both new test/fixture files, and the
+  `docs/ARCHITECTURE.md`/`docs/ROADMAP.md` wording changes cleanly, with
+  no migration to reverse and no data written by this slice to any
+  environment (pure Python, never wired into ingestion/persistence).
+- **Phase 3's third parser slice is merged, not Phase 3 itself.** The
+  deterministic entry_level/mid_level/senior/staff/principal/director
+  classifier (independently implemented, no import from or modification
+  of `remote.py`/`employment.py`) is now on `main`, reviewed across two
+  correction rounds with no remaining executable findings. `seniority.yaml`
+  remains annotated as planned future enrichment, not implemented by this
+  slice. The other five required Phase 3 parsers (title, salary, location,
+  experience, skill) remain unstarted; this classifier is not wired into
+  `ingestion/pipeline.py` or `ingestion/persistence.py`, and no
+  `parser_version`/`field_provenance` write exists yet — those remain
+  Phase 4+ concerns.
+- STOP — do not begin or propose another Phase 3 parser, wire this
+  classifier into ingestion/persistence, contact providers, or create a
+  migration without separate authorization.
