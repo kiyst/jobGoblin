@@ -244,10 +244,10 @@ that detail.
 
 - Date/agent: 2026-09-08, Claude Code (Sonnet 5). Risk class R (tooling —
   process/infrastructure only, no identity/concurrency/security/external
-  behavior). New bounded slice on new branch
-  `tooling/workflow-v3.1-handoff-metadata`, base: clean `main@f003595`
-  (the seniority-classifier merge-record commit). Implements the
-  Workflow v3.1 pilot's first (of three) piloted slices exactly as
+  behavior). Base -> ending commit: `f003595` -> this commit; branch
+  `tooling/workflow-v3.1-handoff-metadata` (new branch, base: clean
+  `main@f003595`, the seniority-classifier merge-record commit).
+  Implements the Workflow v3.1 pilot's first (of three) piloted slices exactly as
   user-authorized: a `slice_kind`/`verification_level` structured metadata
   block in `LLM_HANDOFF.md`'s `Work done` entries, its validator, a
   required `verify.py` step that cross-checks that block against the same
