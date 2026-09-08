@@ -353,11 +353,11 @@
   {
     "id": "shortform_not_isolated_negative",
     "origin": "synthetic_representative",
-    "title": null,
-    "description": "5+ yrs of coding",
+    "title": "5+ yrs of coding",
+    "description": null,
     "expected_min": null, "expected_min_provenance": "unavailable",
     "expected_max": null, "expected_max_provenance": "unavailable",
-    "note": "Short-form waiver must not over-trigger: segment content is not exactly the short form (trailing \"of coding\"), and \"coding\" is not \"experience\"."
+    "note": "Corrected input (Astra re-review finding 6, round 2): this must be a title, not a description, to actually exercise the title-only short-form waiver. Segment content is not exactly the short form (trailing \"of coding\"), and \"coding\" is not \"experience\"."
   },
   {
     "id": "multivalue_collapse_identical",
@@ -381,10 +381,10 @@
     "id": "amendment6_title_internal_conflict_beats_description_agreement",
     "origin": "synthetic_representative",
     "title": "5-7 Years Experience, 10 Years Experience",
-    "description": null,
+    "description": "This role requires 5 years of experience.",
     "expected_min": null, "expected_min_provenance": "unavailable",
     "expected_max": 7, "expected_max_provenance": "inferred",
-    "note": "Astra review finding 6: two distinct title minima (5 and 10) remain internally conflicting for minimum, independent of maximum (7, cleanly resolved from the same \"5-7\" segment) — proves bound independence."
+    "note": "Corrected input (Astra re-review finding 6, round 2): description must actually state a value agreeing with one of the two conflicting title minima (5) to prove title-internal conflict wins over cross-source agreement, not merely over absent description evidence. Maximum (7, from the same \"5-7\" title segment) is unaffected by minimum's conflict, and description supplies no maximum — proves bound independence."
   },
   {
     "id": "amendment6_description_internal_conflict_beats_title_agreement",
@@ -493,5 +493,140 @@
     "expected_min": null, "expected_min_provenance": "unavailable",
     "expected_max": null, "expected_max_provenance": "unavailable",
     "note": "Empty (non-None) strings resolve identically to None input."
+  },
+  {
+    "id": "round2_fix1_reversed_label_bypasses_attribution",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "Our vendor experience: 5 years.",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Astra re-review finding 1: the reversed label:value path is only role-scoped when \"experience\" is the sentence's own opening word — found here mid-sentence after \"Our vendor\", so it must obey the same attribution frame as any other candidate and reject."
+  },
+  {
+    "id": "round2_fix2_title_leading_preferred_range",
+    "origin": "synthetic_representative",
+    "title": "Preferred 3-5 years experience",
+    "description": null,
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Astra re-review finding 2: a leading preference marker suppresses the whole title segment, not only a trailing one."
+  },
+  {
+    "id": "round2_fix2_title_leading_ideally_no_comma",
+    "origin": "synthetic_representative",
+    "title": "Ideally 5 years of experience",
+    "description": null,
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Astra re-review finding 2: title-side leading \"Ideally\" suppresses without requiring a following comma (unlike the description-side sentence-initial check)."
+  },
+  {
+    "id": "round2_fix2_title_not_required_across_comma",
+    "origin": "synthetic_representative",
+    "title": "5 years experience, not required",
+    "description": null,
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Astra re-review finding 2: a comma splits this into two segments, but the second (\"not required\", qualifier-only) still modifies the first rather than standing alone — the requirement is suppressed across the punctuation boundary."
+  },
+  {
+    "id": "round2_fix3_description_trailing_or_fewer_after_full_phrase",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "This role requires 5 years of experience or fewer.",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": 5, "expected_max_provenance": "parsed_description",
+    "note": "Astra re-review finding 3: a trailing upper-bound marker positioned after the complete \"N years of experience\" phrase (not only before the unit word) converts the candidate to maximum-only."
+  },
+  {
+    "id": "round2_fix3_title_trailing_or_fewer_after_full_phrase",
+    "origin": "synthetic_representative",
+    "title": "5 years of experience or fewer",
+    "description": null,
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": 5, "expected_max_provenance": "inferred",
+    "note": "Astra re-review finding 3, title isolation: the same trailing-marker form recognized in titles too."
+  },
+  {
+    "id": "round2_fix3_unsupported_less_than_safely_rejects",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "This role requires less than 5 years of experience.",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Astra re-review finding 3: \"less than\" is not a recognized open-upper marker; it must not silently fall back to a bare-number match that ignores the marker (which would fabricate minimum=5). NOTE: this description case is independently protected by the round-1 attribution match-start-zero check (\"less than\" leaves a non-zero match offset), so it alone does not isolate the poison pattern — see the title-only case below, which lacks that guard."
+  },
+  {
+    "id": "round2_fix3_unsupported_less_than_title_isolation",
+    "origin": "synthetic_representative",
+    "title": "Less than 5 Years Experience",
+    "description": null,
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Astra re-review finding 3, title isolation: unlike description, title extraction has no match-start-zero guard, so this is the case that actually exercises the \"less than\"/\"fewer than\" poison pattern as the sole guard — without it, this fabricates minimum=5."
+  },
+  {
+    "id": "round2_fix4_unicode_vulgar_fraction",
+    "origin": "synthetic_representative",
+    "title": "1½ years experience",
+    "description": null,
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Astra re-review finding 4: NFKC decomposes ½ into digits joined by U+2044 FRACTION SLASH, not ASCII \"/\" — must still be poisoned as a fraction, never fabricate minimum=2 from its second operand."
+  },
+  {
+    "id": "round2_fix4_unicode_en_dash_range",
+    "origin": "synthetic_representative",
+    "title": "3–5 years experience",
+    "description": null,
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Astra re-review finding 4: an en dash is not the ASCII hyphen the range grammar recognizes — rejected rather than silently upgraded to a valid range or falling back to a bare match on the second number."
+  },
+  {
+    "id": "round2_fix4_unicode_minus_sign",
+    "origin": "synthetic_representative",
+    "title": "−5 years experience",
+    "description": null,
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Astra re-review finding 4: the Unicode minus sign (U+2212, distinct from ASCII hyphen) must be poisoned the same way a negative sign is, never silently dropped."
+  },
+  {
+    "id": "round2_fix5_same_segment_conflict",
+    "origin": "synthetic_representative",
+    "title": "3 years experience and 5 years experience",
+    "description": null,
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Astra re-review finding 5: both candidates within the same title segment must be collected, not only the first — 3 and 5 conflict."
+  },
+  {
+    "id": "round2_fix5_same_segment_conflict_reversed_order",
+    "origin": "synthetic_representative",
+    "title": "5 years experience and 3 years experience",
+    "description": null,
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Astra re-review finding 5: order-symmetric control for the same-segment conflict — still conflicts regardless of which value appears first."
+  },
+  {
+    "id": "round2_fix5_description_agrees_with_one_conflicting_candidate",
+    "origin": "synthetic_representative",
+    "title": "3 years experience and 5 years experience",
+    "description": "This role requires 5 years of experience.",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Astra re-review finding 5: title-internal conflict (3 vs 5, now correctly both collected) wins even though description agrees with one of the two values — mirrors amendment 6's internal-conflict-before-cross-source precedence."
+  },
+  {
+    "id": "round2_fix5_independent_bounds_two_phrases_one_segment",
+    "origin": "synthetic_representative",
+    "title": "5 years experience and up to 10 years of experience",
+    "description": null,
+    "expected_min": 5, "expected_min_provenance": "inferred",
+    "expected_max": 10, "expected_max_provenance": "inferred",
+    "note": "Astra re-review finding 5: two non-conflicting candidates in the same segment populate independent bounds without contaminating each other — not every multi-candidate segment is a conflict."
   }
 ]

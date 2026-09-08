@@ -35,29 +35,52 @@ structurally adjacent to an experience-unit word, in one of:
     (up to|no more than|maximum of) <N> (years|yrs) [of] experience
     <N> (or more|or above|plus) (years|yrs) [of] experience
     <N> (or less|or fewer|or under) (years|yrs) [of] experience
-    experience:? <N>[+]? (years|yrs)?                 reversed label:value
+    experience:? <N>[+]? (years|yrs)?                 reversed label:value, sentence-initial only
+    <N> (years|yrs) [of] experience (or less|or fewer|or under)   trailing marker, whole-phrase form
+    <N> (years|yrs) [of] experience (or more|or above|plus)       trailing marker, whole-phrase form
 
 A bare number is read as "at least N" (`minimum=N`, `maximum=UNAVAILABLE`)
 — never fabricates an upper bound the text didn't state. An open-upper
 phrase never infers `minimum=0`; symmetrically an open-lower phrase never
 infers a cap. `exp` is deliberately **not** a recognized unit abbreviation
 — too collision-prone with unrelated substrings; a documented exclusion,
-not an oversight.
+not an oversight. The two trailing-marker forms above are distinct from
+`open_lo_suffix`/`open_hi_suffix` (marker positioned *before* the unit
+word, e.g. `"10 or fewer years"`) — these instead recognize the marker
+*after* the complete "N years of experience" phrase (e.g. `"5 years of
+experience or fewer"`), listed before the plain bare production so they
+take precedence when present (Astra re-review finding 3). An unsupported
+prefix marker (`"less than"`, `"fewer than"`) is not part of the
+recognized open-upper catalog at all — rather than silently falling back
+to a bare match that ignores it, it is treated as a poison trigger (see
+below), so `"less than 5 years of experience"` never fabricates
+`minimum=5`.
 
 **Numeric rejection is atomic, not a fallback chain** (Astra review
-finding 4): before any grammar production runs, the whole title/description
-text is scanned once for malformed numeric shapes — a decimal beside a
-range hyphen (`3.5-5`), a fraction (`1/2`), a bare decimal (`3.5`), or a
-free-standing negative number (`-5`, not the digit-hyphen-digit of a valid
-range) — and every digit character inside a matched span is redacted to
-`#` in a working copy of the text (same length, no offset shift). All
-downstream sentence/segment splitting and grammar matching runs against
-this redacted copy, so a poisoned digit can never resurface via a
-narrower production matching a sub-part of the same span — range
-consumption is therefore structurally prior to bare-number matching, not
-merely a catalog-ordering convention. `"This role requires 3.5-5 years of
-experience."`, `"...1/2 years..."`, and `"...-5 years..."` all redact to no
-surviving digits at that location and resolve to double-`UNAVAILABLE`.
+finding 4, extended by Astra re-review finding 4): before any grammar
+production runs, the whole title/description text is scanned once for
+malformed or unsupported numeric shapes and every digit character inside
+a matched span is redacted to `#` in a working copy of the text (same
+length, no offset shift) — a decimal beside a range hyphen (`3.5-5`), a
+fraction (`1/2`), a bare decimal (`3.5`), a free-standing negative number
+(`-5`, not the digit-hyphen-digit of a valid range), an unsupported
+`"less than"`/`"fewer than"` prefix, and a Unicode dash-like character
+(figure dash, en dash, em dash, or the Unicode minus sign U+2212 —
+distinct from the ASCII hyphen the range grammar recognizes) forming
+either a digit-dash-digit range or a leading negative shape. NFKC
+normalization decomposes a vulgar fraction (`"½"`) into digits joined by
+U+2044 FRACTION SLASH, not the ASCII `/` the fraction pattern matches —
+normalized to ASCII `/` before poisoning runs, so `"1½ years experience"`
+is caught the same way `"1/2 years experience"` is, never fabricating
+`minimum=2` from the decomposed second operand. All downstream
+sentence/segment splitting and grammar matching runs against this
+redacted copy, so a poisoned digit can never resurface via a narrower
+production matching a sub-part of the same span — range consumption is
+therefore structurally prior to bare-number matching, not merely a
+catalog-ordering convention. Deliberately narrower than full
+numeric-language support: returning `UNAVAILABLE` for an unsupported
+Unicode numeric shape is sufficient; upgrading it to a valid ASCII-
+equivalent range is not attempted.
 
 **Applicant attribution — closed frame, not subject/verb alone** (Astra
 review finding 2): a description-side candidate (zero or non-zero) is
@@ -100,6 +123,16 @@ string that is *not* a member of the closed template set (it has a
 trailing continuation) — whole-sentence comparison, not suffix matching,
 is what makes this fail (Astra review finding 2).
 
+**Reversed label:value order is role-scoped only when it opens the
+sentence** (Astra re-review finding 1): `"Experience: 5+ years"` is
+accepted without the `ALLOWED_SUBJECT`/`REQUIRE_VERB` frame — but only
+when the match is anchored at position 0 of the (stripped) sentence, like
+a structured field. `"Our vendor experience: 5 years."` has `"experience:"`
+appearing mid-sentence, not as the sentence's own opening word, so it is
+never treated as inherently role-scoped and must obey the same
+attribution frame as any other candidate — which it fails, since `"our
+vendor"` is not an `ALLOWED_SUBJECT`/`REQUIRE_VERB` pair either.
+
 **Title-side segment grammar**: title text splits into structural segments
 (paired parens/brackets, then delimiter-split remainder — the same
 category of segmentation `seniority.py`/`employment.py`/`remote.py` use,
@@ -107,33 +140,51 @@ independently re-derived here) with one experience-specific addition: a
 hyphen directly between two digit runs with no surrounding whitespace
 (`\d+-\d+`) is a **numeric-range separator, never a segment delimiter**
 — resolved at tokenization time, before segmentation runs (Astra review
-finding underlying the original Risk 5). A closed non-required marker
-catalog (`"not required"`, `"not necessary"`, `"isn't required"`, ...,
-explicitly acknowledged non-exhaustive) co-occurring with a *numeric*
-candidate in the same segment suppresses that candidate entirely —
-`"5 Years Experience Not Required"` → double-`UNAVAILABLE` — while the
-separate, unaffected bare zero-phrase production (`"No Experience
-Required"`, no numeric candidate present) keeps its approved zero
-semantics unchanged. An isolated segment whose entire trimmed content is
-exactly a short form (`"5+ yrs"`, `"3-5 yrs"`) waives the literal word
-`experience` — `"Software Engineer - 5+ yrs"` → `minimum=5` — but
-`"5+ yrs of coding"` is not *exactly* the short form, so it falls through
-to the full grammar (which does not recognize `"coding"` as `experience`)
-and correctly resolves to `UNAVAILABLE`.
+finding underlying the original Risk 5). Every non-overlapping numeric
+candidate within a segment is collected, not only the first (Astra
+re-review finding 5) — `"3 years experience and 5 years experience"`
+surfaces both 3 and 5 as competing minima (a same-segment conflict), while
+`"5 years experience and up to 10 years of experience"` surfaces one
+minimum and one maximum candidate that populate independent bounds
+without contaminating each other, since a segment can validly state more
+than one non-conflicting fact.
+
+A closed non-required marker catalog (`"not required"`, `"not necessary"`,
+`"isn't required"`, ..., explicitly acknowledged non-exhaustive)
+co-occurring with a *numeric* candidate suppresses that candidate
+entirely, whether the marker shares the *same* segment (`"5 Years
+Experience Not Required"`) or occupies an *adjacent* segment that is
+itself nothing but the marker phrase, reached when a comma splits the
+title (`"5 years experience, not required"` splits into `"5 years
+experience"` and `"not required"` — the second, being qualifier-only,
+still modifies the first rather than standing alone; Astra re-review
+finding 2) — both forms resolve to double-`UNAVAILABLE`. The separate,
+unaffected bare zero-phrase production (`"No Experience Required"`, no
+numeric candidate present) keeps its approved zero semantics unchanged.
+An isolated segment whose entire trimmed content is exactly a short form
+(`"5+ yrs"`, `"3-5 yrs"`) waives the literal word `experience` —
+`"Software Engineer - 5+ yrs"` → `minimum=5` — but `"5+ yrs of coding"` is
+not *exactly* the short form, so it falls through to the full grammar
+(which does not recognize `"coding"` as `experience`) and correctly
+resolves to `UNAVAILABLE`.
 
 **Preference-marker suppression, positional not lexical** (Astra review
-finding 5): `"ideal"`/`"ideally"` collide between the preference-marker
-catalog and the closed subject phrase `"the ideal candidate"`. Resolved by
-*position*, not a case-list: the preference check only ever inspects (a) a
-sentence-initial `"Ideally,"` (comma required, an adverbial clause) or (b)
-a closed trailing tag immediately following an already-fully-matched
-number-phrase (`"5+ years preferred"`). `"the ideal candidate"` is part of
-the *subject* of a `REQUIRE_VERB` frame — a structurally different
-position this check never inspects — so `"The ideal candidate must have 5
-years of experience."` is never suppressed. An unrecognized trailing hedge
-(`"...experience, preferably."`) is not given a dedicated preference rule
-at all; it is caught by the general continuation-boundary fail-closed rule
-above, the same way any other unrecognized remainder is.
+finding 5, extended by Astra re-review finding 2): `"ideal"`/`"ideally"`
+collide between the preference-marker catalog and the closed subject
+phrase `"the ideal candidate"`. Resolved by *position*, not a case-list:
+the preference check inspects (a) a sentence-initial `"Ideally,"` in
+description (comma required, an adverbial clause) or a *leading* marker
+in a title segment (comma optional — titles are terser than description
+prose, e.g. `"Ideally 5 years of experience"` with no comma, or
+`"Preferred 3-5 years experience"`), or (b) a closed trailing tag
+immediately following an already-fully-matched number-phrase (`"5+ years
+preferred"`). `"the ideal candidate"` is part of the *subject* of a
+`REQUIRE_VERB` frame — a structurally different position this check never
+inspects — so `"The ideal candidate must have 5 years of experience."` is
+never suppressed. An unrecognized trailing hedge (`"...experience,
+preferably."`) is not given a dedicated preference rule at all; it is
+caught by the general continuation-boundary fail-closed rule above, the
+same way any other unrecognized remainder is.
 
 **Multi-value resolution — internal conflict is distinct from absent
 evidence, checked before cross-source reconciliation** (Astra review
@@ -211,6 +262,11 @@ def _normalize_text(text: str) -> str:
     normalized = unicodedata.normalize("NFKC", text)
     for curly in _CURLY_APOSTROPHES:
         normalized = normalized.replace(curly, "'")
+    # NFKC decomposes a vulgar fraction (e.g. "½") into digits joined by
+    # U+2044 FRACTION SLASH, not the ASCII "/" `_FRACTION_RE` matches —
+    # normalizing it here lets the existing fraction-poisoning pattern
+    # catch the decomposed form too (Astra review finding 4).
+    normalized = normalized.replace("⁄", "/")
     return normalized
 
 
@@ -223,7 +279,30 @@ _DECIMAL_RANGE_RE = re.compile(r"\d+\.\d+\s*-\s*\d+|\d+\s*-\s*\d+\.\d+")
 _FRACTION_RE = re.compile(r"\d+\s*/\s*\d+")
 _NEGATIVE_NUMBER_RE = re.compile(r"(?<!\d)-\d+")
 _DECIMAL_RE = re.compile(r"\d+\.\d+")
-_POISON_PATTERNS = (_DECIMAL_RANGE_RE, _FRACTION_RE, _NEGATIVE_NUMBER_RE, _DECIMAL_RE)
+# Unsupported prefix markers ("less than 5", "fewer than 5") are not part
+# of the recognized open-upper catalog (Astra review finding 3) — treated
+# as a poison trigger, same as any other unsupported numeric shape, rather
+# than silently falling back to a bare-number match that would ignore the
+# marker entirely.
+_UNSUPPORTED_PREFIX_RE = re.compile(r"(?:less than|fewer than)\s+\d+", re.IGNORECASE)
+# Figure dash, en dash, em dash, and the Unicode minus sign are not the
+# ASCII hyphen `_TITLE_SEGMENT_DELIMITER_RE`/the range grammar recognize —
+# treated as unsupported and poisoned rather than silently accepted as
+# either a range separator or ignored as a negative sign (Astra review
+# finding 4). Deliberately narrower than full numeric-language support:
+# returning UNAVAILABLE for these is sufficient.
+_UNICODE_DASH_CHARS = "‒–—−"
+_UNICODE_DASH_NUMERIC_RE = re.compile(
+    rf"\d+\s*[{_UNICODE_DASH_CHARS}]\s*\d+|(?<!\d)[{_UNICODE_DASH_CHARS}]\d+"
+)
+_POISON_PATTERNS = (
+    _DECIMAL_RANGE_RE,
+    _FRACTION_RE,
+    _NEGATIVE_NUMBER_RE,
+    _DECIMAL_RE,
+    _UNSUPPORTED_PREFIX_RE,
+    _UNICODE_DASH_NUMERIC_RE,
+)
 
 
 def _redact_poisoned_numbers(text: str) -> str:
@@ -264,6 +343,19 @@ _FORWARD_PHRASE_RE = re.compile(
             r"|(?P<open_lo_suffix>\d+)\s*(?:or more|or above|plus)\s*" + _UNIT + _OF_EXPERIENCE,
             r"|(?P<open_hi_suffix>\d+)\s*(?:or less|or fewer|or under)\s*" + _UNIT + _OF_EXPERIENCE,
             r"|(?P<plus_lo>\d+)\+\s*" + _UNIT + _OF_EXPERIENCE,
+            # Trailing marker *after* the complete "N years of experience"
+            # phrase (as opposed to open_hi_suffix/open_lo_suffix's marker
+            # positioned before the unit word) — listed before the plain
+            # `bare` alternative so it takes precedence when present
+            # (Astra review finding 3).
+            r"|(?P<bare_trail_hi>\d+)\s*"
+            + _UNIT
+            + _OF_EXPERIENCE
+            + r"\s+(?:or less|or fewer|or under)\b",
+            r"|(?P<bare_trail_lo>\d+)\s*"
+            + _UNIT
+            + _OF_EXPERIENCE
+            + r"\s+(?:or more|or above|plus)\b",
             r"|(?P<bare>\d+)\s*" + _UNIT + _OF_EXPERIENCE,
         ]
     ),
@@ -319,6 +411,10 @@ def _phrase_from_forward_match(match: re.Match[str]) -> _Phrase:
         return _Phrase(None, int(groups["open_hi_suffix"]), match.end())
     if groups["plus_lo"] is not None:
         return _Phrase(int(groups["plus_lo"]), None, match.end())
+    if groups["bare_trail_hi"] is not None:
+        return _Phrase(None, int(groups["bare_trail_hi"]), match.end())
+    if groups["bare_trail_lo"] is not None:
+        return _Phrase(int(groups["bare_trail_lo"]), None, match.end())
     return _Phrase(int(cast(str, groups["bare"])), None, match.end())
 
 
@@ -376,14 +472,44 @@ _TITLE_NOT_REQUIRED_MARKERS = (
     "not needed",
 )
 
+_TITLE_PREFERENCE_WORDS = ("preferred", "ideal", "ideally", "optional", "desired", "bonus")
+_TITLE_PREFERENCE_PHRASES = _TITLE_PREFERENCE_WORDS + ("a plus", "nice to have")
+
 _TITLE_PREFERENCE_TAG_RE = re.compile(
-    r"(?:preferred|ideal|optional|desired|a plus|nice to have|bonus)\s*[.!?]*\s*$",
+    r"(?:" + "|".join(_TITLE_PREFERENCE_PHRASES) + r")\s*[.!?]*\s*$",
+    re.IGNORECASE,
+)
+
+# A preference marker *leading* the segment — "Preferred 3-5 years
+# experience", "Ideally 5 years of experience" — not only trailing
+# (Astra review finding 2). Comma after the marker is optional; titles are
+# terser than description prose and rarely punctuate this fully.
+_TITLE_LEADING_PREFERENCE_RE = re.compile(
+    r"^(?:" + "|".join(_TITLE_PREFERENCE_PHRASES) + r")\b\s*,?\s*",
     re.IGNORECASE,
 )
 
 _TITLE_ZERO_RE = re.compile(
     r"no\s+(?:prior\s+)?experience\s+(?:required|necessary)\b", re.IGNORECASE
 )
+
+# A segment consisting of *nothing but* a qualifier phrase — reached when a
+# comma splits "5 years experience, not required" into two segments; the
+# second segment modifies the first rather than standing alone (Astra
+# review finding 2: "preserve modifiers that qualify the requirement
+# across punctuation").
+_QUALIFIER_ONLY_PHRASES = frozenset(_TITLE_NOT_REQUIRED_MARKERS) | frozenset(
+    _TITLE_PREFERENCE_PHRASES
+)
+
+
+def _normalize_segment_for_qualifier_check(segment: str) -> str:
+    stripped = segment.strip().rstrip(".!?").strip()
+    return re.sub(r"\s+", " ", stripped).lower()
+
+
+def _is_qualifier_only_segment(segment: str) -> bool:
+    return _normalize_segment_for_qualifier_check(segment) in _QUALIFIER_ONLY_PHRASES
 
 
 def _title_segments(text: str) -> list[str]:
@@ -396,6 +522,24 @@ def _title_segments(text: str) -> list[str]:
     return segments
 
 
+def _iter_forward_phrases(text: str) -> list[_Phrase]:
+    """Collects every non-overlapping forward-phrase match in `text`, not
+    only the first — "3 years experience and 5 years experience" must
+    surface both candidates so same-segment conflict resolution can run
+    (Astra review finding 5), the same way multiple sentences/segments
+    already do across a description/title."""
+    phrases: list[_Phrase] = []
+    pos = 0
+    while pos <= len(text):
+        result = _match_forward_phrase(text, pos)
+        if result is None:
+            break
+        phrase, match = result
+        phrases.append(phrase)
+        pos = match.end() if match.end() > match.start() else match.start() + 1
+    return phrases
+
+
 def _extract_title_bounds(title: str | None) -> tuple[int | str | None, int | str | None]:
     if not title:
         return None, None
@@ -404,7 +548,16 @@ def _extract_title_bounds(title: str | None) -> tuple[int | str | None, int | st
     minimums: list[int] = []
     maximums: list[int] = []
 
-    for raw_segment in _title_segments(working):
+    raw_segments = _title_segments(working)
+    qualifier_only = [_is_qualifier_only_segment(s) for s in raw_segments]
+
+    for index, raw_segment in enumerate(raw_segments):
+        if qualifier_only[index]:
+            # Consumed as a modifier of the preceding segment below (or,
+            # if first, standalone noise with nothing to modify) — never
+            # processed as its own independent segment.
+            continue
+
         segment = raw_segment.strip()
         if not segment:
             continue
@@ -417,26 +570,33 @@ def _extract_title_bounds(title: str | None) -> tuple[int | str | None, int | st
             continue
 
         has_not_required = any(marker in segment_lower for marker in _TITLE_NOT_REQUIRED_MARKERS)
-        has_preference = bool(_TITLE_PREFERENCE_TAG_RE.search(segment_lower))
+        has_preference = bool(_TITLE_PREFERENCE_TAG_RE.search(segment_lower)) or bool(
+            _TITLE_LEADING_PREFERENCE_RE.match(segment_lower)
+        )
+        has_adjacent_qualifier = index + 1 < len(qualifier_only) and qualifier_only[index + 1]
 
-        phrase = _match_short_form(segment)
-        if phrase is None:
-            forward = _match_forward_phrase(segment)
-            phrase = forward[0] if forward is not None else None
-        if phrase is None:
-            phrase = _match_label_value_phrase(segment)
-        if phrase is None:
+        short_form = _match_short_form(segment)
+        if short_form is not None:
+            phrases = [short_form]
+        else:
+            phrases = _iter_forward_phrases(segment)
+            if not phrases:
+                label_value = _match_label_value_phrase(segment)
+                phrases = [label_value] if label_value is not None else []
+        if not phrases:
             continue
 
-        if has_not_required or has_preference:
+        if has_not_required or has_preference or has_adjacent_qualifier:
             # Whole segment suppressed — contributes nothing (Risk 4 /
-            # preference suppression), never a partial/degraded candidate.
+            # preference suppression, including a qualifier carried across
+            # a punctuation boundary), never a partial/degraded candidate.
             continue
 
-        if phrase.minimum is not None:
-            minimums.append(phrase.minimum)
-        if phrase.maximum is not None:
-            maximums.append(phrase.maximum)
+        for phrase in phrases:
+            if phrase.minimum is not None:
+                minimums.append(phrase.minimum)
+            if phrase.maximum is not None:
+                maximums.append(phrase.maximum)
 
     return _collapse_or_conflict(minimums), _collapse_or_conflict(maximums)
 
@@ -556,10 +716,14 @@ def _extract_description_bounds(
             minimums.append(0)
             continue
 
-        # Reversed label:value order is inherently role-scoped, like a
-        # structured field — no subject-frame gate needed, but still
-        # subject to the same continuation-boundary rule.
-        label_match = _LABEL_VALUE_RE.search(stripped)
+        # Reversed label:value order is inherently role-scoped *only* when
+        # it is the whole sentence's own opening word, like a structured
+        # field ("Experience: 5+ years") — never merely found somewhere
+        # inside an arbitrary sentence ("Our vendor experience: 5 years."),
+        # which must still obey the approved attribution frame like any
+        # other candidate (Astra review finding 1). Anchored at position 0,
+        # not searched for anywhere in the sentence.
+        label_match = _LABEL_VALUE_RE.match(stripped)
         if label_match is not None and _FRAME_RE.match(stripped) is None:
             phrase = _match_label_value_phrase(stripped)
             if phrase is not None:
