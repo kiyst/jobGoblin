@@ -112,6 +112,7 @@ def test_checkpoint_contains_no_environment_or_transcript_content(
     assert "transcript" not in checkpoint.lower()
     assert "Trigger: auto" in checkpoint
     assert "docs/LLM_HANDOFF.md" in checkpoint
+    assert f"Workflow version: {hook.WORKFLOW_VERSION}" in checkpoint
 
 
 def test_write_checkpoint_is_atomic_and_restore_prints_it(

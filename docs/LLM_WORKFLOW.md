@@ -3,7 +3,9 @@
 Status: active as of 2026-08-30. This is the operating process for Claude Code as the
 primary implementer and Codex as the independent reviewer. Product requirements remain
 authoritative in the master guide, architecture, data model, roadmap, and accepted ADRs.
-The user remains the scope and merge authority.
+The user remains the scope and merge authority. A Workflow v3.1 pilot layer (see "Workflow
+v3.1 pilot" below) is being trialed across three slices starting 2026-09-08; it is
+additive to everything in this file unless a section says otherwise.
 
 v3 persists, as durable process rather than conversational instruction, the practices
 that emerged across Phase 2's identity-resolution slices: a `Definition of Ready` gate
@@ -244,6 +246,99 @@ If any condition is uncertain, Codex requests a correction instead. This rule ne
 permits Codex to change code, migrations, tests, dependency versions, or semantic
 documentation without explicit user authorization.
 
+## Workflow v3.1 pilot (three-slice trial)
+
+Status: piloted starting with this tooling slice (`tooling/workflow-v3.1-handoff-metadata`),
+itself pilot slice 1 of 3. v3.1 is a measurable trial layered on v3, not an assumed
+improvement — a mandatory retrospective follows the third piloted slice (see below), and
+any element that does not earn its cost may be dropped rather than kept by default.
+
+### Claim-to-evidence matrix
+
+Before implementation on any Class H proposal, and required for any proposal introducing
+a new parsing form or invariant, the proposal includes a table with one row per claimed
+parsing form/invariant:
+
+| Claim | Example input -> expected output | Verified against |
+|---|---|---|
+
+"Verified against" names the fixture case or manual trace that supports the claim — a row
+with no cited evidence is itself a finding, the same way an unverified superlative claim
+already is under the adversarial self-review above.
+
+### Historical-defect checklist
+
+A proposal's self-review audits the proposed design against each category below,
+grounded in defect classes this project has actually produced (e.g. `employment.py`'s
+mask-iteration-order bug, the seniority classifier's immediate-trailing-conflict gap, and
+the negation/company-tenure gaps the first `classify_experience` preflight caught):
+
+1. Negation/exclusion scope — does a negation word's reach stop where the design assumes?
+2. Subject/attribution misassignment — whose property is this value actually describing?
+3. Numeric-context confusion — dates, durations, product versions, ages, and unrelated
+   numbers mistaken for the value being extracted.
+4. Decimal/fractional mishandling — a fractional value silently truncated or re-read as a
+   different integer.
+5. Token-order/mask-precedence bugs — a shorter match shadowing a longer one, or vice
+   versa, depending on iteration order.
+6. Range/boundary inversion — an off-by-one, swapped min/max, or an inverted range that
+   still parses without error.
+7. Structural/positional gating — title-vs-description conflation, or a segment boundary
+   assumed to fall somewhere it does not always fall.
+8. Provenance/independent-field cross-contamination — one field's resolution silently
+   affecting another's.
+9. Missing-vs-wrong distinction — the design must be checked for cases that would produce
+   a *confident* value contradicted by the input, not merely cases with no extraction.
+
+### Confidently-wrong blocking rule
+
+A case that produces a confident value contradicted by its own input must never be
+recorded as an "accepted limitation" — it blocks implementation unless the user
+explicitly approves it in writing for that specific case. A case that safely returns
+*unavailable* (no extraction, no invented value) may be documented as a limitation without
+blocking.
+
+### Two-pass requirement
+
+A Class H proposal receives two self-review passes before implementation, both performed
+on the proposal itself, before any repository file changes: the claim-to-evidence matrix
+first, then the historical-defect checklist, with the proposal revised between passes
+when either surfaces a gap. Both passes are reported in the proposal, not merely asserted
+complete.
+
+### `slice_kind` and the handoff metadata block
+
+Every `Work done` entry's structured `workflow-metadata` fenced block declares
+`slice_kind: parser | tooling | docs`, validated by `scripts/check_handoff.py` (see that
+module's docstring for the authoritative field-by-field schema) and cross-checked by
+`scripts/verify.py`'s required `handoff metadata validation` step against the exact counts
+that same invocation observed — never a second subprocess, never a re-derived number.
+
+- **`parser`** — a classifier/normalization slice. Requires an actual (non-`not_run`)
+  `focused_test_count` and a matching `focused_test_selector`, plus `fixture_path`/
+  `fixture_count` cross-checked against the real fixture file's length.
+- **`tooling`** — process or infrastructure work (this slice is one). Full-suite
+  verification is required the same as `parser`; focused testing is optional; no fixture
+  fields apply.
+- **`docs`** — genuinely documentation-only work. `verification_level: not_run` is
+  permitted and required — `full_suite_count`/`focused_test_count` must then literally be
+  `not_run`, never a fabricated or copy-pasted number, and `lightweight_checks` must name
+  what was actually done instead (e.g. `git diff --check`, `check_repo.py`). `--docs-only`
+  on `verify.py` enforces this at the tool level: it skips the database and pytest steps
+  and requires the handoff to declare `not_run`, so a docs-only run can never silently
+  paper over a stale or missing test count.
+
+### Mandatory retrospective
+
+After the third piloted slice's `Work review` is recorded, before starting a fourth slice
+under v3.1, the user and the implementer jointly assess: did the claim-to-evidence matrix
+or historical-defect checklist catch a genuine defect before code was written on any of
+the three slices (the first `classify_experience` preflight already did, prior to this
+tooling slice existing); did `check_handoff.py` ever block a fabricated or stale count; did
+either self-review pass meaningfully slow a slice without finding anything. The retrospective
+decides, per element, whether to keep it as standing process, narrow it, or drop it — v3.1
+is not retained by default merely because it shipped.
+
 ## Established conventions are defaults
 
 Do not repeatedly ask the user to reconfirm a convention already accepted in current
@@ -266,6 +361,9 @@ the "Python without schema" row below — it wraps the same checks in the same o
 a second, independently-drifting copy of the sequence. `--level schema`/`--level
 high-risk` extend this table's remaining rows once those levels exist; until a level
 exists for a given change surface, run this table's explicit command list directly.
+`--docs-only` (Workflow v3.1 pilot) runs the mechanical-docs row's checks that `verify.py`
+already covers plus the required handoff-metadata validation, skipping the
+database/pytest steps entirely; it is mutually exclusive with `--focus`.
 
 Run the smallest set that can actually detect regressions in the changed surface:
 

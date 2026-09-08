@@ -98,169 +98,6 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-09-07, Claude Code (Sonnet 5). Risk class R (Class
-  R-plus-adversarial per the approved proposal). New bounded slice on new
-  branch `phase-3/seniority-classifier`, base: clean `main@7a90282` (the
-  employment-classifier merge commit). Third Phase 3 parser:
-  `classify_seniority(title, description) -> NormalizationResult[Seniority]`
-  where `Seniority = entry_level | mid_level | senior | staff | principal |
-  director`. Implements the third, twice-revised proposal exactly, plus
-  five binding clarifications from the approval message.
-- Independent implementation, not an `employment.py`/`remote.py` import:
-  its own tokenizer, its own two-entry hyphen-compound canonicalization
-  (`entry-level`, `mid-level` only), its own segment extraction, its own
-  negation grammar — none shared or imported (proven by
-  `test_import_boundary_allow_list` plus a regression asserting both
-  `app.normalization.employment` and `app.normalization.remote` are
-  specifically rejected by this module's own allow-list).
-- Title grammar (binding clarification 2): `principal`/`director` phrases
-  must be anchored at a structural segment's leading position, never
-  matched anywhere inside it — `Director of Engineering`/`Principal
-  Software Engineer` match; `Assistant to the Director of Engineering`,
-  `Office of the Director of Operations`, and `Assistant to the Principal
-  Engineer` (the required third prefix-wrapped negative) do not, since an
-  unrecognized word occupies the leading position instead.
-- Description grammar (binding clarification 1, the most novel mechanism
-  in this slice): after a self-referential anchor (`this is`, `it is`,
-  `the position is`, `this position is`, `the role is`, `this role is`,
-  `we are hiring`, `seeking`), the first candidate must begin immediately
-  after only an approved grammatical prefix — optional `a`/`an`/`the`; or
-  `not`/`no`/`neither`/`not either` plus an optional article — never
-  searched for further into the sentence. This is why `This role is
-  supported by a senior engineer.`, `This position is reporting to the
-  Director of Engineering.`, and `We are hiring alongside a staff
-  engineer.` all resolve to `unavailable`: the token immediately after
-  each anchor (`supported`, `reporting`, `alongside`) is neither a valid
-  prefix nor a candidate. This entirely replaces `employment.py`'s
-  nearest-candidate-window negation mechanism with a simpler, local
-  grammar — a deliberate, narrower design suited to this parser's own
-  requirement, not a partial reuse.
-- Corrected excluded-term claim (binding clarification 5, corrected again
-  by clarification 2 of the final approval): `manager`/`lead`/
-  `associate`/`executive`/`vp`/C-level remain in no catalog, but three
-  exact exclusion phrases were added for the specific required outcomes —
-  `senior executive assistant`, `senior vice president`, `senior vp` —
-  masked entirely so `senior` cannot leak through them either. `Senior
-  Manager` deliberately still resolves to `senior` (manager contributes
-  nothing but does not block a different, actually-recognized qualifier).
-  `Lead Senior Engineer`/`Associate Director of Engineering` remain
-  `unavailable` via the pre-existing leading-position rule, needing no new
-  exclusion.
-- Compound/conflict precedence (binding clarification 7): `Sr. Staff
-  Engineer` -> `staff`, `Senior Principal Engineer` -> `principal`
-  (compound rule, `director` deliberately excluded from it), `Senior
-  Director`/`Staff/Principal Engineer`/`Junior Senior Analyst` -> conflict
-  -> `unavailable`, and `Senior, Staff Engineer`/`(Senior) Staff Engineer`
-  (comma/parens forcing two segments) differ deterministically from the
-  undelimited `Senior Staff Engineer` by defeating the compound rule.
-- Files changed: `backend/app/normalization/seniority.py` (new),
-  `backend/tests/test_normalization_seniority.py` (new),
-  `backend/tests/fixtures/normalization/seniority_cases.json` (new, 84
-  cases), `docs/ARCHITECTURE.md` (annotated `seniority.yaml` as planned
-  future enrichment, not implemented by this slice, per the accepted
-  decision), `docs/ROADMAP.md` (Phase 3 bullet — also corrected a
-  pre-existing staleness: it still said the employment-classifier slice
-  was "pending review, not merged" despite the merge already recorded
-  above at `8e136c0`), this handoff entry. `app/normalization/
-  employment.py`, `app/normalization/remote.py`, `app/normalization/
-  types.py` untouched.
-- Honest evidence-gap statement preserved (binding clarification 5 of the
-  final approval): the corpus contains exactly one `sanitized_capture`
-  fixture (the real Greenhouse-derived title from `backend/tests/
-  fixtures/discovery/greenhouse_live_canary.json`, a negative control) —
-  a single data point, not broad realistic-positive coverage. Recorded in
-  both the module docstring and a dedicated test
-  (`test_corpus_origin_values_are_honestly_labeled`, asserting exactly
-  one `sanitized_capture` case) as an acknowledged, open Phase 3
-  exit-gate gap, not something this slice claims to satisfy.
-- Verification: targeted seniority module alone (**89 passed** — 84
-  fixture cases + 5 code-level tests); all four normalization modules
-  together (**262 passed**). `ruff format --check`/`ruff check`/`mypy`
-  all pass. Genuine external `python scripts/verify.py --level routine`
-  (full run) — all **9 steps PASS**, **1757 full-suite tests** (was 1668;
-  +89). No database/migration/schema touched.
-- Deeper adversarial verification (Class-R-plus-adversarial, required by
-  the approved proposal): beyond the fixture corpus, probed ~16 unseen
-  cases — additional negator forms (`no`, `neither...the...nor...the`,
-  `not either...the...or...the`), plain (non-negated) `or` coordination,
-  a mid-sentence anchor (correctly not recognized — anchors are
-  sentence-initial only, an intentional scope limit), multi-sentence
-  descriptions, the compound rule inside description, and a later
-  unrelated qualifier-shaped phrase after an already-found candidate
-  (`"...staff-level collaboration"` — correctly never reached, since
-  description has no broad trailing conflict-scan the way title does,
-  only the tight coordination-adjacent check). All resolved correctly or
-  to an already-documented, intentional scope boundary. Two minor,
-  out-of-scope observations reported rather than fixed: (1) coordination
-  propagation only fires when the second candidate is directly adjacent
-  to the coordinator with no intervening noun — a sentence like `"This is
-  neither the senior role nor the staff position."` still reaches the
-  correct final `unavailable`, but via the second candidate never being
-  examined rather than via successful coordination-propagation; (2) a
-  title ending in a literal period (e.g. `"Senior."`) fails to match,
-  since the period stays glued to the token (unlike a comma, an
-  established segment delimiter) — a rare input shape, not one of the
-  required cases, and not fixed here since doing so risks the `sr.`/`jr.`
-  abbreviation handling this slice depends on.
-- Deviations/known limitations: the two adversarial observations above
-  (both out of scope, not fixed); the pre-existing `alembic check`
-  substitution (unrelated); the honest evidence-gap statement (not a
-  limitation of the code, a limitation of the evidence base).
-- STOP — awaiting Codex review. Do not merge, begin another Phase 3
-  parser, wire into ingestion/persistence, contact providers, or create a
-  migration.
-
-### Work review
-
-- Date/reviewer: 2026-09-07, Codex.
-- Diff reviewed: `7a90282..1ac2b81` on `phase-3/seniority-classifier`.
-- Verdict: **Changes requested.** One executable finding and one documentation
-  correction remain.
-- Independent verification: the targeted seniority module passes (**89 tests**), and
-  the canonical focused verifier passes all **10 steps** (**89 focused / 1757 full
-  suite**), including Ruff, mypy, repository checks, test-database safety, and cleanup.
-  `git diff --check` is clean. These green results do not cover the missing description
-  conflict behavior below.
-- Findings:
-  1. **High — description parsing omits the approved multiple-level conflict check.**
-     `seniority.py:525-565` adds the first positive candidate and examines only a
-     directly adjacent `or`/`nor` candidate. Unlike the title path at
-     `seniority.py:453-490`, it never calls `_trailing_conflict_labels` or an equivalent
-     description-safe mechanism. Direct execution therefore returns
-     `senior/parsed_description` for `This is a senior director position.`,
-     `entry_level/parsed_description` for `This is a junior senior analyst role.`, and
-     `staff/parsed_description` for `This is a staff/principal engineer position.` The
-     approved proposal said the description conflict rule would fail closed on two
-     distinct values; the new `Work done` entry instead relabels the omission as an
-     intentional boundary. Implement a description-safe immediate-title-phrase conflict
-     check. It may be narrower than title's broad trailing scan so later relational prose
-     is not mistaken for the posting's tier, but it must reject the three reproduced
-     forms and equivalent immediately joined distinct levels. Preserve the approved
-     `senior staff -> staff` and `senior principal -> principal` compounds and ordinary
-     single-value descriptions. Add direct regressions for all of those outcomes.
-  2. **Low — the handoff gives the fixture count as 89.** The JSON corpus contains 84
-     cases; 89 is the module's total test count (84 parametrized corpus cases plus five
-     code-level tests). Correct `docs/LLM_HANDOFF.md:305-306` without rewriting the
-     historical verification totals.
-- Accepted portions: the anchored title grammar, anchor-adjacent description entry
-  grammar, exact executive/support exclusions, compound precedence on the covered path,
-  independent import boundary, locally implemented hyphen handling, taxonomy
-  annotation, merge-state-aware ROADMAP wording, and honest real-fixture evidence gap
-  all match the approved scope.
-- Exact requested correction: modify only `seniority.py`, its fixture corpus/tests, and
-  the next handoff entry (including the count correction). Do not expand the canonical
-  vocabulary, aliases, anchors, explicit principal/director phrases, exclusion catalog,
-  taxonomy work, ingestion wiring, schemas, providers, or another parser. Run the
-  targeted normalization tests and canonical verifier, adversarially replay the three
-  reproduced conflicts plus preserved compound/single-value controls, commit and push
-  the feature branch, then stop for re-review.
-
----
-
-## Iteration 2
-
-### Work done
-
 - Date/agent: 2026-09-07, Claude Code (Sonnet 5). Risk class R correction
   pass on `phase-3/seniority-classifier` for both findings in Iteration
   1's `Work review` above. Base: commit `1ac2b81` plus the uncommitted
@@ -398,3 +235,119 @@ that detail.
 - STOP — do not begin or propose another Phase 3 parser, wire this
   classifier into ingestion/persistence, contact providers, or create a
   migration without separate authorization.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-09-08, Claude Code (Sonnet 5). Risk class R (tooling —
+  process/infrastructure only, no identity/concurrency/security/external
+  behavior). New bounded slice on new branch
+  `tooling/workflow-v3.1-handoff-metadata`, base: clean `main@f003595`
+  (the seniority-classifier merge-record commit). Implements the
+  Workflow v3.1 pilot's first (of three) piloted slices exactly as
+  user-authorized: a `slice_kind`/`verification_level` structured metadata
+  block in `LLM_HANDOFF.md`'s `Work done` entries, its validator, a
+  required `verify.py` step that cross-checks that block against the same
+  invocation's own observed counts, a `--docs-only` verifier mode, a
+  `workflow_version` marker in the compaction checkpoint, and the durable
+  process text (claim-to-evidence matrix, historical-defect checklist,
+  confidently-wrong blocking rule, two-pass requirement) in
+  `docs/LLM_WORKFLOW.md`/`CLAUDE.md`.
+- `backend/scripts/check_handoff.py` (new): offline, no-subprocess
+  validator for the metadata block — presence/allowed-values/cross-field
+  structure (`validate_structure`), fixture-count cross-check against the
+  real fixture file for `slice_kind: parser` (`validate_fixture_count`),
+  and a cross-check against a caller-supplied actual run
+  (`validate_against_run`) enforcing that `verification_level: not_run`
+  never coexists with a fabricated numeric count and that `slice_kind:
+  parser` requires real focused testing. Only ever inspects the *newest*
+  `## Iteration N`'s `Work done` section — historical, already-rotated
+  entries are never checked.
+- `backend/scripts/verify.py`: added `handoff_metadata_step` (new,
+  required, unconditional — runs even under `--docs-only`), wired via a
+  `pytest_counts` dict shared across `_build_steps`'s pytest step
+  closures using `run_pytest_step`'s new `counts_sink`/`counts_key`
+  keyword-only parameters (a side channel; no second pytest subprocess is
+  ever launched to re-derive counts). Added `--docs-only` (mutually
+  exclusive with `--focus`, enforced in `_parse_args`), which skips the
+  two database steps and both pytest steps while still requiring the
+  handoff-metadata step to pass with `verification_level: not_run`.
+- `.claude/hooks/compact_checkpoint.py`: added `WORKFLOW_VERSION =
+  "v3.1-pilot"`, included in `render_checkpoint`'s output as `Workflow
+  version: v3.1-pilot`.
+- `docs/LLM_WORKFLOW.md`: new "Workflow v3.1 pilot (three-slice trial)"
+  section — claim-to-evidence matrix template, the nine-category
+  historical-defect checklist (grounded in this project's actual past
+  defects: the `employment.py` mask-order bug, the seniority immediate-
+  trailing-conflict gap, and the negation/attribution gaps the first
+  `classify_experience` preflight caught), the confidently-wrong blocking
+  rule, the two-pass requirement, the `slice_kind`/metadata-block
+  reference, and the mandatory post-third-slice retrospective trigger.
+  Also documents `--docs-only` in the verification matrix section.
+- `CLAUDE.md`: new "Workflow v3.1 (pilot)" marker section; compaction
+  instructions now also preserve the active workflow version and the
+  active slice's `slice_kind`/`verification_level`.
+- Files changed: `backend/scripts/check_handoff.py` (new),
+  `backend/tests/test_check_handoff.py` (new, 43 tests),
+  `backend/scripts/verify.py`, `backend/tests/test_verify.py` (15 new
+  tests; 2 existing `_build_steps` structural tests updated for the new
+  trailing step), `.claude/hooks/compact_checkpoint.py`,
+  `backend/tests/test_compact_checkpoint.py` (1 new test),
+  `docs/LLM_WORKFLOW.md`, `CLAUDE.md`, this handoff entry (two-iteration
+  rotation: deleted the original Iteration 1, renumbered the
+  seniority-classifier's Work done/Work review/Merge record to Iteration
+  1, appended this entry as Iteration 2). No application code
+  (`app/normalization/*`, `app/db/*`, ingestion) touched; no schema or
+  migration.
+- Verification: `ruff format --check`/`ruff check`/`mypy` all pass (104
+  source files under `app`/`tests`/`scripts`/`.claude/hooks`).
+  `python -m scripts.check_repo` exits 0. Genuine external `python
+  scripts/verify.py --level routine --focus tests/test_check_handoff.py
+  tests/test_verify.py tests/test_compact_checkpoint.py` (full run,
+  before this entry existed, to prove the wiring end-to-end): **10 of 11
+  steps PASS** — **146 focused / 1820 full-suite tests** — with the new
+  `handoff metadata validation` step correctly FAILing (`"the newest
+  'Work done' section has no 'workflow-metadata' block"`), proving the
+  step actually inspects the real file rather than trivially passing.
+  This entry's own metadata block below now supplies that block; a
+  second genuine run after this entry is committed (recorded by the
+  reviewer's independent verification, per the standing process) is
+  expected to show all 11 steps PASS.
+- Self-review (Class R, abbreviated per `LLM_WORKFLOW.md`'s scaled-depth
+  rule): confirmed `check_handoff.py` never imports or calls anything
+  from `verify.py` (no recursive verifier invocation); confirmed
+  `run_pytest_step`'s `counts_sink`/`counts_key` default to `None`/`""`
+  so every pre-existing call site (all of them, until this slice) is
+  unaffected; confirmed `_build_steps`'s `docs_only` branch never
+  constructs the database/pytest `Step` closures at all under
+  `--docs-only` (not merely skips running them) via a test whose fake
+  runner/connectivity-check raise if called; confirmed
+  `validate_against_run` independently rejects a parser-slice's
+  `not_run` focused count even when isolated from `validate_structure`
+  (a defense-in-depth unit test, not merely relying on the structural
+  check).
+- Deviations/known limitations: this entry's own metadata block is
+  necessarily written after the verification run whose counts it
+  declares (146/1820, from the run above) rather than the reviewer
+  re-deriving them independently — this is inherent to how any
+  self-describing ledger works and is exactly why `check_handoff.py`'s
+  cross-check against the *reviewer's own* subsequent run exists as a
+  separate, independent safeguard. The nine-category historical-defect
+  checklist and the pilot's success thresholds are newly authored process
+  text, not independently re-derived from a separate source, since this
+  is their first codification.
+- STOP — awaiting Codex review. Do not merge, begin `classify_experience`
+  or any other Phase 3 parser, or start pilot slice 2/3 of Workflow v3.1
+  without separate authorization.
+
+```workflow-metadata
+workflow_version: v3.1-pilot
+slice_kind: tooling
+verification_level: routine
+focused_test_selector: tests/test_check_handoff.py tests/test_verify.py tests/test_compact_checkpoint.py
+focused_test_count: 146
+full_suite_count: 1820
+```
