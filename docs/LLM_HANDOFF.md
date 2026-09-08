@@ -391,3 +391,35 @@ focused_test_selector: tests/test_check_handoff.py tests/test_verify.py tests/te
 focused_test_count: 171
 full_suite_count: 1845
 ```
+
+### Work review
+
+- Date/reviewer: 2026-09-08, Codex.
+- Diff reviewed: `38ed0a2..41b3f70` on
+  `tooling/workflow-v3.1-handoff-metadata`.
+- Verdict: **Changes requested.** Findings 1, 2, 4, and 5 are closed. Finding 3
+  is substantially corrected, but one explicitly requested malformed-metadata case
+  remains accepted.
+- Independent verification: `git diff --check` is clean; the three focused modules pass
+  **171/171 tests** with a workspace-local pytest base directory. The default pytest temp
+  root was inaccessible to this reviewer account (`PermissionError`) and is an
+  environment issue, not a product/test failure. A direct executable probe reproduced
+  the remaining issue below. The full 1845-test suite was not rerun because this bounded
+  structural defect is already independently demonstrated.
+- **Medium — unknown metadata keys still pass validation.** The Iteration 1 correction
+  explicitly required rejecting duplicate, empty, **and unknown** keys. The new parser
+  rejects duplicates and empty keys, while `validate_structure()` checks required and
+  conditional fields but never compares the supplied key set against the closed metadata
+  schema (`backend/scripts/check_handoff.py:87`, `:171`). Directly adding
+  `typo_full_sute_count: 1` to an otherwise-valid tooling block still returns normally;
+  `backend/tests/test_check_handoff.py` has no unknown-key regression. This leaves typos
+  and unsupported fields silently ignored, contrary to the validator's fail-closed goal.
+- Bounded correction: define the complete allowed field-name set (the six required fields
+  plus `lightweight_checks`, `fixture_path`, and `fixture_count`) and have structural
+  validation reject every supplied key outside it before conditional checks. Add a
+  regression proving an otherwise-valid block with an invented/typo key fails, mutation-
+  prove that test, then rerun the focused checker/verifier/hook tests and canonical
+  verifier with updated metadata counts. No verifier orchestration, hook, product,
+  migration, or pilot-policy change is requested.
+- STOP: do not merge or begin `classify_experience` or another parser until this bounded
+  correction is implemented and re-reviewed.
