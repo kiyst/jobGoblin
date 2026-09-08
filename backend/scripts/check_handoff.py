@@ -38,6 +38,10 @@ and that is not this tool's concern.
     fixture_path: <path>                     # required only if slice_kind: parser
     fixture_count: <int>                     # required only if slice_kind: parser
 
+These nine names are the **complete, closed schema** — any other key (a typo
+such as `typo_full_sute_count`, or an invented field) is rejected outright by
+`validate_structure`, never silently ignored.
+
 `fixture_path`/`fixture_count` are mandatory when `slice_kind: parser` and
 must be *absent* otherwise — a stray, inapplicable field is itself a
 structural error, not silently tolerated. `verification_level: not_run`
@@ -92,6 +96,14 @@ _REQUIRED_FIELDS = (
     "focused_test_count",
     "full_suite_count",
 )
+
+_OPTIONAL_FIELDS = frozenset({"lightweight_checks", "fixture_path", "fixture_count"})
+
+# The complete, closed set of keys a metadata block may ever declare — the six
+# always-required fields plus the three conditionally-required optional ones.
+# Any other key (a typo, an invented field) is rejected outright rather than
+# silently ignored, per Codex review finding (commit d5fec38).
+_ALLOWED_FIELDS = frozenset(_REQUIRED_FIELDS) | _OPTIONAL_FIELDS
 
 
 class HandoffValidationError(Exception):
@@ -171,6 +183,13 @@ def _require_int(fields: dict[str, str], key: str) -> int:
 def validate_structure(fields: dict[str, str]) -> None:
     """Validates presence, allowed values, and cross-field consistency of
     the metadata block alone."""
+    unknown = sorted(key for key in fields if key not in _ALLOWED_FIELDS)
+    if unknown:
+        raise HandoffValidationError(
+            f"metadata block declares unrecognized field(s) outside the closed schema: "
+            f"{unknown} — allowed fields are {sorted(_ALLOWED_FIELDS)}"
+        )
+
     missing = [key for key in _REQUIRED_FIELDS if key not in fields]
     if missing:
         raise HandoffValidationError(f"metadata block is missing required field(s): {missing}")

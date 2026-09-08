@@ -98,187 +98,6 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-09-08, Claude Code (Sonnet 5). Risk class R (tooling —
-  process/infrastructure only, no identity/concurrency/security/external
-  behavior). Base -> ending commit: `f003595` -> this commit; branch
-  `tooling/workflow-v3.1-handoff-metadata` (new branch, base: clean
-  `main@f003595`, the seniority-classifier merge-record commit).
-  Implements the Workflow v3.1 pilot's first (of three) piloted slices exactly as
-  user-authorized: a `slice_kind`/`verification_level` structured metadata
-  block in `LLM_HANDOFF.md`'s `Work done` entries, its validator, a
-  required `verify.py` step that cross-checks that block against the same
-  invocation's own observed counts, a `--docs-only` verifier mode, a
-  `workflow_version` marker in the compaction checkpoint, and the durable
-  process text (claim-to-evidence matrix, historical-defect checklist,
-  confidently-wrong blocking rule, two-pass requirement) in
-  `docs/LLM_WORKFLOW.md`/`CLAUDE.md`.
-- `backend/scripts/check_handoff.py` (new): offline, no-subprocess
-  validator for the metadata block — presence/allowed-values/cross-field
-  structure (`validate_structure`), fixture-count cross-check against the
-  real fixture file for `slice_kind: parser` (`validate_fixture_count`),
-  and a cross-check against a caller-supplied actual run
-  (`validate_against_run`) enforcing that `verification_level: not_run`
-  never coexists with a fabricated numeric count and that `slice_kind:
-  parser` requires real focused testing. Only ever inspects the *newest*
-  `## Iteration N`'s `Work done` section — historical, already-rotated
-  entries are never checked.
-- `backend/scripts/verify.py`: added `handoff_metadata_step` (new,
-  required, unconditional — runs even under `--docs-only`), wired via a
-  `pytest_counts` dict shared across `_build_steps`'s pytest step
-  closures using `run_pytest_step`'s new `counts_sink`/`counts_key`
-  keyword-only parameters (a side channel; no second pytest subprocess is
-  ever launched to re-derive counts). Added `--docs-only` (mutually
-  exclusive with `--focus`, enforced in `_parse_args`), which skips the
-  two database steps and both pytest steps while still requiring the
-  handoff-metadata step to pass with `verification_level: not_run`.
-- `.claude/hooks/compact_checkpoint.py`: added `WORKFLOW_VERSION =
-  "v3.1-pilot"`, included in `render_checkpoint`'s output as `Workflow
-  version: v3.1-pilot`.
-- `docs/LLM_WORKFLOW.md`: new "Workflow v3.1 pilot (three-slice trial)"
-  section — claim-to-evidence matrix template, the nine-category
-  historical-defect checklist (grounded in this project's actual past
-  defects: the `employment.py` mask-order bug, the seniority immediate-
-  trailing-conflict gap, and the negation/attribution gaps the first
-  `classify_experience` preflight caught), the confidently-wrong blocking
-  rule, the two-pass requirement, the `slice_kind`/metadata-block
-  reference, and the mandatory post-third-slice retrospective trigger.
-  Also documents `--docs-only` in the verification matrix section.
-- `CLAUDE.md`: new "Workflow v3.1 (pilot)" marker section; compaction
-  instructions now also preserve the active workflow version and the
-  active slice's `slice_kind`/`verification_level`.
-- Files changed: `backend/scripts/check_handoff.py` (new),
-  `backend/tests/test_check_handoff.py` (new, 43 tests),
-  `backend/scripts/verify.py`, `backend/tests/test_verify.py` (15 new
-  tests; 2 existing `_build_steps` structural tests updated for the new
-  trailing step), `.claude/hooks/compact_checkpoint.py`,
-  `backend/tests/test_compact_checkpoint.py` (1 new test),
-  `docs/LLM_WORKFLOW.md`, `CLAUDE.md`, this handoff entry (two-iteration
-  rotation: deleted the original Iteration 1, renumbered the
-  seniority-classifier's Work done/Work review/Merge record to Iteration
-  1, appended this entry as Iteration 2). No application code
-  (`app/normalization/*`, `app/db/*`, ingestion) touched; no schema or
-  migration.
-- Verification: `ruff format --check`/`ruff check`/`mypy` all pass (104
-  source files under `app`/`tests`/`scripts`/`.claude/hooks`).
-  `python -m scripts.check_repo` exits 0. Genuine external `python
-  scripts/verify.py --level routine --focus tests/test_check_handoff.py
-  tests/test_verify.py tests/test_compact_checkpoint.py` (full run,
-  before this entry existed, to prove the wiring end-to-end): **10 of 11
-  steps PASS** — **146 focused / 1820 full-suite tests** — with the new
-  `handoff metadata validation` step correctly FAILing (`"the newest
-  'Work done' section has no 'workflow-metadata' block"`), proving the
-  step actually inspects the real file rather than trivially passing.
-  This entry's own metadata block below now supplies that block; a
-  second genuine run after this entry is committed (recorded by the
-  reviewer's independent verification, per the standing process) is
-  expected to show all 11 steps PASS.
-- Self-review (Class R, abbreviated per `LLM_WORKFLOW.md`'s scaled-depth
-  rule): confirmed `check_handoff.py` never imports or calls anything
-  from `verify.py` (no recursive verifier invocation); confirmed
-  `run_pytest_step`'s `counts_sink`/`counts_key` default to `None`/`""`
-  so every pre-existing call site (all of them, until this slice) is
-  unaffected; confirmed `_build_steps`'s `docs_only` branch never
-  constructs the database/pytest `Step` closures at all under
-  `--docs-only` (not merely skips running them) via a test whose fake
-  runner/connectivity-check raise if called; confirmed
-  `validate_against_run` independently rejects a parser-slice's
-  `not_run` focused count even when isolated from `validate_structure`
-  (a defense-in-depth unit test, not merely relying on the structural
-  check).
-- Deviations/known limitations: this entry's own metadata block is
-  necessarily written after the verification run whose counts it
-  declares (146/1820, from the run above) rather than the reviewer
-  re-deriving them independently — this is inherent to how any
-  self-describing ledger works and is exactly why `check_handoff.py`'s
-  cross-check against the *reviewer's own* subsequent run exists as a
-  separate, independent safeguard. The nine-category historical-defect
-  checklist and the pilot's success thresholds are newly authored process
-  text, not independently re-derived from a separate source, since this
-  is their first codification.
-- STOP — awaiting Codex review. Do not merge, begin `classify_experience`
-  or any other Phase 3 parser, or start pilot slice 2/3 of Workflow v3.1
-  without separate authorization.
-
-```workflow-metadata
-workflow_version: v3.1-pilot
-slice_kind: tooling
-verification_level: routine
-focused_test_selector: tests/test_check_handoff.py tests/test_verify.py tests/test_compact_checkpoint.py
-focused_test_count: 146
-full_suite_count: 1820
-```
-
-### Work review
-
-- Date/reviewer: 2026-09-08, Codex. Diff reviewed: `f003595..d8db682` on
-  `tooling/workflow-v3.1-handoff-metadata` (including `62fe128`).
-- Verdict: **Approved with binding clarifications.** Five bounded corrections
-  below are required before merge; the overall design can remain.
-- Independent verification: canonical routine verifier with the three declared
-  focus files passes all **11 steps**, **146 focused / 1820 full-suite tests**,
-  including static checks, metadata validation, and temporary-directory cleanup.
-  Read-only database inspection confirms development `0006`, test `0017`.
-  No implementation, test, migration, or hook file changed during this review.
-- **1 — Medium: docs-only bypasses parser/tooling verification.**
-  `backend/scripts/check_handoff.py:172` returns from `not_run` validation without
-  requiring `slice_kind: docs`; `:263` likewise accepts docs-only by level alone.
-  Direct probes accept both parser and tooling `not_run` declarations; the real
-  `verify.handoff_metadata_step` returns PASS for tooling with no observed tests.
-  Require `not_run` to be docs-only and `focused_test_selector: none`; independently
-  reject non-docs entries when `docs_only=True`. Add end-to-end metadata/step tests
-  for parser/tooling rejection and docs acceptance. No Git-diff classifier is required.
-- **2 — Medium: focused-run evidence can be false.**
-  `check_handoff.py:287` treats an unparseable executed focus run as an omitted run;
-  `:311` checks selector identity only for parsers. Reproduced PASS with an executed
-  focus whose parsed counts are None and metadata claiming not_run; also reproduced
-  tooling PASS when declared and actual selectors differ but both counts equal 3.
-  Use actual selector presence to distinguish omitted from unparseable focus;
-  when focus ran, require readable counts, a numeric declaration, and matching
-  selectors for every slice kind. Add both regressions and an omitted-focus control.
-- **3 — Medium: malformed metadata can silently pass.**
-  `check_handoff.py:129` overwrites duplicate keys; `:143` checks workflow_version
-  presence but never its value. Reproduced acceptance of workflow_version=garbage
-  and conflicting duplicate full_suite_count declarations (last one silently wins).
-  Require the supported version, reject duplicate/empty/unknown keys and multiple
-  metadata blocks in the selected Work done section, and reject empty required
-  selectors/paths. Add focused positive/negative tests without inspecting old entries.
-- **4 — Low: malformed input escapes the reported validation failure path.**
-  `check_handoff.py:133` uses isdigit() before int(): the value U+00B2 passes the
-  predicate and raises ValueError. Missing handoff files also raise FileNotFoundError
-  through `verify.handoff_metadata_step`, bypassing its StepResult/summary handling.
-  Validate ASCII integer syntax and translate expected conversion/read/decode failures
-  into HandoffValidationError at the input boundary, for both standalone and verifier
-  entry points. Report concise errors without echoing file contents. Test malformed
-  counts, missing/unreadable handoff, and invalid UTF-8; retain cleanup on failure.
-- **5 — Medium: durable pilot rules omit the approved experiment.**
-  `docs/LLM_WORKFLOW.md:301` replaces the promised pre-review implementation
-  contract/counterexample passes with two Class-H-only proposal passes. The Class-R
-  experience parser therefore misses the intended requirement. The implementation
-  also omits the mutation-proof rule and numerical success thresholds, and counts
-  tooling as pilot slice 1 although the approved proposal makes experience slice 1.
-  Restore both implementation self-review passes for applicable pilot parser slices,
-  proposal preflight for new parsing forms/invariants, the load-bearing regression
-  mutation proof, and the three-applicable-slice measurement window starting with
-  experience. Record the agreed targets: at most one correction round per slice,
-  zero confidently-wrong review findings, zero handoff count defects, and zero
-  regressions that pass with their required guard disabled. Preserve proportional
-  docs verification; clarify that docs may truthfully record routine tests if run
-  (the existing test permits this despite the docs saying not_run is required).
-  Align CLAUDE.md and the retrospective trigger. Record deviations in the new entry;
-  preserve historical Work done/review text. No extra automation is requested.
-- Correction verification: targeted checker/verifier/hook tests and one canonical
-  focused run with updated actual metadata counts; no migration round-trip needed.
-  Add a concise new Work done entry recording the final successful run rather than
-  leaving final success as an expectation for the reviewer to establish.
-- STOP: user authorizes the bounded correction pass; no merge, experience
-  implementation, other parser, or provider contact is approved by this review.
-
----
-
-## Iteration 2
-
-### Work done
-
 - Date/agent: 2026-09-08, Claude Code (Sonnet 5). Risk class R (tooling)
   correction pass on `tooling/workflow-v3.1-handoff-metadata` addressing
   all five findings in Iteration 1's `Work review` (commit `38ed0a2`)
@@ -423,3 +242,59 @@ full_suite_count: 1845
   migration, or pilot-policy change is requested.
 - STOP: do not merge or begin `classify_experience` or another parser until this bounded
   correction is implemented and re-reviewed.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-09-08, Claude Code (Sonnet 5). Risk class R (tooling)
+  correction pass on `tooling/workflow-v3.1-handoff-metadata` addressing
+  the single remaining bounded finding in Iteration 1's `Work review`
+  (commit `d5fec38`) above. Base -> ending commit: `d5fec38` -> this
+  commit; same branch. Scope held exactly to the requested correction —
+  no verifier orchestration, hook, product, migration, or pilot-policy
+  change.
+- Finding (Medium — unknown metadata keys still passed validation):
+  added `_OPTIONAL_FIELDS` and `_ALLOWED_FIELDS` (the six required fields
+  plus `lightweight_checks`/`fixture_path`/`fixture_count` — the complete,
+  closed schema) to `check_handoff.py`. `validate_structure` now computes
+  `unknown = [key for key in fields if key not in _ALLOWED_FIELDS]` and
+  raises before any other check runs if `unknown` is non-empty, so an
+  invented or misspelled key can never reach the required/conditional
+  logic undetected. Updated the module docstring's schema section to
+  state the closed-schema rule explicitly.
+- Regression: `test_unknown_metadata_key_is_rejected_even_in_an_otherwise_valid_block`
+  reproduces Codex's own example exactly — an otherwise fully-valid
+  tooling block with an added `typo_full_sute_count: 1` key — and asserts
+  it now raises `HandoffValidationError`.
+- Mutation-proof: temporarily removed the new `unknown`/`_ALLOWED_FIELDS`
+  check from `validate_structure`, reran the new regression test alone,
+  confirmed it failed with `DID NOT RAISE HandoffValidationError`
+  (reproducing exactly the reviewer's reported defect), then restored the
+  check and reconfirmed the test passes.
+- Files changed: `backend/scripts/check_handoff.py`, `backend/tests/
+  test_check_handoff.py` (+1 test, 69 total), this handoff entry. No
+  other file touched.
+- Verification: `ruff format --check`/`ruff check`/`mypy` all pass (104
+  source files). `python -m scripts.check_repo` exits 0. Genuine external
+  `python scripts/verify.py --level routine --focus
+  tests/test_check_handoff.py tests/test_verify.py
+  tests/test_compact_checkpoint.py` (full run) — **172 focused / 1846
+  full-suite tests** (was 171/1845; +1 each, exactly the one new test).
+  All 11 steps PASS, including `handoff metadata validation` against
+  this entry's own metadata block below.
+- Deviations/known limitations: none new.
+- STOP — awaiting Codex final re-review. Do not merge, begin
+  `classify_experience` or any other Phase 3 parser, or start pilot slice
+  2/3 of Workflow v3.1 without separate authorization.
+
+```workflow-metadata
+workflow_version: v3.1-pilot
+slice_kind: tooling
+verification_level: routine
+focused_test_selector: tests/test_check_handoff.py tests/test_verify.py tests/test_compact_checkpoint.py
+focused_test_count: 172
+full_suite_count: 1846
+```

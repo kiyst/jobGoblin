@@ -158,6 +158,19 @@ def test_valid_parser_metadata_passes() -> None:
     ch.validate_structure(dict(_PARSER_FIELDS))  # must not raise
 
 
+def test_unknown_metadata_key_is_rejected_even_in_an_otherwise_valid_block() -> None:
+    """Codex review finding (commit d5fec38): an otherwise-valid block with
+    an invented/typo key (e.g. `typo_full_sute_count`) previously passed
+    `validate_structure` unnoticed — only required/conditional fields were
+    checked, never the full key set against a closed schema. Reproduced
+    with exactly the reviewer's own example typo, added to an otherwise
+    fully-valid tooling block."""
+    fields = dict(_TOOLING_FIELDS)
+    fields["typo_full_sute_count"] = "1"
+    with pytest.raises(ch.HandoffValidationError, match="unrecognized field"):
+        ch.validate_structure(fields)
+
+
 def test_missing_required_field_is_rejected() -> None:
     fields = dict(_PARSER_FIELDS)
     del fields["workflow_version"]
