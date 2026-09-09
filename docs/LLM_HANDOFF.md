@@ -99,76 +99,6 @@ that detail.
 ### Work done
 
 - Date/agent: 2026-09-08, Claude Code (Sonnet 5). Risk class R
-  (R-plus-adversarial, unchanged). Base -> ending commit: `2fcdc0f` ->
-  this commit; same branch `phase-3/experience-classifier`. Bounded
-  correction pass addressing Astra's review of commit `2fcdc0f` (relayed
-  as text; no `### Work review` commit exists on this branch or its
-  origin). Scope held to the parser, its tests/fixtures, and this
-  documentation.
-- Two findings addressed:
-  1. **Empty segments break title modifier adjacency**: added
-     `_nearest_meaningful_neighbor_is_qualifier`, which walks past any
-     empty/whitespace-only segment to find the actual nearest neighbor in
-     each direction, instead of checking the raw `index ± 1` position.
-     Combined comma+parenthesis splitting (`"(Preferred), 5 years
-     experience"`, `"5 years experience, (not required)"`) inserts a
-     blank segment directly between the qualifier and its target — the
-     raw-index check treated that blank as a barrier; the new check does
-     not. Both examples now correctly reject.
-  2. **Negative composite ranges leaked an endpoint**: added
-     `_NEGATIVE_COMPOSITE_RANGE_RE`, poisoning a free-standing negative
-     number combined with any adjacent range separator as one whole span
-     — the same treatment the decimal/fraction composites already got in
-     the prior round, extended to the negative-number case.
-     `"-3 to 5 years experience"` no longer leaks `minimum=5` from the
-     untouched second endpoint.
-- Files changed: `backend/app/normalization/experience.py`,
-  `backend/tests/fixtures/normalization/experience_cases.json` (+5 cases,
-  85 total), this handoff entry. No other file touched.
-- Mutation-proof mapping:
-
-  | Fix | Mechanism | Regression test(s) | Mutation outcome |
-  |---|---|---|---|
-  | 1 | `_nearest_meaningful_neighbor_is_qualifier` | `round4_fix1_leading_parenthesized_qualifier_before_comma`, `round4_fix1_trailing_parenthesized_qualifier_after_comma` | Reverted to raw `index ± 1`: both failed (`minimum=5`). Restored: both passed. |
-  | 2 | `_NEGATIVE_COMPOSITE_RANGE_RE` | `round4_fix2_negative_composite_to_range`, `round4_fix2_negative_composite_does_not_swallow_neighboring_valid_phrase` | Removed from `_POISON_PATTERNS`: both failed (first fabricated `minimum=5`; second failed differently — the fabricated `5` conflicted with the real, independent `10`, the same masking-by-spurious-conflict symptom seen in the prior round's equivalent test). Restored: both passed. **Note**: the third related fixture (`round4_fix2_negative_composite_reversed_endpoint_order`, `"5 to -3..."`) does not itself isolate this mechanism — with the poison pattern disabled, `"5"` is still immediately followed by `" to -3 years..."` rather than a unit word, so the pre-existing unit-adjacency strictness independently rejects it regardless; noted directly in its fixture `note`. |
-
-- Verification: `ruff format --check`/`ruff check`/`mypy` all pass (106
-  source files). `python -m scripts.check_repo` exits 0. Genuine external
-  `python scripts/verify.py --level routine --focus
-  tests/test_normalization_experience.py` (full run) — **93 focused /
-  1939 full-suite tests** (was 88/1934; +5 fixture cases). All 11 steps
-  PASS, including `handoff metadata validation` against this entry's own
-  metadata block below. A broader ad hoc regression sweep (not committed
-  as fixtures) covering every prior round's examples plus new
-  combinations (a leading parenthesized preference marker, an
-  alternate-phrasing trailing marker, a three-segment leading case, a
-  negative-decimal composite, a composite inside an attribution frame,
-  and a qualifier sandwiched between two other segments) all resolved
-  correctly with no confidently-wrong output.
-- Deviations/known limitations: unchanged from prior iterations' explicit
-  exclusions. No new limitations introduced by this correction pass.
-- STOP — awaiting Astra's re-review. Do not merge, begin another Phase 3
-  parser, wire into ingestion/persistence, contact providers, or create a
-  migration.
-
-```workflow-metadata
-workflow_version: v3.1-pilot
-slice_kind: parser
-verification_level: routine
-focused_test_selector: tests/test_normalization_experience.py
-focused_test_count: 93
-full_suite_count: 1939
-fixture_path: backend/tests/fixtures/normalization/experience_cases.json
-fixture_count: 85
-```
-
----
-
-## Iteration 2
-
-### Work done
-
-- Date/agent: 2026-09-08, Claude Code (Sonnet 5). Risk class R
   (R-plus-adversarial, unchanged). Base -> ending commit: `1610f57` ->
   this commit; same branch `phase-3/experience-classifier`. Bounded
   correction pass addressing Astra's review of commit `1610f57` (relayed
@@ -303,3 +233,121 @@ fixture_count: 90
   rather than characterize the slice as meeting that target.
 - STOP — do not begin pilot slice 2/3 of Workflow v3.1 or any other Phase 3
   parser without separate authorization.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-09-09, Claude Code (Sonnet 5). Risk class R
+  (R-plus-adversarial, established parser-slice convention). Base ->
+  ending commit: `b9d7f0c` -> this commit; new branch
+  `phase-3/salary-classifier`. Workflow v3.1 pilot parser slice 2 of 3,
+  implementing the round-4-approved `classify_salary` proposal (three
+  proposal-review rounds preceded implementation; no branch/code existed
+  before this pass). Scope held to the parser, its tests/fixtures, and
+  the two documentation files the proposal's own Files-expected-to-change
+  list named.
+- Outcome: `backend/app/normalization/salary.py::classify_salary(compensation_text)
+  -> SalaryResult` (four independently-provenanced fields: `minimum`/
+  `maximum`/`currency`/`period`), reading `compensation_text` only (no
+  `title`/`description`, an explicit approved scope boundary). Implements
+  every binding decision from the three proposal-review rounds:
+  - `Provenance.PARSED_DESCRIPTION` (not `INFERRED`) for every successful
+    extraction, per `docs/DATA_MODEL.md`'s literal "extracted via
+    regex/rules from free text" definition.
+  - A whole-field lexical/semantic split: five finite `re.fullmatch`
+    productions (bare/open-lower, open-upper, hyphen-range, to-range,
+    between-and-range), each requiring the *entire* normalized field to
+    match — unknown leftover text, a second candidate, or a
+    component-attribution word (bonus/commission/OTE/equity/stock/
+    stipend/sign-on/total-compensation) all fail to fullmatch and land in
+    Table D (all four fields unavailable), with no separate keyword-scan
+    mechanism needed.
+  - Numeric failure is atomic across a range: either operand invalid ->
+    both bounds unavailable, proven across all three separators
+    (`-`/`to`/`between...and`) and both operand positions.
+  - ASCII-only `[0-9]` digit classes (never bare `\d`), with NFKC
+    pre-normalization so a fullwidth digit folds into range while a
+    genuinely different digit system (Arabic-Indic) is lexically
+    rejected, landing in Table D rather than a semantic numeric failure.
+  - The exact three-step normalization order (NFKC -> covered-whitespace
+    strip -> at most one trailing-period strip -> re-strip).
+  - The full currency-compatibility table (`$` compatible with
+    `USD`/`CAD`/`AUD`, conflicting with `GBP`/`EUR`; `£`/`€` unambiguous
+    to `GBP`/`EUR`; two conflicting codes/symbols -> currency unavailable
+    only, numeric/period unaffected).
+  - The closed period-synonym catalog (22 synonyms across
+    `hourly`/`daily`/`monthly`/`annual`) plus the enumerated-unsupported
+    and generic `/word`/`per word` fallback, whose match invalidates
+    numeric bounds too (the one approved cross-field contamination rule).
+  - Bare single amount -> equal `minimum`/`maximum`; explicit open-
+    lower/upper set only their stated bound; shared trailing `k` in a
+    complete range applies to both operands.
+  - Nonnegative/ordered/PostgreSQL-int32-range enforcement (malformed
+    grouping and overflow both reject; an inverted range is never
+    silently reordered, mirroring `ExperienceRange`'s established
+    defense-in-depth pattern).
+  - The explicit anchor requirement: a bare unanchored number (even
+    across a structurally-valid range) is never extracted.
+- Files changed: `backend/app/normalization/salary.py`,
+  `backend/tests/fixtures/normalization/salary_cases.json` (86 cases),
+  `backend/tests/test_normalization_salary.py`, `docs/ARCHITECTURE.md`,
+  `docs/ROADMAP.md` (both updated for this slice's status **and** the two
+  stale "pending Astra review — not merged" `classify_experience`
+  references, corrected here as a same-cycle mechanical edit per the
+  user's explicit instruction, not a separate slice), this handoff entry.
+  No other file touched.
+- Mutation-proof mapping:
+
+  | Mechanism | Regression test(s) | Mutation outcome |
+  |---|---|---|
+  | Range atomicity (both separators, both operand positions) | all 8 `atomic_failure_*` fixtures | Disabled the invalid-operand-nulls-both branch (kept the clean operand as a standalone match): all 8 failed, each producing a spurious single-sided value. Restored: all 8 passed. |
+  | Anchor requirement | `bare_zero_no_anchor`, `range_no_anchor_at_all` | Forced `has_anchor = True` unconditionally: both failed (produced a value instead of unavailable). Restored: both passed. **Note**: `no_anchor_no_extraction` does not itself isolate this mechanism — it fails earlier at the whole-field fullmatch stage (leading prose) regardless of the anchor check; noted directly in its fixture `note`. |
+  | Currency-compatibility conflict check | `dollar_gbp_conflicting`, `dollar_eur_conflicting`, `pound_usd_conflicting`, `euro_gbp_conflicting` | Removed the symbol-vs-code compatibility check (returned the explicit code unconditionally): all 4 failed (wrongly resolved a currency instead of unavailable). Restored: all 4 passed. **Note**: `multiple_codes_conflicting` does not itself isolate this mechanism — it is independently rejected by the separate two-codes-conflict check; noted directly in its fixture `note`. |
+  | ASCII-only digit class (`[0-9]` vs. bare `\d`) | `unicode_digit_rejected_whole_field_unavailable` | Replaced `[0-9]` with `\d` in the lexical numeric body: the Arabic-Indic-digit text now wrongly fullmatched, leaking `currency`/`period` as resolved instead of all four fields unavailable. Restored: passed. |
+  | Shared trailing `k` | `k_shorthand_shared_trailing` | Disabled the backward-sharing step: failed (`minimum=120` instead of `120000`). Restored: passed. |
+  | Malformed-grouping shape check | `malformed_grouping`, `malformed_grouping_leading_1digit_then_2` | Removed the grouping-shape validation: both failed (wrongly extracted a concatenated value). Restored: both passed. **Note**: `atomic_failure_malformed_grouping_first_endpoint` does not itself isolate this mechanism — with grouping unchecked, the first operand's concatenated value exceeds the second operand's, so the pre-existing inversion check independently produces the same double-unavailable outcome; noted directly in its fixture `note`. |
+  | Int32 overflow guard | `overflow`, `atomic_failure_overflow_second_endpoint`, `atomic_failure_to_range_second_operand`, `atomic_failure_between_and_second_operand` | Removed the `> _INT32_MAX` check: all 4 failed (wrongly extracted or promoted an out-of-range value). Restored: all 4 passed (`exactly_int32_max_valid`, the boundary case, correctly unaffected either way). |
+  | Unsupported-period invalidates numeric | `unsupported_period_enumerated`, `unsupported_period_generic_fallback` | Removed the cross-field invalidation step: both failed (numeric bounds wrongly survived). Restored: both passed. |
+
+- Verification: `ruff format --check`/`ruff check`/`mypy` all pass.
+  `python -m scripts.check_repo` exits 0. Genuine external `python -m
+  scripts.verify --level routine --focus tests/test_normalization_salary.py`
+  (full run, see metadata below) — all 11 steps PASS, including `handoff
+  metadata validation`. Full unfocused suite: **2040 passed** (was 1944;
+  +96 fixture/test cases). An additional ad hoc contract-conformance and
+  counterexample sweep (not committed as fixtures) covering: leading-
+  garbage-before-label/currency text, an unenumerated `per diem` generic
+  fallback, a space inside a grouped number, scientific notation, a
+  three-operand range, a double period marker, symbol-then-sign ordering
+  (`"$-120,000"`, not part of the approved grammar), per-operand code
+  repetition (not part of the approved grammar), and both operands
+  already carrying their own `k` — every case resolved to either the
+  correct value or safely `unavailable`, with no confidently-wrong
+  output.
+- Deviations/known limitations: every fixture is hand-constructed
+  synthetic (`synthetic_representative`/`synthetic_adversarial`); no
+  real, sanitized salary-bearing posting text has been collected or
+  reviewed for this slice — an explicit, disclosed exit-gate evidence
+  limitation, not treated as satisfied (mirrors `classify_experience`'s
+  own disclosed "corpus is synthetic" limitation). The negative-sign
+  grammar recognizes only sign-before-symbol ordering (`"-$3"`), per the
+  approved proposal's own example; the reverse ordering
+  (`"$-3"`) is not part of the finite grammar and fails safely to
+  `unavailable` rather than misreading it, not a confidently-wrong gap.
+- STOP — awaiting Astra's review. Do not merge, begin another Phase 3
+  parser, wire into ingestion/persistence, contact providers, or create a
+  migration.
+
+```workflow-metadata
+workflow_version: v3.1-pilot
+slice_kind: parser
+verification_level: routine
+focused_test_selector: tests/test_normalization_salary.py
+focused_test_count: 96
+full_suite_count: 2040
+fixture_path: backend/tests/fixtures/normalization/salary_cases.json
+fixture_count: 86
+```

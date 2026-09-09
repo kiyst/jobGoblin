@@ -1,0 +1,862 @@
+[
+  {
+    "id": "explicit_code_labeled_range_annual",
+    "origin": "synthetic_representative",
+    "compensation_text": "Base salary: USD 120,000-150,000 per year",
+    "expected_min": 120000, "expected_min_provenance": "parsed_description",
+    "expected_max": 150000, "expected_max_provenance": "parsed_description",
+    "expected_currency": "USD", "expected_currency_provenance": "parsed_description",
+    "expected_period": "annual", "expected_period_provenance": "parsed_description",
+    "note": "Labeled, explicit-code, hyphen-range, explicit period -- the fully clean happy path."
+  },
+  {
+    "id": "bare_dollar_no_currency_no_period",
+    "origin": "synthetic_representative",
+    "compensation_text": "$120,000-$150,000",
+    "expected_min": 120000, "expected_min_provenance": "parsed_description",
+    "expected_max": 150000, "expected_max_provenance": "parsed_description",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "Bare $ never establishes currency; no period marker stays unavailable. Only numeric bounds resolve."
+  },
+  {
+    "id": "ungrouped_integer_positive",
+    "origin": "synthetic_representative",
+    "compensation_text": "USD 120000 per year",
+    "expected_min": 120000, "expected_min_provenance": "parsed_description",
+    "expected_max": 120000, "expected_max_provenance": "parsed_description",
+    "expected_currency": "USD", "expected_currency_provenance": "parsed_description",
+    "expected_period": "annual", "expected_period_provenance": "parsed_description",
+    "note": "Ordinary ungrouped integer (no comma grouping at all) is a supported numeric form."
+  },
+  {
+    "id": "to_range_gbp_symbol",
+    "origin": "synthetic_representative",
+    "compensation_text": "£45,000 to £55,000",
+    "expected_min": 45000, "expected_min_provenance": "parsed_description",
+    "expected_max": 55000, "expected_max_provenance": "parsed_description",
+    "expected_currency": "GBP", "expected_currency_provenance": "parsed_description",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "£ is unambiguous (GBP only); repeated on both operands of a to-range."
+  },
+  {
+    "id": "and_range_eur_symbol",
+    "origin": "synthetic_representative",
+    "compensation_text": "between €45,000 and €55,000",
+    "expected_min": 45000, "expected_min_provenance": "parsed_description",
+    "expected_max": 55000, "expected_max_provenance": "parsed_description",
+    "expected_currency": "EUR", "expected_currency_provenance": "parsed_description",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "€ is unambiguous (EUR only); between...and range form."
+  },
+  {
+    "id": "open_lower_plus_bare_dollar",
+    "origin": "synthetic_representative",
+    "compensation_text": "$150,000+",
+    "expected_min": 150000, "expected_min_provenance": "parsed_description",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "Explicit open-lower form sets minimum only; maximum is never fabricated."
+  },
+  {
+    "id": "open_upper_up_to_bare_dollar",
+    "origin": "synthetic_representative",
+    "compensation_text": "up to $150,000",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": 150000, "expected_max_provenance": "parsed_description",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "Explicit open-upper form sets maximum only."
+  },
+  {
+    "id": "up_to_hyphenated_form",
+    "origin": "synthetic_representative",
+    "compensation_text": "up-to $150,000",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": 150000, "expected_max_provenance": "parsed_description",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "Hyphenated 'up-to' spelling is an approved synonym of 'up to'."
+  },
+  {
+    "id": "bare_single_sets_equal_bounds",
+    "origin": "synthetic_representative",
+    "compensation_text": "Pay: $130,000",
+    "expected_min": 130000, "expected_min_provenance": "parsed_description",
+    "expected_max": 130000, "expected_max_provenance": "parsed_description",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "A bare anchored single amount sets minimum == maximum (not an open-ended floor)."
+  },
+  {
+    "id": "label_no_colon",
+    "origin": "synthetic_representative",
+    "compensation_text": "Base pay $130,000",
+    "expected_min": 130000, "expected_min_provenance": "parsed_description",
+    "expected_max": 130000, "expected_max_provenance": "parsed_description",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "Label's trailing colon is optional."
+  },
+  {
+    "id": "label_lowercase_bare",
+    "origin": "synthetic_representative",
+    "compensation_text": "salary $130,000",
+    "expected_min": 130000, "expected_min_provenance": "parsed_description",
+    "expected_max": 130000, "expected_max_provenance": "parsed_description",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "Bare 'salary' (no colon, lowercase) is still a recognized closed-catalog label."
+  },
+  {
+    "id": "uppercase_label_and_colon",
+    "origin": "synthetic_representative",
+    "compensation_text": "BASE SALARY: $120,000",
+    "expected_min": 120000, "expected_min_provenance": "parsed_description",
+    "expected_max": 120000, "expected_max_provenance": "parsed_description",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "Label matching is case-insensitive."
+  },
+  {
+    "id": "k_shorthand_shared_trailing",
+    "origin": "synthetic_representative",
+    "compensation_text": "$120-150k",
+    "expected_min": 120000, "expected_min_provenance": "parsed_description",
+    "expected_max": 150000, "expected_max_provenance": "parsed_description",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "A trailing k on only the last operand of a range shares backward onto the unmarked first operand."
+  },
+  {
+    "id": "k_shorthand_with_exact_dot00",
+    "origin": "synthetic_representative",
+    "compensation_text": "$120.00k",
+    "expected_min": 120000, "expected_min_provenance": "parsed_description",
+    "expected_max": 120000, "expected_max_provenance": "parsed_description",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "Exact zero-fraction .00 combined with k-scaling: 120.00 (exact) then x1000."
+  },
+  {
+    "id": "exact_dot00_accepted",
+    "origin": "synthetic_representative",
+    "compensation_text": "$120,000.00",
+    "expected_min": 120000, "expected_min_provenance": "parsed_description",
+    "expected_max": 120000, "expected_max_provenance": "parsed_description",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "Exact .00 fractional suffix is accepted; never rounded, just recognized as zero-fraction."
+  },
+  {
+    "id": "fullwidth_digit_normalizes_to_ascii",
+    "origin": "synthetic_representative",
+    "compensation_text": "USD １２００００ per year",
+    "expected_min": 120000, "expected_min_provenance": "parsed_description",
+    "expected_max": 120000, "expected_max_provenance": "parsed_description",
+    "expected_currency": "USD", "expected_currency_provenance": "parsed_description",
+    "expected_period": "annual", "expected_period_provenance": "parsed_description",
+    "note": "Fullwidth digits (U+FF10-FF19) NFKC-normalize into ASCII range before matching."
+  },
+  {
+    "id": "unicode_digit_rejected_whole_field_unavailable",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "USD ١٢٠,٠٠٠ per year",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "Arabic-Indic digits do not NFKC-fold to ASCII and are rejected by the explicit [0-9] grammar -- a lexical mismatch (no production fullmatches), landing in Table D (all four fields unavailable), not a semantic numeric failure."
+  },
+  {
+    "id": "malformed_grouping",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "$12,34,567",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "Non-Western grouping (groups of 2 after the leading group) is rejected, not guessed."
+  },
+  {
+    "id": "malformed_grouping_leading_1digit_then_2",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "$1,23,456",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "A valid 1-3-digit leading group followed by a non-3-digit group is still malformed."
+  },
+  {
+    "id": "overflow",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "$99,999,999,999",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "Exceeds PostgreSQL's 32-bit signed integer maximum; rejected, not clamped."
+  },
+  {
+    "id": "exactly_int32_max_valid",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "$2,147,483,647",
+    "expected_min": 2147483647, "expected_min_provenance": "parsed_description",
+    "expected_max": 2147483647, "expected_max_provenance": "parsed_description",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "Boundary case: exactly the int32 maximum is valid (the check is > max, not >= max)."
+  },
+  {
+    "id": "exactly_one_over_int32_max",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "$2,147,483,648",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "Boundary case: one over the int32 maximum is rejected."
+  },
+  {
+    "id": "negative_number",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "-$5,000",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "No legitimate negative salary; a negative sign always invalidates its operand."
+  },
+  {
+    "id": "inverted_range",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "$150,000-$120,000",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "A textually-reversed range is never silently reordered; both bounds become unavailable."
+  },
+  {
+    "id": "atomic_failure_decimal_first_endpoint",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "USD $18.50-$20/hr",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "expected_currency": "USD", "expected_currency_provenance": "parsed_description",
+    "expected_period": "hourly", "expected_period_provenance": "parsed_description",
+    "note": "Nonzero decimal on the FIRST operand nulls BOTH bounds atomically; the clean $20 is never promoted to a standalone match. Explicit USD code proves currency/period genuinely survive."
+  },
+  {
+    "id": "atomic_failure_negative_first_endpoint",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "USD -$3-$5/hr",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "expected_currency": "USD", "expected_currency_provenance": "parsed_description",
+    "expected_period": "hourly", "expected_period_provenance": "parsed_description",
+    "note": "Negative sign on the FIRST operand nulls both bounds atomically; currency/period survive."
+  },
+  {
+    "id": "atomic_failure_malformed_grouping_first_endpoint",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "USD $12,34,567-$150,000/year",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "expected_currency": "USD", "expected_currency_provenance": "parsed_description",
+    "expected_period": "annual", "expected_period_provenance": "parsed_description",
+    "note": "Malformed grouping on the FIRST operand nulls both bounds atomically; currency/period survive."
+  },
+  {
+    "id": "atomic_failure_overflow_second_endpoint",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "USD $120,000-$9999999999/year",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "expected_currency": "USD", "expected_currency_provenance": "parsed_description",
+    "expected_period": "annual", "expected_period_provenance": "parsed_description",
+    "note": "Overflow on the SECOND operand nulls both bounds atomically; the clean $120,000 first operand is never promoted to a standalone match."
+  },
+  {
+    "id": "atomic_failure_to_range_first_operand",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "USD $18.50 to $20 per year",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "expected_currency": "USD", "expected_currency_provenance": "parsed_description",
+    "expected_period": "annual", "expected_period_provenance": "parsed_description",
+    "note": "Atomicity proven on the 'to' separator, first-operand failure (decimal)."
+  },
+  {
+    "id": "atomic_failure_to_range_second_operand",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "USD $120,000 to $9999999999 per year",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "expected_currency": "USD", "expected_currency_provenance": "parsed_description",
+    "expected_period": "annual", "expected_period_provenance": "parsed_description",
+    "note": "Atomicity proven on the 'to' separator, second-operand failure (overflow)."
+  },
+  {
+    "id": "atomic_failure_between_and_first_operand",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "USD between $18.50 and $20 per year",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "expected_currency": "USD", "expected_currency_provenance": "parsed_description",
+    "expected_period": "annual", "expected_period_provenance": "parsed_description",
+    "note": "Atomicity proven on the 'between...and' separator, first-operand failure (decimal)."
+  },
+  {
+    "id": "atomic_failure_between_and_second_operand",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "USD between $120,000 and $9999999999 per year",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "expected_currency": "USD", "expected_currency_provenance": "parsed_description",
+    "expected_period": "annual", "expected_period_provenance": "parsed_description",
+    "note": "Atomicity proven on the 'between...and' separator, second-operand failure (overflow)."
+  },
+  {
+    "id": "unsupported_period_enumerated",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "USD $120,000-$150,000 biweekly",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "expected_currency": "USD", "expected_currency_provenance": "parsed_description",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "An explicit but unsupported period word (enumerated catalog) invalidates numeric extraction too; currency still survives independently."
+  },
+  {
+    "id": "unsupported_period_generic_fallback",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "USD $120,000 per fortnight",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "expected_currency": "USD", "expected_currency_provenance": "parsed_description",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "An unenumerated 'per word' still lexically fills the period slot via the generic fallback, and is semantically unsupported the same way; currency survives."
+  },
+  {
+    "id": "dollar_usd_compatible",
+    "origin": "synthetic_representative",
+    "compensation_text": "USD $120,000-$150,000",
+    "expected_min": 120000, "expected_min_provenance": "parsed_description",
+    "expected_max": 150000, "expected_max_provenance": "parsed_description",
+    "expected_currency": "USD", "expected_currency_provenance": "parsed_description",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "$ is compatible with an explicit USD code."
+  },
+  {
+    "id": "dollar_cad_compatible",
+    "origin": "synthetic_representative",
+    "compensation_text": "CAD $120,000-$150,000",
+    "expected_min": 120000, "expected_min_provenance": "parsed_description",
+    "expected_max": 150000, "expected_max_provenance": "parsed_description",
+    "expected_currency": "CAD", "expected_currency_provenance": "parsed_description",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "$ is compatible with an explicit CAD code."
+  },
+  {
+    "id": "dollar_aud_compatible",
+    "origin": "synthetic_representative",
+    "compensation_text": "AUD $120,000-$150,000",
+    "expected_min": 120000, "expected_min_provenance": "parsed_description",
+    "expected_max": 150000, "expected_max_provenance": "parsed_description",
+    "expected_currency": "AUD", "expected_currency_provenance": "parsed_description",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "$ is compatible with an explicit AUD code."
+  },
+  {
+    "id": "dollar_gbp_conflicting",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "$120,000-$150,000 GBP per year",
+    "expected_min": 120000, "expected_min_provenance": "parsed_description",
+    "expected_max": 150000, "expected_max_provenance": "parsed_description",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": "annual", "expected_period_provenance": "parsed_description",
+    "note": "$ conflicts with an explicit GBP code -- currency unavailable, numeric bounds and period (a supported synonym is included) both survive."
+  },
+  {
+    "id": "dollar_eur_conflicting",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "$120,000 EUR per year",
+    "expected_min": 120000, "expected_min_provenance": "parsed_description",
+    "expected_max": 120000, "expected_max_provenance": "parsed_description",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": "annual", "expected_period_provenance": "parsed_description",
+    "note": "$ conflicts with an explicit EUR code -- currency unavailable, numeric bounds and period survive."
+  },
+  {
+    "id": "pound_gbp_compatible",
+    "origin": "synthetic_representative",
+    "compensation_text": "GBP £45,000-£55,000",
+    "expected_min": 45000, "expected_min_provenance": "parsed_description",
+    "expected_max": 55000, "expected_max_provenance": "parsed_description",
+    "expected_currency": "GBP", "expected_currency_provenance": "parsed_description",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "£ is compatible with an explicit GBP code (redundant but consistent)."
+  },
+  {
+    "id": "pound_usd_conflicting",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "£45,000-£55,000 USD per year",
+    "expected_min": 45000, "expected_min_provenance": "parsed_description",
+    "expected_max": 55000, "expected_max_provenance": "parsed_description",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": "annual", "expected_period_provenance": "parsed_description",
+    "note": "£ conflicts with an explicit USD code -- currency unavailable, numeric bounds and period survive."
+  },
+  {
+    "id": "euro_eur_compatible",
+    "origin": "synthetic_representative",
+    "compensation_text": "EUR €45,000-€55,000",
+    "expected_min": 45000, "expected_min_provenance": "parsed_description",
+    "expected_max": 55000, "expected_max_provenance": "parsed_description",
+    "expected_currency": "EUR", "expected_currency_provenance": "parsed_description",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "€ is compatible with an explicit EUR code (redundant but consistent)."
+  },
+  {
+    "id": "euro_gbp_conflicting",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "€45,000-€55,000 GBP per year",
+    "expected_min": 45000, "expected_min_provenance": "parsed_description",
+    "expected_max": 55000, "expected_max_provenance": "parsed_description",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": "annual", "expected_period_provenance": "parsed_description",
+    "note": "€ conflicts with an explicit GBP code -- currency unavailable, numeric bounds and period survive."
+  },
+  {
+    "id": "multiple_codes_conflicting",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "USD 120,000-150,000 CAD per year",
+    "expected_min": 120000, "expected_min_provenance": "parsed_description",
+    "expected_max": 150000, "expected_max_provenance": "parsed_description",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": "annual", "expected_period_provenance": "parsed_description",
+    "note": "Two different explicit codes (prefix USD, suffix CAD) conflict -- currency unavailable, numeric bounds and period survive."
+  },
+  {
+    "id": "bare_code_cad_no_symbol",
+    "origin": "synthetic_representative",
+    "compensation_text": "120,000-150,000 CAD",
+    "expected_min": 120000, "expected_min_provenance": "parsed_description",
+    "expected_max": 150000, "expected_max_provenance": "parsed_description",
+    "expected_currency": "CAD", "expected_currency_provenance": "parsed_description",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "An explicit code alone (no symbol at all) both anchors and resolves currency."
+  },
+  {
+    "id": "mixed_symbol_conflict",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "$45,000 to £55,000",
+    "expected_min": 45000, "expected_min_provenance": "parsed_description",
+    "expected_max": 55000, "expected_max_provenance": "parsed_description",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "Two different symbol types on the two operands conflict -- currency unavailable, numeric bounds unaffected (same general mechanism as the code-conflict cases, not a separate special case)."
+  },
+  {
+    "id": "disqualifier_bonus",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "$120,000 base + bonus",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "'bonus' cannot be consumed by any production slot, so the whole field fails to fullmatch -- all four fields unavailable, no separate keyword scan needed."
+  },
+  {
+    "id": "disqualifier_equity",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "$150,000 plus equity",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "'plus equity' is not the bare '+' open-lower marker and is not consumable -- whole field fails to fullmatch."
+  },
+  {
+    "id": "disqualifier_total_comp",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "$200,000 total compensation",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "'total compensation' is not in the closed label catalog and is not a period/code -- whole field fails to fullmatch."
+  },
+  {
+    "id": "multiple_ranges",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "$100,000-$120,000 (L4) or $130,000-$150,000 (L5)",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "A second candidate range elsewhere in the text leaves unconsumed leftover content -- whole field fails to fullmatch."
+  },
+  {
+    "id": "leftover_text_disqualifies_all",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "$120,000 relocation assistance available",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "Unknown leftover semantic text after a valid-looking amount disqualifies all four fields; no substring is scanned out of the larger unsupported statement."
+  },
+  {
+    "id": "no_anchor_no_extraction",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "Competitive, team of 20",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "No currency symbol, code, or label anywhere -- an unrelated number is never confidently read as salary."
+  },
+  {
+    "id": "range_no_anchor_at_all",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "5,000-10,000",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "A structurally-valid range with no anchor at all (no symbol/code/label) is still rejected -- the anchor requirement applies to every shape, not only bare singles."
+  },
+  {
+    "id": "bare_zero_no_anchor",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "0",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "A bare unanchored number, even zero, is never extracted."
+  },
+  {
+    "id": "zero_with_symbol_anchor",
+    "origin": "synthetic_representative",
+    "compensation_text": "$0",
+    "expected_min": 0, "expected_min_provenance": "parsed_description",
+    "expected_max": 0, "expected_max_provenance": "parsed_description",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "Zero is a valid nonnegative integer once anchored; not treated as missing."
+  },
+  {
+    "id": "doe_no_candidate",
+    "origin": "synthetic_representative",
+    "compensation_text": "Compensation: DOE",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "No numeric candidate at all; 'Compensation' is also not in the closed label catalog."
+  },
+  {
+    "id": "double_trailing_period_not_stripped",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "$120,000..",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "Only a single trailing period is the enumerated harmless-punctuation allowance; two periods are left as unconsumed leftover text."
+  },
+  {
+    "id": "empty_string_no_candidate",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "Empty string safely resolves to all-unavailable."
+  },
+  {
+    "id": "whitespace_only_no_candidate",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "   ",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "Whitespace-only string normalizes to empty and safely resolves to all-unavailable."
+  },
+  {
+    "id": "none_input_no_candidate",
+    "origin": "synthetic_adversarial",
+    "compensation_text": null,
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "A None compensation_text (field genuinely absent) safely resolves to all-unavailable."
+  },
+  {
+    "id": "to_range_missing_space_before_second_operand",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "$120,000 to$150,000",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "The 'to' separator requires whitespace on both sides; a glued 'to$' form fails to fullmatch under any production, rather than silently matching a malformed shape."
+  },
+  {
+    "id": "large_but_within_int32",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "$1,000,000,000",
+    "expected_min": 1000000000, "expected_min_provenance": "parsed_description",
+    "expected_max": 1000000000, "expected_max_provenance": "parsed_description",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "The overflow guard is a PostgreSQL int32-safety bound, not a subjective 'realistic salary' ceiling -- a large but in-range value is accepted."
+  },
+  {
+    "id": "symbol_and_period_no_label_no_code",
+    "origin": "synthetic_representative",
+    "compensation_text": "$50/hr",
+    "expected_min": 50, "expected_min_provenance": "parsed_description",
+    "expected_max": 50, "expected_max_provenance": "parsed_description",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": "hourly", "expected_period_provenance": "parsed_description",
+    "note": "A bare $ symbol alone anchors extraction even with no label/code; a tightly-glued period suffix (no space) is supported."
+  },
+  {
+    "id": "no_code_range_with_period_only",
+    "origin": "synthetic_representative",
+    "compensation_text": "$120,000-$150,000 per year",
+    "expected_min": 120000, "expected_min_provenance": "parsed_description",
+    "expected_max": 150000, "expected_max_provenance": "parsed_description",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": "annual", "expected_period_provenance": "parsed_description",
+    "note": "Period resolves independently of currency in a clean (non-failure) case: bare $ leaves currency unavailable while period still resolves."
+  },
+  {
+    "id": "period_synonym_hour",
+    "origin": "synthetic_representative",
+    "compensation_text": "USD $120,000 hour",
+    "expected_min": 120000, "expected_min_provenance": "parsed_description",
+    "expected_max": 120000, "expected_max_provenance": "parsed_description",
+    "expected_currency": "USD", "expected_currency_provenance": "parsed_description",
+    "expected_period": "hourly", "expected_period_provenance": "parsed_description",
+    "note": "Period synonym catalog: 'hour' -> hourly."
+  },
+  {
+    "id": "period_synonym_hourly",
+    "origin": "synthetic_representative",
+    "compensation_text": "USD $120,000 hourly",
+    "expected_min": 120000, "expected_min_provenance": "parsed_description",
+    "expected_max": 120000, "expected_max_provenance": "parsed_description",
+    "expected_currency": "USD", "expected_currency_provenance": "parsed_description",
+    "expected_period": "hourly", "expected_period_provenance": "parsed_description",
+    "note": "Period synonym catalog: 'hourly' -> hourly."
+  },
+  {
+    "id": "period_synonym_hr",
+    "origin": "synthetic_representative",
+    "compensation_text": "USD $120,000 hr",
+    "expected_min": 120000, "expected_min_provenance": "parsed_description",
+    "expected_max": 120000, "expected_max_provenance": "parsed_description",
+    "expected_currency": "USD", "expected_currency_provenance": "parsed_description",
+    "expected_period": "hourly", "expected_period_provenance": "parsed_description",
+    "note": "Period synonym catalog: 'hr' -> hourly."
+  },
+  {
+    "id": "period_synonym_slash_hr",
+    "origin": "synthetic_representative",
+    "compensation_text": "USD $120,000/hr",
+    "expected_min": 120000, "expected_min_provenance": "parsed_description",
+    "expected_max": 120000, "expected_max_provenance": "parsed_description",
+    "expected_currency": "USD", "expected_currency_provenance": "parsed_description",
+    "expected_period": "hourly", "expected_period_provenance": "parsed_description",
+    "note": "Period synonym catalog: '/hr' -> hourly, tightly glued."
+  },
+  {
+    "id": "period_synonym_per_hour",
+    "origin": "synthetic_representative",
+    "compensation_text": "USD $120,000 per hour",
+    "expected_min": 120000, "expected_min_provenance": "parsed_description",
+    "expected_max": 120000, "expected_max_provenance": "parsed_description",
+    "expected_currency": "USD", "expected_currency_provenance": "parsed_description",
+    "expected_period": "hourly", "expected_period_provenance": "parsed_description",
+    "note": "Period synonym catalog: 'per hour' -> hourly."
+  },
+  {
+    "id": "period_synonym_day",
+    "origin": "synthetic_representative",
+    "compensation_text": "USD $120,000 day",
+    "expected_min": 120000, "expected_min_provenance": "parsed_description",
+    "expected_max": 120000, "expected_max_provenance": "parsed_description",
+    "expected_currency": "USD", "expected_currency_provenance": "parsed_description",
+    "expected_period": "daily", "expected_period_provenance": "parsed_description",
+    "note": "Period synonym catalog: 'day' -> daily."
+  },
+  {
+    "id": "period_synonym_daily",
+    "origin": "synthetic_representative",
+    "compensation_text": "USD $120,000 daily",
+    "expected_min": 120000, "expected_min_provenance": "parsed_description",
+    "expected_max": 120000, "expected_max_provenance": "parsed_description",
+    "expected_currency": "USD", "expected_currency_provenance": "parsed_description",
+    "expected_period": "daily", "expected_period_provenance": "parsed_description",
+    "note": "Period synonym catalog: 'daily' -> daily."
+  },
+  {
+    "id": "period_synonym_slash_day",
+    "origin": "synthetic_representative",
+    "compensation_text": "USD $120,000/day",
+    "expected_min": 120000, "expected_min_provenance": "parsed_description",
+    "expected_max": 120000, "expected_max_provenance": "parsed_description",
+    "expected_currency": "USD", "expected_currency_provenance": "parsed_description",
+    "expected_period": "daily", "expected_period_provenance": "parsed_description",
+    "note": "Period synonym catalog: '/day' -> daily."
+  },
+  {
+    "id": "period_synonym_per_day",
+    "origin": "synthetic_representative",
+    "compensation_text": "USD $120,000 per day",
+    "expected_min": 120000, "expected_min_provenance": "parsed_description",
+    "expected_max": 120000, "expected_max_provenance": "parsed_description",
+    "expected_currency": "USD", "expected_currency_provenance": "parsed_description",
+    "expected_period": "daily", "expected_period_provenance": "parsed_description",
+    "note": "Period synonym catalog: 'per day' -> daily."
+  },
+  {
+    "id": "period_synonym_month",
+    "origin": "synthetic_representative",
+    "compensation_text": "USD $120,000 month",
+    "expected_min": 120000, "expected_min_provenance": "parsed_description",
+    "expected_max": 120000, "expected_max_provenance": "parsed_description",
+    "expected_currency": "USD", "expected_currency_provenance": "parsed_description",
+    "expected_period": "monthly", "expected_period_provenance": "parsed_description",
+    "note": "Period synonym catalog: 'month' -> monthly."
+  },
+  {
+    "id": "period_synonym_monthly",
+    "origin": "synthetic_representative",
+    "compensation_text": "USD $120,000 monthly",
+    "expected_min": 120000, "expected_min_provenance": "parsed_description",
+    "expected_max": 120000, "expected_max_provenance": "parsed_description",
+    "expected_currency": "USD", "expected_currency_provenance": "parsed_description",
+    "expected_period": "monthly", "expected_period_provenance": "parsed_description",
+    "note": "Period synonym catalog: 'monthly' -> monthly."
+  },
+  {
+    "id": "period_synonym_mo",
+    "origin": "synthetic_representative",
+    "compensation_text": "USD $120,000 mo",
+    "expected_min": 120000, "expected_min_provenance": "parsed_description",
+    "expected_max": 120000, "expected_max_provenance": "parsed_description",
+    "expected_currency": "USD", "expected_currency_provenance": "parsed_description",
+    "expected_period": "monthly", "expected_period_provenance": "parsed_description",
+    "note": "Period synonym catalog: 'mo' -> monthly."
+  },
+  {
+    "id": "period_synonym_slash_mo",
+    "origin": "synthetic_representative",
+    "compensation_text": "USD $120,000/mo",
+    "expected_min": 120000, "expected_min_provenance": "parsed_description",
+    "expected_max": 120000, "expected_max_provenance": "parsed_description",
+    "expected_currency": "USD", "expected_currency_provenance": "parsed_description",
+    "expected_period": "monthly", "expected_period_provenance": "parsed_description",
+    "note": "Period synonym catalog: '/mo' -> monthly."
+  },
+  {
+    "id": "period_synonym_per_month",
+    "origin": "synthetic_representative",
+    "compensation_text": "USD $120,000 per month",
+    "expected_min": 120000, "expected_min_provenance": "parsed_description",
+    "expected_max": 120000, "expected_max_provenance": "parsed_description",
+    "expected_currency": "USD", "expected_currency_provenance": "parsed_description",
+    "expected_period": "monthly", "expected_period_provenance": "parsed_description",
+    "note": "Period synonym catalog: 'per month' -> monthly."
+  },
+  {
+    "id": "period_synonym_year",
+    "origin": "synthetic_representative",
+    "compensation_text": "USD $120,000 year",
+    "expected_min": 120000, "expected_min_provenance": "parsed_description",
+    "expected_max": 120000, "expected_max_provenance": "parsed_description",
+    "expected_currency": "USD", "expected_currency_provenance": "parsed_description",
+    "expected_period": "annual", "expected_period_provenance": "parsed_description",
+    "note": "Period synonym catalog: 'year' -> annual."
+  },
+  {
+    "id": "period_synonym_yearly",
+    "origin": "synthetic_representative",
+    "compensation_text": "USD $120,000 yearly",
+    "expected_min": 120000, "expected_min_provenance": "parsed_description",
+    "expected_max": 120000, "expected_max_provenance": "parsed_description",
+    "expected_currency": "USD", "expected_currency_provenance": "parsed_description",
+    "expected_period": "annual", "expected_period_provenance": "parsed_description",
+    "note": "Period synonym catalog: 'yearly' -> annual."
+  },
+  {
+    "id": "period_synonym_annual",
+    "origin": "synthetic_representative",
+    "compensation_text": "USD $120,000 annual",
+    "expected_min": 120000, "expected_min_provenance": "parsed_description",
+    "expected_max": 120000, "expected_max_provenance": "parsed_description",
+    "expected_currency": "USD", "expected_currency_provenance": "parsed_description",
+    "expected_period": "annual", "expected_period_provenance": "parsed_description",
+    "note": "Period synonym catalog: 'annual' -> annual."
+  },
+  {
+    "id": "period_synonym_annually",
+    "origin": "synthetic_representative",
+    "compensation_text": "USD $120,000 annually",
+    "expected_min": 120000, "expected_min_provenance": "parsed_description",
+    "expected_max": 120000, "expected_max_provenance": "parsed_description",
+    "expected_currency": "USD", "expected_currency_provenance": "parsed_description",
+    "expected_period": "annual", "expected_period_provenance": "parsed_description",
+    "note": "Period synonym catalog: 'annually' -> annual."
+  },
+  {
+    "id": "period_synonym_yr",
+    "origin": "synthetic_representative",
+    "compensation_text": "USD $120,000 yr",
+    "expected_min": 120000, "expected_min_provenance": "parsed_description",
+    "expected_max": 120000, "expected_max_provenance": "parsed_description",
+    "expected_currency": "USD", "expected_currency_provenance": "parsed_description",
+    "expected_period": "annual", "expected_period_provenance": "parsed_description",
+    "note": "Period synonym catalog: 'yr' -> annual."
+  },
+  {
+    "id": "period_synonym_slash_yr",
+    "origin": "synthetic_representative",
+    "compensation_text": "USD $120,000/yr",
+    "expected_min": 120000, "expected_min_provenance": "parsed_description",
+    "expected_max": 120000, "expected_max_provenance": "parsed_description",
+    "expected_currency": "USD", "expected_currency_provenance": "parsed_description",
+    "expected_period": "annual", "expected_period_provenance": "parsed_description",
+    "note": "Period synonym catalog: '/yr' -> annual."
+  },
+  {
+    "id": "period_synonym_slash_year",
+    "origin": "synthetic_representative",
+    "compensation_text": "USD $120,000/year",
+    "expected_min": 120000, "expected_min_provenance": "parsed_description",
+    "expected_max": 120000, "expected_max_provenance": "parsed_description",
+    "expected_currency": "USD", "expected_currency_provenance": "parsed_description",
+    "expected_period": "annual", "expected_period_provenance": "parsed_description",
+    "note": "Period synonym catalog: '/year' -> annual."
+  },
+  {
+    "id": "period_synonym_per_year",
+    "origin": "synthetic_representative",
+    "compensation_text": "USD $120,000 per year",
+    "expected_min": 120000, "expected_min_provenance": "parsed_description",
+    "expected_max": 120000, "expected_max_provenance": "parsed_description",
+    "expected_currency": "USD", "expected_currency_provenance": "parsed_description",
+    "expected_period": "annual", "expected_period_provenance": "parsed_description",
+    "note": "Period synonym catalog: 'per year' -> annual."
+  }
+]

@@ -432,14 +432,28 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   `seniority.yaml` entry is annotated as planned future enrichment, not implemented by
   this slice.
   A fourth slice (years-of-experience range classifier, Workflow v3.1 pilot parser
-  slice 1 of 3) is **implemented on `phase-3/experience-classifier`, pending Astra
-  review — not merged, not complete.** `app/normalization/experience.py` produces an
-  `ExperienceRange` (independently-provenanced `minimum`/`maximum`), the first parser
-  needing `types.py`'s deferred composite-result-type case. Not wired into
+  slice 1 of 3) merged into `main` at `6f9ae53` (approval recorded in commit `d46f20f`,
+  merge record in [LLM_HANDOFF.md](LLM_HANDOFF.md)). `app/normalization/experience.py`
+  produces an `ExperienceRange` (independently-provenanced `minimum`/`maximum`), the
+  first parser needing `types.py`'s deferred composite-result-type case. Not wired into
   ingestion/persistence, no `parser_version` threading, no `jobs.years_experience_min`/
-  `max` write of any kind — those remain Phase 4+ concerns.
-  No other Phase 3 parser (title, salary, location, skill) has been started — this is
-  one more bounded slice, not a Phase 3 completion claim.
+  `max` write of any kind — those remain Phase 4+ concerns. This slice needed five
+  correction rounds against the pilot's one-round target — a pilot-tracking fact, not a
+  reopened finding.
+  A fifth slice (base-pay classifier, Workflow v3.1 pilot parser slice 2 of 3) is
+  **implemented on `phase-3/salary-classifier`, pending Astra review — not merged, not
+  complete.** `app/normalization/salary.py` reads `compensation_text` only (no
+  `title`/`description`) and produces a `SalaryResult` — four independently-provenanced
+  fields (`minimum`/`maximum`/`currency`/`period`), the case `types.py`'s own docstring
+  anticipated. A finite, whole-field lexical/semantic grammar (five productions; no
+  substring fallback) rather than `experience.py`'s segment-scanning design. Not wired
+  into ingestion/persistence, no `parser_version` threading, no `jobs.salary_min/max/
+  currency/period` write of any kind, no annualization, no FX conversion, no
+  `compensation_explicit` classification — all Phase 4+ or explicitly out-of-scope
+  concerns.
+  No other Phase 3 parser (title, location, skill) has been started — this is one more
+  bounded slice, not a Phase 3 completion claim. Title and skill remain blocked on a
+  taxonomy that does not yet exist in this repository.
 - **Phase 4: two bounded read-only prework proofs merged into `main`; the production
   `AtsScrapersProvider` adapter is not started and Phase 4 is not complete.** The
   Greenhouse live ATS canary (`phase-4/greenhouse-canary`, merged at `64a3534`) and the
