@@ -99,124 +99,6 @@ that detail.
 ### Work done
 
 - Date/agent: 2026-09-09, Claude Code (Sonnet 5). Risk class R
-  (R-plus-adversarial, established parser-slice convention). Base ->
-  ending commit: `b9d7f0c` -> this commit; new branch
-  `phase-3/salary-classifier`. Workflow v3.1 pilot parser slice 2 of 3,
-  implementing the round-4-approved `classify_salary` proposal (three
-  proposal-review rounds preceded implementation; no branch/code existed
-  before this pass). Scope held to the parser, its tests/fixtures, and
-  the two documentation files the proposal's own Files-expected-to-change
-  list named.
-- Outcome: `backend/app/normalization/salary.py::classify_salary(compensation_text)
-  -> SalaryResult` (four independently-provenanced fields: `minimum`/
-  `maximum`/`currency`/`period`), reading `compensation_text` only (no
-  `title`/`description`, an explicit approved scope boundary). Implements
-  every binding decision from the three proposal-review rounds:
-  - `Provenance.PARSED_DESCRIPTION` (not `INFERRED`) for every successful
-    extraction, per `docs/DATA_MODEL.md`'s literal "extracted via
-    regex/rules from free text" definition.
-  - A whole-field lexical/semantic split: five finite `re.fullmatch`
-    productions (bare/open-lower, open-upper, hyphen-range, to-range,
-    between-and-range), each requiring the *entire* normalized field to
-    match — unknown leftover text, a second candidate, or a
-    component-attribution word (bonus/commission/OTE/equity/stock/
-    stipend/sign-on/total-compensation) all fail to fullmatch and land in
-    Table D (all four fields unavailable), with no separate keyword-scan
-    mechanism needed.
-  - Numeric failure is atomic across a range: either operand invalid ->
-    both bounds unavailable, proven across all three separators
-    (`-`/`to`/`between...and`) and both operand positions.
-  - ASCII-only `[0-9]` digit classes (never bare `\d`), with NFKC
-    pre-normalization so a fullwidth digit folds into range while a
-    genuinely different digit system (Arabic-Indic) is lexically
-    rejected, landing in Table D rather than a semantic numeric failure.
-  - The exact three-step normalization order (NFKC -> covered-whitespace
-    strip -> at most one trailing-period strip -> re-strip).
-  - The full currency-compatibility table (`$` compatible with
-    `USD`/`CAD`/`AUD`, conflicting with `GBP`/`EUR`; `£`/`€` unambiguous
-    to `GBP`/`EUR`; two conflicting codes/symbols -> currency unavailable
-    only, numeric/period unaffected).
-  - The closed period-synonym catalog (22 synonyms across
-    `hourly`/`daily`/`monthly`/`annual`) plus the enumerated-unsupported
-    and generic `/word`/`per word` fallback, whose match invalidates
-    numeric bounds too (the one approved cross-field contamination rule).
-  - Bare single amount -> equal `minimum`/`maximum`; explicit open-
-    lower/upper set only their stated bound; shared trailing `k` in a
-    complete range applies to both operands.
-  - Nonnegative/ordered/PostgreSQL-int32-range enforcement (malformed
-    grouping and overflow both reject; an inverted range is never
-    silently reordered, mirroring `ExperienceRange`'s established
-    defense-in-depth pattern).
-  - The explicit anchor requirement: a bare unanchored number (even
-    across a structurally-valid range) is never extracted.
-- Files changed: `backend/app/normalization/salary.py`,
-  `backend/tests/fixtures/normalization/salary_cases.json` (86 cases),
-  `backend/tests/test_normalization_salary.py`, `docs/ARCHITECTURE.md`,
-  `docs/ROADMAP.md` (both updated for this slice's status **and** the two
-  stale "pending Astra review — not merged" `classify_experience`
-  references, corrected here as a same-cycle mechanical edit per the
-  user's explicit instruction, not a separate slice), this handoff entry.
-  No other file touched.
-- Mutation-proof mapping:
-
-  | Mechanism | Regression test(s) | Mutation outcome |
-  |---|---|---|
-  | Range atomicity (both separators, both operand positions) | all 8 `atomic_failure_*` fixtures | Disabled the invalid-operand-nulls-both branch (kept the clean operand as a standalone match): all 8 failed, each producing a spurious single-sided value. Restored: all 8 passed. |
-  | Anchor requirement | `bare_zero_no_anchor`, `range_no_anchor_at_all` | Forced `has_anchor = True` unconditionally: both failed (produced a value instead of unavailable). Restored: both passed. **Note**: `no_anchor_no_extraction` does not itself isolate this mechanism — it fails earlier at the whole-field fullmatch stage (leading prose) regardless of the anchor check; noted directly in its fixture `note`. |
-  | Currency-compatibility conflict check | `dollar_gbp_conflicting`, `dollar_eur_conflicting`, `pound_usd_conflicting`, `euro_gbp_conflicting` | Removed the symbol-vs-code compatibility check (returned the explicit code unconditionally): all 4 failed (wrongly resolved a currency instead of unavailable). Restored: all 4 passed. **Note**: `multiple_codes_conflicting` does not itself isolate this mechanism — it is independently rejected by the separate two-codes-conflict check; noted directly in its fixture `note`. |
-  | ASCII-only digit class (`[0-9]` vs. bare `\d`) | `unicode_digit_rejected_whole_field_unavailable` | Replaced `[0-9]` with `\d` in the lexical numeric body: the Arabic-Indic-digit text now wrongly fullmatched, leaking `currency`/`period` as resolved instead of all four fields unavailable. Restored: passed. |
-  | Shared trailing `k` | `k_shorthand_shared_trailing` | Disabled the backward-sharing step: failed (`minimum=120` instead of `120000`). Restored: passed. |
-  | Malformed-grouping shape check | `malformed_grouping`, `malformed_grouping_leading_1digit_then_2` | Removed the grouping-shape validation: both failed (wrongly extracted a concatenated value). Restored: both passed. **Note**: `atomic_failure_malformed_grouping_first_endpoint` does not itself isolate this mechanism — with grouping unchecked, the first operand's concatenated value exceeds the second operand's, so the pre-existing inversion check independently produces the same double-unavailable outcome; noted directly in its fixture `note`. |
-  | Int32 overflow guard | `overflow`, `atomic_failure_overflow_second_endpoint`, `atomic_failure_to_range_second_operand`, `atomic_failure_between_and_second_operand` | Removed the `> _INT32_MAX` check: all 4 failed (wrongly extracted or promoted an out-of-range value). Restored: all 4 passed (`exactly_int32_max_valid`, the boundary case, correctly unaffected either way). |
-  | Unsupported-period invalidates numeric | `unsupported_period_enumerated`, `unsupported_period_generic_fallback` | Removed the cross-field invalidation step: both failed (numeric bounds wrongly survived). Restored: both passed. |
-
-- Verification: `ruff format --check`/`ruff check`/`mypy` all pass.
-  `python -m scripts.check_repo` exits 0. Genuine external `python -m
-  scripts.verify --level routine --focus tests/test_normalization_salary.py`
-  (full run, see metadata below) — all 11 steps PASS, including `handoff
-  metadata validation`. Full unfocused suite: **2040 passed** (was 1944;
-  +96 fixture/test cases). An additional ad hoc contract-conformance and
-  counterexample sweep (not committed as fixtures) covering: leading-
-  garbage-before-label/currency text, an unenumerated `per diem` generic
-  fallback, a space inside a grouped number, scientific notation, a
-  three-operand range, a double period marker, symbol-then-sign ordering
-  (`"$-120,000"`, not part of the approved grammar), per-operand code
-  repetition (not part of the approved grammar), and both operands
-  already carrying their own `k` — every case resolved to either the
-  correct value or safely `unavailable`, with no confidently-wrong
-  output.
-- Deviations/known limitations: every fixture is hand-constructed
-  synthetic (`synthetic_representative`/`synthetic_adversarial`); no
-  real, sanitized salary-bearing posting text has been collected or
-  reviewed for this slice — an explicit, disclosed exit-gate evidence
-  limitation, not treated as satisfied (mirrors `classify_experience`'s
-  own disclosed "corpus is synthetic" limitation). The negative-sign
-  grammar recognizes only sign-before-symbol ordering (`"-$3"`), per the
-  approved proposal's own example; the reverse ordering
-  (`"$-3"`) is not part of the finite grammar and fails safely to
-  `unavailable` rather than misreading it, not a confidently-wrong gap.
-- STOP — awaiting Codex/Sol's review. Do not merge, begin another Phase 3
-  parser, wire into ingestion/persistence, contact providers, or create a
-  migration.
-
-```workflow-metadata
-workflow_version: v3.1-pilot
-slice_kind: parser
-verification_level: routine
-focused_test_selector: tests/test_normalization_salary.py
-focused_test_count: 96
-full_suite_count: 2040
-fixture_path: backend/tests/fixtures/normalization/salary_cases.json
-fixture_count: 86
-```
-
----
-
-## Iteration 2
-
-### Work done
-
-- Date/agent: 2026-09-09, Claude Code (Sonnet 5). Risk class R
   (R-plus-adversarial, unchanged). Base -> ending commit: `3c02fac` ->
   this commit; same branch `phase-3/salary-classifier`. Bounded
   correction pass addressing Codex/Sol's review of commit `3c02fac`
@@ -379,3 +261,140 @@ fixture_count: 105
 - STOP — do not begin pilot slice 3 of Workflow v3.1, the mandatory
   retrospective, ingestion wiring, or any other Phase 3 parser without
   separate authorization.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-09-09, Claude Code (Sonnet 5). Risk class R
+  (R-plus-adversarial, established parser-slice convention). Base ->
+  ending commit: `d82445f` -> this commit; new branch
+  `phase-3/location-classifier`. Workflow v3.1 pilot parser slice 3 of 3,
+  implementing the round-4-approved `classify_location` proposal (four
+  proposal-review rounds preceded implementation; no branch/code existed
+  before this pass). Scope held to the parser, its tests/fixtures, and
+  the documentation files the proposal's own Files-expected-to-change
+  list named. **Per explicit user instruction, this commit is frozen
+  immediately after push for a blind Sol/Astra comparison review — no
+  correction pass, no further commits, no Work review recorded by the
+  implementer.**
+- Outcome: `backend/app/normalization/location.py::classify_location(location)
+  -> LocationResult` (four independently-provenanced fields:
+  `city`/`state`/`country`/`postal_code`), reading `location` only (no
+  `title`/`description`). Implements every binding decision from the
+  four proposal-review rounds:
+  - **`city` is unconditionally `Provenance.UNAVAILABLE`** for every
+    input — deferred, not implemented, in this slice. A denylist-based
+    approach (reject known-generic phrases, otherwise trust a city-
+    shaped span) was rejected during proposal review as unable to
+    establish a positive correctness guarantee; the fix is structural,
+    not enumerative. Every production still structurally requires a
+    geo/region-shaped span (so a bare, contextless state code alone is
+    never confidently resolved either), but that span is always
+    discarded, never wired into any output field.
+  - Five finite `re.fullmatch` productions (country-alone, geo+state,
+    geo+state+ZIP, geo+country, geo+region+country), each wrapped in an
+    identical, independently-optional marker prefix/suffix — never both
+    present in one match.
+  - A frozen, independently-derived, live-source-confirmed (2026-09-09,
+    USPS Appendix B + ISO 3166 authority) 26-code collision set (a USPS
+    state abbreviation that is also a current ISO 3166-1 alpha-2 country
+    code): AL/AR/AZ/CA/CO/DE/GA/ID/IL/IN/KY/LA/MA/MD/ME/MN/MO/MS/MT/NC/
+    NE/PA/SC/SD/TN/VA. A collision-bearing code with no US-only anchor
+    (ZIP or explicit US country) fails closed; disambiguated by either
+    anchor regardless of collision-set membership.
+  - The three-part dispatch's four explicit semantic rules (recognized-
+    state x explicit-US/non-US, non-state-region x non-US/explicit-US),
+    making `"Austin, TX, Canada"` fail while preserving `"Toronto, ON,
+    Canada"`.
+  - The generic/non-geographic sentinel catalog retained as defense-in-
+    depth only (`multiple locations`/`various locations`/`worldwide`/
+    `various`/`multiple`/`nationwide`/`global`), rejecting the whole
+    result (including `country`) on an exact match — explicitly not the
+    mechanism that makes discarding the geo span safe, since nothing
+    needs to make that safe.
+  - The coordinator/delimiter exclusion (standalone `or`/`and`, `/`/`;`/
+    `|`) and marker-embedded-in-geography exclusion applied to every
+    discarded geo/region span — necessary specifically because those
+    spans are open-ended (unlike `state`/`country`, which reject junk
+    "for free" via closed-catalog lookup).
+  - Country-alias canonicalization to full English names
+    (`US`/`U.S.`/`U.S.A.`/`USA` -> `United States`, `UK` -> `United
+    Kingdom`); the `D.C.`/`DC` state exception.
+  - Covered-whitespace-only grammar boundaries (`_WS = r"[\t\n\r ]"`)
+    and a mandatory-whitespace prefix-hyphen marker boundary, applied
+    from the start rather than needing a correction round (the
+    `salary.py` grammar-boundary correction's lesson applied
+    proactively).
+- Files changed: `backend/app/normalization/location.py`,
+  `backend/tests/fixtures/normalization/location_cases.json` (98 cases),
+  `backend/tests/test_normalization_location.py`, `docs/ARCHITECTURE.md`,
+  `docs/ROADMAP.md` (both updated for this slice's status **and** the
+  stale "pending Codex review — not merged" `classify_salary` reference,
+  corrected here as a same-cycle mechanical edit, not a separate slice —
+  a doc-attribution fix, not product behavior), `docs/LLM_WORKFLOW.md`
+  (stale "slices 2/3 unstarted" pilot-status line corrected the same
+  way), this handoff entry. No other file touched.
+- Mutation-proof mapping:
+
+  | Mechanism | Regression test(s) | Mutation outcome |
+  |---|---|---|
+  | City-never-populated structural invariant | all 4 `generic_phrase_*_country_only` fixtures, `test_city_field_is_always_unavailable_v1_deferred` | Wired the discarded geo span into the `city` field unconditionally: all 4 fixtures plus the structural-invariant test failed (wrongly showed a populated `city`). Restored: all passed. |
+  | Collision-set gate | `collision_ca_no_anchor_rejected`, `collision_in_no_anchor_rejected`, `collision_tn_no_anchor_rejected` | Disabled the `state in _COLLISION_STATES` check: all 3 failed (wrongly resolved `state`/`country`). Restored: all 3 passed. |
+  | Sentinel catalog (defense-in-depth) | all 4 `sentinel_*_rejected` fixtures | Forced the sentinel-match check to always return `False`: all 4 failed (wrongly extracted `country`, e.g. `United States` from `"Multiple Locations, United States"`). Restored: all 4 passed. The neighbor positive control (`sentinel_neighbor_legitimate_extracts_country`) correctly remained unaffected either way. |
+  | Covered-whitespace-only boundary (NBSP vs. LINE SEPARATOR) | `line_separator_not_covered_whitespace_rejected` | Widened `_WS` to Python's Unicode-aware bare `\s`: failed (U+2028 was wrongly treated as a boundary, resolving `state`/`country` normally instead of rejecting). Restored: passed. `nbsp_normalizes_to_covered_whitespace` correctly remained unaffected either way (NBSP already folds via NFKC regardless of `_WS`'s width). |
+
+- Verification: `ruff format --check`/`ruff check`/`mypy` all pass.
+  `python -m scripts.check_repo` exits 0. Genuine external `python -m
+  scripts.verify --level routine --focus tests/test_normalization_location.py`
+  (full run, see metadata below) — all 11 steps PASS, including `handoff
+  metadata validation`. Full unfocused suite: **2166 passed** (was 2059;
+  +107 fixture/test cases). An additional novel ad hoc counterexample
+  sweep (not committed as fixtures) covering: leading garbage before a
+  valid form, a marker-only string wrapped in parentheses with no
+  geography, case-insensitive sentinel matching, a three-letter state
+  lookalike, glued/doubled comma spacing around a state code, a region
+  token that is itself a recognized foreign country name (not a state),
+  confirmation that the sentinel check is exact-match only (not
+  substring — `"Worldwide Team, Canada"` extracts `country=Canada`
+  normally, while `"Worldwide Remote Team, Canada"` is rejected only via
+  the embedded-marker check), a lowercase state with a ZIP, a three-part
+  state+UK conflict, and a purely numeric discarded-geo span — every
+  case resolved to either the correct value or safely `unavailable`,
+  with no confidently-wrong output.
+- Deviations/known limitations: every synthetic fixture is hand-
+  constructed (`synthetic_representative`/`synthetic_adversarial`); the
+  one real sanitized location string in this repository (`"Remote,
+  US"`, `greenhouse_live_canary.json`) is exercised by
+  `test_real_sanitized_greenhouse_fixture_classifies_correctly`, which
+  loads the actual fixture file and asserts the source value before
+  asserting the classification, so the claim cannot silently drift.
+  `city` resolution is explicitly deferred, not implemented (see the
+  module docstring) — a disclosed scope boundary, not a defect. The
+  26-code collision set was independently derived and cross-checked
+  against a second independently-proposed candidate set during proposal
+  review, converging exactly; a live-source confirmation against USPS
+  Appendix B and the ISO 3166 authority was separately performed and
+  accepted (2026-09-09) prior to this implementation. Non-US postal
+  codes, non-US subnational abbreviations in the state catalog, and a
+  parenthesized-marker-prefix form remain unsupported, per the approved
+  proposal's exclusions.
+- STOP — this commit is frozen for the planned blind Sol/Astra
+  comparison review. Do not merge, begin pilot slice retrospective,
+  wire into ingestion/persistence, contact providers, or create a
+  migration. No further correction, no Work review, no additional
+  commits on this branch until the user separately authorizes the next
+  action.
+
+```workflow-metadata
+workflow_version: v3.1-pilot
+slice_kind: parser
+verification_level: routine
+focused_test_selector: tests/test_normalization_location.py
+focused_test_count: 107
+full_suite_count: 2166
+fixture_path: backend/tests/fixtures/normalization/location_cases.json
+fixture_count: 98
+```
