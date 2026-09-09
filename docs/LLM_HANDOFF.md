@@ -257,3 +257,49 @@ fixture_count: 90
   resolving review publication before completing the repository workflow. No merge is
   authorized by this review, and no next parser is authorized.
 - RETURN TO SOL NOW — Astra's review cycle is complete.
+
+### Merge record
+
+- Date: 2026-09-08. User authorized publishing the pending review commit and
+  merging `phase-3/experience-classifier` into `main` following Astra's
+  Approved review above (correction diff `1610f57..559e77a`; approval
+  recorded in commit `d46f20f`).
+- Review publication: local-only review commit `d46f20f` (docs-only, `docs/
+  LLM_HANDOFF.md` alone, 31 insertions/0 deletions) was pushed to
+  `origin/phase-3/experience-classifier` first, resolving the prior
+  publication gap noted in the review's own "Recording limitation" line.
+- Pre-merge state: `main` and `origin/main` both at `ddb427d`; feature
+  branch `phase-3/experience-classifier` and its origin both clean and
+  synced at `d46f20f` (containing implementation commit `e13d8a6`, four
+  correction passes `2589eec`/`2fcdc0f`/`1610f57`/`559e77a`, and this
+  review-publication commit).
+- Merge: `git merge --no-ff phase-3/experience-classifier` on `main` —
+  merge commit `6f9ae53`. `git diff phase-3/experience-classifier HEAD` is
+  empty (zero content difference); `git diff --check` and `check_repo.py`
+  both exit 0; working tree clean.
+- Post-merge verification: genuine external `python -m scripts.verify
+  --level routine --focus tests/test_normalization_experience.py` (full
+  run) — all **11 steps PASS** (Ruff format/check, mypy, `check_repo.py`,
+  `git diff --check`, disposable-database URL/reachability, **98 focused /
+  1944 full-suite tests**, handoff metadata validation, temp-directory
+  cleanup).
+- Migration/database state: unchanged. `git diff ddb427d HEAD --
+  backend/alembic backend/app/db` is empty — no migration or
+  database-layer file is part of this diff, so no migration was run and no
+  schema changed.
+- Pushed: `main` at `6f9ae53`, matching `origin/main`.
+- Rollback boundary: to revert this slice, reset `main` to `ddb427d` (the
+  commit immediately before this merge) — this removes
+  `backend/app/normalization/experience.py`, its fixture corpus and test
+  file, and the `classify_experience` entries in
+  `docs/ARCHITECTURE.md`/`docs/ROADMAP.md`, cleanly, with no migration to
+  reverse and no data written by this slice to any environment (a pure
+  parser addition, never wired into ingestion/persistence or any
+  database).
+- **`classify_experience` is Workflow v3.1 pilot slice 1 of 3.** It closed
+  after five correction rounds (four `AskUserQuestion`-confirmed plus one
+  user-self-authorized), not the one-round target; per Astra's review,
+  the mandatory pilot retrospective must count this actual round total
+  rather than characterize the slice as meeting that target.
+- STOP — do not begin pilot slice 2/3 of Workflow v3.1 or any other Phase 3
+  parser without separate authorization.
