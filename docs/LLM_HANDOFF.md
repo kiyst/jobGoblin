@@ -226,3 +226,34 @@ full_suite_count: 1944
 fixture_path: backend/tests/fixtures/normalization/experience_cases.json
 fixture_count: 90
 ```
+
+### Work review
+
+- Date/reviewer: 2026-09-08, Astra (Codex). Correction diff reviewed:
+  `1610f57..559e77a` on `phase-3/experience-classifier`.
+- Verdict: **Approved.** The remaining casing inconsistency is corrected in all
+  three composite rejection patterns; no required correction remains in this review.
+- Reviewed commit: `559e77ac79ce69da877bc57cbba41da38082168c`.
+  Clean shared checkout and live `git ls-remote origin` both identify this commit;
+  no later commit is present on the remote task branch at review time.
+- Independent verification: **98 focused tests pass**; Ruff checks, repository
+  validation, and correction diff whitespace checks pass. Independently mutation-
+  proved all five round-5 regressions by recompiling the three poison patterns without
+  IGNORECASE in memory: all five fail without the fix and pass restored. No executable
+  files modified. The 90-case fixture count agrees with the committed corpus.
+- Full-suite evidence: Claude's canonical verifier reports all 11 steps passing,
+  98 focused / 1944 full-suite tests and metadata validation. The full suite was not
+  independently repeated for this isolated regex-flag correction; that limitation
+  is explicit and does not invalidate the focused and mutation verification above.
+- Remaining limitations: conservative closed grammar; unsupported description section
+  headers/standalone labels and numeric forms can yield unavailable; corpus is synthetic.
+  No persistence, parser-version/provenance writes, ingestion integration, or Phase 3
+  completion claim. Pilot retrospective must count the actual multiple correction
+  rounds rather than characterize this slice as meeting the one-round target.
+- Recording limitation: this Work review is saved in the review worktree only, pending
+  authorized publication; no review commit/push is claimed because the prior automatic
+  publication approval rejection remains unresolved. Prior local review preserved.
+- Next action: return to Sol to coordinate user-authorized merge verification, including
+  resolving review publication before completing the repository workflow. No merge is
+  authorized by this review, and no next parser is authorized.
+- RETURN TO SOL NOW — Astra's review cycle is complete.
