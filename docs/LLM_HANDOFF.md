@@ -99,110 +99,6 @@ that detail.
 ### Work done
 
 - Date/agent: 2026-09-08, Claude Code (Sonnet 5). Risk class R
-  (R-plus-adversarial, unchanged from the original implementation). Base
-  -> ending commit: `e13d8a6` -> this commit; same branch `phase-3/experience-classifier`.
-  Bounded correction pass addressing Astra's review of commit `e13d8a6`
-  (relayed to the implementer directly by the user as text; **not**
-  committed to this branch as its own `### Work review` section — no such
-  commit exists on `phase-3/experience-classifier` or its origin as of
-  this entry). Scope held exactly to the parser, its tests/fixtures, and
-  this documentation, per the review's own stated scope boundary.
-- Seven findings addressed:
-  1. **Reversed-label attribution bypass**: `_LABEL_VALUE_RE.search` →
-     `.match` in `_extract_description_bounds`, anchoring the reversed
-     label:value acceptance path to the sentence's own opening word.
-     `"Our vendor experience: 5 years."` now rejects; `"Experience: 5+
-     years"` (positive control) unaffected.
-  2. **Title preference/negation scope**: added `_TITLE_LEADING_PREFERENCE_RE`
-     (leading marker, comma optional) and cross-segment `_is_qualifier_only_segment`/
-     `has_adjacent_qualifier` (a comma-separated qualifier-only segment
-     modifies the preceding segment rather than standing alone).
-     `"Preferred 3-5 years experience"`, `"Ideally 5 years of experience"`,
-     and `"5 years experience, not required"` now all reject; `"The ideal
-     candidate must have 5 years of experience."` and `"No Experience
-     Required"` (positive controls) unaffected.
-  3. **Trailing upper-bound markers + unsupported prefix**: added
-     `bare_trail_hi`/`bare_trail_lo` grammar alternatives (marker *after*
-     the complete "N years of experience" phrase, distinct from the
-     existing before-the-unit-word suffix forms) and `_UNSUPPORTED_PREFIX_RE`
-     (`"less than"`/`"fewer than"`) as a new poison pattern. `"...5 years
-     of experience or fewer."` now yields `maximum=5`; `"less than 5
-     years..."` now safely rejects instead of fabricating `minimum=5`.
-  4. **Unicode numeric expressions**: NFKC-decomposed vulgar fractions use
-     U+2044 FRACTION SLASH, not ASCII `/` — normalized to `/` before
-     poisoning runs. Added `_UNICODE_DASH_NUMERIC_RE` (figure dash, en
-     dash, em dash, Unicode minus U+2212) as a poison pattern, distinct
-     from the ASCII hyphen the range grammar recognizes. `"1½ years
-     experience"`, `"3–5 years experience"`, and `"−5 years experience"`
-     all now reject instead of fabricating `2`, `5`, and `5` respectively.
-  5. **Multi-candidate collection per title segment**: added
-     `_iter_forward_phrases`, collecting every non-overlapping match in a
-     segment rather than only the first. `"3 years experience and 5 years
-     experience"` now conflicts (both collected) instead of returning only
-     `minimum=3`.
-  6. **Regression input corrections**: `amendment6_title_internal_conflict_beats_description_agreement`
-     now supplies a real description (`"This role requires 5 years of
-     experience."`, agreeing with one of the two conflicting title
-     minima) instead of `null`. `shortform_not_isolated_negative` is now a
-     title input (was a description, which cannot exercise the
-     title-only short-form waiver).
-  7. **Verification and scope**: see below.
-- Files changed: `backend/app/normalization/experience.py`,
-  `backend/tests/fixtures/normalization/experience_cases.json` (+15
-  cases: 14 new regressions plus one added mid-pass — see mutation-proof
-  note below — for 70 total), `backend/tests/test_normalization_experience.py`
-  (unchanged in structure; case count grows via the fixture file), this
-  handoff entry. No other file touched.
-- Mutation-proof mapping (Workflow v3.1, required — an exact fix/test/
-  outcome table, not a rounded count):
-
-  | Fix | Mechanism | Regression test(s) | Mutation outcome |
-  |---|---|---|---|
-  | 1 | `_LABEL_VALUE_RE.match` (anchored) | `round2_fix1_reversed_label_bypasses_attribution` | Reverted to `.search`: test failed (`minimum=5`, expected `unavailable`). Restored: passed. |
-  | 2a | `_TITLE_LEADING_PREFERENCE_RE` | `round2_fix2_title_leading_preferred_range`, `round2_fix2_title_leading_ideally_no_comma` | Removed from `has_preference`: both failed (`minimum=3`/`5` instead of `unavailable`). Restored: both passed. |
-  | 2b | `_is_qualifier_only_segment` / `has_adjacent_qualifier` | `round2_fix2_title_not_required_across_comma` | `has_adjacent_qualifier` forced `False`: failed (`minimum=5`). Restored: passed. |
-  | 3a | `bare_trail_hi`/`bare_trail_lo` grammar | `round2_fix3_description_trailing_or_fewer_after_full_phrase`, `round2_fix3_title_trailing_or_fewer_after_full_phrase` | Marker text replaced with an unmatchable placeholder: both failed. Restored: both passed. |
-  | 3b | `_UNSUPPORTED_PREFIX_RE` poison pattern | `round2_fix3_unsupported_less_than_title_isolation` | Removed from `_POISON_PATTERNS`: failed (`minimum=5`). Restored: passed. **Note**: the companion description-only fixture (`round2_fix3_unsupported_less_than_safely_rejects`) does *not* isolate this fix — it is independently protected by Iteration 1's match-start-zero attribution check, so it still passed even with this fix disabled; the title-only fixture above is what actually proves it. |
-  | 4a | Fraction-slash (U+2044→`/`) normalization | `round2_fix4_unicode_vulgar_fraction` | Replacement removed: failed (`minimum=2`). Restored: passed. |
-  | 4b | `_UNICODE_DASH_NUMERIC_RE` poison pattern | `round2_fix4_unicode_en_dash_range`, `round2_fix4_unicode_minus_sign` | Removed from `_POISON_PATTERNS`: both failed (`minimum=5`). Restored: both passed. |
-  | 5 | `_iter_forward_phrases` (collect all) | `round2_fix5_same_segment_conflict`, `round2_fix5_same_segment_conflict_reversed_order`, `round2_fix5_independent_bounds_two_phrases_one_segment` | Reverted to first-match-only: all three failed. Restored: all three passed. **Note**: a fourth related fixture (`round2_fix5_description_agrees_with_one_conflicting_candidate`) still passed even with this fix disabled — with only one title candidate collected it reaches `unavailable` via ordinary cross-source conflict instead, so it does not itself isolate this mechanism; it remains a valid correctness case, just not this fix's proof. |
-
-  Every mutation was independently reverted, its listed test(s) confirmed
-  failing with the exact reported pre-fix defect, then the fix restored
-  and the test(s) reconfirmed passing — 8 distinct fixes, each with at
-  least one isolating regression, matching the review's own numbered
-  findings exactly (no rounded or inflated count this time).
-- Verification: `ruff format --check`/`ruff check`/`mypy` all pass (106
-  source files). `python -m scripts.check_repo` exits 0. Genuine external
-  `python scripts/verify.py --level routine --focus
-  tests/test_normalization_experience.py` (full run) — **78 focused /
-  1924 full-suite tests** (was 63/1909; +15 fixture cases). All 11 steps
-  PASS, including `handoff metadata validation` against this entry's own
-  metadata block below.
-- Deviations/known limitations: unchanged from Iteration 1's explicit
-  exclusions; no new limitations introduced by this correction pass.
-- STOP — awaiting Astra's re-review. Do not merge, begin another Phase 3
-  parser, wire into ingestion/persistence, contact providers, or create a
-  migration.
-
-```workflow-metadata
-workflow_version: v3.1-pilot
-slice_kind: parser
-verification_level: routine
-focused_test_selector: tests/test_normalization_experience.py
-focused_test_count: 78
-full_suite_count: 1924
-fixture_path: backend/tests/fixtures/normalization/experience_cases.json
-fixture_count: 70
-```
-
----
-
-## Iteration 2
-
-### Work done
-
-- Date/agent: 2026-09-08, Claude Code (Sonnet 5). Risk class R
   (R-plus-adversarial, unchanged). Base -> ending commit: `2589eec` ->
   this commit; same branch `phase-3/experience-classifier`. Bounded
   correction pass addressing Astra's review of commit `2589eec` (relayed
@@ -299,4 +195,74 @@ focused_test_count: 88
 full_suite_count: 1934
 fixture_path: backend/tests/fixtures/normalization/experience_cases.json
 fixture_count: 80
+```
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-09-08, Claude Code (Sonnet 5). Risk class R
+  (R-plus-adversarial, unchanged). Base -> ending commit: `2fcdc0f` ->
+  this commit; same branch `phase-3/experience-classifier`. Bounded
+  correction pass addressing Astra's review of commit `2fcdc0f` (relayed
+  as text; no `### Work review` commit exists on this branch or its
+  origin). Scope held to the parser, its tests/fixtures, and this
+  documentation.
+- Two findings addressed:
+  1. **Empty segments break title modifier adjacency**: added
+     `_nearest_meaningful_neighbor_is_qualifier`, which walks past any
+     empty/whitespace-only segment to find the actual nearest neighbor in
+     each direction, instead of checking the raw `index ± 1` position.
+     Combined comma+parenthesis splitting (`"(Preferred), 5 years
+     experience"`, `"5 years experience, (not required)"`) inserts a
+     blank segment directly between the qualifier and its target — the
+     raw-index check treated that blank as a barrier; the new check does
+     not. Both examples now correctly reject.
+  2. **Negative composite ranges leaked an endpoint**: added
+     `_NEGATIVE_COMPOSITE_RANGE_RE`, poisoning a free-standing negative
+     number combined with any adjacent range separator as one whole span
+     — the same treatment the decimal/fraction composites already got in
+     the prior round, extended to the negative-number case.
+     `"-3 to 5 years experience"` no longer leaks `minimum=5` from the
+     untouched second endpoint.
+- Files changed: `backend/app/normalization/experience.py`,
+  `backend/tests/fixtures/normalization/experience_cases.json` (+5 cases,
+  85 total), this handoff entry. No other file touched.
+- Mutation-proof mapping:
+
+  | Fix | Mechanism | Regression test(s) | Mutation outcome |
+  |---|---|---|---|
+  | 1 | `_nearest_meaningful_neighbor_is_qualifier` | `round4_fix1_leading_parenthesized_qualifier_before_comma`, `round4_fix1_trailing_parenthesized_qualifier_after_comma` | Reverted to raw `index ± 1`: both failed (`minimum=5`). Restored: both passed. |
+  | 2 | `_NEGATIVE_COMPOSITE_RANGE_RE` | `round4_fix2_negative_composite_to_range`, `round4_fix2_negative_composite_does_not_swallow_neighboring_valid_phrase` | Removed from `_POISON_PATTERNS`: both failed (first fabricated `minimum=5`; second failed differently — the fabricated `5` conflicted with the real, independent `10`, the same masking-by-spurious-conflict symptom seen in the prior round's equivalent test). Restored: both passed. **Note**: the third related fixture (`round4_fix2_negative_composite_reversed_endpoint_order`, `"5 to -3..."`) does not itself isolate this mechanism — with the poison pattern disabled, `"5"` is still immediately followed by `" to -3 years..."` rather than a unit word, so the pre-existing unit-adjacency strictness independently rejects it regardless; noted directly in its fixture `note`. |
+
+- Verification: `ruff format --check`/`ruff check`/`mypy` all pass (106
+  source files). `python -m scripts.check_repo` exits 0. Genuine external
+  `python scripts/verify.py --level routine --focus
+  tests/test_normalization_experience.py` (full run) — **93 focused /
+  1939 full-suite tests** (was 88/1934; +5 fixture cases). All 11 steps
+  PASS, including `handoff metadata validation` against this entry's own
+  metadata block below. A broader ad hoc regression sweep (not committed
+  as fixtures) covering every prior round's examples plus new
+  combinations (a leading parenthesized preference marker, an
+  alternate-phrasing trailing marker, a three-segment leading case, a
+  negative-decimal composite, a composite inside an attribution frame,
+  and a qualifier sandwiched between two other segments) all resolved
+  correctly with no confidently-wrong output.
+- Deviations/known limitations: unchanged from prior iterations' explicit
+  exclusions. No new limitations introduced by this correction pass.
+- STOP — awaiting Astra's re-review. Do not merge, begin another Phase 3
+  parser, wire into ingestion/persistence, contact providers, or create a
+  migration.
+
+```workflow-metadata
+workflow_version: v3.1-pilot
+slice_kind: parser
+verification_level: routine
+focused_test_selector: tests/test_normalization_experience.py
+focused_test_count: 93
+full_suite_count: 1939
+fixture_path: backend/tests/fixtures/normalization/experience_cases.json
+fixture_count: 85
 ```

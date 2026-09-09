@@ -718,5 +718,50 @@
     "expected_min": null, "expected_min_provenance": "unavailable",
     "expected_max": null, "expected_max_provenance": "unavailable",
     "note": "Astra re-review finding 3, title isolation: unlike the description case above (independently rejected by the exemption's removal), this is the case that actually exercises the mandatory-unit fix on its own, since title-side label:value matching is otherwise still active."
+  },
+  {
+    "id": "round4_fix1_leading_parenthesized_qualifier_before_comma",
+    "origin": "synthetic_representative",
+    "title": "(Preferred), 5 years experience",
+    "description": null,
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Astra re-review finding 1: combined parenthesis+comma splitting inserts a blank segment directly between the qualifier and its target — adjacency must skip past that blank to the nearest meaningful neighbor, not treat it as a barrier."
+  },
+  {
+    "id": "round4_fix1_trailing_parenthesized_qualifier_after_comma",
+    "origin": "synthetic_representative",
+    "title": "5 years experience, (not required)",
+    "description": null,
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Astra re-review finding 1: symmetric case, blank segment after the comma and before the parenthesized qualifier."
+  },
+  {
+    "id": "round4_fix2_negative_composite_to_range",
+    "origin": "synthetic_representative",
+    "title": "-3 to 5 years experience",
+    "description": null,
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Astra re-review finding 2: a negative number combined with the \"to\" range separator is a single malformed composite — poisoning only \"-3\" left \"5\" as a surviving independent bare candidate."
+  },
+  {
+    "id": "round4_fix2_negative_composite_reversed_endpoint_order",
+    "origin": "synthetic_representative",
+    "title": "5 to -3 years experience",
+    "description": null,
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Astra re-review finding 2: endpoint-order control. NOTE: this case does not itself isolate the negative-composite poison pattern — with the pattern disabled, \"5\" is still immediately followed by \" to -3 years...\" rather than a unit word, so the pre-existing unit-adjacency strictness independently rejects it too; \"round4_fix2_negative_composite_to_range\" above is what actually isolates the mechanism."
+  },
+  {
+    "id": "round4_fix2_negative_composite_does_not_swallow_neighboring_valid_phrase",
+    "origin": "synthetic_representative",
+    "title": "-3 to 5 years experience and 10 years experience",
+    "description": null,
+    "expected_min": 10, "expected_min_provenance": "inferred",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Astra re-review finding 2: composite poisoning must stay localized to the malformed span — a separate, independent, well-formed phrase elsewhere in the same title still resolves normally."
   }
 ]

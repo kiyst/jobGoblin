@@ -57,32 +57,37 @@ below), so `"less than 5 years of experience"` never fabricates
 `minimum=5`.
 
 **Numeric rejection is atomic, not a fallback chain** (Astra review
-finding 4, extended by Astra re-review findings 4 and 2): before any
-grammar production runs, the whole title/description text is scanned once
-for malformed or unsupported numeric shapes and every digit character
-inside a matched span is redacted to `#` in a working copy of the text
-(same length, no offset shift) — a bare decimal (`3.5`), a fraction
-(`1/2`), a free-standing negative number (`-5`, not the digit-hyphen-digit
-of a valid range), an unsupported `"less than"`/`"fewer than"` prefix, a
-Unicode dash-like character (figure dash, en dash, em dash, or the Unicode
-minus sign U+2212 — distinct from the ASCII hyphen the range grammar
-recognizes) forming either a digit-dash-digit range or a leading negative
-shape, and — poisoned as a **whole composite span**, not just the
-decimal/fraction's own two operands — a decimal or fraction combined with
-*any* adjacent range separator (hyphen, `"to"`, or `"and"`, in either
-operand order). Poisoning only a decimal/fraction's own operands
-previously left the *other* endpoint of a combined range as a surviving,
-independent-looking bare candidate: `"3.5 to 5 years experience"`
-fabricated `minimum=5` (the `"3.5"` was poisoned, but the separate `"5"`
-after `"to"` was untouched and still satisfied the plain bare production),
-and `"1/2-5 years experience"` fabricated `minimum=5` the same way (the
-fraction's own poisoning left the hyphen-adjacent `"5"` untouched, and it
-was not preceded by a digit, so the negative-number pattern didn't catch
-it either). The composite pattern generalizes across all three
-separators and both operand orders rather than hand-coding each
-combination, and a separate, well-formed phrase elsewhere in the same
-text is never swept up by it (`"...5 years experience and 10 years
-experience"` still yields `minimum=10` from the untouched second phrase).
+finding 4, extended by Astra re-review findings 4/round-2 and 2/round-3
+and round-4): before any grammar production runs, the whole
+title/description text is scanned once for malformed or unsupported
+numeric shapes and every digit character inside a matched span is
+redacted to `#` in a working copy of the text (same length, no offset
+shift) — a bare decimal (`3.5`), a fraction (`1/2`), an unsupported
+`"less than"`/`"fewer than"` prefix, a Unicode dash-like character (figure
+dash, en dash, em dash, or the Unicode minus sign U+2212 — distinct from
+the ASCII hyphen the range grammar recognizes) forming either a
+digit-dash-digit range or a leading negative shape, and — poisoned as a
+**whole composite span**, not just the decimal/fraction/negative-number's
+own operands — a decimal, fraction, **or free-standing negative number**
+combined with *any* adjacent range separator (hyphen, `"to"`, or `"and"`,
+in either operand order). Poisoning only the malformed component's own
+operand(s) previously left the *other* endpoint of a combined range as a
+surviving, independent-looking bare candidate: `"3.5 to 5 years
+experience"` fabricated `minimum=5` (the `"3.5"` was poisoned, but the
+separate `"5"` after `"to"` was untouched and still satisfied the plain
+bare production), `"1/2-5 years experience"` fabricated `minimum=5` the
+same way (the fraction's own poisoning left the hyphen-adjacent `"5"`
+untouched, and it was not preceded by a digit, so the negative-number
+pattern didn't catch it either), and `"-3 to 5 years experience"`
+fabricated `minimum=5` the same way again (only `"-3"` was poisoned,
+leaving the `"5"` after `"to"` untouched — Astra re-review finding 2,
+round 4). The composite pattern generalizes across all three separators,
+both operand orders, and all three malformed-component kinds rather than
+hand-coding each combination, and a separate, well-formed phrase
+elsewhere in the same text is never swept up by it (`"...5 years
+experience and 10 years experience"` still yields `minimum=10` from the
+untouched second phrase, whether the composite ahead of it is a decimal,
+fraction, or negative-number one).
 NFKC normalization decomposes a vulgar fraction (`"½"`) into digits joined
 by U+2044 FRACTION SLASH, not the ASCII `/` the fraction pattern
 matches — normalized to ASCII `/` before poisoning runs, so `"1½ years
@@ -199,7 +204,14 @@ depends on the segmentation itself preserving original text order: a
 parenthesized qualifier appearing *after* its target in the source text
 must also appear after it in the segment list, never reordered ahead of
 it, or adjacency-checking a "preceding" or "following" neighbor becomes
-meaningless. Both forms resolve to double-`UNAVAILABLE`. The separate,
+meaningless. Neighbor-checking also skips past a **blank segment** rather
+than treating it as a barrier — combining a parenthesis boundary with a
+comma boundary (`"(Preferred), 5 years experience"`, `"5 years
+experience, (not required)"`) inserts an empty or whitespace-only
+segment directly between the qualifier and its target, and a raw
+adjacent-index check would otherwise stop there instead of looking past
+it to the real neighbor (Astra re-review finding 1, round 4). Both forms
+resolve to double-`UNAVAILABLE`. The separate,
 unaffected bare zero-phrase production (`"No Experience Required"`, no
 numeric candidate present) keeps its approved zero semantics unchanged.
 An isolated segment whose entire trimmed content is exactly a short form
@@ -335,6 +347,16 @@ _DECIMAL_COMPOSITE_RANGE_RE = re.compile(
 _FRACTION_COMPOSITE_RANGE_RE = re.compile(
     rf"\d+\s*/\s*\d+{_RANGE_SEPARATOR}\d+|\d+{_RANGE_SEPARATOR}\d+\s*/\s*\d+"
 )
+# A free-standing negative number combined with an adjacent range
+# separator is the same class of composite defect: poisoning only the
+# negative component ("-3") left the range's other endpoint ("5" in "-3
+# to 5") untouched and still satisfying the plain bare production (Astra
+# re-review finding 2: "-3 to 5 years experience" -> fabricated
+# minimum=5). Covers both endpoint orders, same as the decimal/fraction
+# composites above.
+_NEGATIVE_COMPOSITE_RANGE_RE = re.compile(
+    rf"(?<!\d)-\d+{_RANGE_SEPARATOR}\d+|\d+{_RANGE_SEPARATOR}(?<!\d)-\d+"
+)
 # Unsupported prefix markers ("less than 5", "fewer than 5") are not part
 # of the recognized open-upper catalog (Astra review finding 3) — treated
 # as a poison trigger, same as any other unsupported numeric shape, rather
@@ -354,6 +376,7 @@ _UNICODE_DASH_NUMERIC_RE = re.compile(
 _POISON_PATTERNS = (
     _DECIMAL_COMPOSITE_RANGE_RE,
     _FRACTION_COMPOSITE_RANGE_RE,
+    _NEGATIVE_COMPOSITE_RANGE_RE,
     _FRACTION_RE,
     _NEGATIVE_NUMBER_RE,
     _DECIMAL_RE,
@@ -569,6 +592,26 @@ def _is_qualifier_only_segment(segment: str) -> bool:
     return _normalize_segment_for_qualifier_check(segment) in _QUALIFIER_ONLY_PHRASES
 
 
+def _nearest_meaningful_neighbor_is_qualifier(
+    raw_segments: list[str], qualifier_only: list[bool], index: int, step: int
+) -> bool:
+    """Walks in `step` direction (-1 or +1) from `index`, skipping any
+    empty/whitespace-only segment, and returns whether the first
+    *meaningful* (non-blank) segment found is qualifier-only. Combined
+    comma+parenthesis splitting can insert a blank segment directly
+    between a qualifier and its target — `"(Preferred), 5 years
+    experience"` splits into `["Preferred", "", " 5 years experience"]`,
+    with the blank middle segment sitting between them — and a raw
+    `index ± 1` check treats that blank as a barrier rather than looking
+    past it to the real neighbor (Astra re-review finding 1)."""
+    i = index + step
+    while 0 <= i < len(raw_segments):
+        if raw_segments[i].strip():
+            return qualifier_only[i]
+        i += step
+    return False
+
+
 def _title_segments(text: str) -> list[str]:
     """Splits `text` into structural segments in **original left-to-right
     order** — paired-parenthesis/bracket content interleaved with the
@@ -671,10 +714,14 @@ def _extract_title_bounds(title: str | None) -> tuple[int | str | None, int | st
         # years experience") or *after* ("5 years experience, not
         # required", "5 years experience (not required)") — both
         # directions, across both comma and parenthesis boundaries (Astra
+        # review finding 1), computed over the *nearest meaningful*
+        # neighbor in each direction rather than the raw adjacent index,
+        # since combined comma+parenthesis splitting can insert a blank
+        # segment directly between the qualifier and its target (Astra
         # re-review finding 1).
-        has_adjacent_qualifier = (index > 0 and qualifier_only[index - 1]) or (
-            index + 1 < len(qualifier_only) and qualifier_only[index + 1]
-        )
+        has_adjacent_qualifier = _nearest_meaningful_neighbor_is_qualifier(
+            raw_segments, qualifier_only, index, -1
+        ) or _nearest_meaningful_neighbor_is_qualifier(raw_segments, qualifier_only, index, 1)
 
         short_form = _match_short_form(segment)
         if short_form is not None:
