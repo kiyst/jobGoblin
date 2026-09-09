@@ -425,13 +425,21 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   covers only the `jobs.employment_type` schedule/commitment axis; `jobs.contract_type`
   (deferred to its own future slice) and `jobs.shift` (no parser currently planned) are
   untouched.
-  A third slice (entry_level/mid_level/senior/staff/principal/director classifier) is
-  implemented on `phase-3/seniority-classifier`, pending Codex review — not merged,
-  not complete. `app/normalization/seniority.py` is code-defined and bounded — no
-  `taxonomy/` directory or YAML file created; `docs/ARCHITECTURE.md`'s `seniority.yaml`
-  entry is annotated as planned future enrichment, not implemented by this slice.
-  No other Phase 3 parser (title, salary, location, experience, skill) has been
-  started — this is one more bounded slice, not a Phase 3 completion claim.
+  A third slice (entry_level/mid_level/senior/staff/principal/director classifier)
+  merged into `main` at `92fcefc` (approval commit `0c92b7d`, merge record in
+  [LLM_HANDOFF.md](LLM_HANDOFF.md)). `app/normalization/seniority.py` is code-defined
+  and bounded — no `taxonomy/` directory or YAML file created; `docs/ARCHITECTURE.md`'s
+  `seniority.yaml` entry is annotated as planned future enrichment, not implemented by
+  this slice.
+  A fourth slice (years-of-experience range classifier, Workflow v3.1 pilot parser
+  slice 1 of 3) is **implemented on `phase-3/experience-classifier`, pending Astra
+  review — not merged, not complete.** `app/normalization/experience.py` produces an
+  `ExperienceRange` (independently-provenanced `minimum`/`maximum`), the first parser
+  needing `types.py`'s deferred composite-result-type case. Not wired into
+  ingestion/persistence, no `parser_version` threading, no `jobs.years_experience_min`/
+  `max` write of any kind — those remain Phase 4+ concerns.
+  No other Phase 3 parser (title, salary, location, skill) has been started — this is
+  one more bounded slice, not a Phase 3 completion claim.
 - **Phase 4: two bounded read-only prework proofs merged into `main`; the production
   `AtsScrapersProvider` adapter is not started and Phase 4 is not complete.** The
   Greenhouse live ATS canary (`phase-4/greenhouse-canary`, merged at `64a3534`) and the
