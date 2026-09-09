@@ -276,10 +276,11 @@ jobGoblin/
 │   │   ├── normalization/
 │   │   │   ├── titles.py
 │   │   │   ├── skills.py
-│   │   │   ├── salary.py
+│   │   │   ├── salary.py                # base-pay classifier (Phase 3, fifth parser slice) —
+│   │   │   │                            # implemented on phase-3/salary-classifier, pending
+│   │   │   │                            # Codex review, not merged (see docs/ROADMAP.md)
 │   │   │   ├── experience.py            # years-of-experience range classifier (Phase 3, fourth
-│   │   │   │                            # parser slice) — implemented on phase-3/experience-classifier,
-│   │   │   │                            # pending Astra review, not merged (see docs/ROADMAP.md)
+│   │   │   │                            # parser slice) — merged into main (see docs/ROADMAP.md)
 │   │   │   ├── location.py
 │   │   │   ├── employment.py
 │   │   │   ├── seniority.py
