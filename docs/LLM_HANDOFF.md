@@ -334,3 +334,48 @@ fixture_count: 105
   merge or next-parser work.
 - STOP — no merge, no next Phase 3 parser, without explicit user
   authorization.
+
+### Merge record
+
+- Date: 2026-09-09. User authorized merging
+  `phase-3/salary-classifier` into `main` following Codex/Sol's Approved
+  review above (correction diff `3c02fac..261ffe3`; approval recorded in
+  commit `396c939`).
+- Pre-merge state: `main` and `origin/main` both at `b9d7f0c`; feature
+  branch `phase-3/salary-classifier` and its origin both clean and synced
+  at `396c939` (containing implementation commit `3c02fac`, correction
+  commit `261ffe3`, and this review-publication commit).
+- Merge: `git merge --no-ff phase-3/salary-classifier` on `main` — merge
+  commit `5b144a2`. `git diff phase-3/salary-classifier HEAD` is empty
+  (zero content difference); `git diff --check` and `check_repo.py` both
+  exit 0; working tree clean. No squash, rebase, force-push, or
+  implementation change of any kind performed during the merge.
+- Post-merge verification: genuine external `python -m scripts.verify
+  --level routine --focus tests/test_normalization_salary.py` (full run)
+  — all **11 steps PASS** (Ruff format/check, mypy, `check_repo.py`,
+  `git diff --check`, disposable-database URL/reachability, **115 focused
+  / 2059 full-suite tests**, handoff metadata validation, temp-directory
+  cleanup).
+- Migration/database state: unchanged. `git diff b9d7f0c HEAD --
+  backend/alembic backend/app/db` is empty — no migration or
+  database-layer file is part of this diff, so no migration was run and
+  no schema changed (this slice introduced no schema changes, as
+  expected for a pure parser addition).
+- Pushed: `main` at `5b144a2`, matching `origin/main`.
+- Rollback boundary: to revert this slice, reset `main` to `b9d7f0c` (the
+  commit immediately before this merge) — this removes
+  `backend/app/normalization/salary.py`, its fixture corpus and test
+  file, and the `classify_salary` entries in
+  `docs/ARCHITECTURE.md`/`docs/ROADMAP.md`, cleanly, with no migration to
+  reverse and no data written by this slice to any environment (a pure
+  parser addition, never wired into ingestion/persistence or any
+  database).
+- **`classify_salary` is Workflow v3.1 pilot slice 2 of 3.** It closed
+  after one bounded correction round (grammar-boundary strictness),
+  within the pilot's one-round target — a pilot-tracking fact, contrasted
+  with `classify_experience` (slice 1 of 3), which needed five rounds.
+  One more parser slice remains before the mandatory retrospective
+  triggers after slice 3's `Work review`.
+- STOP — do not begin pilot slice 3 of Workflow v3.1, the mandatory
+  retrospective, ingestion wiring, or any other Phase 3 parser without
+  separate authorization.
