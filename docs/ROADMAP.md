@@ -441,7 +441,7 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   correction rounds against the pilot's one-round target — a pilot-tracking fact, not a
   reopened finding.
   A fifth slice (base-pay classifier, Workflow v3.1 pilot parser slice 2 of 3) is
-  **implemented on `phase-3/salary-classifier`, pending Astra review — not merged, not
+  **implemented on `phase-3/salary-classifier`, pending Codex review — not merged, not
   complete.** `app/normalization/salary.py` reads `compensation_text` only (no
   `title`/`description`) and produces a `SalaryResult` — four independently-provenanced
   fields (`minimum`/`maximum`/`currency`/`period`), the case `types.py`'s own docstring

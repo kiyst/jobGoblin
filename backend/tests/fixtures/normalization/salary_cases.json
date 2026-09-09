@@ -858,5 +858,195 @@
     "expected_currency": "USD", "expected_currency_provenance": "parsed_description",
     "expected_period": "annual", "expected_period_provenance": "parsed_description",
     "note": "Period synonym catalog: 'per year' -> annual."
+  },
+  {
+    "id": "correction_reject_label_no_colon_glued",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "salary120000",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "Codex round-4 correction 2: a label without a colon requires at least one covered-whitespace character before what follows; a glued form is never accepted."
+  },
+  {
+    "id": "correction_reject_label_no_colon_glued_symbol",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "pay$120000",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "Codex round-4 correction 2: label glued directly to a currency symbol is rejected."
+  },
+  {
+    "id": "correction_reject_label_no_colon_glued_code",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "base salaryUSD120000",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "Codex round-4 correction 2: multi-word label glued directly to a currency code is rejected."
+  },
+  {
+    "id": "correction_preserve_label_no_colon_spaced",
+    "origin": "synthetic_representative",
+    "compensation_text": "salary 120000",
+    "expected_min": 120000, "expected_min_provenance": "parsed_description",
+    "expected_max": 120000, "expected_max_provenance": "parsed_description",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "Positive control neighboring correction_reject_label_no_colon_glued: the same label with the required covered-whitespace boundary present."
+  },
+  {
+    "id": "correction_reject_code_prefix_glued",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "USD120000",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "Codex round-4 correction 3: a currency code glued directly to the amount is rejected."
+  },
+  {
+    "id": "correction_reject_code_suffix_glued",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "120000USD",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "Codex round-4 correction 3: an amount glued directly to a trailing currency code is rejected."
+  },
+  {
+    "id": "correction_reject_label_colon_code_glued",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "salary:USD120000",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "Codex round-4 correction 3: the label:colon boundary allows zero whitespace, but the code-to-amount boundary still requires it -- rejected."
+  },
+  {
+    "id": "correction_preserve_code_prefix_spaced_no_period",
+    "origin": "synthetic_representative",
+    "compensation_text": "USD 120000",
+    "expected_min": 120000, "expected_min_provenance": "parsed_description",
+    "expected_max": 120000, "expected_max_provenance": "parsed_description",
+    "expected_currency": "USD", "expected_currency_provenance": "parsed_description",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "Positive control neighboring correction_reject_code_prefix_glued: the same code with the required covered-whitespace boundary present."
+  },
+  {
+    "id": "correction_preserve_code_suffix_spaced_no_period",
+    "origin": "synthetic_representative",
+    "compensation_text": "120000 CAD",
+    "expected_min": 120000, "expected_min_provenance": "parsed_description",
+    "expected_max": 120000, "expected_max_provenance": "parsed_description",
+    "expected_currency": "CAD", "expected_currency_provenance": "parsed_description",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "Positive control neighboring correction_reject_code_suffix_glued: the same code with the required covered-whitespace boundary present."
+  },
+  {
+    "id": "correction_preserve_label_colon_code_spaced",
+    "origin": "synthetic_representative",
+    "compensation_text": "Salary: USD 120000",
+    "expected_min": 120000, "expected_min_provenance": "parsed_description",
+    "expected_max": 120000, "expected_max_provenance": "parsed_description",
+    "expected_currency": "USD", "expected_currency_provenance": "parsed_description",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "Positive control neighboring correction_reject_label_colon_code_glued: the code-to-amount boundary is still spaced even though the label:colon boundary is optional."
+  },
+  {
+    "id": "correction_preserve_label_colon_zero_whitespace",
+    "origin": "synthetic_representative",
+    "compensation_text": "Salary:$130,000",
+    "expected_min": 130000, "expected_min_provenance": "parsed_description",
+    "expected_max": 130000, "expected_max_provenance": "parsed_description",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "A label with a colon may be followed by zero covered whitespace (approved, distinct from a label without a colon, which requires at least one)."
+  },
+  {
+    "id": "correction_reject_word_period_glued",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "$120000year",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "Codex round-4 correction 4: a word-based period glued directly to the amount is rejected -- only slash forms may attach directly."
+  },
+  {
+    "id": "correction_reject_per_period_glued",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "$120000per year",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "Codex round-4 correction 4: a 'per X' period glued directly to the amount is rejected."
+  },
+  {
+    "id": "correction_reject_code_and_period_glued",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "120000USDyear",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "Codex round-4 correction 3+4 combined: both the code and the period boundary are glued -- rejected."
+  },
+  {
+    "id": "correction_preserve_slash_period_glued_no_comma",
+    "origin": "synthetic_representative",
+    "compensation_text": "$120000/year",
+    "expected_min": 120000, "expected_min_provenance": "parsed_description",
+    "expected_max": 120000, "expected_max_provenance": "parsed_description",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": "annual", "expected_period_provenance": "parsed_description",
+    "note": "Positive control neighboring correction_reject_word_period_glued: a slash-form period is approved to attach directly to the amount with no covered whitespace."
+  },
+  {
+    "id": "correction_preserve_per_period_spaced_no_comma",
+    "origin": "synthetic_representative",
+    "compensation_text": "$120000 per year",
+    "expected_min": 120000, "expected_min_provenance": "parsed_description",
+    "expected_max": 120000, "expected_max_provenance": "parsed_description",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": "annual", "expected_period_provenance": "parsed_description",
+    "note": "Positive control neighboring correction_reject_per_period_glued: the same 'per year' form with the required covered-whitespace boundary present."
+  },
+  {
+    "id": "correction_reject_up_double_hyphen",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "up--to $150,000",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "Codex round-4 correction 5: only 'up' + whitespace + 'to' or literal 'up-to' are approved -- a doubled hyphen is neither and is rejected."
+  },
+  {
+    "id": "correction_reject_up_space_then_hyphen",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "up -to $150,000",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "Codex round-4 correction 5: a mixed space-then-hyphen separator is not one of the two approved forms and is rejected."
+  },
+  {
+    "id": "correction_reject_up_hyphen_then_space",
+    "origin": "synthetic_adversarial",
+    "compensation_text": "up- to $150,000",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "expected_currency": null, "expected_currency_provenance": "unavailable",
+    "expected_period": null, "expected_period_provenance": "unavailable",
+    "note": "Codex round-4 correction 5: a mixed hyphen-then-space separator is not one of the two approved forms and is rejected."
   }
 ]

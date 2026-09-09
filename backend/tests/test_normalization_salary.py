@@ -74,7 +74,7 @@ def test_every_period_synonym_is_covered_by_the_fixture_corpus() -> None:
 
 
 def test_all_five_currency_codes_and_both_unambiguous_symbols_are_covered() -> None:
-    """docs/LLM_WORKFLOW.md's claim-to-evidence discipline, Astra round-4
+    """docs/LLM_WORKFLOW.md's claim-to-evidence discipline, Codex round-4
     clarification 4: every one of the five explicit currency codes and
     both unambiguous symbols must have at least one fixture resolving to
     it."""

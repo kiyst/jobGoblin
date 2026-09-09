@@ -1,7 +1,7 @@
 r"""Deterministic salary/base-pay classifier (Phase 3 -- fifth parser slice;
 docs/ARCHITECTURE.md Section 4's `normalization/salary.py`,
 docs/PHASE_RISK_CHECKLIST.md's Phase 3 exit gate -- Workflow v3.1 pilot
-parser slice 2 of 3, reviewed by Astra across three proposal rounds before
+parser slice 2 of 3, reviewed across three proposal-review rounds before
 implementation).
 
 Pure function: `compensation_text` free text in, one `SalaryResult` out -- a
@@ -24,7 +24,7 @@ concern), `compensation_explicit` (provider/source metadata, not derivable
 from text), FX conversion, any taxonomy, any database/migration/ingestion
 wiring.
 
-**Provenance** (Astra round-4 correction): every successfully-extracted
+**Provenance** (Codex round-4 correction): every successfully-extracted
 field uses `Provenance.PARSED_DESCRIPTION` -- DATA_MODEL.md's own
 definition is "extracted via regex/rules from free text," which is
 literally what this module does to `compensation_text`. `INFERRED`
@@ -33,7 +33,7 @@ guessing here, since the source is single-field. `EXPLICIT_SOURCE`/
 `STRUCTURED_METADATA` are unavailable since this function receives no
 source-origin metadata.
 
-**Whole-field lexical/semantic split** (Astra round-4 correction). Two
+**Whole-field lexical/semantic split** (Codex round-4 correction). Two
 strictly separated layers:
 
 1. **Lexical envelope** -- after normalization (see below), the *entire*
@@ -85,7 +85,39 @@ and/or after the amount-expression (both may be present at once, e.g. to
 exercise a currency conflict). `symbol` is one of `$`/`GBP-pound-sign`/
 `euro-sign`, attached per-operand.
 
-**Numeric grammar is ASCII-only** (Astra round-4 correction): every digit
+**Every grammar boundary is the project's covered-whitespace set only**
+(`_WS = r"[\t\n\r ]"`, matching `_normalize_field`'s own `_WHITESPACE`
+constant) -- never unrestricted `\s`, which also matches other Unicode
+whitespace this project does not treat as a boundary character (Codex
+round-4 correction 1). Boundary strictness rules (round-4 correction 2-5):
+
+- **Label**: without a trailing colon, at least one covered-whitespace
+  character is required before whatever follows (`"salary120000"`,
+  `"pay$120000"`, `"base salaryUSD120000"` all reject -- glued forms are
+  never a label match). With a trailing colon, covered whitespace after
+  it is optional (`"Salary:$130,000"` is accepted, zero whitespace after
+  the colon).
+- **Currency code** (prefix or suffix): always requires at least one
+  covered-whitespace character between the code and the amount
+  expression, regardless of what preceded the code (`"USD120000"`,
+  `"120000USD"`, and `"salary:USD120000"` all reject -- the label:colon
+  boundary being optional does not relax the code's own boundary).
+  `"USD 120000"`, `"120000 CAD"`, and `"Salary: USD 120000"` remain
+  approved.
+- **Period**: a *slash* form (`/hr`, `/day`, `/mo`, `/yr`, `/year`, and
+  the generic `/word` fallback) is the only period shape allowed to
+  attach directly to the amount with no covered-whitespace boundary
+  (`"$120000/year"` is approved). Every *word* form (`year`, `hourly`,
+  `per year`, an enumerated-unsupported word, or the generic `per word`
+  fallback) requires at least one covered-whitespace character before it
+  (`"$120000year"`, `"$120000per year"`, `"120000USDyear"` all reject;
+  `"$120000 per year"` remains approved).
+- **`up ... to`**: exactly two approved forms -- `"up"` + mandatory
+  covered whitespace + `"to"`, or the literal `"up-to"` -- never a
+  mixed/repeated separator (`"up--to"`, `"up -to"`, `"up- to"` all
+  reject; `"up to $150,000"` and `"up-to $150,000"` remain approved).
+
+**Numeric grammar is ASCII-only** (Codex round-4 correction): every digit
 class is the literal `[0-9]`, never bare `\d` (which is Unicode-digit-aware
 in Python without `re.ASCII`). Normalization applies NFKC first (see
 `_normalize_field`), so a fullwidth digit (`１２０`) folds into
@@ -96,7 +128,7 @@ the explicit `[0-9]` classes -- never silently accepted the way a bare
 (the production simply does not fullmatch), landing in Table D, not a
 semantic numeric failure landing in Table B.
 
-**Normalization order** (Astra round-4 correction), applied once before
+**Normalization order** (Codex round-4 correction), applied once before
 any grammar match, in this exact sequence:
 
     1. NFKC-normalize the raw text (`unicodedata.normalize("NFKC", text)`).
@@ -117,7 +149,7 @@ any grammar match, in this exact sequence:
        not in the whitespace set -> period removed -> `"$120,000 "` ->
        final strip -> `"$120,000"`).
 
-**Currency compatibility** (Astra round-4 correction; see `_resolve_currency`):
+**Currency compatibility** (Codex round-4 correction; see `_resolve_currency`):
 
 | Signals found in one candidate                  | Result                    |
 |---------------------------------------------------|---------------------------|
@@ -207,6 +239,10 @@ _INT32_MAX = 2_147_483_647
 # four characters used by every trim-only text column's CHECK constraint
 # in this schema, e.g. candidate_skills.skill / saved_search_titles.title).
 _WHITESPACE = "\t\n\r "
+# Same set, as a regex character class -- every grammar boundary below uses
+# this, never unrestricted `\s` (which also matches other Unicode
+# whitespace this project does not treat as a boundary character).
+_WS = r"[\t\n\r ]"
 
 _INVERTED_RANGE_ERROR = (
     "SalaryResult invariant violated: both bounds resolved but minimum > maximum."
@@ -248,7 +284,7 @@ _UNAVAILABLE_RESULT = SalaryResult(
 
 
 def _normalize_field(text: str) -> str:
-    """Exact three-step order (Astra round-4 correction) -- see the module
+    """Exact three-step order (Codex round-4 correction) -- see the module
     docstring's "Normalization order" section for the full rationale."""
     normalized = unicodedata.normalize("NFKC", text)
     normalized = normalized.strip(_WHITESPACE)
@@ -261,12 +297,19 @@ def _normalize_field(text: str) -> str:
 # Closed catalogs
 # ---------------------------------------------------------------------------
 
-_LABEL = r"(?:salary|base\s+salary|base\s+pay|pay\s+rate|pay)"
-_LABEL_PREFIX = rf"(?:(?P<label>{_LABEL})\s*:?\s*)?"
+_LABEL = rf"(?:salary|base{_WS}+salary|base{_WS}+pay|pay{_WS}+rate|pay)"
+# A label without a colon requires at least one covered-whitespace
+# character before whatever follows (never glued, e.g. "salary120000");
+# a label with a colon allows optional covered whitespace after it
+# (Codex round-4 correction 2).
+_LABEL_PREFIX = rf"(?:(?P<label>{_LABEL})(?::{_WS}*|{_WS}+))?"
 
 _CODE = r"(?:USD|CAD|AUD|GBP|EUR)"
-_CODE_PREFIX = rf"(?:(?P<code_prefix>{_CODE})\s*)?"
-_CODE_SUFFIX = rf"(?:\s*(?P<code_suffix>{_CODE}))?"
+# A currency code adjacent to the amount expression must be separated
+# from it by at least one covered-whitespace character on both sides
+# (never glued, e.g. "USD120000"/"120000USD") (Codex round-4 correction 3).
+_CODE_PREFIX = rf"(?:(?P<code_prefix>{_CODE}){_WS}+)?"
+_CODE_SUFFIX = rf"(?:{_WS}+(?P<code_suffix>{_CODE}))?"
 
 _SYMBOL = r"[$£€]"  # $, GBP pound sign, euro sign
 
@@ -294,25 +337,49 @@ _SUPPORTED_PERIOD_SYNONYMS: dict[str, str] = {
     "/year": "annual",
     "per year": "annual",
 }
-_UNSUPPORTED_PERIOD_ENUMERATED = {
+
+# Bare (non-slash) period words this grammar recognizes lexically --
+# supported synonyms above (minus their slash/"per X" forms, which are
+# handled by their own productions below) plus the enumerated-unsupported
+# words that still lexically fill the period slot so they reach semantic
+# "recognized but unsupported" handling rather than becoming unconsumed
+# leftover text.
+_KNOWN_WORD_PERIOD_TOKENS = (
+    "hour",
+    "hourly",
+    "hr",
+    "day",
+    "daily",
+    "month",
+    "monthly",
+    "mo",
+    "year",
+    "yearly",
+    "annual",
+    "annually",
+    "yr",
     "week",
     "weekly",
     "biweekly",
     "bi-weekly",
     "fortnight",
     "fortnightly",
-    "per week",
-    "/wk",
     "semi-monthly",
     "semimonthly",
-}
-_SUPPORTED_PERIOD_WORDS_RE = "|".join(re.escape(w) for w in _SUPPORTED_PERIOD_SYNONYMS)
-_UNSUPPORTED_PERIOD_WORDS_RE = "|".join(re.escape(w) for w in _UNSUPPORTED_PERIOD_ENUMERATED)
-_GENERIC_PERIOD_FALLBACK = r"(?:/[A-Za-z]+|per\s+[A-Za-z]+)"
-_PERIOD_TOKEN = (
-    rf"(?:{_SUPPORTED_PERIOD_WORDS_RE}|{_UNSUPPORTED_PERIOD_WORDS_RE}|{_GENERIC_PERIOD_FALLBACK})"
 )
-_PERIOD_SUFFIX = rf"(?:\s*(?P<period>{_PERIOD_TOKEN}))?"
+_WORD_PERIOD_ALT = "|".join(re.escape(w) for w in _KNOWN_WORD_PERIOD_TOKENS)
+# "per X" is generic (covers both known phrases like "per hour" and an
+# unsupported "per fortnight"/"per diem") -- the internal boundary between
+# "per" and the word is a covered-whitespace run too, collapsed to a
+# single space before the dict lookup in `_resolve_period`.
+_WORD_PERIOD_TOKEN = rf"(?:{_WORD_PERIOD_ALT}|per{_WS}+[A-Za-z]+)"
+# Slash forms are the only period shape allowed to attach directly to the
+# amount with no covered-whitespace boundary (Codex round-4 correction 4).
+_SLASH_PERIOD_TOKEN = r"/[A-Za-z]+"
+_PERIOD_SUFFIX = (
+    rf"(?:{_WS}*(?P<period_slash>{_SLASH_PERIOD_TOKEN})"
+    rf"|{_WS}+(?P<period_word>{_WORD_PERIOD_TOKEN}))?"
+)
 
 # Lexically permissive numeric body -- any digit grouping shape, any
 # decimal, an optional k/K scale suffix. Grouping/decimal-exactness/
@@ -324,10 +391,13 @@ _NUMBER_BODY_PARSE_RE = re.compile(
 
 
 def _operand(idx: int) -> str:
-    return rf"(?P<sign{idx}>-)?(?P<sym{idx}>{_SYMBOL})?\s*(?P<num{idx}>{_NUMBER_BODY})"
+    return rf"(?P<sign{idx}>-)?(?P<sym{idx}>{_SYMBOL})?{_WS}*(?P<num{idx}>{_NUMBER_BODY})"
 
 
-_UP_TO = r"up[\s-]+to\s+"
+# Exactly two approved forms: "up" + mandatory covered whitespace + "to",
+# or the literal "up-to" -- never a mixed/repeated separator like
+# "up--to"/"up -to"/"up- to" (Codex round-4 correction 5).
+_UP_TO = rf"(?:up{_WS}+to|up-to){_WS}+"
 
 _PRODUCTIONS: dict[str, re.Pattern[str]] = {
     "single_or_open_lower": re.compile(
@@ -339,15 +409,17 @@ _PRODUCTIONS: dict[str, re.Pattern[str]] = {
         re.IGNORECASE,
     ),
     "hyphen_range": re.compile(
-        rf"^{_LABEL_PREFIX}{_CODE_PREFIX}{_operand(1)}\s*-\s*{_operand(2)}{_CODE_SUFFIX}{_PERIOD_SUFFIX}$",
+        rf"^{_LABEL_PREFIX}{_CODE_PREFIX}{_operand(1)}{_WS}*-{_WS}*{_operand(2)}"
+        rf"{_CODE_SUFFIX}{_PERIOD_SUFFIX}$",
         re.IGNORECASE,
     ),
     "to_range": re.compile(
-        rf"^{_LABEL_PREFIX}{_CODE_PREFIX}{_operand(1)}\s+to\s+{_operand(2)}{_CODE_SUFFIX}{_PERIOD_SUFFIX}$",
+        rf"^{_LABEL_PREFIX}{_CODE_PREFIX}{_operand(1)}{_WS}+to{_WS}+{_operand(2)}"
+        rf"{_CODE_SUFFIX}{_PERIOD_SUFFIX}$",
         re.IGNORECASE,
     ),
     "between_and_range": re.compile(
-        rf"^{_LABEL_PREFIX}{_CODE_PREFIX}between\s+{_operand(1)}\s+and\s+{_operand(2)}"
+        rf"^{_LABEL_PREFIX}{_CODE_PREFIX}between{_WS}+{_operand(1)}{_WS}+and{_WS}+{_operand(2)}"
         rf"{_CODE_SUFFIX}{_PERIOD_SUFFIX}$",
         re.IGNORECASE,
     ),
@@ -424,10 +496,13 @@ def _resolve_currency(
 def _resolve_period(period_text: str | None) -> tuple[str | None, bool]:
     """Returns (canonical_db_literal_or_None, numeric_should_be_invalidated).
     The second element is True only for the "explicit but unsupported"
-    case (Table B) -- absence of a marker is not a failure (Table A)."""
+    case (Table B) -- absence of a marker is not a failure (Table A).
+    Internal covered-whitespace runs (e.g. a "per\\thour" capture) are
+    collapsed to a single space before the dict lookup, since the lexical
+    grammar's "per X" boundary is `_WS+`, not a literal single space."""
     if period_text is None:
         return None, False
-    normalized = period_text.lower()
+    normalized = re.sub(rf"{_WS}+", " ", period_text.lower())
     canonical = _SUPPORTED_PERIOD_SYNONYMS.get(normalized)
     if canonical is not None:
         return canonical, False
@@ -501,7 +576,8 @@ def classify_salary(compensation_text: str | None) -> SalaryResult:
         return _UNAVAILABLE_RESULT
 
     currency = _resolve_currency(code_prefix, code_suffix, symbols)
-    period, period_invalidates_numeric = _resolve_period(groups.get("period"))
+    period_text = groups.get("period_slash") or groups.get("period_word")
+    period, period_invalidates_numeric = _resolve_period(period_text)
 
     op1 = _parse_operand(groups.get("sign1"), groups["num1"])
     op2 = _parse_operand(groups.get("sign2"), groups["num2"]) if "num2" in groups else None
