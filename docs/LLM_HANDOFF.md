@@ -99,176 +99,6 @@ that detail.
 ### Work done
 
 - Date/agent: 2026-09-09, Claude Code (Sonnet 5). Risk class R
-  (R-plus-adversarial, unchanged). Base -> ending commit: `3c02fac` ->
-  this commit; same branch `phase-3/salary-classifier`. Bounded
-  correction pass addressing Codex/Sol's review of commit `3c02fac`
-  (relayed as text; no `### Work review` commit exists on this branch or
-  its origin). Scope held to the parser, its tests/fixtures, and this
-  documentation, per the user's explicit authorization of this bounded
-  correction. Verdict was **corrections required; do not merge.**
-- Seven findings addressed, all narrowing grammar-boundary strictness
-  (no behavior change to currency compatibility, period-synonym mapping,
-  numeric validation, or atomicity — those remain exactly as merged):
-  1. **Unrestricted `\s` replaced with the covered-whitespace class**
-     (`_WS = r"[\t\n\r ]"`, matching `_normalize_field`'s own
-     `_WHITESPACE`) everywhere a grammar boundary is expressed — label,
-     code, operand, period, range separators, and `up ... to`.
-  2. **Label boundary strictness**: without a trailing colon, at least
-     one covered-whitespace character is now required before whatever
-     follows; with a colon, whitespace after it remains optional.
-     `"salary120000"`, `"pay$120000"`, `"base salaryUSD120000"` now
-     reject; `"Salary:$130,000"` (colon, zero whitespace) remains
-     accepted, as does every previously-approved spaced label form.
-  3. **Currency-code boundary strictness**: a code (prefix or suffix)
-     now always requires at least one covered-whitespace character
-     between itself and the amount expression, regardless of the
-     label's own boundary. `"USD120000"`, `"120000USD"`,
-     `"salary:USD120000"` now reject; `"USD 120000"`, `"120000 CAD"`,
-     `"Salary: USD 120000"` remain accepted.
-  4. **Period boundary strictness, split by shape**: a slash form
-     (`/hr`/`/day`/`/mo`/`/yr`/`/year`, generic `/word`) may still attach
-     directly to the amount with no covered-whitespace boundary; every
-     word form (`year`, `hourly`, `per year`, an unsupported word, the
-     generic `per word` fallback) now requires at least one covered-
-     whitespace character before it. `"$120000year"`,
-     `"$120000per year"`, `"120000USDyear"` now reject; `"$120000/year"`
-     and `"$120000 per year"` remain accepted. The period-synonym dict
-     lookup now collapses internal covered-whitespace runs to a single
-     space first, so a captured `"per\thour"`-shaped match (an internal
-     boundary, not this finding's target, but the same `_WS` discipline)
-     still resolves correctly.
-  5. **`up ... to` narrowed to exactly two forms**: `"up"` + mandatory
-     covered whitespace + `"to"`, or the literal `"up-to"` — replacing
-     the old `up[\s-]+to` permissive class. `"up--to"`, `"up -to"`,
-     `"up- to"` now reject; `"up to $150,000"` and `"up-to $150,000"`
-     remain accepted.
-  6. Regression fixtures added for every reproduced malformed input plus
-     a neighboring positive control for each — see Files changed and the
-     mutation-proof mapping below.
-  7. **Documentation attribution corrected**: every claim in
-     `salary.py`'s docstring, `test_normalization_salary.py`, and this
-     slice's own status lines in `docs/ARCHITECTURE.md`/`docs/ROADMAP.md`
-     that this slice was reviewed or would be reviewed by Astra is
-     replaced with neutral Codex/proposal-review wording — this slice
-     was never in Astra's review queue; the "Astra round-4 correction"
-     annotations were a copy-paste artifact from the merged
-     `classify_experience` precedent. The historical
-     `classify_experience` entries above (Iteration 1, and the quoted
-     stale-reference text inside this slice's own prior Work done entry)
-     are untouched — Astra genuinely reviewed that slice.
-- Files changed: `backend/app/normalization/salary.py`,
-  `backend/tests/fixtures/normalization/salary_cases.json` (+19 cases,
-  105 total), `backend/tests/test_normalization_salary.py` (attribution
-  fix only, no behavior change), `docs/ARCHITECTURE.md`, `docs/ROADMAP.md`
-  (attribution fix only), this handoff entry. No other file touched.
-- Mutation-proof mapping:
-
-  | Fix | Mechanism | Regression test(s) | Mutation outcome |
-  |---|---|---|---|
-  | 2 | Label no-colon mandatory whitespace | `correction_reject_label_no_colon_glued`, `correction_reject_label_no_colon_glued_symbol` | Weakened `_LABEL_PREFIX` back to `\s*:?\s*` (optional either way): both failed (wrongly extracted a value). Restored: both passed. **Note**: `correction_reject_label_no_colon_glued_code` and `correction_reject_label_colon_code_glued` do not isolate this mechanism alone — both are independently rejected by the still-intact code-boundary guard regardless of the label mutation; noted directly in their fixture `note`s. |
-  | 3 | Currency-code mandatory whitespace (prefix/suffix) | `correction_reject_code_prefix_glued`, `correction_reject_code_suffix_glued`, `correction_reject_label_colon_code_glued` | Weakened `_CODE_PREFIX`/`_CODE_SUFFIX` to optional whitespace: all three failed. Restored: all three passed. **Note**: `correction_reject_code_and_period_glued` does not isolate this mechanism alone — independently rejected by the still-intact period-boundary guard; noted in its fixture `note`. |
-  | 4 | Period word-form mandatory whitespace | `correction_reject_word_period_glued`, `correction_reject_per_period_glued` | Weakened the word-period branch to optional whitespace: both failed. Restored: both passed. **Note**: `correction_reject_code_and_period_glued` does not isolate this mechanism alone either — independently rejected by the code-boundary guard; noted in its fixture `note`. |
-  | 5 | `up ... to` narrowed to two forms | `correction_reject_up_double_hyphen`, `correction_reject_up_space_then_hyphen`, `correction_reject_up_hyphen_then_space` | Reverted `_UP_TO` to the old `up[\s-]+to\s+`: all three failed (wrongly extracted `maximum=150000`). Restored: all three passed. |
-
-- Verification: `ruff format --check`/`ruff check`/`mypy` all pass.
-  `python -m scripts.check_repo` exits 0. Genuine external `python -m
-  scripts.verify --level routine --focus tests/test_normalization_salary.py`
-  (full run, see metadata below) — all 11 steps PASS, including `handoff
-  metadata validation`. Full unfocused suite: **2059 passed** (was 2040;
-  +19 fixture/test cases). All previously-approved forms re-verified
-  unchanged (all 96 prior fixtures still pass with no expected-value
-  edits).
-- Deviations/known limitations: unchanged from the prior iteration's
-  disclosed limitations (synthetic-only corpus; sign-before-symbol-only
-  negative-number ordering). No new limitations introduced by this
-  correction pass — it only tightens boundary strictness, changing no
-  approved-form behavior.
-- STOP — awaiting Codex/Sol's re-review. Do not merge, begin another
-  Phase 3 parser, wire into ingestion/persistence, contact providers, or
-  create a migration.
-
-```workflow-metadata
-workflow_version: v3.1-pilot
-slice_kind: parser
-verification_level: routine
-focused_test_selector: tests/test_normalization_salary.py
-focused_test_count: 115
-full_suite_count: 2059
-fixture_path: backend/tests/fixtures/normalization/salary_cases.json
-fixture_count: 105
-```
-
-### Work review
-
-- Date/reviewer: 2026-09-09, Codex/Sol. Correction diff reviewed:
-  `3c02fac..261ffe3` on `phase-3/salary-classifier` (relayed as text; no
-  `### Work review` commit exists on this branch or its origin).
-- Verdict: **Approved.** No findings.
-- Independent verification: replayed every reported malformed-boundary
-  case (label/code/period glued forms, the three `up...to` mixed-
-  separator forms) plus their adjacent valid controls and non-covered-
-  whitespace cases; **115/115 focused salary tests pass**; Ruff format/
-  check, mypy, `check_repo.py`, `handoff metadata validation`, and
-  `git diff --check` all pass.
-- Missing/inconclusive checks: the reported **2,059-test full-suite
-  result was not independently repeated**.
-- Next action: awaiting the user's separate authorization before any
-  merge or next-parser work.
-- STOP — no merge, no next Phase 3 parser, without explicit user
-  authorization.
-
-### Merge record
-
-- Date: 2026-09-09. User authorized merging
-  `phase-3/salary-classifier` into `main` following Codex/Sol's Approved
-  review above (correction diff `3c02fac..261ffe3`; approval recorded in
-  commit `396c939`).
-- Pre-merge state: `main` and `origin/main` both at `b9d7f0c`; feature
-  branch `phase-3/salary-classifier` and its origin both clean and synced
-  at `396c939` (containing implementation commit `3c02fac`, correction
-  commit `261ffe3`, and this review-publication commit).
-- Merge: `git merge --no-ff phase-3/salary-classifier` on `main` — merge
-  commit `5b144a2`. `git diff phase-3/salary-classifier HEAD` is empty
-  (zero content difference); `git diff --check` and `check_repo.py` both
-  exit 0; working tree clean. No squash, rebase, force-push, or
-  implementation change of any kind performed during the merge.
-- Post-merge verification: genuine external `python -m scripts.verify
-  --level routine --focus tests/test_normalization_salary.py` (full run)
-  — all **11 steps PASS** (Ruff format/check, mypy, `check_repo.py`,
-  `git diff --check`, disposable-database URL/reachability, **115 focused
-  / 2059 full-suite tests**, handoff metadata validation, temp-directory
-  cleanup).
-- Migration/database state: unchanged. `git diff b9d7f0c HEAD --
-  backend/alembic backend/app/db` is empty — no migration or
-  database-layer file is part of this diff, so no migration was run and
-  no schema changed (this slice introduced no schema changes, as
-  expected for a pure parser addition).
-- Pushed: `main` at `5b144a2`, matching `origin/main`.
-- Rollback boundary: to revert this slice, reset `main` to `b9d7f0c` (the
-  commit immediately before this merge) — this removes
-  `backend/app/normalization/salary.py`, its fixture corpus and test
-  file, and the `classify_salary` entries in
-  `docs/ARCHITECTURE.md`/`docs/ROADMAP.md`, cleanly, with no migration to
-  reverse and no data written by this slice to any environment (a pure
-  parser addition, never wired into ingestion/persistence or any
-  database).
-- **`classify_salary` is Workflow v3.1 pilot slice 2 of 3.** It closed
-  after one bounded correction round (grammar-boundary strictness),
-  within the pilot's one-round target — a pilot-tracking fact, contrasted
-  with `classify_experience` (slice 1 of 3), which needed five rounds.
-  One more parser slice remains before the mandatory retrospective
-  triggers after slice 3's `Work review`.
-- STOP — do not begin pilot slice 3 of Workflow v3.1, the mandatory
-  retrospective, ingestion wiring, or any other Phase 3 parser without
-  separate authorization.
-
----
-
-## Iteration 2
-
-### Work done
-
-- Date/agent: 2026-09-09, Claude Code (Sonnet 5). Risk class R
   (R-plus-adversarial, established parser-slice convention). Base ->
   ending commit: `d82445f` -> this commit; new branch
   `phase-3/location-classifier`. Workflow v3.1 pilot parser slice 3 of 3,
@@ -397,4 +227,123 @@ focused_test_count: 107
 full_suite_count: 2166
 fixture_path: backend/tests/fixtures/normalization/location_cases.json
 fixture_count: 98
+```
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-09-09, Claude Code (Sonnet 5). Risk class R
+  (R-plus-adversarial, unchanged). Base -> ending commit: `88cdb2f` ->
+  this commit; same branch `phase-3/location-classifier`. Bounded
+  correction pass applying eight independently-validated findings from
+  the blind Sol/Astra comparison review of frozen commit `88cdb2f`,
+  per the user's explicit authorization. **Reviewer attribution per
+  finding (which came from Astra Light vs. Sol Medium) was not included
+  in the correction request relayed to the implementer; this entry
+  records the combined validated union of eight defects without
+  per-finding attribution, since fabricating that mapping would not be
+  honest. The user or the reviewing agents should supply the per-finding
+  attribution directly if it needs to be recorded.**
+- Eight findings addressed, no behavior change outside them:
+  1. **Country-alias trailing-period compatibility**: `_normalize_field`'s
+     generic trailing-period strip can remove exactly one period from a
+     `U.S.`/`U.S.A.` alias's own final period. Made only that one final
+     period optional in each alias (`U\.S\.A\.?`/`U\.S\.?`); a genuine
+     doubled terminal period (`"U.S.."`) still correctly fails to
+     fullmatch. Applies uniformly across all four productions that use
+     `_COUNTRY_TOKEN`.
+  2. **State+ZIP country provenance**: `state_zip_form` was wrongly using
+     `Provenance.PARSED_DESCRIPTION` for `country="United States"` even
+     though "United States" is never literally present in a plain
+     `"<geo>, <state> <zip>"` string. Now `Provenance.INFERRED`, matching
+     the bare `state_form` case.
+  3. **Region whitespace trimming + one exact state parser**: a greedy
+     `_GEO_TOKEN` region capture can include incidental trailing
+     whitespace before the next comma (e.g. `"TX "` instead of `"TX"`),
+     which the old ad hoc `.replace(".", "").upper()` + set-membership
+     check did not trim, silently misclassifying a real state as "not a
+     state." Replaced with a single authority, `_is_recognized_state`,
+     that trims covered whitespace then requires an exact fullmatch
+     against the closed `_STATE_TOKEN` grammar (also closes finding 8).
+  4. **Standalone negation/exclusion cues**: `"not"`/`"except"`/
+     `"excluding"`/`"excluded"` inside a discarded geo/region span now
+     reject the whole result the same way the `or`/`and` coordinator
+     check does — `"All countries except, Canada"` and `"Not in, Canada"`
+     no longer confidently extract `country=Canada`.
+  5. **Recognized country in a discarded span is a conflict**: a
+     discarded geo or region span that itself exactly matches the
+     country catalog (`"Canada, France"`, `"Canada, United States"`,
+     `"London, Germany, France"`) is now a rejection trigger, not silently
+     ignored — a genuine multi-country conflict, never resolved by
+     picking the explicit country slot's value. `"Toronto, ON, Canada"`
+     is unaffected (`"ON"` is not a recognized country).
+  6. **ASCII-only case-insensitivity for state matching**: added
+     `re.ASCII` alongside `re.IGNORECASE` on every compiled pattern in
+     this module. Without it, Python's Unicode-aware case-folding could
+     treat U+0130 (Turkish dotted capital İ) as case-equivalent to ASCII
+     "I", letting `"Wİ"` match Wisconsin or `"İN"` match Indiana — neither
+     is an NFKC compatibility variant of "I" (unlike a genuine fullwidth
+     letter, which still folds and still resolves correctly).
+  7. **State-recognition precedence over the coordinator check**: in the
+     three-part form, `"OR"` (Oregon) was being rejected by the
+     `or`/`and` standalone-word check before ever being checked against
+     the state catalog. `region` is now checked against
+     `_is_recognized_state` *first*; only a region that is not a
+     recognized state goes through the open-text validation (coordinator/
+     negation/marker/sentinel/country-conflict checks). A genuinely
+     coordinator-bearing non-state region (`"East or West"`) is still
+     correctly rejected.
+  8. **Exact state-token grammar validated before canonicalization**:
+     `"T...X"`/`"TX..."` no longer fullmatch `_STATE_TOKEN` and are
+     correctly never recognized as states (closed by the same fix as
+     finding 3); `"DC"`/`"D.C"`/`"D.C."` all remain correctly recognized.
+- Files changed: `backend/app/normalization/location.py`,
+  `backend/tests/fixtures/normalization/location_cases.json` (+27 cases,
+  125 total), `docs/LLM_HANDOFF.md`. No other file touched — none of the
+  eight findings required a documentation-attribution or status-line
+  fix.
+- Mutation-proof mapping:
+
+  | Finding | Mechanism | Regression test(s) | Mutation outcome |
+  |---|---|---|---|
+  | 1 | Optional final period on `U.S.`/`U.S.A.` aliases | `country_alias_us_dotted`, `country_alias_us_dotted_no_final_period`, `country_alias_usa_dotted`, `country_alias_usa_dotted_no_final_period` | Reverted both aliases to mandatory final periods: all 4 failed (wrongly unavailable). Restored: all 4 passed. `country_alias_us_doubled_period_rejected` correctly unaffected either way. |
+  | 2 | `state_zip_form` country provenance | `collision_ca_disambiguated_by_zip`, `collision_ga_disambiguated_by_zip`, `noncolliding_state_zip_positive_control`, `city_state_zip_plus4` | Reverted to the `PARSED_DESCRIPTION` default: all 4 failed. Restored: all 4 passed. |
+  | 3 | Region whitespace trim in `_is_recognized_state` | `region_whitespace_space_trimmed_before_comma`, `region_whitespace_nbsp_trimmed_before_comma` | Disabled the trim (`trimmed = raw`): both failed. Restored: both passed. **Note**: `region_whitespace_tab_trimmed_before_comma` does not isolate this mechanism — tab is not in `_GEO_TOKEN`'s character class at all, so the greedy region capture never includes it regardless of trimming; noted directly in its fixture `note`, and it remains a valid neighboring covered-whitespace control per the correction's own request. |
+  | 4 | Standalone negation-word check | `negation_except_rejected`, `negation_not_in_rejected` | Removed the negation-word check: both failed (wrongly extracted `country=Canada`). Restored: both passed. `negation_ordinary_positive_control` correctly unaffected either way. |
+  | 5 | Country-catalog match on a discarded span | `country_conflict_geo_is_country_france`, `country_conflict_geo_is_country_us`, `country_conflict_region_is_country` | Disabled the check (forced it to always return `False`): all 3 failed (wrongly extracted the explicit country). Restored: all 3 passed. `three_part_region_nonUS_country_preserved` (`"Toronto, ON, Canada"`) correctly unaffected either way. |
+  | 6 | `re.ASCII` on the five `_PRODUCTIONS` compiles | `ascii_only_wi_lookalike_rejected`, `ascii_only_in_lookalike_rejected`, `ascii_only_wi_lookalike_zip_rejected` | Removed `re.ASCII` from the five compiled productions: all 3 failed (wrongly resolved Wisconsin/Indiana from the Turkish-İ lookalikes). Restored: all 3 passed. `ascii_only_lowercase_positive_control`/`ascii_only_fullwidth_positive_control` correctly unaffected either way. |
+  | 7 | State-check precedence before the coordinator check | `oregon_state_plus_explicit_us` | Reverted the check order (open-text validation runs unconditionally before the state check): failed (Oregon wrongly rejected). Restored: passed. **Note**: `oregon_state_plus_canada_conflict` does not isolate this mechanism — both the (wrong) coordinator rejection and the (correct) state+non-US-country conflict rule produce the same all-four-unavailable outcome; noted directly in its fixture `note`. `genuine_coordinator_region_rejected` correctly unaffected either way. |
+  | 8 | Exact `_STATE_TOKEN_RE.fullmatch` (shared fix with finding 3) | `malformed_state_dots_rejected_as_state`, `malformed_state_trailing_dots_rejected_as_state` | Replaced the exact-grammar check with the old loose strip+membership check: both failed (`"T...X"`/`"TX..."` wrongly recognized as states, nulling `country` via the state+non-US-country conflict rule instead of preserving it). Restored: both passed. `dc_bare_preserved_three_part`/`dc_one_period_preserved_three_part`/`dc_two_period_preserved_three_part` correctly unaffected either way. |
+
+- Verification: `ruff format --check`/`ruff check`/`mypy` all pass.
+  `python -m scripts.check_repo` exits 0. Genuine external `python -m
+  scripts.verify --level routine --focus tests/test_normalization_location.py`
+  (full run, see metadata below) — all 11 steps PASS, including `handoff
+  metadata validation`. Full unfocused suite: **2193 passed** (was 2166;
+  +27 fixture cases). All previously-approved forms re-verified unchanged
+  (all 98 prior fixtures still pass with no expected-value edits except
+  the four corrected by finding 2).
+- Deviations/known limitations: unchanged from the prior iteration's
+  disclosed limitations (city resolution deferred; synthetic-only
+  corpus apart from the one real Greenhouse fixture; non-US postal
+  codes/subnational abbreviations/parenthesized-marker-prefix form
+  remain unsupported). No new limitations introduced — this pass only
+  fixes the eight reported defects.
+- STOP — this commit is frozen for final Codex re-review. Do not merge,
+  begin pilot slice retrospective, wire into ingestion/persistence,
+  contact providers, or create a migration. No Work review recorded by
+  the implementer — that is the reviewer's to write.
+
+```workflow-metadata
+workflow_version: v3.1-pilot
+slice_kind: parser
+verification_level: routine
+focused_test_selector: tests/test_normalization_location.py
+focused_test_count: 134
+full_suite_count: 2193
+fixture_path: backend/tests/fixtures/normalization/location_cases.json
+fixture_count: 125
 ```

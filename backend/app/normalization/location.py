@@ -4,6 +4,17 @@ docs/PHASE_RISK_CHECKLIST.md's Phase 3 exit gate -- Workflow v3.1 pilot
 parser slice 3 of 3, following four proposal-review rounds before
 implementation).
 
+**Correction round 6** (following the blind Sol/Astra comparison review
+of the frozen implementation commit) fixed eight independently-validated
+defects, each annotated at its exact fix site below: country-alias
+trailing-period compatibility; state+ZIP country provenance;
+region-span whitespace trimming and exact-grammar state validation;
+standalone negation/exclusion cues; a recognized country appearing in a
+discarded geo/region span; ASCII-only case-insensitivity for state
+matching; state-recognition precedence over the coordinator check in
+the three-part form; and exact state-token grammar validation before
+canonicalization. No behavior outside these eight findings changed.
+
 Pure function: `location` free text in, one `LocationResult` out -- a
 composite of four independently-provenanced `NormalizationResult` fields
 (`city`/`state`/`country`/`postal_code`, all `str`), matching the `jobs`
@@ -321,6 +332,16 @@ _COLLISION_STATES = frozenset(
 
 _STATE_ALTERNATION = "|".join(sorted(_STATES - {"DC"}))
 _STATE_TOKEN = rf"(?:{_STATE_ALTERNATION}|DC|D\.C\.?)"
+# Correction round 6, findings 3/6/8: the exact, standalone state-token
+# grammar, compiled once and reused as the single authority for "is this
+# text a recognized state" -- never re-derived via ad hoc punctuation
+# stripping. ASCII-restricted case-insensitivity (finding 6): without
+# `re.ASCII`, Python's IGNORECASE case-folding is Unicode-aware and can
+# treat a non-ASCII lookalike (e.g. U+0130 LATIN CAPITAL LETTER I WITH DOT
+# ABOVE, "İ") as case-equivalent to ASCII "I", which would let "Wİ"
+# match "WI" (Wisconsin) or "İN" match "IN" (Indiana) -- neither is a
+# compatibility variant folded by NFKC, unlike a genuine fullwidth letter.
+_STATE_TOKEN_RE = re.compile(rf"^{_STATE_TOKEN}$", re.IGNORECASE | re.ASCII)
 
 _ZIP = r"[0-9]{5}(?:-[0-9]{4})?"
 
@@ -328,8 +349,10 @@ _COUNTRY_CANONICAL: dict[str, str] = {
     "united states": "United States",
     "us": "United States",
     "u.s.": "United States",
-    "u.s.a.": "United States",
-    "usa": "United States",
+    "u.s": "United States",  # Correction round 6, finding 1: the field-level
+    "u.s.a.": "United States",  # trailing-period strip can remove exactly one
+    "u.s.a": "United States",  # trailing period from an alias that legitimately
+    "usa": "United States",  # ends in one -- both spellings must canonicalize
     "united kingdom": "United Kingdom",
     "uk": "United Kingdom",
     "canada": "Canada",
@@ -341,8 +364,15 @@ _COUNTRY_CANONICAL: dict[str, str] = {
     "singapore": "Singapore",
     "netherlands": "Netherlands",
 }
+# "U.S." / "U.S.A." each have their own *final* period made optional, since
+# `_normalize_field`'s generic trailing-period strip may remove exactly one
+# trailing period from the whole field, potentially the alias's own last
+# period. Only that single, specific period is made optional -- this does
+# not broadly accept malformed punctuation (e.g. "U.S.." with a genuine
+# doubled terminal period still fails to fullmatch, since the second period
+# is never consumed by anything).
 _COUNTRY_TOKEN = (
-    rf"(?:United{_WS}+Kingdom|United{_WS}+States|U\.S\.A\.|U\.S\.|USA|US|UK|"
+    rf"(?:United{_WS}+Kingdom|United{_WS}+States|U\.S\.A\.?|U\.S\.?|USA|US|UK|"
     rf"Canada|Australia|Ireland|Germany|France|India|Singapore|Netherlands)"
 )
 
@@ -371,48 +401,75 @@ _MARKER_PREFIX = (
 )
 _MARKER_SUFFIX = rf"(?:{_WS}+\({_WS}*(?P<marker_suffix>{_MARKER}){_WS}*\))?"
 
+# Correction round 6, finding 6: `re.ASCII` applied alongside `re.IGNORECASE`
+# everywhere in this module -- every character class here is already an
+# explicit `[A-Za-z]`/`[0-9]` (never `\w`/`\d`/`\s`), so the only practical
+# effect is restricting IGNORECASE's case-folding table to ASCII, closing
+# the Unicode-lookalike-letter risk described above `_STATE_TOKEN_RE`.
 _PRODUCTIONS: dict[str, re.Pattern[str]] = {
     "country_alone": re.compile(
-        rf"^{_MARKER_PREFIX}(?P<country>{_COUNTRY_TOKEN}){_MARKER_SUFFIX}$", re.IGNORECASE
+        rf"^{_MARKER_PREFIX}(?P<country>{_COUNTRY_TOKEN}){_MARKER_SUFFIX}$",
+        re.IGNORECASE | re.ASCII,
     ),
     "state_form": re.compile(
         rf"^{_MARKER_PREFIX}(?P<geo>{_GEO_TOKEN}){_WS}*,{_WS}*(?P<state>{_STATE_TOKEN})"
         rf"{_MARKER_SUFFIX}$",
-        re.IGNORECASE,
+        re.IGNORECASE | re.ASCII,
     ),
     "state_zip_form": re.compile(
         rf"^{_MARKER_PREFIX}(?P<geo>{_GEO_TOKEN}){_WS}*,{_WS}*(?P<state>{_STATE_TOKEN})"
         rf"{_WS}+(?P<zip>{_ZIP}){_MARKER_SUFFIX}$",
-        re.IGNORECASE,
+        re.IGNORECASE | re.ASCII,
     ),
     "country_form": re.compile(
         rf"^{_MARKER_PREFIX}(?P<geo>{_GEO_TOKEN}){_WS}*,{_WS}*(?P<country>{_COUNTRY_TOKEN})"
         rf"{_MARKER_SUFFIX}$",
-        re.IGNORECASE,
+        re.IGNORECASE | re.ASCII,
     ),
     "region_country_form": re.compile(
         rf"^{_MARKER_PREFIX}(?P<geo>{_GEO_TOKEN}){_WS}*,{_WS}*(?P<region>{_GEO_TOKEN})"
         rf"{_WS}*,{_WS}*(?P<country>{_COUNTRY_TOKEN}){_MARKER_SUFFIX}$",
-        re.IGNORECASE,
+        re.IGNORECASE | re.ASCII,
     ),
 }
 
-_OR_AND_RE = re.compile(r"(?<![A-Za-z])(?:or|and)(?![A-Za-z])", re.IGNORECASE)
-_MARKER_WORD_RE = re.compile(rf"(?<![A-Za-z])(?:{_MARKER})(?![A-Za-z])", re.IGNORECASE)
+_OR_AND_RE = re.compile(r"(?<![A-Za-z])(?:or|and)(?![A-Za-z])", re.IGNORECASE | re.ASCII)
+# Correction round 6, finding 4: standalone negation/exclusion cues inside
+# a discarded span (e.g. "All countries except, Canada", "Not in, Canada")
+# must not let the remaining geography be confidently emitted -- the same
+# standalone-word mechanism as the or/and coordinator check, not a
+# whole-span exact match.
+_NEGATION_WORDS_RE = re.compile(
+    r"(?<![A-Za-z])(?:not|except|excluding|excluded)(?![A-Za-z])", re.IGNORECASE | re.ASCII
+)
+_MARKER_WORD_RE = re.compile(rf"(?<![A-Za-z])(?:{_MARKER})(?![A-Za-z])", re.IGNORECASE | re.ASCII)
 _DELIMITER_CHARS = frozenset("/;|")
 
 
 def _geo_span_is_rejected(span: str) -> bool:
     """Semantic validation of a discarded geo/region span -- see the
-    module docstring's "Discarded-span validation" section."""
+    module docstring's "Discarded-span validation" section. Only called
+    for a span that is not already a recognized state (see
+    `_is_recognized_state` and finding 7's precedence fix in
+    `classify_location`)."""
     if _OR_AND_RE.search(span):
+        return True
+    if _NEGATION_WORDS_RE.search(span):
         return True
     if any(ch in _DELIMITER_CHARS for ch in span):
         return True
     if _MARKER_WORD_RE.search(span):
         return True
-    collapsed = re.sub(rf"{_WS}+", " ", span.strip(_WHITESPACE)).lower()
-    return collapsed in _SENTINEL_PHRASES
+    trimmed = span.strip(_WHITESPACE)
+    collapsed = re.sub(rf"{_WS}+", " ", trimmed).lower()
+    if collapsed in _SENTINEL_PHRASES:
+        return True
+    # Correction round 6, finding 5: an exact recognized country in a
+    # discarded span is a genuine multi-country conflict (e.g. "Canada,
+    # France"), never a coincidental "city" that happens to share a name
+    # with a country -- reject the whole result rather than silently
+    # picking the explicit country slot's value.
+    return _canonicalize_country(trimmed) is not None
 
 
 def _canonicalize_country(raw: str) -> str | None:
@@ -421,7 +478,26 @@ def _canonicalize_country(raw: str) -> str | None:
 
 
 def _canonicalize_state(raw: str) -> str:
+    """Canonicalizes text already confirmed to fullmatch `_STATE_TOKEN`
+    (via `_is_recognized_state`) -- never called against unvalidated
+    text, since blindly stripping periods and upper-casing arbitrary text
+    would accept shapes the grammar itself does not (finding 3/8)."""
     return raw.replace(".", "").upper()
+
+
+def _is_recognized_state(raw: str) -> str | None:
+    """The single authority for "is this text a recognized state" --
+    trims covered whitespace first (correction round 6, finding 3: a
+    greedy `_GEO_TOKEN` region capture can include incidental trailing
+    whitespace before the next literal comma), then requires the trimmed
+    text to fullmatch the exact `_STATE_TOKEN` grammar (finding 3/8:
+    never "strip all periods, then check set membership," which would
+    accept malformed shapes like "T...X" or "TX..." that do not actually
+    match the closed grammar). Returns the canonical code, or `None`."""
+    trimmed = raw.strip(_WHITESPACE)
+    if _STATE_TOKEN_RE.fullmatch(trimmed) is None:
+        return None
+    return _canonicalize_state(trimmed)
 
 
 def _wrap_str(
@@ -486,8 +562,17 @@ def classify_location(location: str | None) -> LocationResult:
     if geo is not None and _geo_span_is_rejected(geo):
         return _UNAVAILABLE_RESULT
 
+    # Correction round 6, finding 7: a recognized state (e.g. "OR" for
+    # Oregon) must be identified *before* the generic open-text checks
+    # run -- otherwise the standalone-coordinator check in
+    # `_geo_span_is_rejected` would treat "OR" as the word "or" and
+    # reject it, when it is in fact a validly anchored, closed-catalog
+    # state token, not open-ended text. A region that is a recognized
+    # state skips `_geo_span_is_rejected` entirely; a region that is not
+    # still goes through the full open-text validation.
     region = groups.get("region")
-    if region is not None and _geo_span_is_rejected(region):
+    region_state = _is_recognized_state(region) if region is not None else None
+    if region is not None and region_state is None and _geo_span_is_rejected(region):
         return _UNAVAILABLE_RESULT
 
     if shape == "country_alone":
@@ -506,7 +591,15 @@ def classify_location(location: str | None) -> LocationResult:
 
     if shape == "state_zip_form":
         state = _canonicalize_state(groups["state"])
-        return _build_result(state=state, country="United States", postal_code=groups["zip"])
+        # Correction round 6, finding 2: "United States" is never literally
+        # present in a plain "<geo>, <state> <zip>" string -- INFERRED, not
+        # PARSED_DESCRIPTION, the same as the bare state_form case.
+        return _build_result(
+            state=state,
+            country="United States",
+            postal_code=groups["zip"],
+            country_provenance=Provenance.INFERRED,
+        )
 
     if shape == "country_form":
         country = _canonicalize_country(groups["country"])
@@ -518,8 +611,7 @@ def classify_location(location: str | None) -> LocationResult:
     country = _canonicalize_country(groups["country"])
     if country is None:
         return _UNAVAILABLE_RESULT
-    region_state = _canonicalize_state(groups["region"])
-    region_is_state = region_state in _STATES
+    region_is_state = region_state is not None
     is_us = country == "United States"
     if region_is_state and is_us:
         return _build_result(state=region_state, country="United States")
