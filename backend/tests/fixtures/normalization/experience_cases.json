@@ -763,5 +763,50 @@
     "expected_min": 10, "expected_min_provenance": "inferred",
     "expected_max": null, "expected_max_provenance": "unavailable",
     "note": "Astra re-review finding 2: composite poisoning must stay localized to the malformed span — a separate, independent, well-formed phrase elsewhere in the same title still resolves normally."
+  },
+  {
+    "id": "round5_fix1_decimal_composite_uppercase_to",
+    "origin": "synthetic_representative",
+    "title": "3.5 TO 5 years experience",
+    "description": null,
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Astra re-review finding (round 5): the composite poison regex was case-sensitive while extraction is case-insensitive, so an uppercase \"TO\" separator escaped poisoning and let the untouched \"5\" survive as a bare candidate."
+  },
+  {
+    "id": "round5_fix1_negative_composite_uppercase_to",
+    "origin": "synthetic_representative",
+    "title": "-3 TO 5 years experience",
+    "description": null,
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Astra re-review finding (round 5): same casing defect, negative-composite variant."
+  },
+  {
+    "id": "round5_fix1_fraction_composite_uppercase_and",
+    "origin": "synthetic_representative",
+    "title": "between 3.5 AND 5 years experience",
+    "description": null,
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Astra re-review finding (round 5): same casing defect, \"and\" separator variant (also exercises the decimal-composite pattern, since \"between...and\" wraps the same separator)."
+  },
+  {
+    "id": "round5_fix1_decimal_composite_mixed_case_to",
+    "origin": "synthetic_representative",
+    "title": "3.5 To 5 years experience",
+    "description": null,
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Astra re-review finding (round 5): mixed-case separator control."
+  },
+  {
+    "id": "round5_fix1_composite_does_not_swallow_neighboring_valid_phrase_uppercase",
+    "origin": "synthetic_representative",
+    "title": "3.5 TO 5 years experience and 10 YEARS EXPERIENCE",
+    "description": null,
+    "expected_min": 10, "expected_min_provenance": "inferred",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Astra re-review finding (round 5): the casing fix must not overreach — a separate, independent, well-formed phrase (itself uppercase) elsewhere in the same title still resolves normally."
   }
 ]

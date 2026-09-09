@@ -87,7 +87,15 @@ hand-coding each combination, and a separate, well-formed phrase
 elsewhere in the same text is never swept up by it (`"...5 years
 experience and 10 years experience"` still yields `minimum=10` from the
 untouched second phrase, whether the composite ahead of it is a decimal,
-fraction, or negative-number one).
+fraction, or negative-number one). The three composite patterns are
+case-insensitive, matching the extraction grammar's own case-insensitive
+`"to"`/`"and"` separators — without this, an uppercase or mixed-case
+separator (`"3.5 TO 5 years experience"`, `"-3 TO 5 years experience"`,
+`"between 3.5 AND 5 years experience"`) escaped the composite poison
+pattern entirely while the plain single-operand decimal/fraction pattern
+still poisoned its own operand, leaving the *other* endpoint to survive
+as a bare candidate the same way the lowercase-only defect did before
+this class of pattern existed (Astra re-review finding, round 5).
 NFKC normalization decomposes a vulgar fraction (`"½"`) into digits joined
 by U+2044 FRACTION SLASH, not the ASCII `/` the fraction pattern
 matches — normalized to ASCII `/` before poisoning runs, so `"1½ years
@@ -342,10 +350,10 @@ _DECIMAL_RE = re.compile(r"\d+\.\d+")
 # rather than hand-coding each combination.
 _RANGE_SEPARATOR = r"(?:\s*-\s*|\s+to\s+|\s+and\s+)"
 _DECIMAL_COMPOSITE_RANGE_RE = re.compile(
-    rf"\d+\.\d+{_RANGE_SEPARATOR}\d+|\d+{_RANGE_SEPARATOR}\d+\.\d+"
+    rf"\d+\.\d+{_RANGE_SEPARATOR}\d+|\d+{_RANGE_SEPARATOR}\d+\.\d+", re.IGNORECASE
 )
 _FRACTION_COMPOSITE_RANGE_RE = re.compile(
-    rf"\d+\s*/\s*\d+{_RANGE_SEPARATOR}\d+|\d+{_RANGE_SEPARATOR}\d+\s*/\s*\d+"
+    rf"\d+\s*/\s*\d+{_RANGE_SEPARATOR}\d+|\d+{_RANGE_SEPARATOR}\d+\s*/\s*\d+", re.IGNORECASE
 )
 # A free-standing negative number combined with an adjacent range
 # separator is the same class of composite defect: poisoning only the
@@ -355,7 +363,7 @@ _FRACTION_COMPOSITE_RANGE_RE = re.compile(
 # minimum=5). Covers both endpoint orders, same as the decimal/fraction
 # composites above.
 _NEGATIVE_COMPOSITE_RANGE_RE = re.compile(
-    rf"(?<!\d)-\d+{_RANGE_SEPARATOR}\d+|\d+{_RANGE_SEPARATOR}(?<!\d)-\d+"
+    rf"(?<!\d)-\d+{_RANGE_SEPARATOR}\d+|\d+{_RANGE_SEPARATOR}(?<!\d)-\d+", re.IGNORECASE
 )
 # Unsupported prefix markers ("less than 5", "fewer than 5") are not part
 # of the recognized open-upper catalog (Astra review finding 3) — treated
