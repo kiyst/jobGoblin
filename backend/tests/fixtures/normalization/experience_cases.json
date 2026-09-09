@@ -83,20 +83,20 @@
   {
     "id": "reversed_label_value_bare",
     "origin": "synthetic_representative",
-    "title": null,
-    "description": "Experience: 5+ years",
-    "expected_min": 5, "expected_min_provenance": "parsed_description",
+    "title": "Experience: 5+ years",
+    "description": null,
+    "expected_min": 5, "expected_min_provenance": "inferred",
     "expected_max": null, "expected_max_provenance": "unavailable",
-    "note": "Reversed label:value order, inherently role-scoped like a structured field."
+    "note": "Corrected input (Astra re-review finding 3, round 3): reversed label:value order has no attribution-frame concept on the title side (titles are structural, not prose), so it remains supported there unchanged. The description-side form no longer has an independent acceptance path at all — see round3_fix3_description_label_value_no_longer_exempt below."
   },
   {
     "id": "reversed_label_value_range",
     "origin": "synthetic_representative",
-    "title": null,
-    "description": "Experience: 3-5 years",
-    "expected_min": 3, "expected_min_provenance": "parsed_description",
-    "expected_max": 5, "expected_max_provenance": "parsed_description",
-    "note": "Reversed label:value order, range form."
+    "title": "Experience: 3-5 years",
+    "description": null,
+    "expected_min": 3, "expected_min_provenance": "inferred",
+    "expected_max": 5, "expected_max_provenance": "inferred",
+    "note": "Corrected input (Astra re-review finding 3, round 3): title-side reversed label:value, range form."
   },
   {
     "id": "frame_this_role_requires",
@@ -628,5 +628,95 @@
     "expected_min": 5, "expected_min_provenance": "inferred",
     "expected_max": 10, "expected_max_provenance": "inferred",
     "note": "Astra re-review finding 5: two non-conflicting candidates in the same segment populate independent bounds without contaminating each other — not every multi-candidate segment is a conflict."
+  },
+  {
+    "id": "round3_fix1_leading_ideally_with_comma",
+    "origin": "synthetic_representative",
+    "title": "Ideally, 5 years of experience",
+    "description": null,
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Astra re-review finding 1: a comma after the leading marker splits this into two segments (\"Ideally\" and \"5 years of experience\"), but the qualifier-only preceding segment must still suppress its follower — same outcome as the no-comma form already covered."
+  },
+  {
+    "id": "round3_fix1_leading_preferred_with_comma_range",
+    "origin": "synthetic_representative",
+    "title": "Preferred, 3-5 years experience",
+    "description": null,
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Astra re-review finding 1: preceding qualifier-only segment suppression, range variant."
+  },
+  {
+    "id": "round3_fix1_trailing_parenthesized_not_required",
+    "origin": "synthetic_representative",
+    "title": "5 years experience (not required)",
+    "description": null,
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Astra re-review finding 1: parenthesized content must be interleaved in original text order, not hoisted before the segment it modifies. NOTE: with only two segments, the bidirectional adjacency check alone happens to compensate even if order were wrong (preceding vs. following becomes symmetric) — see the three-segment case below, which is what actually isolates order-preservation from the bidirectional check."
+  },
+  {
+    "id": "round3_fix1_three_segment_order_preservation_isolation",
+    "origin": "synthetic_representative",
+    "title": "Software Engineer, 5 years experience (not required)",
+    "description": null,
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Astra re-review finding 1, isolating a three-segment case: hoisting the parenthesized \"not required\" ahead of \"Software Engineer\" (its actual predecessor in the text) leaves it non-adjacent to \"5 years experience\" once reordered, so only true text-order preservation (not merely bidirectional checking) prevents minimum=5 from leaking through."
+  },
+  {
+    "id": "round3_fix2_decimal_to_range",
+    "origin": "synthetic_representative",
+    "title": "3.5 to 5 years experience",
+    "description": null,
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Astra re-review finding 2: a decimal combined with the \"to\" range separator is a single malformed composite — poisoning only \"3.5\" left \"5\" as a surviving independent bare candidate; the whole composite must poison."
+  },
+  {
+    "id": "round3_fix2_fraction_hyphen_range",
+    "origin": "synthetic_representative",
+    "title": "1/2-5 years experience",
+    "description": null,
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Astra re-review finding 2: a fraction whose denominator is also shared with a range hyphen is a single malformed composite — poisoning only \"1/2\" left \"5\" as a surviving independent bare candidate."
+  },
+  {
+    "id": "round3_fix2_composite_does_not_swallow_neighboring_valid_phrase",
+    "origin": "synthetic_representative",
+    "title": "3.5 to 5 years experience and 10 years experience",
+    "description": null,
+    "expected_min": 10, "expected_min_provenance": "inferred",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Astra re-review finding 2: composite poisoning must stay localized to the malformed span — a separate, independent, well-formed phrase elsewhere in the same title still resolves normally."
+  },
+  {
+    "id": "round3_fix3_description_label_value_no_longer_exempt",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "Experience: 5+ years",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Astra re-review finding 3: sentence-initial position is not an approved exception — a reversed label:value description candidate must obey the same attribution frame as any other candidate, which this fails (no ALLOWED_SUBJECT/REQUIRE_VERB present). The equivalent title form remains supported (see reversed_label_value_bare)."
+  },
+  {
+    "id": "round3_fix3_label_value_unit_now_mandatory",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "Experience: 5",
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Astra re-review finding 3: the label:value grammar's unit word was optional, letting a bare \"Experience: 5\" (no \"years\"/\"yrs\" at all) match — now mandatory, requiring the same number/unit adjacency as every other production. Also independently rejected here since description no longer has any label:value acceptance path at all."
+  },
+  {
+    "id": "round3_fix3_label_value_unit_now_mandatory_title",
+    "origin": "synthetic_representative",
+    "title": "Experience: 5",
+    "description": null,
+    "expected_min": null, "expected_min_provenance": "unavailable",
+    "expected_max": null, "expected_max_provenance": "unavailable",
+    "note": "Astra re-review finding 3, title isolation: unlike the description case above (independently rejected by the exemption's removal), this is the case that actually exercises the mandatory-unit fix on its own, since title-side label:value matching is otherwise still active."
   }
 ]

@@ -99,121 +99,8 @@ that detail.
 ### Work done
 
 - Date/agent: 2026-09-08, Claude Code (Sonnet 5). Risk class R
-  (R-plus-adversarial, matching `seniority.py`'s precedent — deterministic
-  pure-function text classifier, no identity/concurrency/security/
-  external/destructive surface). Base -> ending commit: `ddb427d` -> this
-  commit; new branch `phase-3/experience-classifier`. Workflow v3.1 pilot
-  parser slice 1 of 3. Implements the fresh proposal Astra approved with
-  binding clarifications, incorporating every amendment below exactly.
-- `app/normalization/experience.py` (new): `classify_experience(title,
-  description) -> ExperienceRange`, the first parser needing `types.py`'s
-  deferred composite-result case — two independently-provenanced
-  `NormalizationResult[int]` bounds (`minimum`, `maximum`). Independent
-  implementation (own regex grammar, own segment/sentence splitting,
-  no import from `seniority.py`/`employment.py`/`remote.py`), proven by
-  the same AST-inspection allow-list pattern as the other three parsers.
-- Astra review amendments incorporated (all from the `604213a` proposal
-  review): **(2)** applicant attribution is a closed
-  `ALLOWED_SUBJECT REQUIRE_VERB [ATTRIBUTION_OBJECT] <phrase> END` frame,
-  not subject/verb adjacency alone — `"We require vendors with 5 years of
-  experience."` and `"We require no experience to use our platform."`
-  both correctly reject. **(3)** the continuation-boundary rule is
-  uniform: only an empty remainder accepts; a recognized negation and a
-  wholly unrecognized hedge both reject identically, so unsupported
-  negation can never silently become a positive requirement, while
-  `"no more than 5 years"` still correctly yields `maximum=5` (consumed
-  whole by the open-upper production, never reaching the boundary check
-  as trailing text). **(4)** numeric rejection is atomic: a single
-  text-wide redaction pass (decimal-beside-range, fraction, free-standing
-  negative, bare decimal) runs before any sentence/segment splitting, so
-  a poisoned digit can never resurface via a narrower production —
-  proven necessary specifically on the *title* path (no redundant
-  match-start/continuation-boundary guard there), where four new fixtures
-  demonstrate the old (mutated-off) behavior fabricating `min=5`, `min=2`,
-  etc. **(5)** preference-marker suppression is positional, not lexical:
-  `"the ideal candidate"` (a closed subject phrase) is never confused with
-  the `"ideal"/"ideally"` preference marker, since the marker check only
-  ever inspects a sentence-initial `"Ideally,"` or an immediate trailing
-  tag after an already-matched number — never the subject position.
-  **(6)** internal (within-source) conflict is checked, and wins, before
-  cross-source reconciliation, independently per bound — mirrors
-  `seniority.py`'s exact `_CONFLICT`-before-agreement precedence.
-- Files changed: `backend/app/normalization/experience.py` (new),
-  `backend/tests/test_normalization_experience.py` (new, 63 tests),
-  `backend/tests/fixtures/normalization/experience_cases.json` (new, 55
-  cases), `docs/ROADMAP.md` (Phase 3 bullet — also corrected a
-  pre-existing staleness: the seniority-classifier bullet still said
-  "pending Codex review — not merged" despite that merge already existing
-  at `92fcefc`), `docs/ARCHITECTURE.md` (annotated `experience.py`'s
-  status), this handoff entry (two-iteration rotation). No other file
-  touched; no schema, migration, or ingestion/persistence wiring.
-- Contract-conformance pass (Workflow v3.1, required for parser slices):
-  walked every claim in the approved proposal plus every Astra amendment
-  individually against the implementation via direct manual traces
-  (documented above and in the module docstring) before writing the
-  fixture corpus — all confirmed enforced, not merely fixture-satisfied.
-- Counterexample pass (Workflow v3.1, required for parser slices): probed
-  ~25 new inputs not in the fixture corpus across the historical-defect
-  checklist's nine categories (disallowed subjects beyond the reviewed
-  examples — "the client", "our previous engineer"; non-adjacent
-  "requires" separated from its subject by other clauses; an inverted
-  raw range "7-3 years" correctly caught by the same consistency
-  invariant that catches cross-bound inversion; a hyphenated compound
-  "5-Year Minimum..." that doesn't match any production). No confidently-
-  wrong output found; every excluded case resolved to `UNAVAILABLE`. Two
-  new safe-miss scope boundaries noted, not fixed: a "5-Year" hyphenated-
-  compound adjective form, and a `REQUIRE_VERB` frame requiring direct
-  subject-verb adjacency (no intervening clause) — both documented
-  limitations, not confidently-wrong cases.
-- Load-bearing regression mutation proofs (Workflow v3.1, required):
-  individually reverted and reconfirmed 8 fixes — amendment 2's
-  attribution-object gate, amendment 3's uniform continuation-boundary
-  rule, amendment 4's redaction mechanism (isolated via 4 new title-side
-  fixtures after discovering the original description-side fixtures were
-  masked by amendment 2/3's own guards — a real gap this pass itself
-  caught and closed), amendment 5's positional preference check, amendment
-  6's internal-conflict precedence, and Risk 5's hyphen disambiguation.
-  Every mutation reproduced the exact pre-fix defect (a fabricated value
-  or a crash); every fix, once restored, passed again.
-- Verification: `ruff format --check`/`ruff check`/`mypy` all pass (106
-  source files). `python -m scripts.check_repo` exits 0. Genuine external
-  `python scripts/verify.py --level routine --focus
-  tests/test_normalization_experience.py` (full run) — **63 focused /
-  1909 full-suite tests** (was 1846; +63 from the three targeted
-  normalization suites run together plus the new module, net +63 to the
-  full suite). All 11 steps PASS, including `handoff metadata validation`
-  against this entry's own metadata block below.
-- Deviations/known limitations: explicit exclusions carried from the
-  approved proposal (no `"Requirements:"`-header-scoped attribution, no
-  `exp` unit abbreviation, negation-marker catalog acknowledged
-  non-exhaustive) plus the two new counterexample-pass findings above
-  (hyphenated-compound numbers, non-adjacent requirement clauses) — all
-  safe misses (`UNAVAILABLE`), none confidently wrong, none requiring
-  user approval under the confidently-wrong blocking rule.
-- STOP — awaiting Astra's implementation review. Do not merge, begin
-  another Phase 3 parser, wire into ingestion/persistence, contact
-  providers, or create a migration.
-
-```workflow-metadata
-workflow_version: v3.1-pilot
-slice_kind: parser
-verification_level: routine
-focused_test_selector: tests/test_normalization_experience.py
-focused_test_count: 63
-full_suite_count: 1909
-fixture_path: backend/tests/fixtures/normalization/experience_cases.json
-fixture_count: 55
-```
-
----
-
-## Iteration 2
-
-### Work done
-
-- Date/agent: 2026-09-08, Claude Code (Sonnet 5). Risk class R
-  (R-plus-adversarial, unchanged from Iteration 1). Base -> ending commit:
-  `e13d8a6` -> this commit; same branch `phase-3/experience-classifier`.
+  (R-plus-adversarial, unchanged from the original implementation). Base
+  -> ending commit: `e13d8a6` -> this commit; same branch `phase-3/experience-classifier`.
   Bounded correction pass addressing Astra's review of commit `e13d8a6`
   (relayed to the implementer directly by the user as text; **not**
   committed to this branch as its own `### Work review` section — no such
@@ -307,4 +194,109 @@ focused_test_count: 78
 full_suite_count: 1924
 fixture_path: backend/tests/fixtures/normalization/experience_cases.json
 fixture_count: 70
+```
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-09-08, Claude Code (Sonnet 5). Risk class R
+  (R-plus-adversarial, unchanged). Base -> ending commit: `2589eec` ->
+  this commit; same branch `phase-3/experience-classifier`. Bounded
+  correction pass addressing Astra's review of commit `2589eec` (relayed
+  as text; no `### Work review` commit exists on this branch or its
+  origin). Scope held to the parser, its tests/fixtures, and this
+  documentation.
+- Three findings addressed, plus one genuine defect this pass discovered
+  on its own while mutation-proving finding 3:
+  1. **Title modifier scope/ordering**: `_title_segments` now interleaves
+     paired-parenthesis/bracket content with delimiter-split text in
+     **original left-to-right order**, instead of hoisting all
+     parenthesized content to the front of the segment list.
+     `has_adjacent_qualifier` now checks **both** the preceding and
+     following segment, not only the following one. `"Ideally, 5 years of
+     experience"`, `"Preferred, 3-5 years experience"`, and `"5 years
+     experience (not required)"` now all reject.
+  2. **Composite unsupported numeric expressions**: replaced the
+     hyphen-only `_DECIMAL_RANGE_RE` with generalized
+     `_DECIMAL_COMPOSITE_RANGE_RE`/`_FRACTION_COMPOSITE_RANGE_RE`, which
+     poison a decimal or fraction combined with *any* adjacent range
+     separator (hyphen, `"to"`, `"and"`, either operand order) as one
+     whole span, rather than only the decimal/fraction's own two
+     operands. `"3.5 to 5 years experience"` and `"1/2-5 years
+     experience"` no longer leak the untouched second endpoint as a
+     surviving bare candidate; a separate, well-formed neighboring phrase
+     is unaffected.
+  3. **Description label:value exemption removed**: the reversed
+     label:value form (`"Experience: 5+ years"`) no longer has any
+     independent acceptance path on the description side at all —
+     sentence-initial position was never an approved exception, per this
+     review. It now only matches on the title side. The label:value
+     grammar's unit word is also now mandatory (`"Experience: 5"` with no
+     `"years"`/`"yrs"` at all previously matched; it no longer does).
+     **Genuine defect found while mutation-proving this fix**: title-side
+     label:value matching turned out to be effectively dead code all
+     along — the colon in `"Experience: N"` is itself a segment
+     delimiter, so segmentation always separated the word `experience`
+     from its value before the label:value grammar ever saw them
+     together; every prior passing fixture for this form "worked" only
+     by coincidence, via the isolated-segment short-form waiver matching
+     the post-colon fragment on its own. Fixed by checking the label:value
+     grammar against the **whole title**, anchored at position 0 with a
+     remainder check, *before* segmentation runs — mirroring the
+     description side's existing whole-sentence discipline. This makes
+     the mandatory-unit fix (and the grammar generally) actually
+     reachable and testable for the first time.
+- Files changed: `backend/app/normalization/experience.py`,
+  `backend/tests/fixtures/normalization/experience_cases.json` (+10
+  cases, 80 total), this handoff entry. No other file touched.
+- Mutation-proof mapping:
+
+  | Fix | Mechanism | Regression test(s) | Mutation outcome |
+  |---|---|---|---|
+  | 1a | Order-preserving `_title_segments` | `round3_fix1_three_segment_order_preservation_isolation` | Reverted to hoist-parens-first: failed (`minimum=5`). Restored: passed. **Note**: the simpler two-segment fixture (`round3_fix1_trailing_parenthesized_not_required`) still passes even with this fix disabled — with only two segments, "preceding" and "following" are symmetric, so the bidirectional check alone compensates; the three-segment fixture is what actually isolates order-preservation. |
+  | 1b | Bidirectional `has_adjacent_qualifier` | `round3_fix1_leading_ideally_with_comma`, `round3_fix1_leading_preferred_with_comma_range` | Reverted to following-only: both failed. Restored: both passed. |
+  | 2 | `_DECIMAL_COMPOSITE_RANGE_RE`/`_FRACTION_COMPOSITE_RANGE_RE` | `round3_fix2_decimal_to_range`, `round3_fix2_fraction_hyphen_range`, `round3_fix2_composite_does_not_swallow_neighboring_valid_phrase` | Removed from `_POISON_PATTERNS`: all three failed (first two fabricated `minimum=5`; the third failed differently — the fabricated `5` conflicted with the real, independent `10`, masking it behind a spurious cross-candidate conflict instead of surfacing `minimum=10`). Restored: all three passed. |
+  | 3a | Description label:value path removed | `round3_fix3_description_label_value_no_longer_exempt` | Reinstated the old exemption: failed (`minimum=5`). Restored: passed. |
+  | 3b | Mandatory unit + whole-title anchoring | `round3_fix3_label_value_unit_now_mandatory_title` | Made unit optional again: failed (`minimum=5`) once tested against the corrected whole-title path — the same mutation against the original (dead) per-segment path had silently passed, which is what surfaced the whole-title fix's necessity in the first place. Restored: passed. |
+
+  The description-side `round3_fix3_label_value_unit_now_mandatory` fixture
+  does not itself isolate 3b (already independently rejected by 3a's
+  removal of the description path entirely) — noted directly in its
+  fixture `note`.
+- Verification: `ruff format --check`/`ruff check`/`mypy` all pass (106
+  source files). `python -m scripts.check_repo` exits 0. Genuine external
+  `python scripts/verify.py --level routine --focus
+  tests/test_normalization_experience.py` (full run) — **88 focused /
+  1934 full-suite tests** (was 78/1924; +10 fixture cases). All 11 steps
+  PASS, including `handoff metadata validation` against this entry's own
+  metadata block below. A broader ad hoc regression sweep (not committed
+  as fixtures) covering every prior round's examples plus new
+  combinations (a leading *and* trailing qualifier together, a
+  label:value form followed by a comma-separated `"not required"`, a
+  valid range sharing a segment with a poisoned composite, a composite
+  inside an attribution frame, and a *leading* parenthesized qualifier)
+  all resolved correctly with no confidently-wrong output.
+- Deviations/known limitations: unchanged from prior iterations' explicit
+  exclusions. The label:value grammar still supports only bare/plus/
+  hyphen-range forms, not open-upper/open-lower prefixes (e.g.
+  `"Experience: up to 10 years"` remains unsupported) — this was never
+  claimed or tested before either, so it is not a regression, just an
+  explicitly noted scope boundary discovered during this pass's
+  debugging.
+- STOP — awaiting Astra's re-review. Do not merge, begin another Phase 3
+  parser, wire into ingestion/persistence, contact providers, or create a
+  migration.
+
+```workflow-metadata
+workflow_version: v3.1-pilot
+slice_kind: parser
+verification_level: routine
+focused_test_selector: tests/test_normalization_experience.py
+focused_test_count: 88
+full_suite_count: 1934
+fixture_path: backend/tests/fixtures/normalization/experience_cases.json
+fixture_count: 80
 ```
