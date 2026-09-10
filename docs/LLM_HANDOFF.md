@@ -371,9 +371,13 @@ fixture_count: 125
   findings [7+3+2+1], six pre-code amendments recorded separately,
   proposal-submission count not reconstructible), `classify_salary`
   (three documented proposal-review rounds, one executable correction
-  round with seven boundary findings, four demonstrated confidently-wrong
-  findings under the strict definition with any further count recorded
-  as not reconstructible rather than estimated), and `classify_location`
+  round addressing five executable grammar-boundary mechanisms, their
+  accompanying regression fixtures, and one documentation-attribution
+  correction; no salary finding meets the strict confidently-wrong bar —
+  the boundary-acceptance defects demonstrate malformed input being
+  wrongly accepted, not a value contradicted by the input — and no exact
+  count under that definition is reconstructible from durable evidence),
+  and `classify_location`
   (four documented proposal-review rounds, one executable correction
   round, eight validated findings including four committed
   confidently-wrong cases); the four numerical target verdicts
@@ -416,8 +420,9 @@ fixture_count: 125
   test file changed, so no focused/full-suite run applies.
 - Deviations/known limitations: this ADR's own "not reconstructible"
   figures (experience's proposal-submission count; salary's exact
-  confidently-wrong count beyond the four demonstrated) are deliberate
-  gaps, not omissions to be silently filled later.
+  confidently-wrong finding count under the strict definition) are
+  deliberate gaps — not zero, and not to be silently filled with an
+  estimate later.
 - STOP — this is Slice 1 of 3 only. Do not implement the contract
   harness, receipt system, verifier profiles, metadata schema changes,
   workflow-version changes, title parser, or skill parser. Do not merge,

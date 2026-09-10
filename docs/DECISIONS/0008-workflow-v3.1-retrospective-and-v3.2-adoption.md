@@ -66,27 +66,31 @@ recorded as **not reconstructible** rather than estimated.
 - **Three documented proposal-review rounds**: the implementation commit `3c02fac` and its
   own `Work done` entry state "the round-4-approved `classify_salary` proposal (three
   proposal-review rounds preceded implementation)."
-- **One executable correction round** (`261ffe3`), containing **seven boundary findings**:
-  unrestricted `\s` replaced with a covered-whitespace class; label-boundary strictness;
-  currency-code boundary strictness; period-boundary strictness split by shape; `up...to`
-  narrowed to exactly two forms; regression fixtures added; a documentation-attribution
-  correction (this slice was never in Astra's review queue — a copy-paste artifact from the
-  merged `classify_experience` precedent, corrected here as a non-behavioral fix).
+- **One executable correction round** (`261ffe3`), addressing **five executable
+  grammar-boundary mechanisms**, their accompanying regression fixtures, and **one
+  documentation-attribution correction**: unrestricted `\s` replaced with a
+  covered-whitespace class; label-boundary strictness; currency-code boundary strictness;
+  period-boundary strictness split by shape; `up...to` narrowed to exactly two forms —
+  each backed by new regression fixtures — plus a documentation-attribution correction
+  (this slice was never in Astra's review queue — a copy-paste artifact from the merged
+  `classify_experience` precedent, corrected here as a non-behavioral fix). This ADR no
+  longer describes these as "seven boundary findings"; that framing conflated five
+  executable mechanisms, their fixtures, and one unrelated documentation fix into a single
+  undifferentiated count.
 - **Confidently-wrong classification, strict**: a finding counts as confidently wrong only
   where the committed text demonstrates the pre-fix code returned a confident value
-  contradicted by its own input — not merely "accepted a boundary case it shouldn't have."
-  Findings 2–5 (label/code/period boundary-glue acceptance, `up...to` separator laxity) meet
-  this bar: each is documented producing a specific fabricated numeric/currency/period value
-  from malformed input (e.g. `"salary120000"` wrongly extracting a value). Findings 1
-  (whitespace class narrowing) and 6–7 (fixture additions; documentation-attribution fix)
-  do not themselves demonstrate a fabricated value in the committed text and are not
-  counted as confidently-wrong findings. **An exact strict count beyond this is not
-  reconstructible** from durable evidence — the original review request that produced these
-  seven findings was relayed as text and never committed as its own artifact, so no
-  additional per-finding severity/certainty detail beyond what the correction commit itself
-  documents can be recovered. This ADR records four demonstrated confidently-wrong findings
-  for salary and marks any finer count beyond that as not reconstructible, rather than
-  estimating one.
+  *contradicted by* its own input. The five grammar-boundary mechanisms above demonstrate
+  that malformed/glued boundary input (e.g. `"salary120000"`) was wrongly **accepted** by
+  the pre-fix grammar — but in each documented case the numeric/currency/period
+  information the parser extracted was actually present in the input; the defect is that
+  the grammar's boundary was too permissive, not that the extracted value contradicted the
+  input. This does not meet the strict confidently-wrong bar. **No salary finding is
+  recorded as confidently wrong**, and **no exact count of salary findings under the
+  strict definition is reconstructible from durable evidence** — the original review
+  request that produced these findings was relayed as text and never committed as its own
+  artifact, so the per-finding certainty detail needed to classify each one individually
+  cannot be recovered. This ADR does not substitute zero as an exact historical count for
+  salary; it records the count as **not reconstructible**, distinct from "zero identified."
 
 ### `classify_location`
 
@@ -115,7 +119,7 @@ recorded as **not reconstructible** rather than estimated.
 | Target | Verdict | Basis |
 |---|---|---|
 | At most one correction round per slice | **Fail** | `classify_experience` alone required four post-implementation correction rounds (13 findings); one violating slice fails the target as written ("a slice needing two or more... counts against the pilot"). Salary and location each needed exactly one. |
-| Zero confidently-wrong independent-review findings | **Fail** | Proven without inventing uncertain counts: `classify_experience`'s `559e77a` finding is explicitly documented, in its own committed text, producing a fabricated value; `classify_location`'s four confidently-wrong findings above are independently reproduced and documented. These proven cases alone are sufficient to fail the target; the salary figure above is deliberately not used to inflate this verdict beyond what is demonstrated. |
+| Zero confidently-wrong independent-review findings | **Fail** | Proven without inventing uncertain counts: `classify_experience`'s `559e77a` finding is explicitly documented, in its own committed text, producing a fabricated value; `classify_location`'s four confidently-wrong findings above are independently reproduced and documented. These proven cases alone are sufficient to fail the target independently of salary; salary's boundary-acceptance findings do not meet the strict confidently-wrong bar (see above) and are not used as evidence for this verdict either way. |
 | Zero handoff-count defects reaching a merged `Work done` entry undetected | **Pass** | No instance was found, across any of the three slices' committed history, of a fabricated/stale/mismatched count surviving to a merged `Work done` entry. |
 | Zero regressions that pass with their required guard disabled | **Pass** | Every fixture flagged non-isolating across all three slices (experience: several per round; salary: 4; location: 2) was explicitly disclosed as such in committed text, was never relied upon as sole proof of its finding, and had a genuinely isolating sibling fixture confirmed by mutation.
 
@@ -228,6 +232,6 @@ answered in that slice's own proposal before implementation:
 - The v3.1 workflow continues governing all work, including any further Phase 3 parser
   slices, until a separately authorized activation slice changes it.
 - The "not reconstructible" figures recorded above (experience's proposal-submission count;
-  salary's exact confidently-wrong count beyond the four demonstrated) must not be
-  backfilled with an estimate in any future document; if better evidence is ever found, it
-  should be added with its source cited, not asserted from memory.
+  salary's exact confidently-wrong finding count under the strict definition) must not be
+  backfilled with an estimate — including zero — in any future document; if better evidence
+  is ever found, it should be added with its source cited, not asserted from memory.
