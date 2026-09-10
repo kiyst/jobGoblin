@@ -251,7 +251,10 @@ documentation without explicit user authorization.
 ## Workflow v3.1 pilot (three-slice trial)
 
 Status: the approved pilot proposal counts three **parser** slices as its measurement
-window, starting with `classify_experience` as pilot slice 1 of 3 (slices 2/3 unstarted).
+window: `classify_experience` (slice 1 of 3, merged) and `classify_salary` (slice 2 of 3,
+merged) are both complete; `classify_location` (slice 3 of 3) is implemented and frozen
+for blind Sol/Astra review, not yet merged. See `docs/ROADMAP.md`'s Phase 3 status for
+exact commit references.
 `tooling/workflow-v3.1-handoff-metadata` (this branch) is the enabling infrastructure that
 makes the pilot measurable — it is not itself one of the three counted slices, since it
 has no parsing form/invariant for the claim-to-evidence matrix or historical-defect

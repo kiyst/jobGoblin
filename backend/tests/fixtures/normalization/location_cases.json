@@ -1,0 +1,1252 @@
+[
+  {
+    "id": "bare_city_no_anchor_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Austin",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "No positive city catalog exists; a bare city-shaped token with no state/ZIP/country anchor is never confidently resolved."
+  },
+  {
+    "id": "city_state_name_collision_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Washington",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Ambiguous bare name (city vs. state vs. informal DC reference) with no anchor -- resolved by never resolving it."
+  },
+  {
+    "id": "country_state_name_collision_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Georgia",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "'Georgia' is deliberately excluded from the country catalog (collides with the US state name); bare token has no anchor either way."
+  },
+  {
+    "id": "marker_alone_no_geography_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Onsite",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "A marker word alone, with no geography to wrap, matches no production."
+  },
+  {
+    "id": "arbitrary_phrase_worldwide_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Worldwide",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Not a recognized country; bare token has no anchor."
+  },
+  {
+    "id": "arbitrary_phrase_multiple_locations_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Multiple Locations",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Not a recognized country; bare token has no anchor."
+  },
+  {
+    "id": "marker_country_uk_alias",
+    "origin": "synthetic_representative",
+    "location": "Remote, UK",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": "United Kingdom", "expected_country_provenance": "parsed_description",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Marker consumed and discarded; UK alias canonicalized to United Kingdom."
+  },
+  {
+    "id": "city_state_noncolliding_infers_us",
+    "origin": "synthetic_representative",
+    "location": "Austin, TX",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": "TX", "expected_state_provenance": "parsed_description",
+    "expected_country": "United States", "expected_country_provenance": "inferred",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "City always discarded. Non-colliding state infers United States (INFERRED, not a literal read)."
+  },
+  {
+    "id": "collision_al_no_anchor_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Tirana, AL",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Collision code AL (Alabama/Albania); no US-only anchor -- fails closed."
+  },
+  {
+    "id": "collision_ar_no_anchor_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Buenos Aires, AR",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Collision code AR (Arkansas/Argentina); no anchor -- fails closed."
+  },
+  {
+    "id": "collision_az_no_anchor_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Baku, AZ",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Collision code AZ (Arizona/Azerbaijan); no anchor -- fails closed."
+  },
+  {
+    "id": "collision_ca_no_anchor_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Toronto, CA",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Collision code CA (California/Canada); no anchor -- fails closed."
+  },
+  {
+    "id": "collision_co_no_anchor_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Bogota, CO",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Collision code CO (Colorado/Colombia); no anchor -- fails closed."
+  },
+  {
+    "id": "collision_de_no_anchor_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Berlin, DE",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Collision code DE (Delaware/Germany); no anchor -- fails closed."
+  },
+  {
+    "id": "collision_ga_no_anchor_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Libreville, GA",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Collision code GA (Georgia the US state/Gabon); no anchor -- fails closed."
+  },
+  {
+    "id": "collision_id_no_anchor_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Jakarta, ID",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Collision code ID (Idaho/Indonesia); no anchor -- fails closed."
+  },
+  {
+    "id": "collision_il_no_anchor_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Tel Aviv, IL",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Collision code IL (Illinois/Israel); no anchor -- fails closed."
+  },
+  {
+    "id": "collision_in_no_anchor_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Bangalore, IN",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Collision code IN (Indiana/India); no anchor -- fails closed."
+  },
+  {
+    "id": "collision_ky_no_anchor_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "George Town, KY",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Collision code KY (Kentucky/Cayman Islands); no anchor -- fails closed."
+  },
+  {
+    "id": "collision_la_no_anchor_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Vientiane, LA",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Collision code LA (Louisiana/Laos); no anchor -- fails closed."
+  },
+  {
+    "id": "collision_ma_no_anchor_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Rabat, MA",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Collision code MA (Massachusetts/Morocco); no anchor -- fails closed."
+  },
+  {
+    "id": "collision_md_no_anchor_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Chisinau, MD",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Collision code MD (Maryland/Moldova); no anchor -- fails closed."
+  },
+  {
+    "id": "collision_me_no_anchor_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Podgorica, ME",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Collision code ME (Maine/Montenegro); no anchor -- fails closed."
+  },
+  {
+    "id": "collision_mn_no_anchor_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Ulaanbaatar, MN",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Collision code MN (Minnesota/Mongolia); no anchor -- fails closed."
+  },
+  {
+    "id": "collision_mo_no_anchor_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Macau, MO",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Collision code MO (Missouri/Macao); no anchor -- fails closed."
+  },
+  {
+    "id": "collision_ms_no_anchor_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Plymouth, MS",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Collision code MS (Mississippi/Montserrat); no anchor -- fails closed."
+  },
+  {
+    "id": "collision_mt_no_anchor_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Valletta, MT",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Collision code MT (Montana/Malta); no anchor -- fails closed."
+  },
+  {
+    "id": "collision_nc_no_anchor_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Noumea, NC",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Collision code NC (North Carolina/New Caledonia); no anchor -- fails closed."
+  },
+  {
+    "id": "collision_ne_no_anchor_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Niamey, NE",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Collision code NE (Nebraska/Niger); no anchor -- fails closed."
+  },
+  {
+    "id": "collision_pa_no_anchor_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Panama City, PA",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Collision code PA (Pennsylvania/Panama); no anchor -- fails closed."
+  },
+  {
+    "id": "collision_sc_no_anchor_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Victoria, SC",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Collision code SC (South Carolina/Seychelles); no anchor -- fails closed."
+  },
+  {
+    "id": "collision_sd_no_anchor_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Khartoum, SD",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Collision code SD (South Dakota/Sudan); no anchor -- fails closed."
+  },
+  {
+    "id": "collision_tn_no_anchor_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Tunis, TN",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Collision code TN (Tennessee/Tunisia); no anchor -- fails closed."
+  },
+  {
+    "id": "collision_va_no_anchor_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Vatican City, VA",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Collision code VA (Virginia/Holy See); no anchor -- fails closed."
+  },
+  {
+    "id": "collision_ca_disambiguated_by_zip",
+    "origin": "synthetic_representative",
+    "location": "Sacramento, CA 95814",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": "CA", "expected_state_provenance": "parsed_description",
+    "expected_country": "United States", "expected_country_provenance": "inferred",
+    "expected_postal_code": "95814", "expected_postal_code_provenance": "parsed_description",
+    "note": "A trailing US ZIP disambiguates a collision-bearing state regardless of collision-set membership. Correction round 6, finding 2: country provenance is inferred (not parsed_description) -- 'United States' is never literally present in the text even when a ZIP anchors it."
+  },
+  {
+    "id": "collision_ga_disambiguated_by_zip",
+    "origin": "synthetic_representative",
+    "location": "Atlanta, GA 30301",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": "GA", "expected_state_provenance": "parsed_description",
+    "expected_country": "United States", "expected_country_provenance": "inferred",
+    "expected_postal_code": "30301", "expected_postal_code_provenance": "parsed_description",
+    "note": "Second collision code proving the ZIP-disambiguation mechanism generalizes beyond CA. Country provenance is inferred (finding 2)."
+  },
+  {
+    "id": "noncolliding_state_zip_positive_control",
+    "origin": "synthetic_representative",
+    "location": "Austin, TX 78701",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": "TX", "expected_state_provenance": "parsed_description",
+    "expected_country": "United States", "expected_country_provenance": "inferred",
+    "expected_postal_code": "78701", "expected_postal_code_provenance": "parsed_description",
+    "note": "Non-colliding state with a ZIP anchor -- no collision concern here. Country provenance is inferred (finding 2)."
+  },
+  {
+    "id": "city_state_zip_plus4",
+    "origin": "synthetic_representative",
+    "location": "Austin, TX 78701-1234",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": "TX", "expected_state_provenance": "parsed_description",
+    "expected_country": "United States", "expected_country_provenance": "inferred",
+    "expected_postal_code": "78701-1234", "expected_postal_code_provenance": "parsed_description",
+    "note": "ZIP+4 form accepted. Country provenance is inferred (finding 2)."
+  },
+  {
+    "id": "zip_too_short_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Austin, TX 1234",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "A 4-digit number is not a valid ZIP shape -- leftover unconsumed, whole match fails."
+  },
+  {
+    "id": "zip_too_long_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Austin, TX 123456",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "A 6-digit number is not a valid ZIP shape."
+  },
+  {
+    "id": "collision_ca_disambiguated_by_explicit_us",
+    "origin": "synthetic_representative",
+    "location": "Sacramento, CA, United States",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": "CA", "expected_state_provenance": "parsed_description",
+    "expected_country": "United States", "expected_country_provenance": "parsed_description",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Explicit US country in the three-part form disambiguates a collision-bearing state (dispatch rule 1)."
+  },
+  {
+    "id": "dc_dotted_spelling",
+    "origin": "synthetic_representative",
+    "location": "Washington, D.C.",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": "DC", "expected_state_provenance": "parsed_description",
+    "expected_country": "United States", "expected_country_provenance": "inferred",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "DC is never a collision-set member; dotted spelling canonicalizes to DC."
+  },
+  {
+    "id": "dc_bare_abbreviation",
+    "origin": "synthetic_representative",
+    "location": "Washington, DC",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": "DC", "expected_state_provenance": "parsed_description",
+    "expected_country": "United States", "expected_country_provenance": "inferred",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Bare DC spelling."
+  },
+  {
+    "id": "city_country_explicit_uk",
+    "origin": "synthetic_representative",
+    "location": "London, United Kingdom",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": "United Kingdom", "expected_country_provenance": "parsed_description",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Explicit non-US country, full name."
+  },
+  {
+    "id": "city_country_short_form_canada",
+    "origin": "synthetic_representative",
+    "location": "Toronto, Canada",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": "Canada", "expected_country_provenance": "parsed_description",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Explicit country, no state token at all."
+  },
+  {
+    "id": "country_alias_usa_canonicalized",
+    "origin": "synthetic_representative",
+    "location": "Austin, USA",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": "United States", "expected_country_provenance": "parsed_description",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Country alias 'USA' canonicalized to 'United States', not stored verbatim."
+  },
+  {
+    "id": "three_part_noncolliding_state_explicit_us",
+    "origin": "synthetic_representative",
+    "location": "Austin, TX, United States",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": "TX", "expected_state_provenance": "parsed_description",
+    "expected_country": "United States", "expected_country_provenance": "parsed_description",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Dispatch rule 1: recognized state + explicit US."
+  },
+  {
+    "id": "three_part_state_nonUS_country_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Austin, TX, Canada",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Dispatch rule 2: recognized US state + non-US country is an unsupported conflict -- fails closed entirely, never picks one side."
+  },
+  {
+    "id": "three_part_region_nonUS_country_preserved",
+    "origin": "synthetic_representative",
+    "location": "Toronto, ON, Canada",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": "Canada", "expected_country_provenance": "parsed_description",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Dispatch rule 3: non-state region + non-US country -- country preserved, region discarded (never stored as state)."
+  },
+  {
+    "id": "three_part_region_explicit_us_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Toronto, ON, United States",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Dispatch rule 4: non-state region + explicit US is contradictory -- fails closed."
+  },
+  {
+    "id": "three_part_unrecognized_country_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Toronto, ON, Narnia",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Country not in the closed catalog -- whole match fails, no rule applies."
+  },
+  {
+    "id": "three_part_canadian_province_preserved",
+    "origin": "synthetic_representative",
+    "location": "Toronto, BC, Canada",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": "Canada", "expected_country_provenance": "parsed_description",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "A different non-state region code (BC), same dispatch rule 3 outcome."
+  },
+  {
+    "id": "coordinator_or_inside_city_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "London or Paris, France",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "The discarded geo span is open-ended and would otherwise swallow 'London or Paris' as one span -- explicit standalone-word exclusion rejects the whole match."
+  },
+  {
+    "id": "coordinator_or_via_state_anchor_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Austin, TX or Boston, MA",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Rejected via the closed state catalog's anchor failing on 'TX or Boston, MA' -- a structurally different mechanism than the open-ended-token case above, not redundant."
+  },
+  {
+    "id": "multi_location_slash_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "New York, NY / San Francisco, CA",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Slash delimiter inside the discarded span rejects the whole match."
+  },
+  {
+    "id": "multi_location_semicolon_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Austin, TX; Boston, MA",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Semicolon delimiter rejects the whole match."
+  },
+  {
+    "id": "multi_location_pipe_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Austin, TX | Boston, MA",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Pipe delimiter rejects the whole match."
+  },
+  {
+    "id": "coordinator_and_inside_region_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Toronto, ON and QC, Canada",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Standalone 'and' inside the region span rejects the whole match, even in the three-part form."
+  },
+  {
+    "id": "andover_substring_not_coordinator_positive_control",
+    "origin": "synthetic_representative",
+    "location": "Andover, NH",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": "NH", "expected_state_provenance": "parsed_description",
+    "expected_country": "United States", "expected_country_provenance": "inferred",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "'and' is matched only as a standalone word, not a substring -- 'Andover' does not trigger the coordinator exclusion. NH (not MA) is used deliberately since MA is itself a collision code and would reject for an unrelated reason."
+  },
+  {
+    "id": "marker_prefix_comma",
+    "origin": "synthetic_representative",
+    "location": "Remote, Austin, TX",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": "TX", "expected_state_provenance": "parsed_description",
+    "expected_country": "United States", "expected_country_provenance": "inferred",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Prefix-comma marker form, consumed and discarded."
+  },
+  {
+    "id": "marker_prefix_hyphen_spaced",
+    "origin": "synthetic_representative",
+    "location": "Remote - Austin, TX",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": "TX", "expected_state_provenance": "parsed_description",
+    "expected_country": "United States", "expected_country_provenance": "inferred",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Prefix-hyphen marker form, mandatory whitespace both sides."
+  },
+  {
+    "id": "marker_prefix_hyphen_glued_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Remote-Austin, TX",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Glued hyphen (no whitespace) rejected -- mandatory whitespace boundary, applying the salary-classifier correction's lesson proactively."
+  },
+  {
+    "id": "marker_suffix_parenthesized",
+    "origin": "synthetic_representative",
+    "location": "Austin, TX (Hybrid)",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": "TX", "expected_state_provenance": "parsed_description",
+    "expected_country": "United States", "expected_country_provenance": "inferred",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Suffix-parenthesized marker form."
+  },
+  {
+    "id": "marker_on_site_hyphenated_suffix",
+    "origin": "synthetic_representative",
+    "location": "Austin, TX (On-Site)",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": "TX", "expected_state_provenance": "parsed_description",
+    "expected_country": "United States", "expected_country_provenance": "inferred",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Hyphenated marker spelling variant."
+  },
+  {
+    "id": "marker_on_site_spaced_suffix",
+    "origin": "synthetic_representative",
+    "location": "Austin, TX (On Site)",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": "TX", "expected_state_provenance": "parsed_description",
+    "expected_country": "United States", "expected_country_provenance": "inferred",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Spaced marker spelling variant."
+  },
+  {
+    "id": "marker_suffix_unclosed_paren_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Austin, TX (Hybrid",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Unclosed parenthesis rejected."
+  },
+  {
+    "id": "marker_suffix_crossed_bracket_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Austin, TX (Hybrid]",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Mismatched bracket type rejected -- only literal parentheses are recognized."
+  },
+  {
+    "id": "marker_prefix_repeated_comma_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Remote,, Austin, TX",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Repeated separator rejected."
+  },
+  {
+    "id": "marker_both_prefix_and_suffix_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Remote, Austin, TX (Hybrid)",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Both a prefix and a suffix marker in one string is rejected -- at most one marker total."
+  },
+  {
+    "id": "two_markers_stacked_prefix_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Remote, Hybrid, Austin, TX",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Two stacked prefix markers rejected -- the second marker word doesn't fit any production slot."
+  },
+  {
+    "id": "marker_embedded_in_city_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Austin Remote, TX",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "A marker word embedded inside the discarded geo span rejects the whole match."
+  },
+  {
+    "id": "marker_only_no_geography_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Remote",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Marker-only string, no geography to wrap."
+  },
+  {
+    "id": "sentinel_multiple_locations_us_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Multiple Locations, United States",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Sentinel catalog match (defense-in-depth) rejects the whole match, even though 'United States' is literally stated."
+  },
+  {
+    "id": "sentinel_worldwide_canada_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Worldwide, Canada",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Sentinel catalog match rejects the whole match."
+  },
+  {
+    "id": "sentinel_various_locations_france_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Various Locations, France",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Sentinel catalog match rejects the whole match."
+  },
+  {
+    "id": "sentinel_nationwide_state_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Nationwide, TX",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Sentinel catalog match rejects the whole match even against a non-colliding state."
+  },
+  {
+    "id": "sentinel_neighbor_legitimate_extracts_country",
+    "origin": "synthetic_representative",
+    "location": "Chicago, United States",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": "United States", "expected_country_provenance": "parsed_description",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "'Chicago' is not a sentinel phrase -- extracts normally, contrasted directly against the sentinel-rejected neighbor above."
+  },
+  {
+    "id": "generic_phrase_headquarters_country_only",
+    "origin": "synthetic_representative",
+    "location": "Headquarters, United States",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": "United States", "expected_country_provenance": "parsed_description",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Resolves the round-4 blocking finding: 'Headquarters' is discarded (never emitted as city, structurally, not via a denylist); country is safely extracted since it is literally stated. Deliberately NOT added to the sentinel catalog -- the fix is structural, not enumerative."
+  },
+  {
+    "id": "generic_phrase_flexible_country_only",
+    "origin": "synthetic_representative",
+    "location": "Flexible, Canada",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": "Canada", "expected_country_provenance": "parsed_description",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Resolves the round-4 blocking finding."
+  },
+  {
+    "id": "generic_phrase_anywhere_country_only",
+    "origin": "synthetic_representative",
+    "location": "Anywhere, France",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": "France", "expected_country_provenance": "parsed_description",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Resolves the round-4 blocking finding."
+  },
+  {
+    "id": "generic_phrase_distributed_country_only",
+    "origin": "synthetic_representative",
+    "location": "Distributed, US",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": "United States", "expected_country_provenance": "parsed_description",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Resolves the round-4 blocking finding; alias canonicalized."
+  },
+  {
+    "id": "nbsp_normalizes_to_covered_whitespace",
+    "origin": "synthetic_adversarial",
+    "location": "Austin, TX",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": "TX", "expected_state_provenance": "parsed_description",
+    "expected_country": "United States", "expected_country_provenance": "inferred",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "NBSP (U+00A0) has an NFKC compatibility decomposition to ASCII space -- folds before matching, resolves normally."
+  },
+  {
+    "id": "line_separator_not_covered_whitespace_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Austin, TX",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "U+2028 LINE SEPARATOR has no NFKC compatibility decomposition and is not in the covered-whitespace set -- left as unconsumed leftover, whole match fails."
+  },
+  {
+    "id": "trailing_period_stripped",
+    "origin": "synthetic_adversarial",
+    "location": "Austin, TX.",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": "TX", "expected_state_provenance": "parsed_description",
+    "expected_country": "United States", "expected_country_provenance": "inferred",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Single trailing period is the enumerated harmless-punctuation allowance."
+  },
+  {
+    "id": "double_trailing_period_not_stripped",
+    "origin": "synthetic_adversarial",
+    "location": "Austin, TX..",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "A run of two or more periods is deliberately left alone and fails to fullmatch."
+  },
+  {
+    "id": "bare_region_two_letter_no_country_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Toronto, ON",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "A two-part form with a non-US-state code and no country matches no production."
+  },
+  {
+    "id": "noncolliding_ny_positive_control",
+    "origin": "synthetic_representative",
+    "location": "New York, NY",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": "NY", "expected_state_provenance": "parsed_description",
+    "expected_country": "United States", "expected_country_provenance": "inferred",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Representative non-colliding state control."
+  },
+  {
+    "id": "noncolliding_wa_positive_control",
+    "origin": "synthetic_representative",
+    "location": "Seattle, WA",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": "WA", "expected_state_provenance": "parsed_description",
+    "expected_country": "United States", "expected_country_provenance": "inferred",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Representative non-colliding state control."
+  },
+  {
+    "id": "noncolliding_fl_positive_control",
+    "origin": "synthetic_representative",
+    "location": "Miami, FL",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": "FL", "expected_state_provenance": "parsed_description",
+    "expected_country": "United States", "expected_country_provenance": "inferred",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Representative non-colliding state control."
+  },
+  {
+    "id": "hyphenated_city_noncolliding_state",
+    "origin": "synthetic_representative",
+    "location": "Winston-Salem, TX",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": "TX", "expected_state_provenance": "parsed_description",
+    "expected_country": "United States", "expected_country_provenance": "inferred",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Hyphenated discarded-span punctuation (real place name shape) does not break the match, even though its content is never read."
+  },
+  {
+    "id": "apostrophe_city_noncolliding_state",
+    "origin": "synthetic_representative",
+    "location": "O'Fallon, TX",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": "TX", "expected_state_provenance": "parsed_description",
+    "expected_country": "United States", "expected_country_provenance": "inferred",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Apostrophe in the discarded span does not break the match."
+  },
+  {
+    "id": "period_city_noncolliding_state",
+    "origin": "synthetic_representative",
+    "location": "St. Louis, TX",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": "TX", "expected_state_provenance": "parsed_description",
+    "expected_country": "United States", "expected_country_provenance": "inferred",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Internal period in the discarded span does not break the match."
+  },
+  {
+    "id": "empty_string_no_candidate",
+    "origin": "synthetic_adversarial",
+    "location": "",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Empty string safely resolves to all-unavailable."
+  },
+  {
+    "id": "whitespace_only_no_candidate",
+    "origin": "synthetic_adversarial",
+    "location": "   ",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Whitespace-only string normalizes to empty."
+  },
+  {
+    "id": "none_input_no_candidate",
+    "origin": "synthetic_adversarial",
+    "location": null,
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "A None location (field genuinely absent) safely resolves to all-unavailable."
+  },
+  {
+    "id": "case_insensitive_state_and_country",
+    "origin": "synthetic_representative",
+    "location": "austin, tx",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": "TX", "expected_state_provenance": "parsed_description",
+    "expected_country": "United States", "expected_country_provenance": "inferred",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Matching is case-insensitive; state is canonicalized to uppercase on output."
+  },
+  {
+    "id": "case_insensitive_country_full_name",
+    "origin": "synthetic_representative",
+    "location": "austin, united states",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": "United States", "expected_country_provenance": "parsed_description",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Case-insensitive full country name, canonicalized on output regardless of input casing."
+  },
+  {
+    "id": "marker_prefix_hyphen_lowercase",
+    "origin": "synthetic_representative",
+    "location": "remote - austin, tx",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": "TX", "expected_state_provenance": "parsed_description",
+    "expected_country": "United States", "expected_country_provenance": "inferred",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Marker matching is case-insensitive."
+  },
+  {
+    "id": "country_alias_us_dotted",
+    "origin": "synthetic_representative",
+    "location": "Remote, U.S.",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": "United States", "expected_country_provenance": "parsed_description",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Correction round 6, finding 1: 'U.S.' resolves correctly even though the field-level trailing-period strip may remove its own final period."
+  },
+  {
+    "id": "country_alias_us_dotted_no_final_period",
+    "origin": "synthetic_representative",
+    "location": "Remote, U.S",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": "United States", "expected_country_provenance": "parsed_description",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "The already-stripped spelling (no final period) resolves identically to the dotted form."
+  },
+  {
+    "id": "country_alias_usa_dotted",
+    "origin": "synthetic_representative",
+    "location": "Austin, U.S.A.",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": "United States", "expected_country_provenance": "parsed_description",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "'U.S.A.' resolves correctly through the country_form production."
+  },
+  {
+    "id": "country_alias_usa_dotted_no_final_period",
+    "origin": "synthetic_representative",
+    "location": "Austin, U.S.A",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": "United States", "expected_country_provenance": "parsed_description",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "The already-stripped spelling resolves identically."
+  },
+  {
+    "id": "country_alias_us_doubled_period_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Remote, U.S..",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Correction round 6, finding 1 explicitly does not broadly accept malformed punctuation -- a genuine doubled terminal period is never accepted."
+  },
+  {
+    "id": "region_whitespace_space_trimmed_before_comma",
+    "origin": "synthetic_adversarial",
+    "location": "Toronto, TX , United States",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": "TX", "expected_state_provenance": "parsed_description",
+    "expected_country": "United States", "expected_country_provenance": "parsed_description",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Correction round 6, finding 3: a greedy region capture can include an incidental trailing ASCII space before the next comma; it must still be recognized as the state TX, not treated as an unrecognized region."
+  },
+  {
+    "id": "region_whitespace_tab_trimmed_before_comma",
+    "origin": "synthetic_adversarial",
+    "location": "Toronto, TX\t, United States",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": "TX", "expected_state_provenance": "parsed_description",
+    "expected_country": "United States", "expected_country_provenance": "parsed_description",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Tab retained as a neighboring covered-whitespace control alongside space/NBSP."
+  },
+  {
+    "id": "region_whitespace_nbsp_trimmed_before_comma",
+    "origin": "synthetic_adversarial",
+    "location": "Toronto, TX , United States",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": "TX", "expected_state_provenance": "parsed_description",
+    "expected_country": "United States", "expected_country_provenance": "parsed_description",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "NBSP (U+00A0) folds to ASCII space via NFKC at the field level before region trimming ever runs."
+  },
+  {
+    "id": "negation_except_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "All countries except, Canada",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Correction round 6, finding 4: a standalone exclusion cue inside the discarded span rejects the whole match, even though 'Canada' is explicitly stated."
+  },
+  {
+    "id": "negation_not_in_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Not in, Canada",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Standalone negation cue rejects the whole match."
+  },
+  {
+    "id": "negation_ordinary_positive_control",
+    "origin": "synthetic_representative",
+    "location": "Chicago, Canada",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": "Canada", "expected_country_provenance": "parsed_description",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Ordinary legitimate discarded span, neighboring the negation-rejected fixtures above -- does not trigger the negation check."
+  },
+  {
+    "id": "country_conflict_geo_is_country_france",
+    "origin": "synthetic_adversarial",
+    "location": "Canada, France",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Correction round 6, finding 5: the discarded geo span 'Canada' is itself an exact recognized country -- a genuine multi-country conflict, never silently resolved to just 'France'."
+  },
+  {
+    "id": "country_conflict_geo_is_country_us",
+    "origin": "synthetic_adversarial",
+    "location": "Canada, United States",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Same conflict with the explicit country resolving to United States."
+  },
+  {
+    "id": "country_conflict_region_is_country",
+    "origin": "synthetic_adversarial",
+    "location": "London, Germany, France",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "The discarded region span 'Germany' is itself an exact recognized country in the three-part form -- rejected, contrasted directly against the preserved 'Toronto, ON, Canada' neighbor (region 'ON' is not a recognized country)."
+  },
+  {
+    "id": "ascii_only_wi_lookalike_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Austin, Wİ",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Correction round 6, finding 6: U+0130 LATIN CAPITAL LETTER I WITH DOT ABOVE is not an NFKC compatibility variant of ASCII 'I' and must not be treated as case-equivalent to it -- 'Wİ' must never resolve to Wisconsin."
+  },
+  {
+    "id": "ascii_only_in_lookalike_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Austin, İN",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "'İN' must never resolve to Indiana."
+  },
+  {
+    "id": "ascii_only_wi_lookalike_zip_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Austin, Wİ 12345",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "The ASCII-only restriction also applies in the state+ZIP production, not only the bare state form."
+  },
+  {
+    "id": "ascii_only_lowercase_positive_control",
+    "origin": "synthetic_representative",
+    "location": "austin, wi",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": "WI", "expected_state_provenance": "parsed_description",
+    "expected_country": "United States", "expected_country_provenance": "inferred",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Genuine lowercase ASCII 'wi' still resolves to Wisconsin -- the ASCII restriction narrows Unicode case-folding, it does not disable ASCII case-insensitivity."
+  },
+  {
+    "id": "ascii_only_fullwidth_positive_control",
+    "origin": "synthetic_representative",
+    "location": "Austin, ＷＩ",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": "WI", "expected_state_provenance": "parsed_description",
+    "expected_country": "United States", "expected_country_provenance": "inferred",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Fullwidth Latin letters are genuine NFKC compatibility variants of their ASCII forms (unlike U+0130) and fold to 'WI' before matching -- resolves to Wisconsin correctly, demonstrating the ASCII restriction narrows case-folding without breaking legitimate NFKC normalization."
+  },
+  {
+    "id": "oregon_state_plus_explicit_us",
+    "origin": "synthetic_representative",
+    "location": "Austin, OR, United States",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": "OR", "expected_state_provenance": "parsed_description",
+    "expected_country": "United States", "expected_country_provenance": "parsed_description",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Correction round 6, finding 7: 'OR' (Oregon) must be recognized as a valid state before the generic or/and coordinator check runs, or it would be wrongly rejected as the word 'or'."
+  },
+  {
+    "id": "oregon_state_plus_canada_conflict",
+    "origin": "synthetic_adversarial",
+    "location": "Austin, OR, Canada",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Oregon correctly recognized as a state, then correctly rejected via the state+non-US-country conflict rule (dispatch rule 2) -- not via the coordinator check."
+  },
+  {
+    "id": "genuine_coordinator_region_rejected",
+    "origin": "synthetic_adversarial",
+    "location": "Toronto, East or West, Canada",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": null, "expected_country_provenance": "unavailable",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Confirms the state-first precedence fix does not disable the coordinator check generally -- a region that is genuinely not a recognized state ('East or West') is still rejected for containing a standalone 'or'."
+  },
+  {
+    "id": "malformed_state_dots_rejected_as_state",
+    "origin": "synthetic_adversarial",
+    "location": "Toronto, T...X, Canada",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": "Canada", "expected_country_provenance": "parsed_description",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "Correction round 6, finding 8: 'T...X' does not fullmatch the exact state-token grammar and is never recognized as a state; the three-part dispatch falls through to the non-state-region + non-US-country rule, preserving 'country' with 'state' unavailable."
+  },
+  {
+    "id": "malformed_state_trailing_dots_rejected_as_state",
+    "origin": "synthetic_adversarial",
+    "location": "Toronto, TX..., Canada",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": null, "expected_state_provenance": "unavailable",
+    "expected_country": "Canada", "expected_country_provenance": "parsed_description",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "'TX...' (trailing repeated periods) does not fullmatch the exact state-token grammar either -- only the single documented DC dotted-exception tolerates a trailing period."
+  },
+  {
+    "id": "dc_bare_preserved_three_part",
+    "origin": "synthetic_representative",
+    "location": "Somewhere, DC, United States",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": "DC", "expected_state_provenance": "parsed_description",
+    "expected_country": "United States", "expected_country_provenance": "parsed_description",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "The bare DC spelling is preserved as a recognized state in the three-part form, contrasted against the malformed T...X/TX... fixtures above."
+  },
+  {
+    "id": "dc_one_period_preserved_three_part",
+    "origin": "synthetic_representative",
+    "location": "Somewhere, D.C, United States",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": "DC", "expected_state_provenance": "parsed_description",
+    "expected_country": "United States", "expected_country_provenance": "parsed_description",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "The single-period DC spelling is preserved."
+  },
+  {
+    "id": "dc_two_period_preserved_three_part",
+    "origin": "synthetic_representative",
+    "location": "Somewhere, D.C., United States",
+    "expected_city": null, "expected_city_provenance": "unavailable",
+    "expected_state": "DC", "expected_state_provenance": "parsed_description",
+    "expected_country": "United States", "expected_country_provenance": "parsed_description",
+    "expected_postal_code": null, "expected_postal_code_provenance": "unavailable",
+    "note": "The standard two-period DC spelling is preserved."
+  }
+]

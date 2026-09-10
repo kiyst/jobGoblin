@@ -440,20 +440,36 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   `max` write of any kind — those remain Phase 4+ concerns. This slice needed five
   correction rounds against the pilot's one-round target — a pilot-tracking fact, not a
   reopened finding.
-  A fifth slice (base-pay classifier, Workflow v3.1 pilot parser slice 2 of 3) is
-  **implemented on `phase-3/salary-classifier`, pending Codex review — not merged, not
-  complete.** `app/normalization/salary.py` reads `compensation_text` only (no
-  `title`/`description`) and produces a `SalaryResult` — four independently-provenanced
-  fields (`minimum`/`maximum`/`currency`/`period`), the case `types.py`'s own docstring
-  anticipated. A finite, whole-field lexical/semantic grammar (five productions; no
-  substring fallback) rather than `experience.py`'s segment-scanning design. Not wired
-  into ingestion/persistence, no `parser_version` threading, no `jobs.salary_min/max/
-  currency/period` write of any kind, no annualization, no FX conversion, no
-  `compensation_explicit` classification — all Phase 4+ or explicitly out-of-scope
+  A fifth slice (base-pay classifier, Workflow v3.1 pilot parser slice 2 of 3) merged
+  into `main` at `5b144a2` (approval recorded in commit `396c939`, merge record in
+  [LLM_HANDOFF.md](LLM_HANDOFF.md)). `app/normalization/salary.py` reads
+  `compensation_text` only (no `title`/`description`) and produces a `SalaryResult` —
+  four independently-provenanced fields (`minimum`/`maximum`/`currency`/`period`), the
+  case `types.py`'s own docstring anticipated. A finite, whole-field lexical/semantic
+  grammar (five productions; no substring fallback) rather than `experience.py`'s
+  segment-scanning design. Not wired into ingestion/persistence, no `parser_version`
+  threading, no `jobs.salary_min/max/currency/period` write of any kind, no
+  annualization, no FX conversion, no `compensation_explicit` classification — all
+  Phase 4+ or explicitly out-of-scope concerns. This slice needed one bounded correction
+  round (grammar-boundary strictness), within the pilot's one-round target.
+  A sixth slice (location-geography classifier, Workflow v3.1 pilot parser slice 3 of 3)
+  is **implemented on `phase-3/location-classifier`, frozen for blind Sol/Astra review —
+  not merged, not complete.** `app/normalization/location.py` reads `location` only and
+  produces a `LocationResult` — four independently-provenanced fields
+  (`city`/`state`/`country`/`postal_code`). **`city` is deliberately never populated in
+  this slice** (unconditionally `unavailable`) — a denylist-based approach was rejected
+  during proposal review as unable to establish a positive correctness guarantee without
+  a real gazetteer; `state`/`country`/`postal_code` remain independently extractable via
+  closed catalogs and a strict ZIP pattern. Includes a frozen, independently-derived and
+  live-source-confirmed 26-code collision set (a USPS state abbreviation that is also a
+  current ISO 3166-1 alpha-2 country code) requiring a US-only anchor (ZIP or explicit US
+  country) to disambiguate. Not wired into ingestion/persistence, no `parser_version`
+  threading, no `jobs.city/state/country/postal_code` write of any kind, no lat/long
+  geocoding, no external lookups, no taxonomy — all Phase 4+ or explicitly out-of-scope
   concerns.
-  No other Phase 3 parser (title, location, skill) has been started — this is one more
-  bounded slice, not a Phase 3 completion claim. Title and skill remain blocked on a
-  taxonomy that does not yet exist in this repository.
+  No other Phase 3 parser (title, skill) has been started — this is one more bounded
+  slice, not a Phase 3 completion claim. Title and skill remain blocked on a taxonomy
+  that does not yet exist in this repository.
 - **Phase 4: two bounded read-only prework proofs merged into `main`; the production
   `AtsScrapersProvider` adapter is not started and Phase 4 is not complete.** The
   Greenhouse live ATS canary (`phase-4/greenhouse-canary`, merged at `64a3534`) and the
