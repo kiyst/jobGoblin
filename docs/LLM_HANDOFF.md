@@ -347,3 +347,110 @@ full_suite_count: 2193
 fixture_path: backend/tests/fixtures/normalization/location_cases.json
 fixture_count: 125
 ```
+
+### Work review
+
+- Date/reviewer: 2026-09-09, Codex/Sol (combining Astra Light and Sol
+  Medium's blind-comparison findings). Correction diff reviewed:
+  `88cdb2f..071d8dc` on `phase-3/location-classifier` (relayed as text;
+  no `### Work review` commit exists on this branch or its origin).
+- Verdict: **Approved.** All eight findings independently confirmed
+  closed by direct reproduction against the actual committed code (not
+  merely by re-reading the implementer's own report).
+- Independent verification performed, with file/line evidence:
+  1. Dotted `U.S.`/`U.S.A.` aliases — `location.py:349-378` (`_COUNTRY_CANONICAL`/
+     `_COUNTRY_TOKEN`). Reproduced `"Remote, U.S."`, `"Remote, U.S"`,
+     `"Austin, U.S.A."`, `"Austin, U.S.A"` all -> `country=United States`;
+     `"Remote, U.S.."` (genuine doubled terminal period) -> unavailable,
+     confirming no broadened malformed-punctuation acceptance.
+  2. ZIP-implied country provenance — `location.py:591-600` (`state_zip_form`).
+     Reproduced `"Austin, TX 78701"` -> `country.provenance == INFERRED`
+     (was `PARSED_DESCRIPTION`); the three-part explicit form
+     (`"Austin, TX, United States"`) correctly still yields
+     `PARSED_DESCRIPTION` — no cross-contamination between the two paths.
+  3. Region trailing-whitespace bypass — `location.py:488-500`
+     (`_is_recognized_state`). Reproduced `"Toronto, TX , United States"`
+     (ASCII space) and the NBSP variant both -> `state=TX`; mutation-
+     disabled the trim myself (independently, not merely re-reading the
+     implementer's claim) and confirmed both fail without it.
+  4. Negation/exclusion in discarded spans — `location.py:425-433`
+     (`_NEGATION_WORDS_RE`). Reproduced `"All countries except, Canada"`
+     and `"Not in, Canada"` both -> all four unavailable; `"Chicago,
+     Canada"` and `"Andover, NH"` (substring, not standalone) both
+     unaffected.
+  5. Conflicting country tokens — `location.py:454-461`
+     (`_geo_span_is_rejected`'s final check). Reproduced `"Canada,
+     France"`, `"Canada, United States"`, `"London, Germany, France"` all
+     -> all four unavailable; `"Toronto, ON, Canada"` correctly preserved
+     (`"ON"` is not a recognized country).
+  6. Unicode state-token matching — `location.py:333`
+     (`_STATE_TOKEN_RE`), `location.py:401-432` (`_PRODUCTIONS`/`_OR_AND_RE`/
+     `_NEGATION_WORDS_RE`/`_MARKER_WORD_RE`, all now `re.IGNORECASE |
+     re.ASCII`). Reproduced `"Austin, Wİ"`, `"Austin, İN"`, `"Austin, Wİ
+     12345"` (U+0130) all -> unavailable; `"austin, wi"` and `"Austin,
+     ＷＩ"` (genuine NFKC-folding fullwidth letters) both correctly ->
+     `state=WI`. Independently removed `re.ASCII` from the five compiled
+     productions and confirmed the three Turkish-İ cases wrongly resolve
+     to Wisconsin/Indiana without it.
+  7. Oregon `OR` precedence — `location.py:565-576` (`classify_location`'s
+     region-then-coordinator-check ordering). Reproduced `"Austin, OR,
+     United States"` -> `state=OR`; `"Austin, OR, Canada"` -> all four
+     unavailable via the state+non-US-country conflict rule (not the
+     coordinator check); `"Toronto, East or West, Canada"` (genuinely
+     non-state, coordinator-bearing) still correctly rejected.
+  8. Malformed state punctuation — same fix site as finding 3
+     (`_is_recognized_state`'s `_STATE_TOKEN_RE.fullmatch`). Reproduced
+     `"Toronto, T...X, Canada"` and `"Toronto, TX..., Canada"` both ->
+     `country=Canada`/`state` unavailable (never recognized as a state);
+     `"Somewhere, DC/D.C/D.C., United States"` all three -> `state=DC`.
+- **Mutation-proof adequacy, independently re-verified** (not merely
+  accepted from the Work done narrative): the two fixtures flagged
+  "non-isolating" were re-tested directly. `region_whitespace_tab_trimmed_before_comma`
+  (finding 3) genuinely does not isolate the trim mechanism — `_GEO_TOKEN`
+  (`location.py:396`, `r"[A-Za-z][A-Za-z .'\-]*"`) never included tab in
+  its character class, so the greedy region capture excludes it
+  regardless of trimming; confirmed by independently disabling the trim
+  and observing the tab fixture still passes while the space/NBSP
+  fixtures for the same finding correctly fail. `oregon_state_plus_canada_conflict`
+  (finding 7) is similarly confirmed non-isolating — reverting the
+  precedence fix leaves it passing, because the wrong path (coordinator
+  rejection) and the correct path (state+non-US-country conflict rule)
+  both produce all-four-unavailable. In both cases, **at least one other
+  fixture for the same finding is genuinely load-bearing**
+  (`region_whitespace_space_trimmed_before_comma`/
+  `region_whitespace_nbsp_trimmed_before_comma` for finding 3;
+  `oregon_state_plus_explicit_us` for finding 7), independently confirmed
+  to fail under mutation. Workflow v3.1's rule — a test must not be
+  *reported as closing* a finding it does not actually prove when its
+  guard is disabled — is satisfied: the Work done entry already labels
+  both fixtures as non-isolating rather than claiming they close their
+  findings, and does not rely on them as the sole evidence for findings
+  3 or 7. This is a satisfied disclosure, not a remaining process/evidence
+  defect.
+- **Cross-cutting regression checks** (per the review request, beyond
+  the eight findings themselves): no broader alias acceptance (`"U..S."`,
+  `"U.S.A.."`, `"U.S.A.A."` all still correctly rejected); no provenance
+  cross-contamination (explicit-country forms stay `PARSED_DESCRIPTION`,
+  state-inferred forms stay `INFERRED`, confirmed across all four
+  three-part dispatch rules independently); no Unicode bypass beyond
+  finding 6 itself; no new state/country dispatch inconsistency (all
+  four three-part rules and the collision-set ZIP/explicit-US
+  disambiguation paths re-verified unaffected).
+- Historical Work done entry integrity: `git diff 88cdb2f..071d8dc --
+  docs/LLM_HANDOFF.md` shows the location classifier's own prior Work
+  done entry (this iteration's, now renumbered Iteration 1 by the
+  standard two-iteration rotation) preserved byte-for-byte, only
+  appended to. The entry deleted by that same rotation belongs to the
+  already-merged, already-closed `classify_salary` slice, not this one.
+- Missing/inconclusive checks: none. Every finding was reproduced
+  directly; every mutation-proof claim was independently re-executed,
+  not merely re-read.
+- Attribution for the record: **Astra Light** found findings 1 (dotted
+  aliases) and 2 (ZIP-implied country provenance). **Sol Medium** found
+  finding 1 (independently, shared with Astra Light) plus findings 3-8.
+  The combined validated union across both reviewers is eight defects,
+  all now closed.
+- Next action: awaiting the user's separate authorization before any
+  merge or next-parser work.
+- STOP — no merge, no next Phase 3 parser, no mandatory retrospective,
+  without explicit user authorization.
