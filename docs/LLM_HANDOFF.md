@@ -454,3 +454,37 @@ fixture_count: 125
   merge or next-parser work.
 - STOP — no merge, no next Phase 3 parser, no mandatory retrospective,
   without explicit user authorization.
+
+### Merge record
+
+- Date/agent: 2026-09-09, Claude Code (Sonnet 5), per explicit user
+  merge authorization.
+- Approved feature tip: `c1a5235` (`phase-3/location-classifier`,
+  includes the approved `Work review` above). Pre-merge `main`/
+  `origin/main`: `d82445f`, synchronized, clean working tree — verified
+  immediately before merging, not assumed from a prior snapshot.
+- Merge: `git merge --no-ff --no-edit` (no squash, no rebase, no
+  force-push, no implementation changes) of `phase-3/location-classifier`
+  into `main`. Merge commit: `a32b5cc`.
+- Zero-content-difference check: `git diff c1a5235 main` — empty;
+  confirms the merge introduced no content beyond what was already
+  approved on the feature tip.
+- Canonical verifier on merged `main` (`python -m scripts.verify
+  --level routine --focus tests/test_normalization_location.py`): ALL
+  11 CHECKS PASSED — 134 focused / 2193 full-suite tests, `check_repo.py`
+  ok, `git diff --check` ok, `handoff metadata validation` ok.
+- Migration/database state: unchanged. `git diff --stat 88cdb2f main --
+  backend/alembic backend/migrations` and `git log d82445f..main --
+  backend/alembic backend/migrations` both empty — no schema/migration
+  file touched by this slice or its merge; the verifier's disposable
+  test-database reachability preflight passed against the existing
+  schema with no drift.
+- Pushed: `origin/main` now at `a32b5cc` (was `d82445f`).
+- Rollback boundary: `git reset --hard d82445f` on `main` (pre-merge
+  tip) would fully revert this merge; the feature branch
+  `phase-3/location-classifier` at `c1a5235` remains intact and
+  unforced, independently recoverable regardless of any `main` rollback.
+- STOP — merge complete. Do not begin another Phase 3 parser. The
+  mandatory Workflow v3.1 pilot retrospective (three parser slices now
+  merged: `classify_experience`, `classify_salary`, `classify_location`)
+  is required next, under separate explicit user authorization.
