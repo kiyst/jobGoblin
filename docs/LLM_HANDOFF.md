@@ -99,143 +99,6 @@ that detail.
 ### Work done
 
 - Date/agent: 2026-09-09, Claude Code (Sonnet 5). Risk class R
-  (R-plus-adversarial, established parser-slice convention). Base ->
-  ending commit: `d82445f` -> this commit; new branch
-  `phase-3/location-classifier`. Workflow v3.1 pilot parser slice 3 of 3,
-  implementing the round-4-approved `classify_location` proposal (four
-  proposal-review rounds preceded implementation; no branch/code existed
-  before this pass). Scope held to the parser, its tests/fixtures, and
-  the documentation files the proposal's own Files-expected-to-change
-  list named. **Per explicit user instruction, this commit is frozen
-  immediately after push for a blind Sol/Astra comparison review — no
-  correction pass, no further commits, no Work review recorded by the
-  implementer.**
-- Outcome: `backend/app/normalization/location.py::classify_location(location)
-  -> LocationResult` (four independently-provenanced fields:
-  `city`/`state`/`country`/`postal_code`), reading `location` only (no
-  `title`/`description`). Implements every binding decision from the
-  four proposal-review rounds:
-  - **`city` is unconditionally `Provenance.UNAVAILABLE`** for every
-    input — deferred, not implemented, in this slice. A denylist-based
-    approach (reject known-generic phrases, otherwise trust a city-
-    shaped span) was rejected during proposal review as unable to
-    establish a positive correctness guarantee; the fix is structural,
-    not enumerative. Every production still structurally requires a
-    geo/region-shaped span (so a bare, contextless state code alone is
-    never confidently resolved either), but that span is always
-    discarded, never wired into any output field.
-  - Five finite `re.fullmatch` productions (country-alone, geo+state,
-    geo+state+ZIP, geo+country, geo+region+country), each wrapped in an
-    identical, independently-optional marker prefix/suffix — never both
-    present in one match.
-  - A frozen, independently-derived, live-source-confirmed (2026-09-09,
-    USPS Appendix B + ISO 3166 authority) 26-code collision set (a USPS
-    state abbreviation that is also a current ISO 3166-1 alpha-2 country
-    code): AL/AR/AZ/CA/CO/DE/GA/ID/IL/IN/KY/LA/MA/MD/ME/MN/MO/MS/MT/NC/
-    NE/PA/SC/SD/TN/VA. A collision-bearing code with no US-only anchor
-    (ZIP or explicit US country) fails closed; disambiguated by either
-    anchor regardless of collision-set membership.
-  - The three-part dispatch's four explicit semantic rules (recognized-
-    state x explicit-US/non-US, non-state-region x non-US/explicit-US),
-    making `"Austin, TX, Canada"` fail while preserving `"Toronto, ON,
-    Canada"`.
-  - The generic/non-geographic sentinel catalog retained as defense-in-
-    depth only (`multiple locations`/`various locations`/`worldwide`/
-    `various`/`multiple`/`nationwide`/`global`), rejecting the whole
-    result (including `country`) on an exact match — explicitly not the
-    mechanism that makes discarding the geo span safe, since nothing
-    needs to make that safe.
-  - The coordinator/delimiter exclusion (standalone `or`/`and`, `/`/`;`/
-    `|`) and marker-embedded-in-geography exclusion applied to every
-    discarded geo/region span — necessary specifically because those
-    spans are open-ended (unlike `state`/`country`, which reject junk
-    "for free" via closed-catalog lookup).
-  - Country-alias canonicalization to full English names
-    (`US`/`U.S.`/`U.S.A.`/`USA` -> `United States`, `UK` -> `United
-    Kingdom`); the `D.C.`/`DC` state exception.
-  - Covered-whitespace-only grammar boundaries (`_WS = r"[\t\n\r ]"`)
-    and a mandatory-whitespace prefix-hyphen marker boundary, applied
-    from the start rather than needing a correction round (the
-    `salary.py` grammar-boundary correction's lesson applied
-    proactively).
-- Files changed: `backend/app/normalization/location.py`,
-  `backend/tests/fixtures/normalization/location_cases.json` (98 cases),
-  `backend/tests/test_normalization_location.py`, `docs/ARCHITECTURE.md`,
-  `docs/ROADMAP.md` (both updated for this slice's status **and** the
-  stale "pending Codex review — not merged" `classify_salary` reference,
-  corrected here as a same-cycle mechanical edit, not a separate slice —
-  a doc-attribution fix, not product behavior), `docs/LLM_WORKFLOW.md`
-  (stale "slices 2/3 unstarted" pilot-status line corrected the same
-  way), this handoff entry. No other file touched.
-- Mutation-proof mapping:
-
-  | Mechanism | Regression test(s) | Mutation outcome |
-  |---|---|---|
-  | City-never-populated structural invariant | all 4 `generic_phrase_*_country_only` fixtures, `test_city_field_is_always_unavailable_v1_deferred` | Wired the discarded geo span into the `city` field unconditionally: all 4 fixtures plus the structural-invariant test failed (wrongly showed a populated `city`). Restored: all passed. |
-  | Collision-set gate | `collision_ca_no_anchor_rejected`, `collision_in_no_anchor_rejected`, `collision_tn_no_anchor_rejected` | Disabled the `state in _COLLISION_STATES` check: all 3 failed (wrongly resolved `state`/`country`). Restored: all 3 passed. |
-  | Sentinel catalog (defense-in-depth) | all 4 `sentinel_*_rejected` fixtures | Forced the sentinel-match check to always return `False`: all 4 failed (wrongly extracted `country`, e.g. `United States` from `"Multiple Locations, United States"`). Restored: all 4 passed. The neighbor positive control (`sentinel_neighbor_legitimate_extracts_country`) correctly remained unaffected either way. |
-  | Covered-whitespace-only boundary (NBSP vs. LINE SEPARATOR) | `line_separator_not_covered_whitespace_rejected` | Widened `_WS` to Python's Unicode-aware bare `\s`: failed (U+2028 was wrongly treated as a boundary, resolving `state`/`country` normally instead of rejecting). Restored: passed. `nbsp_normalizes_to_covered_whitespace` correctly remained unaffected either way (NBSP already folds via NFKC regardless of `_WS`'s width). |
-
-- Verification: `ruff format --check`/`ruff check`/`mypy` all pass.
-  `python -m scripts.check_repo` exits 0. Genuine external `python -m
-  scripts.verify --level routine --focus tests/test_normalization_location.py`
-  (full run, see metadata below) — all 11 steps PASS, including `handoff
-  metadata validation`. Full unfocused suite: **2166 passed** (was 2059;
-  +107 fixture/test cases). An additional novel ad hoc counterexample
-  sweep (not committed as fixtures) covering: leading garbage before a
-  valid form, a marker-only string wrapped in parentheses with no
-  geography, case-insensitive sentinel matching, a three-letter state
-  lookalike, glued/doubled comma spacing around a state code, a region
-  token that is itself a recognized foreign country name (not a state),
-  confirmation that the sentinel check is exact-match only (not
-  substring — `"Worldwide Team, Canada"` extracts `country=Canada`
-  normally, while `"Worldwide Remote Team, Canada"` is rejected only via
-  the embedded-marker check), a lowercase state with a ZIP, a three-part
-  state+UK conflict, and a purely numeric discarded-geo span — every
-  case resolved to either the correct value or safely `unavailable`,
-  with no confidently-wrong output.
-- Deviations/known limitations: every synthetic fixture is hand-
-  constructed (`synthetic_representative`/`synthetic_adversarial`); the
-  one real sanitized location string in this repository (`"Remote,
-  US"`, `greenhouse_live_canary.json`) is exercised by
-  `test_real_sanitized_greenhouse_fixture_classifies_correctly`, which
-  loads the actual fixture file and asserts the source value before
-  asserting the classification, so the claim cannot silently drift.
-  `city` resolution is explicitly deferred, not implemented (see the
-  module docstring) — a disclosed scope boundary, not a defect. The
-  26-code collision set was independently derived and cross-checked
-  against a second independently-proposed candidate set during proposal
-  review, converging exactly; a live-source confirmation against USPS
-  Appendix B and the ISO 3166 authority was separately performed and
-  accepted (2026-09-09) prior to this implementation. Non-US postal
-  codes, non-US subnational abbreviations in the state catalog, and a
-  parenthesized-marker-prefix form remain unsupported, per the approved
-  proposal's exclusions.
-- STOP — this commit is frozen for the planned blind Sol/Astra
-  comparison review. Do not merge, begin pilot slice retrospective,
-  wire into ingestion/persistence, contact providers, or create a
-  migration. No further correction, no Work review, no additional
-  commits on this branch until the user separately authorizes the next
-  action.
-
-```workflow-metadata
-workflow_version: v3.1-pilot
-slice_kind: parser
-verification_level: routine
-focused_test_selector: tests/test_normalization_location.py
-focused_test_count: 107
-full_suite_count: 2166
-fixture_path: backend/tests/fixtures/normalization/location_cases.json
-fixture_count: 98
-```
-
----
-
-## Iteration 2
-
-### Work done
-
-- Date/agent: 2026-09-09, Claude Code (Sonnet 5). Risk class R
   (R-plus-adversarial, unchanged). Base -> ending commit: `88cdb2f` ->
   this commit; same branch `phase-3/location-classifier`. Bounded
   correction pass applying eight independently-validated findings from
@@ -488,3 +351,85 @@ fixture_count: 125
   mandatory Workflow v3.1 pilot retrospective (three parser slices now
   merged: `classify_experience`, `classify_salary`, `classify_location`)
   is required next, under separate explicit user authorization.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-09-09, Claude Code (Sonnet 5). Risk class D
+  (documentation-only). Base -> ending commit: `4ecc4b3` -> this commit;
+  new branch `tooling/workflow-v3.2-retrospective`. This is the mandatory
+  Workflow v3.1 pilot retrospective, authorized as Slice 1 of 3 of a
+  staged Workflow v3.2 proposal (Slices 2/3 — the parser-contract harness
+  and the fast/final verifier/receipt/metadata redesign — are planned but
+  **not authorized** by this slice; see the ADR's "Activation boundary").
+- Outcome: `docs/DECISIONS/0008-workflow-v3.1-retrospective-and-v3.2-adoption.md`
+  (new) records: the corrected per-slice retrospective for
+  `classify_experience` (four post-implementation correction rounds, 13
+  findings [7+3+2+1], six pre-code amendments recorded separately,
+  proposal-submission count not reconstructible), `classify_salary`
+  (three documented proposal-review rounds, one executable correction
+  round with seven boundary findings, four demonstrated confidently-wrong
+  findings under the strict definition with any further count recorded
+  as not reconstructible rather than estimated), and `classify_location`
+  (four documented proposal-review rounds, one executable correction
+  round, eight validated findings including four committed
+  confidently-wrong cases); the four numerical target verdicts
+  (correction-round: fail; confidently-wrong: fail; handoff-count: pass;
+  load-bearing-regression: pass); the Astra Light/Sol Medium comparison
+  recorded strictly as a configuration comparison, not a model/effort
+  claim; and the note that count-mismatch fault injection already exists
+  in `backend/tests/test_check_handoff.py` and simply was not triggered
+  by a real fabricated count during the pilot. It also records the
+  accepted Workflow v3.2 design principles (compact contracts,
+  two-submission parser proposal limit, Sol Medium as mandatory primary
+  reviewer, selective Astra escalation, executable parser contracts,
+  mechanism-level mutation evidence, fast/final gates, stable slice/
+  finding IDs, durable verification evidence, unchanged user-only scope
+  and merge authority) and five unresolved Slice 3 design questions
+  (pre-receipt candidate verification; non-circular receipt attestation;
+  allowed documentation-only differences between attested and merged
+  trees; a candidate/reviewed/corrected/approved/merge-reuse metadata
+  state machine; no ephemeral receipt as durable merge evidence).
+- **Workflow v3.1 remains the sole active workflow version.** No
+  version-bearing consumer was touched: `CLAUDE.md`,
+  `.claude/hooks/compact_checkpoint.py`, `backend/scripts/check_handoff.py`,
+  its tests, and every existing `docs/LLM_HANDOFF.md` entry's
+  `workflow_version` field are unmodified by this slice. The ADR
+  describes Slices 2/3's planned artifacts (contract harness, receipts,
+  verifier profiles) without linking to any file, since none of them
+  exist yet.
+- Files changed: `docs/DECISIONS/0008-workflow-v3.1-retrospective-and-v3.2-adoption.md`
+  (new), this handoff entry (two-iteration rotation — the prior
+  Iteration 1, `classify_location`'s original pre-correction Work done
+  entry, was deleted per the standard rotation rule since the whole
+  `classify_location` slice is already closed via Iteration 2's approval
+  and merge record; Iteration 2's content is preserved byte-for-byte
+  above, only renumbered to Iteration 1). No other file touched.
+- Verification (docs-only, per Workflow v3.1's existing `slice_kind:
+  docs` provisions): `git diff --check` — clean. `python -m
+  scripts.check_repo` exits 0. Genuine external `python -m scripts.verify
+  --docs-only` — all applicable steps PASS (database/pytest steps
+  correctly skipped per `--docs-only`'s own contract); no executable or
+  test file changed, so no focused/full-suite run applies.
+- Deviations/known limitations: this ADR's own "not reconstructible"
+  figures (experience's proposal-submission count; salary's exact
+  confidently-wrong count beyond the four demonstrated) are deliberate
+  gaps, not omissions to be silently filled later.
+- STOP — this is Slice 1 of 3 only. Do not implement the contract
+  harness, receipt system, verifier profiles, metadata schema changes,
+  workflow-version changes, title parser, or skill parser. Do not merge,
+  begin Slice 2 or 3, or start any other Phase 3/4 work without separate
+  explicit user authorization.
+
+```workflow-metadata
+workflow_version: v3.1-pilot
+slice_kind: docs
+verification_level: not_run
+focused_test_selector: none
+focused_test_count: not_run
+full_suite_count: not_run
+lightweight_checks: git diff --check; python -m scripts.check_repo; python -m scripts.verify --docs-only
+```
