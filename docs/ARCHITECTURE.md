@@ -277,11 +277,13 @@ jobGoblin/
 │   │   │   ├── titles.py
 │   │   │   ├── skills.py
 │   │   │   ├── salary.py                # base-pay classifier (Phase 3, fifth parser slice) —
-│   │   │   │                            # implemented on phase-3/salary-classifier, pending
-│   │   │   │                            # Codex review, not merged (see docs/ROADMAP.md)
+│   │   │   │                            # merged into main (see docs/ROADMAP.md)
 │   │   │   ├── experience.py            # years-of-experience range classifier (Phase 3, fourth
 │   │   │   │                            # parser slice) — merged into main (see docs/ROADMAP.md)
-│   │   │   ├── location.py
+│   │   │   ├── location.py              # location-geography classifier (Phase 3, sixth parser
+│   │   │   │                            # slice, Workflow v3.1 pilot slice 3 of 3) — implemented
+│   │   │   │                            # on phase-3/location-classifier, frozen for blind
+│   │   │   │                            # Sol/Astra review, not merged (see docs/ROADMAP.md)
 │   │   │   ├── employment.py
 │   │   │   ├── seniority.py
 │   │   │   ├── remote.py               # remote/hybrid/onsite classifier (Phase 3, first parser slice)
