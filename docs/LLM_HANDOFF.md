@@ -468,3 +468,38 @@ lightweight_checks: git diff --check; python -m scripts.check_repo; python -m sc
   merge or Workflow v3.2 Slice 2/3 work.
 - STOP — no merge, no Slice 2 or 3, without explicit user
   authorization.
+
+### Merge record
+
+- Date/agent: 2026-09-11, Claude Code (Sonnet 5), per explicit user
+  merge authorization.
+- Approved feature tip: `596e5fd` (`tooling/workflow-v3.2-retrospective`,
+  includes the approved `Work review` above). Pre-merge `main`/
+  `origin/main`: `4ecc4b3`, synchronized, clean working tree — verified
+  immediately before merging, not assumed from a prior snapshot.
+- Merge: `git merge --no-ff --no-edit` (no squash, no rebase, no
+  force-push, no implementation changes) of
+  `tooling/workflow-v3.2-retrospective` into `main`. Merge commit:
+  `318321e`.
+- Zero-content-difference check: `git diff 596e5fd main` — empty;
+  confirms the merge introduced no content beyond what was already
+  approved on the feature tip.
+- `git diff --check` on merged `main`: clean. `python -m
+  scripts.check_repo`: exit 0. Canonical `python -m scripts.verify
+  --level routine --docs-only` on merged `main`: ALL 7 CHECKS PASSED
+  (ruff format/check, mypy, `check_repo.py`, `git diff --check`,
+  handoff metadata validation, temp-directory cleanup — database/pytest
+  steps correctly skipped per `--docs-only`).
+- No executable, test, migration, or product-document file is part of
+  this diff — a pure docs/ADR and handoff-ledger change.
+- Pushed: `origin/main` now at `318321e` (was `4ecc4b3`).
+- Rollback boundary: `git reset --hard 4ecc4b3` on `main` (pre-merge
+  tip) would fully revert this merge; the feature branch
+  `tooling/workflow-v3.2-retrospective` at `596e5fd` remains intact and
+  unforced, independently recoverable regardless of any `main` rollback.
+- **Workflow v3.1 remains the sole active workflow version** after this
+  merge — no version-bearing file (`CLAUDE.md`, `.claude/hooks/
+  compact_checkpoint.py`, `backend/scripts/check_handoff.py`, its
+  tests) was touched.
+- STOP — merge complete. Do not propose or begin Workflow v3.2 Slice 2
+  or 3 without separate explicit user authorization.
