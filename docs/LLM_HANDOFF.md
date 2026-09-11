@@ -438,3 +438,33 @@ focused_test_count: not_run
 full_suite_count: not_run
 lightweight_checks: git diff --check; python -m scripts.check_repo; python -m scripts.verify --docs-only
 ```
+
+### Work review
+
+- Date/reviewer: 2026-09-10, Codex. Correction diff reviewed:
+  `2a4f565..eace0bc` on `tooling/workflow-v3.2-retrospective` (relayed
+  as text; no separate `### Work review` commit exists on this branch
+  or its origin prior to this one).
+- Verdict: **Approved. No findings.** The bounded correction
+  (salary's characterization as one correction round addressing five
+  executable grammar-boundary mechanisms, accompanying regression
+  fixtures, and one documentation-attribution correction; the
+  withdrawal of the four-confidently-wrong-findings claim for salary;
+  the "not reconstructible, not zero" accounting for salary's strict
+  confidently-wrong count; and the corresponding updates to the ADR's
+  target-verdict table and Consequences section, plus the matching
+  Iteration 2 `Work done` text) satisfies all five requirements from
+  the correction request with no further change needed.
+- Scope confirmed: only `docs/DECISIONS/0008-workflow-v3.1-retrospective-and-v3.2-adoption.md`
+  and `docs/LLM_HANDOFF.md` differ between `2a4f565` and `eace0bc`;
+  Iteration 1's historical body is unchanged; the four overall target
+  verdicts (correction-round: fail; confidently-wrong: fail;
+  handoff-count: pass; load-bearing-regression: pass) are unchanged;
+  no version-bearing file (`CLAUDE.md`, `.claude/hooks/
+  compact_checkpoint.py`, `backend/scripts/check_handoff.py`, its
+  tests) was touched — Workflow v3.1 remains the sole active workflow
+  version.
+- Next action: awaiting the user's separate authorization before any
+  merge or Workflow v3.2 Slice 2/3 work.
+- STOP — no merge, no Slice 2 or 3, without explicit user
+  authorization.
