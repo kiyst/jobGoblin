@@ -457,3 +457,40 @@ full_suite_count: 2323
   merge, Workflow v3.2 activation, Slice 3 work, or another parser.
 - STOP — no merge, no Workflow v3.2 activation, no Slice 3, no other
   Phase 3/4 parser, without explicit user authorization.
+
+### Merge record
+
+- Date: 2026-09-13. Merged `tooling/workflow-v3.2-slice2-contract-harness`
+  at approved, reviewed commit `96917b2` (Codex/Sol "Approved. No
+  findings." verdict above) into `main` via `git merge --no-ff`. Merge
+  commit: `fe82659a072f93050aaf77c7ee29d2543200d978`. Pre-merge `main`/
+  `origin/main` tip (rollback boundary): `d28bf03533b110b030061a6e22c76217d9bf001b`.
+- Pre-merge checks: confirmed the feature branch and its origin both sat
+  at `96917b2`, and `main`/`origin/main` were both clean and synchronized
+  at `d28bf03` before merging.
+- Post-merge verification, all run directly against merged `main`:
+  - `git diff --quiet 96917b2 main` — zero content difference between
+    merged `main` and the approved feature-branch tip, confirmed.
+  - `git diff --check` — clean.
+  - `python -m scripts.check_repo` — clean.
+  - No migration/schema changes: `git diff --stat d28bf03 main --
+    backend/alembic backend/migrations` and `git log --oneline
+    d28bf03..main -- backend/alembic backend/migrations` both empty.
+  - `python -m scripts.verify --level routine --focus
+    tests/contracts/test_location_contract.py
+    tests/contracts/test_salary_contract.py
+    tests/contracts/test_experience_contract.py
+    tests/contracts/test_harness_self.py
+    tests/contracts/test_harness_import_boundary.py` — **all 11 checks
+    PASS**, 130 focused / 2323 full-suite tests passed.
+  - `python -m scripts.contract_mutation_witnesses` — **34 passed, 0
+    failed**, out of 34 active-guard witnesses (`experience/g07` remains
+    correctly excluded as superseded).
+- Pushed: `main` pushed to `origin/main` (`d28bf03..fe82659`); both now
+  synchronized at `fe82659a072f93050aaf77c7ee29d2543200d978`.
+- Workflow v3.1 remains the sole active workflow. Workflow v3.2 is not
+  activated by this merge. Slice 3 and any other parser remain
+  unauthorized.
+- STOP — report the synchronized final `main` SHA and stop. No Workflow
+  v3.2 activation, no Slice 3, no other Phase 3/4 parser, without
+  separate explicit user authorization.
