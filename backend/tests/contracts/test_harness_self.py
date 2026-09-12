@@ -1,11 +1,17 @@
+import dataclasses
 import json
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from scripts.contract_mutation_witnesses import (
+    WitnessError,
+    _check_record_matches_registry_entry,
+)
 from tests.contracts import transforms
 from tests.contracts.loader import ContractRecordError, collect_all, load_parser_file
+from tests.contracts.mutation_registry import MUTATION_REGISTRY
 from tests.contracts.schema import ExpectedField
 
 # ---------------------------------------------------------------------------
@@ -263,6 +269,9 @@ def test_loader_rejects_a_guard_that_belongs_to_a_different_parser(tmp_path: Pat
 
 def test_loader_rejects_any_record_referencing_a_superseded_guard(tmp_path: Path) -> None:
     record = dict(_VALID_LOCATION_RECORD)
+    record["record_id"] = (
+        "experience-x--transform-none--target-title--boundary-attribution_frame--variant-base"
+    )
     record["parser"] = "experience"
     record["guard_ref"] = "experience/g07-reversed-label-anchor"
     record["target"] = {
@@ -303,11 +312,13 @@ def test_loader_rejects_more_than_one_primary_witness_for_the_same_guard(tmp_pat
     # the zero-witness check.
     real = json.loads((_RECORDS_DIR / "location.json").read_text(encoding="utf-8"))
     duplicate = dict(real["records"][0])
-    # Keep the transform/target/boundary tokens consistent with the
-    # copied record's own real fields (required since record_id must
-    # match them); only the variant token needs to change for a
-    # distinct, validly-shaped record_id.
-    duplicate["record_id"] = duplicate["record_id"].replace("--variant-base", "--variant-second")
+    # A base record's record_id must keep "--variant-base" (enforced by
+    # the loader) -- vary the slug prefix instead for a distinct,
+    # validly-shaped record_id, keeping transform/target/boundary
+    # tokens consistent with the copied record's own real fields.
+    duplicate["record_id"] = duplicate["record_id"].replace(
+        "location-alias-trailing-period", "location-alias-trailing-period-duplicate"
+    )
     real["records"].append(duplicate)
     path = tmp_path / "location.json"
     path.write_text(json.dumps(real), encoding="utf-8")
@@ -338,3 +349,271 @@ def test_record_id_target_token_must_match_the_records_own_input_field(tmp_path:
     record["record_id"] = record["record_id"].replace("target-location", "target-compensation_text")
     with pytest.raises(ContractRecordError, match="target.input_field is 'location'"):
         load_parser_file(_write_location_file(tmp_path, [record]), "location")
+
+
+# ---------------------------------------------------------------------------
+# Correction round (Sol re-review): genuinely parser/field-discriminated
+# expected-output typing.
+# ---------------------------------------------------------------------------
+
+
+def test_loader_rejects_int_value_for_a_location_string_field(tmp_path: Path) -> None:
+    record = json.loads(json.dumps(_VALID_LOCATION_RECORD))
+    record["expected_output"]["country"] = {"value": 12345, "provenance": "parsed_description"}
+    with pytest.raises(ContractRecordError, match="must be a str or null"):
+        load_parser_file(_write_location_file(tmp_path, [record]), "location")
+
+
+def test_loader_rejects_str_value_for_a_salary_integer_field(tmp_path: Path) -> None:
+    records_dir = Path(__file__).resolve().parent / "records"
+    record = json.loads((records_dir / "salary.json").read_text(encoding="utf-8"))["records"][0]
+    record = json.loads(json.dumps(record))
+    record["expected_output"]["minimum"] = {"value": "120000", "provenance": "parsed_description"}
+    path = tmp_path / "salary.json"
+    path.write_text(json.dumps({"parser": "salary", "records": [record]}), encoding="utf-8")
+    with pytest.raises(ContractRecordError, match="must be a int or null"):
+        load_parser_file(path, "salary")
+
+
+def test_loader_rejects_int_value_for_a_salary_string_field(tmp_path: Path) -> None:
+    records_dir = Path(__file__).resolve().parent / "records"
+    record = json.loads((records_dir / "salary.json").read_text(encoding="utf-8"))["records"][0]
+    record = json.loads(json.dumps(record))
+    record["expected_output"]["currency"] = {"value": 1, "provenance": "parsed_description"}
+    path = tmp_path / "salary.json"
+    path.write_text(json.dumps({"parser": "salary", "records": [record]}), encoding="utf-8")
+    with pytest.raises(ContractRecordError, match="must be a str or null"):
+        load_parser_file(path, "salary")
+
+
+def test_loader_rejects_str_value_for_an_experience_integer_field(tmp_path: Path) -> None:
+    records_dir = Path(__file__).resolve().parent / "records"
+    record = json.loads((records_dir / "experience.json").read_text(encoding="utf-8"))["records"][0]
+    record = json.loads(json.dumps(record))
+    record["expected_output"]["minimum"] = {"value": "5", "provenance": "parsed_description"}
+    path = tmp_path / "experience.json"
+    path.write_text(json.dumps({"parser": "experience", "records": [record]}), encoding="utf-8")
+    with pytest.raises(ContractRecordError, match="must be a int or null"):
+        load_parser_file(path, "experience")
+
+
+def test_loader_still_rejects_bool_for_a_numeric_field_despite_field_discrimination(
+    tmp_path: Path,
+) -> None:
+    """bool is a subclass of int in Python -- confirms the field-specific
+    int check does not accidentally let a bool slip through now that the
+    generic str|int check has been replaced with per-field typing."""
+    records_dir = Path(__file__).resolve().parent / "records"
+    record = json.loads((records_dir / "salary.json").read_text(encoding="utf-8"))["records"][0]
+    record = json.loads(json.dumps(record))
+    record["expected_output"]["minimum"] = {"value": True, "provenance": "parsed_description"}
+    path = tmp_path / "salary.json"
+    path.write_text(json.dumps({"parser": "salary", "records": [record]}), encoding="utf-8")
+    with pytest.raises(ContractRecordError, match="bool is never a valid expected value"):
+        load_parser_file(path, "salary")
+
+
+# ---------------------------------------------------------------------------
+# Correction round (Sol re-review): record traceability.
+# ---------------------------------------------------------------------------
+
+
+def test_loader_rejects_record_id_whose_parser_prefix_does_not_match_parser(
+    tmp_path: Path,
+) -> None:
+    record = json.loads(json.dumps(_VALID_LOCATION_RECORD))
+    record["record_id"] = record["record_id"].replace("location-x", "salary-x")
+    with pytest.raises(ContractRecordError, match="does not start with the required"):
+        load_parser_file(_write_location_file(tmp_path, [record]), "location")
+
+
+def test_loader_rejects_base_record_with_non_none_transform(tmp_path: Path) -> None:
+    record = json.loads(json.dumps(_VALID_LOCATION_RECORD))
+    record["record_id"] = record["record_id"].replace("transform-none", "transform-ascii_recase")
+    record["transform"] = {"name": "ascii_recase", "parameters": {"mode": "upper"}}
+    record["expected_transformed_input"] = {"location": "REMOTE, U.S."}
+    with pytest.raises(ContractRecordError, match="a base record must use transform 'none'"):
+        load_parser_file(_write_location_file(tmp_path, [record]), "location")
+
+
+def test_loader_rejects_base_record_with_non_base_variant(tmp_path: Path) -> None:
+    record = json.loads(json.dumps(_VALID_LOCATION_RECORD))
+    record["record_id"] = record["record_id"].replace("variant-base", "variant-first")
+    with pytest.raises(
+        ContractRecordError, match="a base record's record_id must use variant 'base'"
+    ):
+        load_parser_file(_write_location_file(tmp_path, [record]), "location")
+
+
+def test_loader_rejects_generated_record_masquerading_with_variant_base(tmp_path: Path) -> None:
+    generated = json.loads(json.dumps(_VALID_LOCATION_RECORD))
+    generated["kind"] = "generated"
+    generated["is_primary_witness"] = False
+    del generated["historical_defect_ref"]
+    generated["base_record_id"] = _VALID_LOCATION_RECORD["record_id"]
+    # record_id still ends in "--variant-base", which is reserved for
+    # actual base records.
+    with pytest.raises(ContractRecordError, match="must not use variant 'base'"):
+        load_parser_file(
+            _write_location_file(tmp_path, [_VALID_LOCATION_RECORD, generated]), "location"
+        )
+
+
+def test_loader_rejects_base_record_whose_historical_defect_ref_disagrees_with_the_guard_inventory(
+    tmp_path: Path,
+) -> None:
+    record = json.loads(json.dumps(_VALID_LOCATION_RECORD))
+    record["historical_defect_ref"] = "this does not match the taxonomy entry"
+    with pytest.raises(ContractRecordError, match="does not match guard inventory entry"):
+        load_parser_file(_write_location_file(tmp_path, [record]), "location")
+
+
+_RECORDS_DIR_FOR_TRACEABILITY = Path(__file__).resolve().parent / "records"
+
+
+def _real_location_base_record() -> dict[str, Any]:
+    data = json.loads((_RECORDS_DIR_FOR_TRACEABILITY / "location.json").read_text(encoding="utf-8"))
+    return dict(data["records"][0])  # location/g01's real, committed base record
+
+
+def _valid_generated_from(base: dict[str, Any], *, variant: str) -> dict[str, Any]:
+    generated: dict[str, Any] = json.loads(json.dumps(base))
+    generated["record_id"] = generated["record_id"].replace(
+        "--variant-base", f"--variant-{variant}"
+    )
+    generated["kind"] = "generated"
+    generated["is_primary_witness"] = False
+    del generated["historical_defect_ref"]
+    generated["base_record_id"] = base["record_id"]
+    return generated
+
+
+def test_loader_rejects_generated_record_whose_base_is_itself_generated(tmp_path: Path) -> None:
+    base = _real_location_base_record()
+    first_generated = _valid_generated_from(base, variant="second")
+    second_generated = _valid_generated_from(base, variant="third")
+    second_generated["base_record_id"] = first_generated["record_id"]
+    path = _write_location_file(tmp_path, [base, first_generated, second_generated])
+    with pytest.raises(ContractRecordError, match="not a base record"):
+        collect_all(
+            {
+                "location": path,
+                "salary": _RECORDS_DIR_FOR_TRACEABILITY / "salary.json",
+                "experience": _RECORDS_DIR_FOR_TRACEABILITY / "experience.json",
+            }
+        )
+
+
+def test_loader_rejects_generated_record_with_different_original_input_than_its_base(
+    tmp_path: Path,
+) -> None:
+    base = _real_location_base_record()
+    generated = _valid_generated_from(base, variant="second")
+    generated["original_input"] = {"location": "Somewhere else entirely"}
+    generated["expected_transformed_input"] = {"location": "Somewhere else entirely"}
+    path = _write_location_file(tmp_path, [base, generated])
+    with pytest.raises(
+        ContractRecordError, match="does not match its base record's original_input"
+    ):
+        collect_all(
+            {
+                "location": path,
+                "salary": _RECORDS_DIR_FOR_TRACEABILITY / "salary.json",
+                "experience": _RECORDS_DIR_FOR_TRACEABILITY / "experience.json",
+            }
+        )
+
+
+def test_loader_rejects_generated_record_with_different_target_than_its_base(
+    tmp_path: Path,
+) -> None:
+    base = _real_location_base_record()
+    generated = _valid_generated_from(base, variant="second")
+    generated["target"] = {
+        "input_field": "location",
+        "semantic_form": "country_declaration",
+        "boundary": "whole_field",
+    }
+    # Keep the record_id's own boundary token internally consistent with
+    # this record's (differing) target, so the per-record consistency
+    # check passes and the cross-record base/generated mismatch below is
+    # what's actually isolated.
+    generated["record_id"] = generated["record_id"].replace(
+        "boundary-country_token", "boundary-whole_field"
+    )
+    path = _write_location_file(tmp_path, [base, generated])
+    with pytest.raises(ContractRecordError, match="does not match its base record's target"):
+        collect_all(
+            {
+                "location": path,
+                "salary": _RECORDS_DIR_FOR_TRACEABILITY / "salary.json",
+                "experience": _RECORDS_DIR_FOR_TRACEABILITY / "experience.json",
+            }
+        )
+
+
+# ---------------------------------------------------------------------------
+# Correction round (Sol re-review): contract_mutation_witnesses.py must
+# load records through the fail-closed loader and verify, before running
+# any witness, that the registry entry and the loaded record genuinely
+# agree with each other.
+# ---------------------------------------------------------------------------
+
+
+def _real_location_g01_record():  # type: ignore[no-untyped-def]
+    all_records = collect_all(
+        {
+            "location": _RECORDS_DIR_FOR_TRACEABILITY / "location.json",
+            "salary": _RECORDS_DIR_FOR_TRACEABILITY / "salary.json",
+            "experience": _RECORDS_DIR_FOR_TRACEABILITY / "experience.json",
+        }
+    )
+    (record,) = [
+        r for r in all_records["location"] if r.guard_ref == "location/g01-alias-trailing-period"
+    ]
+    return record
+
+
+def test_witness_script_rejects_a_missing_record() -> None:
+    entry = MUTATION_REGISTRY["location/g01-alias-trailing-period"]
+    with pytest.raises(WitnessError, match="does not exist in the loaded"):
+        _check_record_matches_registry_entry(entry, None)
+
+
+def test_witness_script_rejects_a_non_primary_witness_record() -> None:
+    entry = MUTATION_REGISTRY["location/g01-alias-trailing-period"]
+    record = dataclasses.replace(_real_location_g01_record(), is_primary_witness=False)
+    with pytest.raises(WitnessError, match="not marked as a designated primary witness"):
+        _check_record_matches_registry_entry(entry, record)
+
+
+def test_witness_script_rejects_a_guard_ref_mismatch() -> None:
+    entry = MUTATION_REGISTRY["location/g01-alias-trailing-period"]
+    record = dataclasses.replace(
+        _real_location_g01_record(), guard_ref="location/g02-state-zip-provenance"
+    )
+    with pytest.raises(WitnessError, match="belongs to guard"):
+        _check_record_matches_registry_entry(entry, record)
+
+
+def test_witness_script_rejects_a_parser_mismatch() -> None:
+    entry = MUTATION_REGISTRY["location/g01-alias-trailing-period"]
+    record = dataclasses.replace(_real_location_g01_record(), parser="salary")
+    with pytest.raises(WitnessError, match="does not match the registry entry's parser"):
+        _check_record_matches_registry_entry(entry, record)
+
+
+def test_witness_script_rejects_registry_input_disagreeing_with_record_input() -> None:
+    entry = MUTATION_REGISTRY["location/g01-alias-trailing-period"]
+    record = dataclasses.replace(
+        _real_location_g01_record(),
+        expected_transformed_input={"location": "a different string entirely"},
+    )
+    with pytest.raises(WitnessError, match="does not exactly equal"):
+        _check_record_matches_registry_entry(entry, record)
+
+
+def test_witness_script_accepts_the_real_matching_record() -> None:
+    entry = MUTATION_REGISTRY["location/g01-alias-trailing-period"]
+    record = _real_location_g01_record()
+    assert _check_record_matches_registry_entry(entry, record) is record

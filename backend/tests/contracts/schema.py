@@ -93,6 +93,20 @@ OUTPUT_FIELDS: dict[Parser, frozenset[str]] = {
     "experience": frozenset({"minimum", "maximum"}),
 }
 
+# The exact value type each output field requires when its provenance is
+# not "unavailable" -- genuinely parser/field-discriminated, not a
+# blanket "str or int" accepted for every field regardless of what it
+# actually is. Location's four fields are all strings; salary's/
+# experience's numeric bounds are integers; salary's currency/period are
+# strings. `bool` is never valid for any field (checked separately,
+# since Python's `bool` is a subclass of `int` and must never satisfy
+# an `int`-typed field either).
+OUTPUT_FIELD_TYPES: dict[Parser, dict[str, type]] = {
+    "location": {"city": str, "state": str, "country": str, "postal_code": str},
+    "salary": {"minimum": int, "maximum": int, "currency": str, "period": str},
+    "experience": {"minimum": int, "maximum": int},
+}
+
 SEMANTIC_FORMS: dict[Parser, frozenset[str]] = {
     "location": frozenset(
         {

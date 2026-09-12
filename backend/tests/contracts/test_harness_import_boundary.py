@@ -57,20 +57,25 @@ def _parse(path: Path) -> ast.Module:
 
 def _imported_from_normalization(tree: ast.Module) -> list[tuple[str, str, bool]]:
     """Returns (module, imported_name, is_whole_module_import) for every
-    import touching `app.normalization`."""
+    import touching `app.normalization`, including equivalent forms:
+    `import app.normalization.location`, `from app.normalization.location
+    import classify_location`, and `from app import normalization` (which
+    binds the whole `normalization` package/subtree under a local name,
+    just as a whole-module `import` would, and is treated identically)."""
     results: list[tuple[str, str, bool]] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
                 if alias.name.startswith("app.normalization"):
                     results.append((alias.name, alias.name, True))
-        elif (
-            isinstance(node, ast.ImportFrom)
-            and node.module is not None
-            and node.module.startswith("app.normalization")
-        ):
-            for alias in node.names:
-                results.append((node.module, alias.name, False))
+        elif isinstance(node, ast.ImportFrom) and node.module is not None:
+            if node.module.startswith("app.normalization"):
+                for alias in node.names:
+                    results.append((node.module, alias.name, False))
+            elif node.module == "app":
+                for alias in node.names:
+                    if alias.name == "normalization" or alias.name.startswith("normalization."):
+                        results.append((f"app.{alias.name}", f"app.{alias.name}", True))
     return results
 
 
@@ -85,26 +90,58 @@ def _private_attribute_accesses(tree: ast.Module) -> list[str]:
 
 
 _DYNAMIC_BYPASS_CALL_NAMES = frozenset({"getattr", "setattr", "delattr", "__import__"})
+_BANNED_DOTTED_CALLS = frozenset(
+    {"importlib.import_module", "importlib.util.spec_from_file_location"}
+)
+
+
+def _build_alias_map(tree: ast.Module) -> dict[str, str]:
+    """Maps every locally-bound import name to its canonical dotted
+    origin, so a call can be resolved back to what it really is
+    regardless of `import X as Y` or `from X import Y as Z` aliasing."""
+    alias_map: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                bound = alias.asname or alias.name.split(".")[0]
+                alias_map[bound] = alias.name
+        elif isinstance(node, ast.ImportFrom) and node.module is not None:
+            for alias in node.names:
+                bound = alias.asname or alias.name
+                alias_map[bound] = f"{node.module}.{alias.name}"
+    return alias_map
+
+
+def _resolve_name(name: str, alias_map: dict[str, str]) -> str:
+    return alias_map.get(name, name)
 
 
 def _dynamic_bypass_calls(tree: ast.Module) -> list[str]:
     """Detects calls that could smuggle a private/cross-parser/whole-module
     access past the literal-name checks above: bare `getattr`/`setattr`/
-    `delattr`/`__import__`, and `importlib.import_module`/
-    `importlib.util.spec_from_file_location` (however the `importlib`
-    name was imported or aliased)."""
+    `delattr`/`__import__`; `importlib.import_module`/
+    `importlib.util.spec_from_file_location` (however `importlib`/
+    `importlib.util` was imported or aliased); and any of the above
+    reached via `from importlib import import_module as load` -- an
+    aliased *function* import, not just an aliased module import."""
+    alias_map = _build_alias_map(tree)
     found: list[str] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
         func = node.func
-        if isinstance(func, ast.Name) and func.id in _DYNAMIC_BYPASS_CALL_NAMES:
-            found.append(func.id)
-        elif isinstance(func, ast.Attribute) and func.attr in (
-            "import_module",
-            "spec_from_file_location",
-        ):
-            found.append(func.attr)
+        if isinstance(func, ast.Name):
+            resolved = _resolve_name(func.id, alias_map)
+            if resolved in _BANNED_DOTTED_CALLS or func.id in _DYNAMIC_BYPASS_CALL_NAMES:
+                found.append(func.id)
+        elif isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+            resolved_base = _resolve_name(func.value.id, alias_map)
+            candidate = f"{resolved_base}.{func.attr}"
+            if candidate in _BANNED_DOTTED_CALLS or func.attr in (
+                "import_module",
+                "spec_from_file_location",
+            ):
+                found.append(func.attr)
     return found
 
 
@@ -163,6 +200,31 @@ def test_import_boundary_rejects_whole_module_import_synthetic_case() -> None:
     tree = ast.parse(synthetic)
     imports = _imported_from_normalization(tree)
     assert imports == [("app.normalization.location", "app.normalization.location", True)]
+
+
+def test_import_boundary_rejects_from_app_import_normalization_synthetic_case() -> None:
+    """`from app import normalization` binds the whole `normalization`
+    package/subtree under a local name, exactly as a whole-module
+    `import app.normalization` would -- an equivalent form that must be
+    caught identically, not treated as merely importing a plain name
+    with no `app.normalization` prefix."""
+    synthetic = "from app import normalization\n"
+    tree = ast.parse(synthetic)
+    imports = _imported_from_normalization(tree)
+    assert imports == [("app.normalization", "app.normalization", True)]
+
+
+def test_dynamic_bypass_detector_catches_aliased_import_module_synthetic_case() -> None:
+    """`from importlib import import_module as load` then `load(...)` is
+    a *function* alias, distinct from module aliasing -- the detector
+    must resolve `load` back to `importlib.import_module` via the
+    module's own import statement, not just recognize the literal name
+    `import_module` or the literal attribute chain `importlib.x`."""
+    synthetic = (
+        "from importlib import import_module as load\n" 'load("app.normalization.location")\n'
+    )
+    tree = ast.parse(synthetic)
+    assert _dynamic_bypass_calls(tree) == ["load"]
 
 
 def test_import_boundary_rejects_private_symbol_synthetic_case() -> None:

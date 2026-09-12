@@ -98,158 +98,6 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-09-09, Claude Code (Sonnet 5). Risk class D
-  (documentation-only). Base -> ending commit: `4ecc4b3` -> this commit;
-  new branch `tooling/workflow-v3.2-retrospective`. This is the mandatory
-  Workflow v3.1 pilot retrospective, authorized as Slice 1 of 3 of a
-  staged Workflow v3.2 proposal (Slices 2/3 — the parser-contract harness
-  and the fast/final verifier/receipt/metadata redesign — are planned but
-  **not authorized** by this slice; see the ADR's "Activation boundary").
-- Outcome: `docs/DECISIONS/0008-workflow-v3.1-retrospective-and-v3.2-adoption.md`
-  (new) records: the corrected per-slice retrospective for
-  `classify_experience` (four post-implementation correction rounds, 13
-  findings [7+3+2+1], six pre-code amendments recorded separately,
-  proposal-submission count not reconstructible), `classify_salary`
-  (three documented proposal-review rounds, one executable correction
-  round addressing five executable grammar-boundary mechanisms, their
-  accompanying regression fixtures, and one documentation-attribution
-  correction; no salary finding meets the strict confidently-wrong bar —
-  the boundary-acceptance defects demonstrate malformed input being
-  wrongly accepted, not a value contradicted by the input — and no exact
-  count under that definition is reconstructible from durable evidence),
-  and `classify_location`
-  (four documented proposal-review rounds, one executable correction
-  round, eight validated findings including four committed
-  confidently-wrong cases); the four numerical target verdicts
-  (correction-round: fail; confidently-wrong: fail; handoff-count: pass;
-  load-bearing-regression: pass); the Astra Light/Sol Medium comparison
-  recorded strictly as a configuration comparison, not a model/effort
-  claim; and the note that count-mismatch fault injection already exists
-  in `backend/tests/test_check_handoff.py` and simply was not triggered
-  by a real fabricated count during the pilot. It also records the
-  accepted Workflow v3.2 design principles (compact contracts,
-  two-submission parser proposal limit, Sol Medium as mandatory primary
-  reviewer, selective Astra escalation, executable parser contracts,
-  mechanism-level mutation evidence, fast/final gates, stable slice/
-  finding IDs, durable verification evidence, unchanged user-only scope
-  and merge authority) and five unresolved Slice 3 design questions
-  (pre-receipt candidate verification; non-circular receipt attestation;
-  allowed documentation-only differences between attested and merged
-  trees; a candidate/reviewed/corrected/approved/merge-reuse metadata
-  state machine; no ephemeral receipt as durable merge evidence).
-- **Workflow v3.1 remains the sole active workflow version.** No
-  version-bearing consumer was touched: `CLAUDE.md`,
-  `.claude/hooks/compact_checkpoint.py`, `backend/scripts/check_handoff.py`,
-  its tests, and every existing `docs/LLM_HANDOFF.md` entry's
-  `workflow_version` field are unmodified by this slice. The ADR
-  describes Slices 2/3's planned artifacts (contract harness, receipts,
-  verifier profiles) without linking to any file, since none of them
-  exist yet.
-- Files changed: `docs/DECISIONS/0008-workflow-v3.1-retrospective-and-v3.2-adoption.md`
-  (new), this handoff entry (two-iteration rotation — the prior
-  Iteration 1, `classify_location`'s original pre-correction Work done
-  entry, was deleted per the standard rotation rule since the whole
-  `classify_location` slice is already closed via Iteration 2's approval
-  and merge record; Iteration 2's content is preserved byte-for-byte
-  above, only renumbered to Iteration 1). No other file touched.
-- Verification (docs-only, per Workflow v3.1's existing `slice_kind:
-  docs` provisions): `git diff --check` — clean. `python -m
-  scripts.check_repo` exits 0. Genuine external `python -m scripts.verify
-  --docs-only` — all applicable steps PASS (database/pytest steps
-  correctly skipped per `--docs-only`'s own contract); no executable or
-  test file changed, so no focused/full-suite run applies.
-- Deviations/known limitations: this ADR's own "not reconstructible"
-  figures (experience's proposal-submission count; salary's exact
-  confidently-wrong finding count under the strict definition) are
-  deliberate gaps — not zero, and not to be silently filled with an
-  estimate later.
-- STOP — this is Slice 1 of 3 only. Do not implement the contract
-  harness, receipt system, verifier profiles, metadata schema changes,
-  workflow-version changes, title parser, or skill parser. Do not merge,
-  begin Slice 2 or 3, or start any other Phase 3/4 work without separate
-  explicit user authorization.
-
-```workflow-metadata
-workflow_version: v3.1-pilot
-slice_kind: docs
-verification_level: not_run
-focused_test_selector: none
-focused_test_count: not_run
-full_suite_count: not_run
-lightweight_checks: git diff --check; python -m scripts.check_repo; python -m scripts.verify --docs-only
-```
-
-### Work review
-
-- Date/reviewer: 2026-09-10, Codex. Correction diff reviewed:
-  `2a4f565..eace0bc` on `tooling/workflow-v3.2-retrospective` (relayed
-  as text; no separate `### Work review` commit exists on this branch
-  or its origin prior to this one).
-- Verdict: **Approved. No findings.** The bounded correction
-  (salary's characterization as one correction round addressing five
-  executable grammar-boundary mechanisms, accompanying regression
-  fixtures, and one documentation-attribution correction; the
-  withdrawal of the four-confidently-wrong-findings claim for salary;
-  the "not reconstructible, not zero" accounting for salary's strict
-  confidently-wrong count; and the corresponding updates to the ADR's
-  target-verdict table and Consequences section, plus the matching
-  Iteration 2 `Work done` text) satisfies all five requirements from
-  the correction request with no further change needed.
-- Scope confirmed: only `docs/DECISIONS/0008-workflow-v3.1-retrospective-and-v3.2-adoption.md`
-  and `docs/LLM_HANDOFF.md` differ between `2a4f565` and `eace0bc`;
-  Iteration 1's historical body is unchanged; the four overall target
-  verdicts (correction-round: fail; confidently-wrong: fail;
-  handoff-count: pass; load-bearing-regression: pass) are unchanged;
-  no version-bearing file (`CLAUDE.md`, `.claude/hooks/
-  compact_checkpoint.py`, `backend/scripts/check_handoff.py`, its
-  tests) was touched — Workflow v3.1 remains the sole active workflow
-  version.
-- Next action: awaiting the user's separate authorization before any
-  merge or Workflow v3.2 Slice 2/3 work.
-- STOP — no merge, no Slice 2 or 3, without explicit user
-  authorization.
-
-### Merge record
-
-- Date/agent: 2026-09-11, Claude Code (Sonnet 5), per explicit user
-  merge authorization.
-- Approved feature tip: `596e5fd` (`tooling/workflow-v3.2-retrospective`,
-  includes the approved `Work review` above). Pre-merge `main`/
-  `origin/main`: `4ecc4b3`, synchronized, clean working tree — verified
-  immediately before merging, not assumed from a prior snapshot.
-- Merge: `git merge --no-ff --no-edit` (no squash, no rebase, no
-  force-push, no implementation changes) of
-  `tooling/workflow-v3.2-retrospective` into `main`. Merge commit:
-  `318321e`.
-- Zero-content-difference check: `git diff 596e5fd main` — empty;
-  confirms the merge introduced no content beyond what was already
-  approved on the feature tip.
-- `git diff --check` on merged `main`: clean. `python -m
-  scripts.check_repo`: exit 0. Canonical `python -m scripts.verify
-  --level routine --docs-only` on merged `main`: ALL 7 CHECKS PASSED
-  (ruff format/check, mypy, `check_repo.py`, `git diff --check`,
-  handoff metadata validation, temp-directory cleanup — database/pytest
-  steps correctly skipped per `--docs-only`).
-- No executable, test, migration, or product-document file is part of
-  this diff — a pure docs/ADR and handoff-ledger change.
-- Pushed: `origin/main` now at `318321e` (was `4ecc4b3`).
-- Rollback boundary: `git reset --hard 4ecc4b3` on `main` (pre-merge
-  tip) would fully revert this merge; the feature branch
-  `tooling/workflow-v3.2-retrospective` at `596e5fd` remains intact and
-  unforced, independently recoverable regardless of any `main` rollback.
-- **Workflow v3.1 remains the sole active workflow version** after this
-  merge — no version-bearing file (`CLAUDE.md`, `.claude/hooks/
-  compact_checkpoint.py`, `backend/scripts/check_handoff.py`, its
-  tests) was touched.
-- STOP — merge complete. Do not propose or begin Workflow v3.2 Slice 2
-  or 3 without separate explicit user authorization.
-
----
-
-## Iteration 2
-
-### Work done
-
 - Date/agent: 2026-09-12, Claude Code (Sonnet 5). Risk class R
   (routine tooling — new, self-contained test infrastructure; no
   production-code, identity, concurrency, security, or external
@@ -406,4 +254,131 @@ verification_level: routine
 focused_test_selector: tests/contracts/test_location_contract.py tests/contracts/test_salary_contract.py tests/contracts/test_experience_contract.py tests/contracts/test_harness_self.py tests/contracts/test_harness_import_boundary.py
 focused_test_count: 102
 full_suite_count: 2295
+```
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-09-13, Claude Code (Sonnet 5). Risk class R
+  (unchanged). Base -> ending commit: `d8c2c09` -> this commit; same
+  branch `tooling/workflow-v3.2-slice2-contract-harness`. Bounded
+  correction pass applying Sol's five re-review findings against the
+  frozen Slice 2 implementation, relayed as text (no separate `###
+  Work review` commit exists on this branch or its origin prior to
+  this one). Scope held exactly to the harness's own files, per the
+  correction's explicit boundary — no production parser, workflow-
+  version consumer, or Slice 3 file touched.
+- Five findings addressed:
+  1. **Import boundary strengthened for equivalent forms/aliases** —
+     `test_harness_import_boundary.py`'s detectors now catch `from app
+     import normalization` (an equivalent whole-module bind, not just
+     `import app.normalization`) and alias-resolved dynamic calls (e.g.
+     `from importlib import import_module as load; load(...)`), via a
+     new import-alias map that resolves any locally-bound name back to
+     its canonical dotted origin before checking it against the banned
+     set. Two new isolated synthetic regressions added.
+  2. **Expected-output validation made genuinely parser/field-
+     discriminated** — replaced the generic "str or int" check with
+     `schema.OUTPUT_FIELD_TYPES` (location's four fields: `str`;
+     salary/experience numeric bounds: `int`; salary currency/period:
+     `str`), enforced in `loader._load_expected_output`. `bool` is
+     still rejected outright before the field-specific check runs
+     (Python's `bool` is an `int` subclass). `None` is still accepted
+     only paired with `unavailable` provenance (unchanged, `ExpectedField`'s
+     own invariant).
+  3. **Record traceability enforced**: a record_id's slug must start
+     with its own `parser` name; a base record's record_id/transform
+     must be `variant-base`/`transform-none`; a generated record must
+     never use `variant-base` (reserved, so record_id alone signals
+     kind); a base record's `historical_defect_ref` must equal its
+     guard inventory entry's; and (in `collect_all`, requiring the
+     full three-file set) a generated record's `base_record_id` must
+     resolve to an actual **base** record (never another generated
+     record) sharing its parser, guard_ref, `original_input`, and
+     `target` exactly.
+  4. **`contract_mutation_witnesses.py` now loads records through the
+     fail-closed loader** (`tests.contracts.loader.collect_all`),
+     never raw `json.loads`. Before running any witness, it now
+     requires: the registry's declared record exists in the loaded
+     set; it is that guard's designated primary witness; its
+     parser/guard_ref agree with the registry entry; and the
+     registry's own `input_` is byte-for-byte identical to the
+     record's `expected_transformed_input`. The restored-output
+     assertion now compares against the loaded record's own
+     `expected_output` directly, not a second raw JSON read.
+  5. **Experience-adapter docstring corrected**: it previously implied
+     the non-target field is always `None`; corrected to state that a
+     record may deliberately populate both `title` and `description`
+     together for a cross-source witness (e.g.
+     `experience/g05-internal-conflict-precedence`, whose own record
+     does exactly this), with `target.input_field` naming the field
+     the guard's mechanism most centrally concerns, not "the only
+     non-null one."
+- Finding 5's docstring edit changed `adapters/experience.py`'s own
+  file bytes, which correctly triggered a `STALE adapter fingerprint`
+  failure for all 21 experience guards on the next witness run
+  (confirming the staleness check, corrected in Iteration 1, genuinely
+  fires on a real, intentional change). Recomputed and re-froze only
+  `_FROZEN_ADAPTER_FP["experience"]` (`03c559ec88386dc7` ->
+  `dfa142423607a5a3`); every other frozen fingerprint (both other
+  adapters, all three parser sources, all 34 records) is byte-identical
+  to Iteration 1's baseline, confirmed by recomputing all of them fresh
+  and diffing.
+- Direct fault-injection tests added for every accepted-invalid case
+  above: 2 new import-boundary synthetic regressions (finding 1); 5 new
+  loader tests covering wrong-type values for each parser/field
+  combination plus a bool-still-rejected control (finding 2); 9 new
+  loader tests covering the parser-prefix mismatch, base-transform/
+  variant misuse, generated-variant-base masquerade, historical_defect_ref
+  disagreement, generated-record chaining to a non-base record, and
+  generated-record original_input/target mismatches (finding 3); 6 new
+  tests exercising `_check_record_matches_registry_entry` directly
+  (missing record, non-primary witness, guard/parser/input mismatches,
+  and the real matching case) (finding 4).
+- Files changed: `backend/scripts/contract_mutation_witnesses.py`,
+  `backend/tests/contracts/adapters/experience.py`,
+  `backend/tests/contracts/loader.py`,
+  `backend/tests/contracts/mutation_registry.py` (frozen adapter
+  fingerprint re-freeze only),
+  `backend/tests/contracts/schema.py`,
+  `backend/tests/contracts/test_harness_import_boundary.py`,
+  `backend/tests/contracts/test_harness_self.py`, this handoff entry.
+  No production parser, existing fixture, existing parser test,
+  verifier, workflow document, hook, metadata validator, dependency
+  file, or other version-bearing consumer touched. The corrected
+  35-historical/34-active/1-superseded inventory is unchanged (asserted
+  fresh at import time, confirmed).
+- Mutation-witness acceptance run: `python -m
+  scripts.contract_mutation_witnesses` — **34 passed, 0 failed**
+  (re-run after the adapter-fingerprint re-freeze above).
+- Verification: `ruff format --check`/`ruff check`/`mypy` all pass.
+  `python -m scripts.check_repo` exits 0. Genuine external `python -m
+  scripts.verify --level routine --focus
+  tests/contracts/test_location_contract.py
+  tests/contracts/test_salary_contract.py
+  tests/contracts/test_experience_contract.py
+  tests/contracts/test_harness_self.py
+  tests/contracts/test_harness_import_boundary.py` — all 11 steps PASS:
+  **123 focused / 2316 full-suite tests** (both counts grew by exactly
+  21, matching the 21 new fault-injection/regression tests added across
+  the two test files).
+- Deviations/known limitations: unchanged from Iteration 1's disclosed
+  limitations. No new limitations introduced — this pass only tightens
+  validation and traceability; no behavior change to any of the 34
+  primary-witness records' own expected outputs.
+- STOP — this is still Slice 2 only, now corrected. Do not implement
+  Slice 3, touch any production parser/fixture/existing test, or begin
+  another Phase 3/4 parser. Do not merge without separate explicit user
+  authorization.
+
+```workflow-metadata
+workflow_version: v3.1-pilot
+slice_kind: tooling
+verification_level: routine
+focused_test_selector: tests/contracts/test_location_contract.py tests/contracts/test_salary_contract.py tests/contracts/test_experience_contract.py tests/contracts/test_harness_self.py tests/contracts/test_harness_import_boundary.py
+focused_test_count: 123
+full_suite_count: 2316
 ```

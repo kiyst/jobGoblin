@@ -130,7 +130,7 @@ _FROZEN_SOURCE_FP: dict[str, str] = {
 _FROZEN_ADAPTER_FP: dict[str, str] = {
     "location": "274c19eaa69a138b",
     "salary": "1daba92cc73415d3",
-    "experience": "03c559ec88386dc7",
+    "experience": "dfa142423607a5a3",
 }
 _FROZEN_RECORD_FP: dict[str, str] = {
     "experience/g01-attribution-frame": "443242f08d541811",

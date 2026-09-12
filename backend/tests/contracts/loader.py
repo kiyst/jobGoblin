@@ -19,6 +19,7 @@ from typing import Any
 from tests.contracts.schema import (
     BOUNDARIES,
     INPUT_FIELDS,
+    OUTPUT_FIELD_TYPES,
     OUTPUT_FIELDS,
     PARSERS,
     SEMANTIC_FORMS,
@@ -189,10 +190,11 @@ def _load_expected_output(obj: Any, parser: Parser, *, context: str) -> dict[str
         provenance = field_dict["provenance"]
         if isinstance(value, bool):
             raise ContractRecordError(f"{field_ctx}.value: bool is never a valid expected value")
-        if value is not None and not isinstance(value, str | int):
+        expected_type = OUTPUT_FIELD_TYPES[parser][field]
+        if value is not None and not isinstance(value, expected_type):
             raise ContractRecordError(
-                f"{field_ctx}.value must be a string, integer, or null, got "
-                f"{type(value).__name__}"
+                f"{field_ctx}.value must be a {expected_type.__name__} or null for "
+                f"parser {parser!r} field {field!r}, got {type(value).__name__}"
             )
         if not isinstance(provenance, str):
             raise ContractRecordError(f"{field_ctx}.provenance must be a string")
@@ -203,14 +205,45 @@ def _load_expected_output(obj: Any, parser: Parser, *, context: str) -> dict[str
     return result
 
 
-def _validate_record_id(record_id: str, *, context: str) -> re.Match[str]:
+def _validate_record_id(record_id: str, parser: Parser, *, context: str) -> re.Match[str]:
     match = _RECORD_ID_RE.match(record_id)
     if match is None:
         raise ContractRecordError(
             f"{context}: record_id {record_id!r} does not match the required "
             "'<slug>--transform-<name>--target-<field>--boundary-<boundary>--variant-<n>' shape"
         )
+    base_slug = match.group("base")
+    if not base_slug.startswith(f"{parser}-"):
+        raise ContractRecordError(
+            f"{context}: record_id's slug {base_slug!r} does not start with the required "
+            f"{parser!r} parser prefix ({parser}-...)"
+        )
     return match
+
+
+def _validate_record_id_kind_variant(
+    record_id_match: re.Match[str], *, kind: str, transform_name: str, context: str
+) -> None:
+    """Base records are the designated primary-witness shape: identity
+    transform, `variant-base`. A generated record must never reuse the
+    `base` variant token -- that token is reserved so record_id alone
+    (without opening the record) tells a reader which kind it is."""
+    variant = record_id_match.group("variant")
+    if kind == "base":
+        if transform_name != "none":
+            raise ContractRecordError(
+                f"{context}: a base record must use transform 'none', got {transform_name!r}"
+            )
+        if variant != "base":
+            raise ContractRecordError(
+                f"{context}: a base record's record_id must use variant 'base', got {variant!r}"
+            )
+    else:  # generated
+        if variant == "base":
+            raise ContractRecordError(
+                f"{context}: a generated record must not use variant 'base' -- that token is "
+                "reserved for base records and a generated record must not masquerade as one"
+            )
 
 
 def _validate_record_id_matches_fields(
@@ -291,7 +324,7 @@ def _load_record(obj: Any, parser: Parser, *, index: int, file_context: str) -> 
 
     record_id = _require_str(record_obj, "record_id", context=context)
     context = f"{file_context}[{index}] ({record_id})"
-    record_id_match = _validate_record_id(record_id, context=context)
+    record_id_match = _validate_record_id(record_id, parser, context=context)
 
     kind = record_obj["kind"]
     if kind not in ("base", "generated"):
@@ -332,6 +365,9 @@ def _load_record(obj: Any, parser: Parser, *, index: int, file_context: str) -> 
         target_boundary=target.boundary,
         context=context,
     )
+    _validate_record_id_kind_variant(
+        record_id_match, kind=kind, transform_name=transform.name, context=context
+    )
     expected_transformed_input = _require_input_dict(
         record_obj["expected_transformed_input"],
         parser,
@@ -350,6 +386,12 @@ def _load_record(obj: Any, parser: Parser, *, index: int, file_context: str) -> 
         if not isinstance(historical_defect_ref, str) or not historical_defect_ref:
             raise ContractRecordError(
                 f"{context}: a base record requires a non-empty historical_defect_ref"
+            )
+        if historical_defect_ref != guard.historical_defect_ref:
+            raise ContractRecordError(
+                f"{context}: historical_defect_ref {historical_defect_ref!r} does not match "
+                f"guard inventory entry {guard_ref!r}'s historical_defect_ref "
+                f"{guard.historical_defect_ref!r}"
             )
     else:  # generated
         if "historical_defect_ref" in record_obj:
@@ -454,10 +496,34 @@ def collect_all(paths: dict[Parser, Path]) -> dict[Parser, list[CaseRecord]]:
                         f"{record.record_id}: base_record_id {record.base_record_id!r} does "
                         "not resolve to any loaded record"
                     )
+                if base.kind != "base":
+                    raise ContractRecordError(
+                        f"{record.record_id}: base_record_id {record.base_record_id!r} resolves "
+                        f"to a {base.kind!r} record, not a base record -- generated records must "
+                        "chain to an actual base record, never to another generated record"
+                    )
+                if base.parser != record.parser:
+                    raise ContractRecordError(
+                        f"{record.record_id}: base_record_id {record.base_record_id!r} belongs "
+                        f"to parser {base.parser!r}, not {record.parser!r}"
+                    )
                 if base.guard_ref != record.guard_ref:
                     raise ContractRecordError(
                         f"{record.record_id}: guard_ref {record.guard_ref!r} does not match its "
                         f"base record's guard_ref {base.guard_ref!r}"
+                    )
+                if base.original_input != record.original_input:
+                    raise ContractRecordError(
+                        f"{record.record_id}: original_input {record.original_input!r} does not "
+                        f"match its base record's original_input {base.original_input!r} -- a "
+                        "generated record must vary only by its declared transform, not by "
+                        "starting from different source text"
+                    )
+                if base.target != record.target:
+                    raise ContractRecordError(
+                        f"{record.record_id}: target {record.target!r} does not match its base "
+                        f"record's target {base.target!r} -- a generated record must exercise "
+                        "the same target context as its base"
                     )
 
     # Only active guards require exactly one designated primary witness.
