@@ -116,14 +116,46 @@ def _resolve_name(name: str, alias_map: dict[str, str]) -> str:
     return alias_map.get(name, name)
 
 
+def _dotted_path(node: ast.expr) -> str | None:
+    """Reconstructs the complete dotted-name path of a `Name`/`Attribute`
+    chain (e.g. `importlib.util.spec_from_file_location`), recursing
+    through every level regardless of depth. Returns `None` if the node
+    is not a pure dotted-name expression (e.g. the base is itself a call
+    or subscript) -- such cases are not statically resolvable and are
+    correctly left unflagged rather than guessed at."""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        base = _dotted_path(node.value)
+        if base is None:
+            return None
+        return f"{base}.{node.attr}"
+    return None
+
+
+def _canonicalize_dotted_path(path: str, alias_map: dict[str, str]) -> str:
+    """Resolves only the path's root component through the alias map,
+    then reattaches the remainder unchanged -- so `il.util.foo` with
+    `il` aliased to `importlib` canonicalizes to `importlib.util.foo`
+    regardless of how many attribute levels follow the root."""
+    root, _, remainder = path.partition(".")
+    resolved_root = _resolve_name(root, alias_map)
+    return f"{resolved_root}.{remainder}" if remainder else resolved_root
+
+
 def _dynamic_bypass_calls(tree: ast.Module) -> list[str]:
     """Detects calls that could smuggle a private/cross-parser/whole-module
     access past the literal-name checks above: bare `getattr`/`setattr`/
     `delattr`/`__import__`; `importlib.import_module`/
-    `importlib.util.spec_from_file_location` (however `importlib`/
-    `importlib.util` was imported or aliased); and any of the above
-    reached via `from importlib import import_module as load` -- an
-    aliased *function* import, not just an aliased module import."""
+    `importlib.util.spec_from_file_location` at any attribute-chain depth
+    (however `importlib`/`importlib.util` was imported or aliased, e.g.
+    `import importlib.util` then `importlib.util.spec_from_file_location(...)`,
+    or `import importlib as il` then `il.util.spec_from_file_location(...)`);
+    and any of the above reached via `from importlib import import_module
+    as load` -- an aliased *function* import, not just an aliased module
+    import. This is a closed-set canonical-path check, not a general
+    security analyzer: an ordinary nested attribute call whose canonical
+    root/path is not in the banned set is never flagged."""
     alias_map = _build_alias_map(tree)
     found: list[str] = []
     for node in ast.walk(tree):
@@ -134,13 +166,12 @@ def _dynamic_bypass_calls(tree: ast.Module) -> list[str]:
             resolved = _resolve_name(func.id, alias_map)
             if resolved in _BANNED_DOTTED_CALLS or func.id in _DYNAMIC_BYPASS_CALL_NAMES:
                 found.append(func.id)
-        elif isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
-            resolved_base = _resolve_name(func.value.id, alias_map)
-            candidate = f"{resolved_base}.{func.attr}"
-            if candidate in _BANNED_DOTTED_CALLS or func.attr in (
-                "import_module",
-                "spec_from_file_location",
-            ):
+        elif isinstance(func, ast.Attribute):
+            raw_path = _dotted_path(func)
+            if raw_path is None:
+                continue
+            canonical = _canonicalize_dotted_path(raw_path, alias_map)
+            if canonical in _BANNED_DOTTED_CALLS:
                 found.append(func.attr)
     return found
 
@@ -259,6 +290,46 @@ def test_dynamic_bypass_detector_catches_importlib_import_module_synthetic_case(
     synthetic = 'importlib.import_module("app.normalization.location")\n'
     tree = ast.parse(synthetic)
     assert _dynamic_bypass_calls(tree) == ["import_module"]
+
+
+def test_dynamic_bypass_detector_catches_nested_attribute_chain_synthetic_case() -> None:
+    """Reproduces the exact reported gap: a two-level attribute chain
+    (`importlib.util.spec_from_file_location`) was invisible to the
+    prior one-level-only handling, despite being named in
+    `_BANNED_DOTTED_CALLS` and the function's own documentation."""
+    synthetic = "import importlib\n" 'importlib.util.spec_from_file_location("x", "y")\n'
+    tree = ast.parse(synthetic)
+    assert _dynamic_bypass_calls(tree) == ["spec_from_file_location"]
+
+
+def test_dynamic_bypass_detector_catches_aliased_nested_attribute_chain_synthetic_case() -> None:
+    """Reproduces the exact reported gap combined with module aliasing:
+    `il.util.spec_from_file_location` must canonicalize its root (`il`)
+    through the alias map before the nested chain is compared against
+    the banned set."""
+    synthetic = "import importlib as il\n" 'il.util.spec_from_file_location("x", "y")\n'
+    tree = ast.parse(synthetic)
+    assert _dynamic_bypass_calls(tree) == ["spec_from_file_location"]
+
+
+def test_dynamic_bypass_detector_allows_unrelated_nested_attribute_call_synthetic_case() -> None:
+    """Positive control: an ordinary nested attribute call whose
+    canonical root/path has nothing to do with the banned set must
+    remain allowed -- this is a closed-set canonical-path check, not a
+    general analyzer that flags every multi-level attribute call."""
+    synthetic = 'import os.path\nos.path.join("a", "b")\n'
+    tree = ast.parse(synthetic)
+    assert _dynamic_bypass_calls(tree) == []
+
+
+def test_dynamic_bypass_detector_allows_deeper_unrelated_attribute_chain_synthetic_case() -> None:
+    """A second positive control at three attribute levels deep, with no
+    import statement at all for the base name (mirrors how an adapter
+    might call a chain of attributes on its own already-imported
+    classifier result, e.g. `result.city.provenance.value`)."""
+    synthetic = "some_module.sub.helper()\n"
+    tree = ast.parse(synthetic)
+    assert _dynamic_bypass_calls(tree) == []
 
 
 def test_dynamic_bypass_detector_catches_dunder_import_synthetic_case() -> None:

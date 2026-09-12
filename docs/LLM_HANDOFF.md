@@ -365,6 +365,36 @@ full_suite_count: 2295
   **123 focused / 2316 full-suite tests** (both counts grew by exactly
   21, matching the 21 new fault-injection/regression tests added across
   the two test files).
+- **Follow-up bounded correction (same commit lineage, still Iteration
+  2 — Sol independently reproduced this before any review was recorded
+  against the entry above, so it is folded in here rather than forcing
+  a premature ledger rotation that would delete Iteration 1's still-
+  unreviewed original Work done)**: `_dynamic_bypass_calls` (added by
+  finding 1 above) only handled an `ast.Attribute` whose immediate
+  `.value` was an `ast.Name` — a nested chain two or more levels deep
+  (`importlib.util.spec_from_file_location`, or the same via `import
+  importlib as il; il.util.spec_from_file_location(...)`) fell through
+  entirely, yielding zero findings despite being named in
+  `_BANNED_DOTTED_CALLS` and the function's own docstring. Fixed by
+  replacing the one-level handling with a recursive `_dotted_path`
+  reconstruction of the complete attribute chain, canonicalizing only
+  the chain's root through the alias map
+  (`_canonicalize_dotted_path`), then comparing the resulting full
+  path against the closed banned-call set — never broadened into a
+  general analyzer. Both exact reproductions and two positive controls
+  (an unrelated two-level chain `os.path.join`, and an unrelated
+  three-level chain with no import statement at all) added as isolated
+  synthetic regressions. This touched only
+  `test_harness_import_boundary.py` (a test file, not a source/adapter/
+  record file), so no fingerprint re-freeze was needed or performed —
+  confirmed by all 34 mutation witnesses passing unmodified. Genuine
+  external `python -m scripts.verify --level routine --focus` (same
+  five-file selector as above) re-run after this fix: all 11 steps
+  PASS, **127 focused / 2320 full-suite tests** (both grew by exactly
+  4, matching the 4 new synthetic regressions/positive controls added)
+  — this is the final, current count, superseding the 123/2316 figure
+  in the verification bullet above, which described the state before
+  this follow-up fix.
 - Deviations/known limitations: unchanged from Iteration 1's disclosed
   limitations. No new limitations introduced — this pass only tightens
   validation and traceability; no behavior change to any of the 34
@@ -379,6 +409,6 @@ workflow_version: v3.1-pilot
 slice_kind: tooling
 verification_level: routine
 focused_test_selector: tests/contracts/test_location_contract.py tests/contracts/test_salary_contract.py tests/contracts/test_experience_contract.py tests/contracts/test_harness_self.py tests/contracts/test_harness_import_boundary.py
-focused_test_count: 123
-full_suite_count: 2316
+focused_test_count: 127
+full_suite_count: 2320
 ```
