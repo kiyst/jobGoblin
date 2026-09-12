@@ -1,0 +1,100 @@
+{
+  "parser": "salary",
+  "records": [
+    {
+      "record_id": "salary-covered-whitespace-line-separator--transform-none--target-compensation_text--boundary-label_boundary--variant-base",
+      "kind": "base",
+      "parser": "salary",
+      "guard_ref": "salary/g01-covered-whitespace-class",
+      "is_primary_witness": true,
+      "historical_defect_ref": "261ffe3 finding 1",
+      "target": {"input_field": "compensation_text", "semantic_form": "single_amount_or_floor", "boundary": "label_boundary"},
+      "original_input": {"compensation_text": "Salary: $120,000"},
+      "transform": {"name": "none", "parameters": {}},
+      "expected_transformed_input": {"compensation_text": "Salary: $120,000"},
+      "expected_output": {
+        "minimum": {"value": null, "provenance": "unavailable"},
+        "maximum": {"value": null, "provenance": "unavailable"},
+        "currency": {"value": null, "provenance": "unavailable"},
+        "period": {"value": null, "provenance": "unavailable"}
+      },
+      "rationale": "U+2028 LINE SEPARATOR is not in the covered-whitespace class (_WS = [\\t\\n\\r ]) that every salary grammar boundary uses, unlike bare backslash-s which Python's re treats as matching it. This is a newly authored record for Slice 2: the existing 261ffe3 correction round fixed findings 2-5, all of which build on this covered-whitespace narrowing, but none of its own fixtures isolates this specific guard on its own (each is independently rejected by its own boundary check regardless of this guard's state). Traced directly against salary.py's _WS constant and _LABEL_PREFIX."
+    },
+    {
+      "record_id": "salary-label-boundary-strictness--transform-none--target-compensation_text--boundary-label_boundary--variant-base",
+      "kind": "base",
+      "parser": "salary",
+      "guard_ref": "salary/g02-label-boundary-strictness",
+      "is_primary_witness": true,
+      "historical_defect_ref": "261ffe3 finding 2",
+      "target": {"input_field": "compensation_text", "semantic_form": "single_amount_or_floor", "boundary": "label_boundary"},
+      "original_input": {"compensation_text": "salary120000"},
+      "transform": {"name": "none", "parameters": {}},
+      "expected_transformed_input": {"compensation_text": "salary120000"},
+      "expected_output": {
+        "minimum": {"value": null, "provenance": "unavailable"},
+        "maximum": {"value": null, "provenance": "unavailable"},
+        "currency": {"value": null, "provenance": "unavailable"},
+        "period": {"value": null, "provenance": "unavailable"}
+      },
+      "rationale": "Without a trailing colon, a label must be separated from what follows by at least one covered-whitespace character -- 'salary120000' has none, so no production fullmatches. Traced against _LABEL_PREFIX."
+    },
+    {
+      "record_id": "salary-currency-code-boundary-strictness--transform-none--target-compensation_text--boundary-code_boundary--variant-base",
+      "kind": "base",
+      "parser": "salary",
+      "guard_ref": "salary/g03-currency-code-boundary-strictness",
+      "is_primary_witness": true,
+      "historical_defect_ref": "261ffe3 finding 3",
+      "target": {"input_field": "compensation_text", "semantic_form": "single_amount_or_floor", "boundary": "code_boundary"},
+      "original_input": {"compensation_text": "USD120000"},
+      "transform": {"name": "none", "parameters": {}},
+      "expected_transformed_input": {"compensation_text": "USD120000"},
+      "expected_output": {
+        "minimum": {"value": null, "provenance": "unavailable"},
+        "maximum": {"value": null, "provenance": "unavailable"},
+        "currency": {"value": null, "provenance": "unavailable"},
+        "period": {"value": null, "provenance": "unavailable"}
+      },
+      "rationale": "A currency code must be separated from the amount by at least one covered-whitespace character, regardless of what preceded the code. 'USD120000' has none, so no production fullmatches. Traced against _CODE_PREFIX/_CODE_SUFFIX."
+    },
+    {
+      "record_id": "salary-period-boundary-by-shape--transform-none--target-compensation_text--boundary-period_boundary--variant-base",
+      "kind": "base",
+      "parser": "salary",
+      "guard_ref": "salary/g04-period-boundary-by-shape",
+      "is_primary_witness": true,
+      "historical_defect_ref": "261ffe3 finding 4",
+      "target": {"input_field": "compensation_text", "semantic_form": "single_amount_or_floor", "boundary": "period_boundary"},
+      "original_input": {"compensation_text": "$120000year"},
+      "transform": {"name": "none", "parameters": {}},
+      "expected_transformed_input": {"compensation_text": "$120000year"},
+      "expected_output": {
+        "minimum": {"value": null, "provenance": "unavailable"},
+        "maximum": {"value": null, "provenance": "unavailable"},
+        "currency": {"value": null, "provenance": "unavailable"},
+        "period": {"value": null, "provenance": "unavailable"}
+      },
+      "rationale": "A word-shaped period marker (unlike a slash form) requires at least one covered-whitespace character before it. '$120000year' has none, so 'year' is unconsumed leftover text and no production fullmatches. Traced against _PERIOD_SUFFIX's period_word branch."
+    },
+    {
+      "record_id": "salary-up-to-narrowed-forms--transform-none--target-compensation_text--boundary-range_separator--variant-base",
+      "kind": "base",
+      "parser": "salary",
+      "guard_ref": "salary/g05-up-to-narrowed-forms",
+      "is_primary_witness": true,
+      "historical_defect_ref": "261ffe3 finding 5",
+      "target": {"input_field": "compensation_text", "semantic_form": "ceiling_only", "boundary": "range_separator"},
+      "original_input": {"compensation_text": "up--to $150,000"},
+      "transform": {"name": "none", "parameters": {}},
+      "expected_transformed_input": {"compensation_text": "up--to $150,000"},
+      "expected_output": {
+        "minimum": {"value": null, "provenance": "unavailable"},
+        "maximum": {"value": null, "provenance": "unavailable"},
+        "currency": {"value": null, "provenance": "unavailable"},
+        "period": {"value": null, "provenance": "unavailable"}
+      },
+      "rationale": "Only 'up' + mandatory whitespace + 'to', or the literal 'up-to', are approved -- 'up--to' (a doubled hyphen) matches neither, so open_upper does not fullmatch. Traced against _UP_TO."
+    }
+  ]
+}

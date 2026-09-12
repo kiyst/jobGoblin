@@ -1,0 +1,157 @@
+{
+  "parser": "location",
+  "records": [
+    {
+      "record_id": "location-alias-trailing-period--transform-none--target-location--boundary-country_token--variant-base",
+      "kind": "base",
+      "parser": "location",
+      "guard_ref": "location/g01-alias-trailing-period",
+      "is_primary_witness": true,
+      "historical_defect_ref": "88cdb2f/071d8dc finding 1",
+      "target": {"input_field": "location", "semantic_form": "country_declaration", "boundary": "country_token"},
+      "original_input": {"location": "Remote, U.S."},
+      "transform": {"name": "none", "parameters": {}},
+      "expected_transformed_input": {"location": "Remote, U.S."},
+      "expected_output": {
+        "city": {"value": null, "provenance": "unavailable"},
+        "state": {"value": null, "provenance": "unavailable"},
+        "country": {"value": "United States", "provenance": "parsed_description"},
+        "postal_code": {"value": null, "provenance": "unavailable"}
+      },
+      "rationale": "The U.S. alias's own final period is made optional so _normalize_field's generic trailing-period strip cannot break it; 'Remote, U.S.' normalizes to 'Remote, U.S' and still resolves country=United States. Traced directly against the current location.py source (_COUNTRY_TOKEN, _normalize_field)."
+    },
+    {
+      "record_id": "location-state-zip-provenance--transform-none--target-location--boundary-whole_field--variant-base",
+      "kind": "base",
+      "parser": "location",
+      "guard_ref": "location/g02-state-zip-provenance",
+      "is_primary_witness": true,
+      "historical_defect_ref": "071d8dc finding 2",
+      "target": {"input_field": "location", "semantic_form": "city_state_postal_triplet", "boundary": "whole_field"},
+      "original_input": {"location": "Austin, TX 78701"},
+      "transform": {"name": "none", "parameters": {}},
+      "expected_transformed_input": {"location": "Austin, TX 78701"},
+      "expected_output": {
+        "city": {"value": null, "provenance": "unavailable"},
+        "state": {"value": "TX", "provenance": "parsed_description"},
+        "country": {"value": "United States", "provenance": "inferred"},
+        "postal_code": {"value": "78701", "provenance": "parsed_description"}
+      },
+      "rationale": "'United States' is never literally present in a plain '<geo>, <state> <zip>' string, so state_zip_form's country provenance must be INFERRED, not PARSED_DESCRIPTION. Traced directly against classify_location's state_zip_form branch."
+    },
+    {
+      "record_id": "location-region-whitespace-trim--transform-none--target-location--boundary-region_span--variant-base",
+      "kind": "base",
+      "parser": "location",
+      "guard_ref": "location/g03-region-whitespace-trim",
+      "is_primary_witness": true,
+      "historical_defect_ref": "071d8dc finding 3",
+      "target": {"input_field": "location", "semantic_form": "city_region_country_triplet", "boundary": "region_span"},
+      "original_input": {"location": "Toronto, TX , United States"},
+      "transform": {"name": "none", "parameters": {}},
+      "expected_transformed_input": {"location": "Toronto, TX , United States"},
+      "expected_output": {
+        "city": {"value": null, "provenance": "unavailable"},
+        "state": {"value": "TX", "provenance": "parsed_description"},
+        "country": {"value": "United States", "provenance": "parsed_description"},
+        "postal_code": {"value": null, "provenance": "unavailable"}
+      },
+      "rationale": "The greedy geo-token region capture includes the trailing space before the comma ('TX '); _is_recognized_state must trim it before grammar-validating, or a real state is silently misclassified as not-a-state. Traced against _is_recognized_state's trim step."
+    },
+    {
+      "record_id": "location-negation-standalone-word--transform-none--target-location--boundary-geo_span--variant-base",
+      "kind": "base",
+      "parser": "location",
+      "guard_ref": "location/g04-negation-standalone-word",
+      "is_primary_witness": true,
+      "historical_defect_ref": "071d8dc finding 4",
+      "target": {"input_field": "location", "semantic_form": "city_country_pair", "boundary": "geo_span"},
+      "original_input": {"location": "All countries except, Canada"},
+      "transform": {"name": "none", "parameters": {}},
+      "expected_transformed_input": {"location": "All countries except, Canada"},
+      "expected_output": {
+        "city": {"value": null, "provenance": "unavailable"},
+        "state": {"value": null, "provenance": "unavailable"},
+        "country": {"value": null, "provenance": "unavailable"},
+        "postal_code": {"value": null, "provenance": "unavailable"}
+      },
+      "rationale": "A standalone negation cue ('except') inside the discarded geo span must reject the whole result. Traced against _geo_span_is_rejected's _NEGATION_WORDS_RE check."
+    },
+    {
+      "record_id": "location-country-conflict-discarded-span--transform-none--target-location--boundary-geo_span--variant-base",
+      "kind": "base",
+      "parser": "location",
+      "guard_ref": "location/g05-country-conflict-discarded-span",
+      "is_primary_witness": true,
+      "historical_defect_ref": "071d8dc finding 5",
+      "target": {"input_field": "location", "semantic_form": "city_country_pair", "boundary": "geo_span"},
+      "original_input": {"location": "Canada, France"},
+      "transform": {"name": "none", "parameters": {}},
+      "expected_transformed_input": {"location": "Canada, France"},
+      "expected_output": {
+        "city": {"value": null, "provenance": "unavailable"},
+        "state": {"value": null, "provenance": "unavailable"},
+        "country": {"value": null, "provenance": "unavailable"},
+        "postal_code": {"value": null, "provenance": "unavailable"}
+      },
+      "rationale": "A recognized country appearing in the discarded geo span ('Canada') is a genuine multi-country conflict with the explicit country slot ('France'), never silently resolved to the explicit slot. Traced against _geo_span_is_rejected's country-catalog check."
+    },
+    {
+      "record_id": "location-ascii-only-casefold--transform-none--target-location--boundary-state_token--variant-base",
+      "kind": "base",
+      "parser": "location",
+      "guard_ref": "location/g06-ascii-only-casefold",
+      "is_primary_witness": true,
+      "historical_defect_ref": "071d8dc finding 6",
+      "target": {"input_field": "location", "semantic_form": "city_state_pair", "boundary": "state_token"},
+      "original_input": {"location": "Austin, Wİ"},
+      "transform": {"name": "none", "parameters": {}},
+      "expected_transformed_input": {"location": "Austin, Wİ"},
+      "expected_output": {
+        "city": {"value": null, "provenance": "unavailable"},
+        "state": {"value": null, "provenance": "unavailable"},
+        "country": {"value": null, "provenance": "unavailable"},
+        "postal_code": {"value": null, "provenance": "unavailable"}
+      },
+      "rationale": "U+0130 (Turkish dotted capital I) is not an ASCII 'I' and not an NFKC compatibility fold of one. With re.ASCII on the state-token grammar, 'W\\u0130' never fullmatches the Wisconsin alternative at all, so the whole location fails to match any production. Empirically verified directly: re.compile(state_token, re.IGNORECASE|re.ASCII).fullmatch('W\\u0130') is None."
+    },
+    {
+      "record_id": "location-state-precedence-over-coordinator--transform-none--target-location--boundary-region_span--variant-base",
+      "kind": "base",
+      "parser": "location",
+      "guard_ref": "location/g07-state-precedence-over-coordinator",
+      "is_primary_witness": true,
+      "historical_defect_ref": "071d8dc finding 7",
+      "target": {"input_field": "location", "semantic_form": "city_region_country_triplet", "boundary": "region_span"},
+      "original_input": {"location": "Austin, OR, United States"},
+      "transform": {"name": "none", "parameters": {}},
+      "expected_transformed_input": {"location": "Austin, OR, United States"},
+      "expected_output": {
+        "city": {"value": null, "provenance": "unavailable"},
+        "state": {"value": "OR", "provenance": "parsed_description"},
+        "country": {"value": "United States", "provenance": "parsed_description"},
+        "postal_code": {"value": null, "provenance": "unavailable"}
+      },
+      "rationale": "Oregon's abbreviation 'OR' must be recognized as a state before the standalone or/and coordinator check runs, or it is wrongly treated as the word 'or'. Traced against classify_location's region-then-coordinator precedence."
+    },
+    {
+      "record_id": "location-exact-state-token-grammar--transform-none--target-location--boundary-region_span--variant-base",
+      "kind": "base",
+      "parser": "location",
+      "guard_ref": "location/g08-exact-state-token-grammar",
+      "is_primary_witness": true,
+      "historical_defect_ref": "071d8dc finding 3/8",
+      "target": {"input_field": "location", "semantic_form": "city_region_country_triplet", "boundary": "region_span"},
+      "original_input": {"location": "Toronto, T...X, Canada"},
+      "transform": {"name": "none", "parameters": {}},
+      "expected_transformed_input": {"location": "Toronto, T...X, Canada"},
+      "expected_output": {
+        "city": {"value": null, "provenance": "unavailable"},
+        "state": {"value": null, "provenance": "unavailable"},
+        "country": {"value": "Canada", "provenance": "parsed_description"},
+        "postal_code": {"value": null, "provenance": "unavailable"}
+      },
+      "rationale": "'T...X' must never be recognized as a state -- it does not fullmatch the exact state-token grammar. Traced against _is_recognized_state's grammar-validation step and classify_location's region_country_form dispatch (not-region-is-state, not-is-us -> country only)."
+    }
+  ]
+}

@@ -98,259 +98,163 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-09-09, Claude Code (Sonnet 5). Risk class R
-  (R-plus-adversarial, unchanged). Base -> ending commit: `88cdb2f` ->
-  this commit; same branch `phase-3/location-classifier`. Bounded
-  correction pass applying eight independently-validated findings from
-  the blind Sol/Astra comparison review of frozen commit `88cdb2f`,
-  per the user's explicit authorization. **Reviewer attribution per
-  finding (which came from Astra Light vs. Sol Medium) was not included
-  in the correction request relayed to the implementer; this entry
-  records the combined validated union of eight defects without
-  per-finding attribution, since fabricating that mapping would not be
-  honest. The user or the reviewing agents should supply the per-finding
-  attribution directly if it needs to be recorded.**
-- Eight findings addressed, no behavior change outside them:
-  1. **Country-alias trailing-period compatibility**: `_normalize_field`'s
-     generic trailing-period strip can remove exactly one period from a
-     `U.S.`/`U.S.A.` alias's own final period. Made only that one final
-     period optional in each alias (`U\.S\.A\.?`/`U\.S\.?`); a genuine
-     doubled terminal period (`"U.S.."`) still correctly fails to
-     fullmatch. Applies uniformly across all four productions that use
-     `_COUNTRY_TOKEN`.
-  2. **State+ZIP country provenance**: `state_zip_form` was wrongly using
-     `Provenance.PARSED_DESCRIPTION` for `country="United States"` even
-     though "United States" is never literally present in a plain
-     `"<geo>, <state> <zip>"` string. Now `Provenance.INFERRED`, matching
-     the bare `state_form` case.
-  3. **Region whitespace trimming + one exact state parser**: a greedy
-     `_GEO_TOKEN` region capture can include incidental trailing
-     whitespace before the next comma (e.g. `"TX "` instead of `"TX"`),
-     which the old ad hoc `.replace(".", "").upper()` + set-membership
-     check did not trim, silently misclassifying a real state as "not a
-     state." Replaced with a single authority, `_is_recognized_state`,
-     that trims covered whitespace then requires an exact fullmatch
-     against the closed `_STATE_TOKEN` grammar (also closes finding 8).
-  4. **Standalone negation/exclusion cues**: `"not"`/`"except"`/
-     `"excluding"`/`"excluded"` inside a discarded geo/region span now
-     reject the whole result the same way the `or`/`and` coordinator
-     check does — `"All countries except, Canada"` and `"Not in, Canada"`
-     no longer confidently extract `country=Canada`.
-  5. **Recognized country in a discarded span is a conflict**: a
-     discarded geo or region span that itself exactly matches the
-     country catalog (`"Canada, France"`, `"Canada, United States"`,
-     `"London, Germany, France"`) is now a rejection trigger, not silently
-     ignored — a genuine multi-country conflict, never resolved by
-     picking the explicit country slot's value. `"Toronto, ON, Canada"`
-     is unaffected (`"ON"` is not a recognized country).
-  6. **ASCII-only case-insensitivity for state matching**: added
-     `re.ASCII` alongside `re.IGNORECASE` on every compiled pattern in
-     this module. Without it, Python's Unicode-aware case-folding could
-     treat U+0130 (Turkish dotted capital İ) as case-equivalent to ASCII
-     "I", letting `"Wİ"` match Wisconsin or `"İN"` match Indiana — neither
-     is an NFKC compatibility variant of "I" (unlike a genuine fullwidth
-     letter, which still folds and still resolves correctly).
-  7. **State-recognition precedence over the coordinator check**: in the
-     three-part form, `"OR"` (Oregon) was being rejected by the
-     `or`/`and` standalone-word check before ever being checked against
-     the state catalog. `region` is now checked against
-     `_is_recognized_state` *first*; only a region that is not a
-     recognized state goes through the open-text validation (coordinator/
-     negation/marker/sentinel/country-conflict checks). A genuinely
-     coordinator-bearing non-state region (`"East or West"`) is still
-     correctly rejected.
-  8. **Exact state-token grammar validated before canonicalization**:
-     `"T...X"`/`"TX..."` no longer fullmatch `_STATE_TOKEN` and are
-     correctly never recognized as states (closed by the same fix as
-     finding 3); `"DC"`/`"D.C"`/`"D.C."` all remain correctly recognized.
-- Files changed: `backend/app/normalization/location.py`,
-  `backend/tests/fixtures/normalization/location_cases.json` (+27 cases,
-  125 total), `docs/LLM_HANDOFF.md`. No other file touched — none of the
-  eight findings required a documentation-attribution or status-line
-  fix.
-- Mutation-proof mapping:
-
-  | Finding | Mechanism | Regression test(s) | Mutation outcome |
-  |---|---|---|---|
-  | 1 | Optional final period on `U.S.`/`U.S.A.` aliases | `country_alias_us_dotted`, `country_alias_us_dotted_no_final_period`, `country_alias_usa_dotted`, `country_alias_usa_dotted_no_final_period` | Reverted both aliases to mandatory final periods: all 4 failed (wrongly unavailable). Restored: all 4 passed. `country_alias_us_doubled_period_rejected` correctly unaffected either way. |
-  | 2 | `state_zip_form` country provenance | `collision_ca_disambiguated_by_zip`, `collision_ga_disambiguated_by_zip`, `noncolliding_state_zip_positive_control`, `city_state_zip_plus4` | Reverted to the `PARSED_DESCRIPTION` default: all 4 failed. Restored: all 4 passed. |
-  | 3 | Region whitespace trim in `_is_recognized_state` | `region_whitespace_space_trimmed_before_comma`, `region_whitespace_nbsp_trimmed_before_comma` | Disabled the trim (`trimmed = raw`): both failed. Restored: both passed. **Note**: `region_whitespace_tab_trimmed_before_comma` does not isolate this mechanism — tab is not in `_GEO_TOKEN`'s character class at all, so the greedy region capture never includes it regardless of trimming; noted directly in its fixture `note`, and it remains a valid neighboring covered-whitespace control per the correction's own request. |
-  | 4 | Standalone negation-word check | `negation_except_rejected`, `negation_not_in_rejected` | Removed the negation-word check: both failed (wrongly extracted `country=Canada`). Restored: both passed. `negation_ordinary_positive_control` correctly unaffected either way. |
-  | 5 | Country-catalog match on a discarded span | `country_conflict_geo_is_country_france`, `country_conflict_geo_is_country_us`, `country_conflict_region_is_country` | Disabled the check (forced it to always return `False`): all 3 failed (wrongly extracted the explicit country). Restored: all 3 passed. `three_part_region_nonUS_country_preserved` (`"Toronto, ON, Canada"`) correctly unaffected either way. |
-  | 6 | `re.ASCII` on the five `_PRODUCTIONS` compiles | `ascii_only_wi_lookalike_rejected`, `ascii_only_in_lookalike_rejected`, `ascii_only_wi_lookalike_zip_rejected` | Removed `re.ASCII` from the five compiled productions: all 3 failed (wrongly resolved Wisconsin/Indiana from the Turkish-İ lookalikes). Restored: all 3 passed. `ascii_only_lowercase_positive_control`/`ascii_only_fullwidth_positive_control` correctly unaffected either way. |
-  | 7 | State-check precedence before the coordinator check | `oregon_state_plus_explicit_us` | Reverted the check order (open-text validation runs unconditionally before the state check): failed (Oregon wrongly rejected). Restored: passed. **Note**: `oregon_state_plus_canada_conflict` does not isolate this mechanism — both the (wrong) coordinator rejection and the (correct) state+non-US-country conflict rule produce the same all-four-unavailable outcome; noted directly in its fixture `note`. `genuine_coordinator_region_rejected` correctly unaffected either way. |
-  | 8 | Exact `_STATE_TOKEN_RE.fullmatch` (shared fix with finding 3) | `malformed_state_dots_rejected_as_state`, `malformed_state_trailing_dots_rejected_as_state` | Replaced the exact-grammar check with the old loose strip+membership check: both failed (`"T...X"`/`"TX..."` wrongly recognized as states, nulling `country` via the state+non-US-country conflict rule instead of preserving it). Restored: both passed. `dc_bare_preserved_three_part`/`dc_one_period_preserved_three_part`/`dc_two_period_preserved_three_part` correctly unaffected either way. |
-
-- Verification: `ruff format --check`/`ruff check`/`mypy` all pass.
-  `python -m scripts.check_repo` exits 0. Genuine external `python -m
-  scripts.verify --level routine --focus tests/test_normalization_location.py`
-  (full run, see metadata below) — all 11 steps PASS, including `handoff
-  metadata validation`. Full unfocused suite: **2193 passed** (was 2166;
-  +27 fixture cases). All previously-approved forms re-verified unchanged
-  (all 98 prior fixtures still pass with no expected-value edits except
-  the four corrected by finding 2).
-- Deviations/known limitations: unchanged from the prior iteration's
-  disclosed limitations (city resolution deferred; synthetic-only
-  corpus apart from the one real Greenhouse fixture; non-US postal
-  codes/subnational abbreviations/parenthesized-marker-prefix form
-  remain unsupported). No new limitations introduced — this pass only
-  fixes the eight reported defects.
-- STOP — this commit is frozen for final Codex re-review. Do not merge,
-  begin pilot slice retrospective, wire into ingestion/persistence,
-  contact providers, or create a migration. No Work review recorded by
-  the implementer — that is the reviewer's to write.
+- Date/agent: 2026-09-12, Claude Code (Sonnet 5). Risk class R
+  (routine tooling — new, self-contained test infrastructure; no
+  production-code, identity, concurrency, security, or external
+  surface). Base -> ending commit: `d28bf03` -> this commit; new branch
+  `tooling/workflow-v3.2-slice2-contract-harness`. Workflow v3.2 Slice 2
+  of the staged proposal: the deterministic parser-contract harness,
+  implemented per the frozen Slice 2 proposal plus Sol's ten binding
+  final clarifications and one further binding resolution (the
+  superseded-guard correction below), all relayed as text and treated as
+  the complete implementation contract — no further proposal round.
+- Outcome: `backend/tests/contracts/` (new package) plus
+  `backend/scripts/contract_mutation_witnesses.py` (new, standalone,
+  never collected by pytest). Covers all three existing parsers
+  (`location`, `salary`, `experience` — only these three seeded, per
+  the binding scope). Key modules: `schema.py` (closed record types; an
+  independently-declared provenance vocabulary, never importing
+  `app.normalization.types.NormalizationResult`), `taxonomy.py` (the
+  guard inventory — see the corrected arithmetic below), `loader.py`
+  (fail-closed JSON loader enforcing ~12 distinct validation
+  categories, including a record_id-to-real-fields consistency check
+  added during self-review), `transforms.py` (five mechanical,
+  parser-independent string transforms; deterministic `ascii_recase`
+  mixed-mode algorithm), `runner.py` (invokes an adapter and compares
+  actual vs. expected), `adapters/{location,salary,experience}.py`
+  (each imports only its own public `classify_*` entry point — enforced
+  at the AST symbol level, including a dynamic-bypass check for
+  `getattr`/`setattr`/`importlib.import_module`/`__import__`, added
+  during self-review), `records/{location,salary,experience}.json` (34
+  hand-authored primary-witness case records, each fully materialized:
+  original input, deterministic transform parameters, expected
+  transformed input, complete expected output, and a durable rationale
+  citing the exact historical commit), and `mutation_registry.py` (34
+  replayable mutants — "simple" ones monkeypatch a live module
+  attribute or small atomic helper function; "structural" ones edit
+  source text via an anchor asserted to occur exactly once and load the
+  mutated text as a fully isolated module via `importlib`, never
+  touching the shared checkout — plus **committed, frozen baseline
+  fingerprints** for the production source file, the JSON record, and
+  the adapter file per guard, corrected during self-review; see below).
+- **Corrected inventory arithmetic** (a factual correction discovered
+  through source-history verification, not a deviation from the
+  authorized contract): `experience/g07-reversed-label-anchor`'s own
+  historical fix (`2589eec` finding 1) was itself fully superseded by a
+  later fix (`2fcdc0f` finding 3, `experience/g18-description-label-
+  value-scope-removed`) that removed the description-side reversed-label
+  path entirely — confirmed directly against the current
+  `experience.py` source, which never calls `_LABEL_VALUE_RE`/
+  `_match_label_value_phrase` from `_extract_description_bounds` in any
+  form. Per the user's binding resolution: g07 is retained as a
+  **historical record**, `status="superseded"`, `superseded_by`
+  pointing to g18, with **no primary witness and no mutant** (a written
+  approval is not a substitute for executable mutation evidence, and
+  g18's own witness is never double-counted as g07's). Corrected counts:
+  **35 historical guard records** (location 8, salary 5, experience 22),
+  of which **34 are active** (experience 21) with exactly one primary
+  witness and mutant each, and **1 is superseded** with neither. The
+  taxonomy module asserts these exact counts at import time.
+  `loader.py` fails closed if any record references the superseded
+  guard, and `collect_all` requires exactly one primary witness per
+  *active* guard only.
+- Fresh-context adversarial self-review (via an independent subagent,
+  per the user's explicit requirement) found six real defects before
+  this entry was written, all fixed and re-verified before commit:
+  1. **[Critical] Vacuous staleness check** — fingerprints were
+     originally computed fresh from current files at import time, then
+     compared against themselves in the same run — a tautology that
+     could never detect drift. Fixed: fingerprints are now committed,
+     frozen baseline values (`_FROZEN_SOURCE_FP`/`_FROZEN_ADAPTER_FP`/
+     `_FROZEN_RECORD_FP`), computed once against this commit's exact
+     content; the witness script recomputes fresh values at run time
+     and compares against these frozen ones. Empirically re-verified:
+     appending a harmless comment to `location.py` and rerunning the
+     `location/g01` witness correctly reports `STALE source
+     fingerprint`; restoring the file and rerunning correctly passes
+     again.
+  2. **[High] AST import-boundary bypassable via dynamic access** —
+     the original checker only inspected literal `Import`/`ImportFrom`/
+     `Attribute` nodes, missing `importlib.import_module`,
+     `__import__`, and computed-name `getattr`/`setattr`/`delattr`.
+     Fixed: a new detector rejects these call forms in every adapter
+     and non-mutation-registry harness module (the mutation registry
+     and witness script are the sole, deliberately exempt, sanctioned
+     users of dynamic access to production internals).
+  3. **[Medium] Misdocumented fingerprint granularity** — the module
+     docstring claimed "exact production source region" precision;
+     fingerprints are actually whole-file hashes. Corrected to disclose
+     this honestly (over-broad staleness triggers, never under-broad).
+  4. **[Low] `record_id` tokens not cross-validated** — a record's
+     embedded transform/target/boundary tokens were never checked
+     against its real fields. Fixed: `loader.py` now rejects a mismatch.
+  5. **[Low] `transform.parameters` accepted unknown extra keys** —
+     fixed via an exact-keys check keyed by transform name
+     (`TRANSFORM_PARAMETER_KEYS`).
+  6. Two existing self-tests whose own fixtures became inconsistent
+     under fix #4's stricter rule were corrected to remain internally
+     consistent (one rewritten to test the new consistency rule
+     directly; one's duplicate-record construction adjusted to keep its
+     copied record's real fields matching its record_id).
+  No confidently-wrong output, cleanup/restoration-on-failure gap, or
+  registry/cardinality drift was found; the reviewer's report is
+  preserved in this session's transcript.
+- Files changed: `backend/tests/contracts/__init__.py`, `schema.py`,
+  `taxonomy.py`, `loader.py`, `runner.py`, `transforms.py`,
+  `mutation_registry.py`, `adapters/__init__.py`,
+  `adapters/{location,salary,experience}.py`,
+  `records/{location,salary,experience}.json`, `test_harness_self.py`,
+  `test_harness_import_boundary.py`,
+  `test_{location,salary,experience}_contract.py`,
+  `backend/scripts/contract_mutation_witnesses.py`, this handoff entry.
+  No production parser, existing fixture, existing parser test,
+  verifier, workflow document, hook, metadata validator, dependency
+  file, or other version-bearing consumer touched.
+- Mutation-witness acceptance run (per binding clarification: run all
+  34 active witnesses now, not added to routine pytest or `verify.py`):
+  `python -m scripts.contract_mutation_witnesses` — **34 passed, 0
+  failed**, each asserting both the documented erroneous output under
+  its mutant and the documented restored output matching its contract
+  record; superseded g07 correctly reported as having no witness, by
+  design, separately from the 34.
+- Verification: `ruff format --check`/`ruff check`/`mypy` all pass (17
+  new source files). `python -m scripts.check_repo` exits 0. Genuine
+  external `python -m scripts.verify --level routine --focus
+  tests/contracts/test_location_contract.py
+  tests/contracts/test_salary_contract.py
+  tests/contracts/test_experience_contract.py
+  tests/contracts/test_harness_self.py
+  tests/contracts/test_harness_import_boundary.py` — all 11 steps PASS:
+  **102 focused / 2295 full-suite tests**. (One full-suite run
+  immediately prior showed 2 unrelated failures in
+  `test_collection_run_provider_attempts.py`/`test_ingestion_pipeline.py`
+  — both passed individually in isolation and the full suite passed
+  cleanly at 2295/2295 on the very next run with no code change in
+  between; recorded here as a one-off database-state artifact from the
+  disposable database container being freshly rebuilt that run, not a
+  regression from this slice, which touches no ingestion/database
+  code.)
+- Deviations/known limitations: only the 34 primary-witness records are
+  committed (no additional generated/transformed records) — within
+  scope, since binding clarification 10 requires exactly one primary
+  witness per active guard but does not mandate additional records.
+  Fingerprint staleness detection is file-level, not anchor/region-level
+  (disclosed in the module docstring, not overclaimed). `experience/g07`
+  is a permanent historical record with no witness, by design.
+- STOP — this is Slice 2 only. Do not implement Slice 3 (fast/final
+  verifier profiles, durable receipts, metadata-schema split, workflow-
+  version activation), touch any production parser/fixture/existing
+  test, or begin another Phase 3/4 parser. Do not merge without separate
+  explicit user authorization.
 
 ```workflow-metadata
 workflow_version: v3.1-pilot
-slice_kind: parser
+slice_kind: tooling
 verification_level: routine
-focused_test_selector: tests/test_normalization_location.py
-focused_test_count: 134
-full_suite_count: 2193
-fixture_path: backend/tests/fixtures/normalization/location_cases.json
-fixture_count: 125
+focused_test_selector: tests/contracts/test_location_contract.py tests/contracts/test_salary_contract.py tests/contracts/test_experience_contract.py tests/contracts/test_harness_self.py tests/contracts/test_harness_import_boundary.py
+focused_test_count: 102
+full_suite_count: 2295
 ```
-
-### Work review
-
-- Date/reviewer: 2026-09-09, Codex/Sol (combining Astra Light and Sol
-  Medium's blind-comparison findings). Correction diff reviewed:
-  `88cdb2f..071d8dc` on `phase-3/location-classifier` (relayed as text;
-  no `### Work review` commit exists on this branch or its origin).
-- Verdict: **Approved.** All eight findings independently confirmed
-  closed by direct reproduction against the actual committed code (not
-  merely by re-reading the implementer's own report).
-- Independent verification performed, with file/line evidence:
-  1. Dotted `U.S.`/`U.S.A.` aliases — `location.py:349-378` (`_COUNTRY_CANONICAL`/
-     `_COUNTRY_TOKEN`). Reproduced `"Remote, U.S."`, `"Remote, U.S"`,
-     `"Austin, U.S.A."`, `"Austin, U.S.A"` all -> `country=United States`;
-     `"Remote, U.S.."` (genuine doubled terminal period) -> unavailable,
-     confirming no broadened malformed-punctuation acceptance.
-  2. ZIP-implied country provenance — `location.py:591-600` (`state_zip_form`).
-     Reproduced `"Austin, TX 78701"` -> `country.provenance == INFERRED`
-     (was `PARSED_DESCRIPTION`); the three-part explicit form
-     (`"Austin, TX, United States"`) correctly still yields
-     `PARSED_DESCRIPTION` — no cross-contamination between the two paths.
-  3. Region trailing-whitespace bypass — `location.py:488-500`
-     (`_is_recognized_state`). Reproduced `"Toronto, TX , United States"`
-     (ASCII space) and the NBSP variant both -> `state=TX`; mutation-
-     disabled the trim myself (independently, not merely re-reading the
-     implementer's claim) and confirmed both fail without it.
-  4. Negation/exclusion in discarded spans — `location.py:425-433`
-     (`_NEGATION_WORDS_RE`). Reproduced `"All countries except, Canada"`
-     and `"Not in, Canada"` both -> all four unavailable; `"Chicago,
-     Canada"` and `"Andover, NH"` (substring, not standalone) both
-     unaffected.
-  5. Conflicting country tokens — `location.py:454-461`
-     (`_geo_span_is_rejected`'s final check). Reproduced `"Canada,
-     France"`, `"Canada, United States"`, `"London, Germany, France"` all
-     -> all four unavailable; `"Toronto, ON, Canada"` correctly preserved
-     (`"ON"` is not a recognized country).
-  6. Unicode state-token matching — `location.py:333`
-     (`_STATE_TOKEN_RE`), `location.py:401-432` (`_PRODUCTIONS`/`_OR_AND_RE`/
-     `_NEGATION_WORDS_RE`/`_MARKER_WORD_RE`, all now `re.IGNORECASE |
-     re.ASCII`). Reproduced `"Austin, Wİ"`, `"Austin, İN"`, `"Austin, Wİ
-     12345"` (U+0130) all -> unavailable; `"austin, wi"` and `"Austin,
-     ＷＩ"` (genuine NFKC-folding fullwidth letters) both correctly ->
-     `state=WI`. Independently removed `re.ASCII` from the five compiled
-     productions and confirmed the three Turkish-İ cases wrongly resolve
-     to Wisconsin/Indiana without it.
-  7. Oregon `OR` precedence — `location.py:565-576` (`classify_location`'s
-     region-then-coordinator-check ordering). Reproduced `"Austin, OR,
-     United States"` -> `state=OR`; `"Austin, OR, Canada"` -> all four
-     unavailable via the state+non-US-country conflict rule (not the
-     coordinator check); `"Toronto, East or West, Canada"` (genuinely
-     non-state, coordinator-bearing) still correctly rejected.
-  8. Malformed state punctuation — same fix site as finding 3
-     (`_is_recognized_state`'s `_STATE_TOKEN_RE.fullmatch`). Reproduced
-     `"Toronto, T...X, Canada"` and `"Toronto, TX..., Canada"` both ->
-     `country=Canada`/`state` unavailable (never recognized as a state);
-     `"Somewhere, DC/D.C/D.C., United States"` all three -> `state=DC`.
-- **Mutation-proof adequacy, independently re-verified** (not merely
-  accepted from the Work done narrative): the two fixtures flagged
-  "non-isolating" were re-tested directly. `region_whitespace_tab_trimmed_before_comma`
-  (finding 3) genuinely does not isolate the trim mechanism — `_GEO_TOKEN`
-  (`location.py:396`, `r"[A-Za-z][A-Za-z .'\-]*"`) never included tab in
-  its character class, so the greedy region capture excludes it
-  regardless of trimming; confirmed by independently disabling the trim
-  and observing the tab fixture still passes while the space/NBSP
-  fixtures for the same finding correctly fail. `oregon_state_plus_canada_conflict`
-  (finding 7) is similarly confirmed non-isolating — reverting the
-  precedence fix leaves it passing, because the wrong path (coordinator
-  rejection) and the correct path (state+non-US-country conflict rule)
-  both produce all-four-unavailable. In both cases, **at least one other
-  fixture for the same finding is genuinely load-bearing**
-  (`region_whitespace_space_trimmed_before_comma`/
-  `region_whitespace_nbsp_trimmed_before_comma` for finding 3;
-  `oregon_state_plus_explicit_us` for finding 7), independently confirmed
-  to fail under mutation. Workflow v3.1's rule — a test must not be
-  *reported as closing* a finding it does not actually prove when its
-  guard is disabled — is satisfied: the Work done entry already labels
-  both fixtures as non-isolating rather than claiming they close their
-  findings, and does not rely on them as the sole evidence for findings
-  3 or 7. This is a satisfied disclosure, not a remaining process/evidence
-  defect.
-- **Cross-cutting regression checks** (per the review request, beyond
-  the eight findings themselves): no broader alias acceptance (`"U..S."`,
-  `"U.S.A.."`, `"U.S.A.A."` all still correctly rejected); no provenance
-  cross-contamination (explicit-country forms stay `PARSED_DESCRIPTION`,
-  state-inferred forms stay `INFERRED`, confirmed across all four
-  three-part dispatch rules independently); no Unicode bypass beyond
-  finding 6 itself; no new state/country dispatch inconsistency (all
-  four three-part rules and the collision-set ZIP/explicit-US
-  disambiguation paths re-verified unaffected).
-- Historical Work done entry integrity: `git diff 88cdb2f..071d8dc --
-  docs/LLM_HANDOFF.md` shows the location classifier's own prior Work
-  done entry (this iteration's, now renumbered Iteration 1 by the
-  standard two-iteration rotation) preserved byte-for-byte, only
-  appended to. The entry deleted by that same rotation belongs to the
-  already-merged, already-closed `classify_salary` slice, not this one.
-- Missing/inconclusive checks: none. Every finding was reproduced
-  directly; every mutation-proof claim was independently re-executed,
-  not merely re-read.
-- Attribution for the record: **Astra Light** found findings 1 (dotted
-  aliases) and 2 (ZIP-implied country provenance). **Sol Medium** found
-  finding 1 (independently, shared with Astra Light) plus findings 3-8.
-  The combined validated union across both reviewers is eight defects,
-  all now closed.
-- Next action: awaiting the user's separate authorization before any
-  merge or next-parser work.
-- STOP — no merge, no next Phase 3 parser, no mandatory retrospective,
-  without explicit user authorization.
-
-### Merge record
-
-- Date/agent: 2026-09-09, Claude Code (Sonnet 5), per explicit user
-  merge authorization.
-- Approved feature tip: `c1a5235` (`phase-3/location-classifier`,
-  includes the approved `Work review` above). Pre-merge `main`/
-  `origin/main`: `d82445f`, synchronized, clean working tree — verified
-  immediately before merging, not assumed from a prior snapshot.
-- Merge: `git merge --no-ff --no-edit` (no squash, no rebase, no
-  force-push, no implementation changes) of `phase-3/location-classifier`
-  into `main`. Merge commit: `a32b5cc`.
-- Zero-content-difference check: `git diff c1a5235 main` — empty;
-  confirms the merge introduced no content beyond what was already
-  approved on the feature tip.
-- Canonical verifier on merged `main` (`python -m scripts.verify
-  --level routine --focus tests/test_normalization_location.py`): ALL
-  11 CHECKS PASSED — 134 focused / 2193 full-suite tests, `check_repo.py`
-  ok, `git diff --check` ok, `handoff metadata validation` ok.
-- Migration/database state: unchanged. `git diff --stat 88cdb2f main --
-  backend/alembic backend/migrations` and `git log d82445f..main --
-  backend/alembic backend/migrations` both empty — no schema/migration
-  file touched by this slice or its merge; the verifier's disposable
-  test-database reachability preflight passed against the existing
-  schema with no drift.
-- Pushed: `origin/main` now at `a32b5cc` (was `d82445f`).
-- Rollback boundary: `git reset --hard d82445f` on `main` (pre-merge
-  tip) would fully revert this merge; the feature branch
-  `phase-3/location-classifier` at `c1a5235` remains intact and
-  unforced, independently recoverable regardless of any `main` rollback.
-- STOP — merge complete. Do not begin another Phase 3 parser. The
-  mandatory Workflow v3.1 pilot retrospective (three parser slices now
-  merged: `classify_experience`, `classify_salary`, `classify_location`)
-  is required next, under separate explicit user authorization.
 
 ---
 
@@ -358,148 +262,198 @@ fixture_count: 125
 
 ### Work done
 
-- Date/agent: 2026-09-09, Claude Code (Sonnet 5). Risk class D
-  (documentation-only). Base -> ending commit: `4ecc4b3` -> this commit;
-  new branch `tooling/workflow-v3.2-retrospective`. This is the mandatory
-  Workflow v3.1 pilot retrospective, authorized as Slice 1 of 3 of a
-  staged Workflow v3.2 proposal (Slices 2/3 — the parser-contract harness
-  and the fast/final verifier/receipt/metadata redesign — are planned but
-  **not authorized** by this slice; see the ADR's "Activation boundary").
-- Outcome: `docs/DECISIONS/0008-workflow-v3.1-retrospective-and-v3.2-adoption.md`
-  (new) records: the corrected per-slice retrospective for
-  `classify_experience` (four post-implementation correction rounds, 13
-  findings [7+3+2+1], six pre-code amendments recorded separately,
-  proposal-submission count not reconstructible), `classify_salary`
-  (three documented proposal-review rounds, one executable correction
-  round addressing five executable grammar-boundary mechanisms, their
-  accompanying regression fixtures, and one documentation-attribution
-  correction; no salary finding meets the strict confidently-wrong bar —
-  the boundary-acceptance defects demonstrate malformed input being
-  wrongly accepted, not a value contradicted by the input — and no exact
-  count under that definition is reconstructible from durable evidence),
-  and `classify_location`
-  (four documented proposal-review rounds, one executable correction
-  round, eight validated findings including four committed
-  confidently-wrong cases); the four numerical target verdicts
-  (correction-round: fail; confidently-wrong: fail; handoff-count: pass;
-  load-bearing-regression: pass); the Astra Light/Sol Medium comparison
-  recorded strictly as a configuration comparison, not a model/effort
-  claim; and the note that count-mismatch fault injection already exists
-  in `backend/tests/test_check_handoff.py` and simply was not triggered
-  by a real fabricated count during the pilot. It also records the
-  accepted Workflow v3.2 design principles (compact contracts,
-  two-submission parser proposal limit, Sol Medium as mandatory primary
-  reviewer, selective Astra escalation, executable parser contracts,
-  mechanism-level mutation evidence, fast/final gates, stable slice/
-  finding IDs, durable verification evidence, unchanged user-only scope
-  and merge authority) and five unresolved Slice 3 design questions
-  (pre-receipt candidate verification; non-circular receipt attestation;
-  allowed documentation-only differences between attested and merged
-  trees; a candidate/reviewed/corrected/approved/merge-reuse metadata
-  state machine; no ephemeral receipt as durable merge evidence).
-- **Workflow v3.1 remains the sole active workflow version.** No
-  version-bearing consumer was touched: `CLAUDE.md`,
-  `.claude/hooks/compact_checkpoint.py`, `backend/scripts/check_handoff.py`,
-  its tests, and every existing `docs/LLM_HANDOFF.md` entry's
-  `workflow_version` field are unmodified by this slice. The ADR
-  describes Slices 2/3's planned artifacts (contract harness, receipts,
-  verifier profiles) without linking to any file, since none of them
-  exist yet.
-- Files changed: `docs/DECISIONS/0008-workflow-v3.1-retrospective-and-v3.2-adoption.md`
-  (new), this handoff entry (two-iteration rotation — the prior
-  Iteration 1, `classify_location`'s original pre-correction Work done
-  entry, was deleted per the standard rotation rule since the whole
-  `classify_location` slice is already closed via Iteration 2's approval
-  and merge record; Iteration 2's content is preserved byte-for-byte
-  above, only renumbered to Iteration 1). No other file touched.
-- Verification (docs-only, per Workflow v3.1's existing `slice_kind:
-  docs` provisions): `git diff --check` — clean. `python -m
-  scripts.check_repo` exits 0. Genuine external `python -m scripts.verify
-  --docs-only` — all applicable steps PASS (database/pytest steps
-  correctly skipped per `--docs-only`'s own contract); no executable or
-  test file changed, so no focused/full-suite run applies.
-- Deviations/known limitations: this ADR's own "not reconstructible"
-  figures (experience's proposal-submission count; salary's exact
-  confidently-wrong finding count under the strict definition) are
-  deliberate gaps — not zero, and not to be silently filled with an
-  estimate later.
-- STOP — this is Slice 1 of 3 only. Do not implement the contract
-  harness, receipt system, verifier profiles, metadata schema changes,
-  workflow-version changes, title parser, or skill parser. Do not merge,
-  begin Slice 2 or 3, or start any other Phase 3/4 work without separate
-  explicit user authorization.
+- Date/agent: 2026-09-13, Claude Code (Sonnet 5). Risk class R
+  (unchanged). Base -> ending commit: `d8c2c09` -> this commit; same
+  branch `tooling/workflow-v3.2-slice2-contract-harness`. Bounded
+  correction pass applying Sol's five re-review findings against the
+  frozen Slice 2 implementation, relayed as text (no separate `###
+  Work review` commit exists on this branch or its origin prior to
+  this one). Scope held exactly to the harness's own files, per the
+  correction's explicit boundary — no production parser, workflow-
+  version consumer, or Slice 3 file touched.
+- Five findings addressed:
+  1. **Import boundary strengthened for equivalent forms/aliases** —
+     `test_harness_import_boundary.py`'s detectors now catch `from app
+     import normalization` (an equivalent whole-module bind, not just
+     `import app.normalization`) and alias-resolved dynamic calls (e.g.
+     `from importlib import import_module as load; load(...)`), via a
+     new import-alias map that resolves any locally-bound name back to
+     its canonical dotted origin before checking it against the banned
+     set. Two new isolated synthetic regressions added.
+  2. **Expected-output validation made genuinely parser/field-
+     discriminated** — replaced the generic "str or int" check with
+     `schema.OUTPUT_FIELD_TYPES` (location's four fields: `str`;
+     salary/experience numeric bounds: `int`; salary currency/period:
+     `str`), enforced in `loader._load_expected_output`. `bool` is
+     still rejected outright before the field-specific check runs
+     (Python's `bool` is an `int` subclass). `None` is still accepted
+     only paired with `unavailable` provenance (unchanged, `ExpectedField`'s
+     own invariant).
+  3. **Record traceability enforced**: a record_id's slug must start
+     with its own `parser` name; a base record's record_id/transform
+     must be `variant-base`/`transform-none`; a generated record must
+     never use `variant-base` (reserved, so record_id alone signals
+     kind); a base record's `historical_defect_ref` must equal its
+     guard inventory entry's; and (in `collect_all`, requiring the
+     full three-file set) a generated record's `base_record_id` must
+     resolve to an actual **base** record (never another generated
+     record) sharing its parser, guard_ref, `original_input`, and
+     `target` exactly.
+  4. **`contract_mutation_witnesses.py` now loads records through the
+     fail-closed loader** (`tests.contracts.loader.collect_all`),
+     never raw `json.loads`. Before running any witness, it now
+     requires: the registry's declared record exists in the loaded
+     set; it is that guard's designated primary witness; its
+     parser/guard_ref agree with the registry entry; and the
+     registry's own `input_` is byte-for-byte identical to the
+     record's `expected_transformed_input`. The restored-output
+     assertion now compares against the loaded record's own
+     `expected_output` directly, not a second raw JSON read.
+  5. **Experience-adapter docstring corrected**: it previously implied
+     the non-target field is always `None`; corrected to state that a
+     record may deliberately populate both `title` and `description`
+     together for a cross-source witness (e.g.
+     `experience/g05-internal-conflict-precedence`, whose own record
+     does exactly this), with `target.input_field` naming the field
+     the guard's mechanism most centrally concerns, not "the only
+     non-null one."
+- Finding 5's docstring edit changed `adapters/experience.py`'s own
+  file bytes, which correctly triggered a `STALE adapter fingerprint`
+  failure for all 21 experience guards on the next witness run
+  (confirming the staleness check, corrected in Iteration 1, genuinely
+  fires on a real, intentional change). Recomputed and re-froze only
+  `_FROZEN_ADAPTER_FP["experience"]` (`03c559ec88386dc7` ->
+  `dfa142423607a5a3`); every other frozen fingerprint (both other
+  adapters, all three parser sources, all 34 records) is byte-identical
+  to Iteration 1's baseline, confirmed by recomputing all of them fresh
+  and diffing.
+- Direct fault-injection tests added for every accepted-invalid case
+  above: 2 new import-boundary synthetic regressions (finding 1); 5 new
+  loader tests covering wrong-type values for each parser/field
+  combination plus a bool-still-rejected control (finding 2); 9 new
+  loader tests covering the parser-prefix mismatch, base-transform/
+  variant misuse, generated-variant-base masquerade, historical_defect_ref
+  disagreement, generated-record chaining to a non-base record, and
+  generated-record original_input/target mismatches (finding 3); 6 new
+  tests exercising `_check_record_matches_registry_entry` directly
+  (missing record, non-primary witness, guard/parser/input mismatches,
+  and the real matching case) (finding 4).
+- Files changed: `backend/scripts/contract_mutation_witnesses.py`,
+  `backend/tests/contracts/adapters/experience.py`,
+  `backend/tests/contracts/loader.py`,
+  `backend/tests/contracts/mutation_registry.py` (frozen adapter
+  fingerprint re-freeze only),
+  `backend/tests/contracts/schema.py`,
+  `backend/tests/contracts/test_harness_import_boundary.py`,
+  `backend/tests/contracts/test_harness_self.py`, this handoff entry.
+  No production parser, existing fixture, existing parser test,
+  verifier, workflow document, hook, metadata validator, dependency
+  file, or other version-bearing consumer touched. The corrected
+  35-historical/34-active/1-superseded inventory is unchanged (asserted
+  fresh at import time, confirmed).
+- Mutation-witness acceptance run: `python -m
+  scripts.contract_mutation_witnesses` — **34 passed, 0 failed**
+  (re-run after the adapter-fingerprint re-freeze above).
+- Verification: `ruff format --check`/`ruff check`/`mypy` all pass.
+  `python -m scripts.check_repo` exits 0. Genuine external `python -m
+  scripts.verify --level routine --focus
+  tests/contracts/test_location_contract.py
+  tests/contracts/test_salary_contract.py
+  tests/contracts/test_experience_contract.py
+  tests/contracts/test_harness_self.py
+  tests/contracts/test_harness_import_boundary.py` — all 11 steps PASS:
+  **123 focused / 2316 full-suite tests** (both counts grew by exactly
+  21, matching the 21 new fault-injection/regression tests added across
+  the two test files).
+- **Follow-up bounded correction (same commit lineage, still Iteration
+  2 — Sol independently reproduced this before any review was recorded
+  against the entry above, so it is folded in here rather than forcing
+  a premature ledger rotation that would delete Iteration 1's still-
+  unreviewed original Work done)**: `_dynamic_bypass_calls` (added by
+  finding 1 above) only handled an `ast.Attribute` whose immediate
+  `.value` was an `ast.Name` — a nested chain two or more levels deep
+  (`importlib.util.spec_from_file_location`, or the same via `import
+  importlib as il; il.util.spec_from_file_location(...)`) fell through
+  entirely, yielding zero findings despite being named in
+  `_BANNED_DOTTED_CALLS` and the function's own docstring. Fixed by
+  replacing the one-level handling with a recursive `_dotted_path`
+  reconstruction of the complete attribute chain, canonicalizing only
+  the chain's root through the alias map
+  (`_canonicalize_dotted_path`), then comparing the resulting full
+  path against the closed banned-call set — never broadened into a
+  general analyzer. Both exact reproductions and two positive controls
+  (an unrelated two-level chain `os.path.join`, and an unrelated
+  three-level chain with no import statement at all) added as isolated
+  synthetic regressions. This touched only
+  `test_harness_import_boundary.py` (a test file, not a source/adapter/
+  record file), so no fingerprint re-freeze was needed or performed —
+  confirmed by all 34 mutation witnesses passing unmodified. Genuine
+  external `python -m scripts.verify --level routine --focus` (same
+  five-file selector as above) re-run after this fix: all 11 steps
+  PASS, **127 focused / 2320 full-suite tests** (both grew by exactly
+  4, matching the 4 new synthetic regressions/positive controls added)
+  — superseded by the second follow-up below, which is now the final,
+  current count.
+- **Second follow-up bounded correction (same reasoning as the first:
+  folded into this still-unreviewed Iteration 2 rather than rotating)**:
+  `_build_alias_map`'s `ast.Import` branch mapped a plain dotted
+  import's bound name to the *complete* imported path even without an
+  `as` clause — `import importlib.util` binds only the name
+  `importlib` (referring to the top-level package itself; `.util` is
+  reached by ordinary attribute access), but the prior code mapped
+  `alias_map["importlib"]` to `"importlib.util"`, so canonicalizing
+  `importlib.util.spec_from_file_location` produced the wrong, doubled
+  path `importlib.util.util.spec_from_file_location` and the banned
+  call escaped detection — also making the function's own docstring
+  claim about `import importlib.util` false. Fixed: without `as`, the
+  bound root now canonicalizes to itself; only `import a.b.c as d`
+  binds `d` to the complete dotted path. Added the exact `import
+  importlib.util` reproduction as an isolated regression, a direct
+  test of `_build_alias_map`'s corrected binding for that exact
+  statement, and a direct canonicalization-level test proving `import
+  os.path` canonicalizes `os.path.join` to exactly `os.path.join` (not
+  `os.path.path.join`) — the latter is a genuine proof, not merely an
+  absence-of-finding assertion, since the pre-fix doubled path for
+  `os.path` also happened not to be in the banned set, so the existing
+  higher-level positive-control test for it had passed even under the
+  bug. Touched only `test_harness_import_boundary.py` again — no
+  fingerprint re-freeze needed, confirmed by all 34 mutation witnesses
+  passing unmodified. Genuine external `python -m scripts.verify
+  --level routine --focus` (same five-file selector) re-run after this
+  fix: all 11 steps PASS, **130 focused / 2323 full-suite tests** (both
+  grew by exactly 3, matching the 3 new tests added) — this is the
+  final, current count.
+- Deviations/known limitations: unchanged from Iteration 1's disclosed
+  limitations. No new limitations introduced — this pass only tightens
+  validation and traceability; no behavior change to any of the 34
+  primary-witness records' own expected outputs.
+- STOP — this is still Slice 2 only, now corrected. Do not implement
+  Slice 3, touch any production parser/fixture/existing test, or begin
+  another Phase 3/4 parser. Do not merge without separate explicit user
+  authorization.
 
 ```workflow-metadata
 workflow_version: v3.1-pilot
-slice_kind: docs
-verification_level: not_run
-focused_test_selector: none
-focused_test_count: not_run
-full_suite_count: not_run
-lightweight_checks: git diff --check; python -m scripts.check_repo; python -m scripts.verify --docs-only
+slice_kind: tooling
+verification_level: routine
+focused_test_selector: tests/contracts/test_location_contract.py tests/contracts/test_salary_contract.py tests/contracts/test_experience_contract.py tests/contracts/test_harness_self.py tests/contracts/test_harness_import_boundary.py
+focused_test_count: 130
+full_suite_count: 2323
 ```
 
 ### Work review
 
-- Date/reviewer: 2026-09-10, Codex. Correction diff reviewed:
-  `2a4f565..eace0bc` on `tooling/workflow-v3.2-retrospective` (relayed
-  as text; no separate `### Work review` commit exists on this branch
-  or its origin prior to this one).
-- Verdict: **Approved. No findings.** The bounded correction
-  (salary's characterization as one correction round addressing five
-  executable grammar-boundary mechanisms, accompanying regression
-  fixtures, and one documentation-attribution correction; the
-  withdrawal of the four-confidently-wrong-findings claim for salary;
-  the "not reconstructible, not zero" accounting for salary's strict
-  confidently-wrong count; and the corresponding updates to the ADR's
-  target-verdict table and Consequences section, plus the matching
-  Iteration 2 `Work done` text) satisfies all five requirements from
-  the correction request with no further change needed.
-- Scope confirmed: only `docs/DECISIONS/0008-workflow-v3.1-retrospective-and-v3.2-adoption.md`
-  and `docs/LLM_HANDOFF.md` differ between `2a4f565` and `eace0bc`;
-  Iteration 1's historical body is unchanged; the four overall target
-  verdicts (correction-round: fail; confidently-wrong: fail;
-  handoff-count: pass; load-bearing-regression: pass) are unchanged;
-  no version-bearing file (`CLAUDE.md`, `.claude/hooks/
-  compact_checkpoint.py`, `backend/scripts/check_handoff.py`, its
-  tests) was touched — Workflow v3.1 remains the sole active workflow
-  version.
+- Date/reviewer: 2026-09-13, Codex/Sol. Reviewed commit: `379f69b` on
+  `tooling/workflow-v3.2-slice2-contract-harness` (the final of three
+  bounded corrections folded into this Iteration 2 entry — Sol's five
+  re-review findings, the nested-attribute-chain fix, and this
+  `ast.Import` binding-semantics fix).
+- Verdict: **Approved. No findings.**
+- Independent verification performed: ran the 130 focused contract
+  tests, all 34 mutation witnesses, `check_repo.py`, and `git diff
+  --check` — all passed. The reported 2,323-test full-suite result was
+  **not independently repeated**.
 - Next action: awaiting the user's separate authorization before any
-  merge or Workflow v3.2 Slice 2/3 work.
-- STOP — no merge, no Slice 2 or 3, without explicit user
-  authorization.
-
-### Merge record
-
-- Date/agent: 2026-09-11, Claude Code (Sonnet 5), per explicit user
-  merge authorization.
-- Approved feature tip: `596e5fd` (`tooling/workflow-v3.2-retrospective`,
-  includes the approved `Work review` above). Pre-merge `main`/
-  `origin/main`: `4ecc4b3`, synchronized, clean working tree — verified
-  immediately before merging, not assumed from a prior snapshot.
-- Merge: `git merge --no-ff --no-edit` (no squash, no rebase, no
-  force-push, no implementation changes) of
-  `tooling/workflow-v3.2-retrospective` into `main`. Merge commit:
-  `318321e`.
-- Zero-content-difference check: `git diff 596e5fd main` — empty;
-  confirms the merge introduced no content beyond what was already
-  approved on the feature tip.
-- `git diff --check` on merged `main`: clean. `python -m
-  scripts.check_repo`: exit 0. Canonical `python -m scripts.verify
-  --level routine --docs-only` on merged `main`: ALL 7 CHECKS PASSED
-  (ruff format/check, mypy, `check_repo.py`, `git diff --check`,
-  handoff metadata validation, temp-directory cleanup — database/pytest
-  steps correctly skipped per `--docs-only`).
-- No executable, test, migration, or product-document file is part of
-  this diff — a pure docs/ADR and handoff-ledger change.
-- Pushed: `origin/main` now at `318321e` (was `4ecc4b3`).
-- Rollback boundary: `git reset --hard 4ecc4b3` on `main` (pre-merge
-  tip) would fully revert this merge; the feature branch
-  `tooling/workflow-v3.2-retrospective` at `596e5fd` remains intact and
-  unforced, independently recoverable regardless of any `main` rollback.
-- **Workflow v3.1 remains the sole active workflow version** after this
-  merge — no version-bearing file (`CLAUDE.md`, `.claude/hooks/
-  compact_checkpoint.py`, `backend/scripts/check_handoff.py`, its
-  tests) was touched.
-- STOP — merge complete. Do not propose or begin Workflow v3.2 Slice 2
-  or 3 without separate explicit user authorization.
+  merge, Workflow v3.2 activation, Slice 3 work, or another parser.
+- STOP — no merge, no Workflow v3.2 activation, no Slice 3, no other
+  Phase 3/4 parser, without explicit user authorization.
