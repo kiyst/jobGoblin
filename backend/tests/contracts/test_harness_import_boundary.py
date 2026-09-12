@@ -98,13 +98,26 @@ _BANNED_DOTTED_CALLS = frozenset(
 def _build_alias_map(tree: ast.Module) -> dict[str, str]:
     """Maps every locally-bound import name to its canonical dotted
     origin, so a call can be resolved back to what it really is
-    regardless of `import X as Y` or `from X import Y as Z` aliasing."""
+    regardless of `import X as Y` or `from X import Y as Z` aliasing.
+
+    `ast.Import` binding semantics, applied precisely (this is the exact
+    distinction a prior version of this function got wrong for a plain
+    dotted import with no `as`): `import a.b.c` binds only the name `a`
+    in the current namespace -- `a` refers to the top-level package
+    itself, with `.b.c` reached by ordinary attribute access on it, so
+    the canonical origin of the bound name `a` is `a`, not `a.b.c`.
+    Only `import a.b.c as d` binds a name (`d`) to the complete dotted
+    path `a.b.c`, since `d` is then an alias for that specific inner
+    submodule object directly."""
     alias_map: dict[str, str] = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                bound = alias.asname or alias.name.split(".")[0]
-                alias_map[bound] = alias.name
+                if alias.asname:
+                    alias_map[alias.asname] = alias.name
+                else:
+                    root = alias.name.split(".")[0]
+                    alias_map[root] = root
         elif isinstance(node, ast.ImportFrom) and node.module is not None:
             for alias in node.names:
                 bound = alias.asname or alias.name
@@ -310,6 +323,45 @@ def test_dynamic_bypass_detector_catches_aliased_nested_attribute_chain_syntheti
     synthetic = "import importlib as il\n" 'il.util.spec_from_file_location("x", "y")\n'
     tree = ast.parse(synthetic)
     assert _dynamic_bypass_calls(tree) == ["spec_from_file_location"]
+
+
+def test_dynamic_bypass_detector_catches_dotted_import_no_as_nested_chain_synthetic_case() -> None:
+    """Reproduces the exact reported gap: `import importlib.util` (a
+    dotted import with no `as`) binds only the name `importlib` --
+    `_build_alias_map` must map that bound name to itself (`importlib`),
+    not to the full dotted import path (`importlib.util`), or
+    canonicalizing `importlib.util.spec_from_file_location` produces the
+    wrong, doubled path `importlib.util.util.spec_from_file_location`
+    and the banned call escapes detection entirely."""
+    synthetic = "import importlib.util\n" 'importlib.util.spec_from_file_location("x", "y")\n'
+    tree = ast.parse(synthetic)
+    assert _dynamic_bypass_calls(tree) == ["spec_from_file_location"]
+
+
+def test_alias_map_binds_dotted_import_without_as_to_its_own_first_component() -> None:
+    """Direct proof of the corrected `ast.Import` binding semantics,
+    independent of whether any particular banned call happens to be
+    involved: a plain dotted import with no `as` must canonicalize its
+    bound root to itself, not to the full imported path."""
+    tree = ast.parse("import importlib.util\n")
+    alias_map = _build_alias_map(tree)
+    assert alias_map == {"importlib": "importlib"}
+
+
+def test_canonicalize_dotted_path_does_not_double_the_submodule_for_os_path() -> None:
+    """Direct canonicalization control, not merely an absence-of-finding
+    assertion: `import os.path` must canonicalize the root `os` to
+    itself, so `os.path.join` canonicalizes to exactly `os.path.join`,
+    never the doubled `os.path.path.join` the prior binding bug would
+    have produced for *any* dotted no-`as` import, including this one --
+    the earlier list-emptiness assertion below happened to pass even
+    under the bug, since the (wrongly) doubled path still wasn't in the
+    banned set; this test proves the canonicalization itself is correct,
+    not merely coincidentally non-triggering."""
+    tree = ast.parse("import os.path\n")
+    alias_map = _build_alias_map(tree)
+    assert alias_map == {"os": "os"}
+    assert _canonicalize_dotted_path("os.path.join", alias_map) == "os.path.join"
 
 
 def test_dynamic_bypass_detector_allows_unrelated_nested_attribute_call_synthetic_case() -> None:

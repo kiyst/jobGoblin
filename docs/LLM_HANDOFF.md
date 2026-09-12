@@ -392,9 +392,37 @@ full_suite_count: 2295
   five-file selector as above) re-run after this fix: all 11 steps
   PASS, **127 focused / 2320 full-suite tests** (both grew by exactly
   4, matching the 4 new synthetic regressions/positive controls added)
-  — this is the final, current count, superseding the 123/2316 figure
-  in the verification bullet above, which described the state before
-  this follow-up fix.
+  — superseded by the second follow-up below, which is now the final,
+  current count.
+- **Second follow-up bounded correction (same reasoning as the first:
+  folded into this still-unreviewed Iteration 2 rather than rotating)**:
+  `_build_alias_map`'s `ast.Import` branch mapped a plain dotted
+  import's bound name to the *complete* imported path even without an
+  `as` clause — `import importlib.util` binds only the name
+  `importlib` (referring to the top-level package itself; `.util` is
+  reached by ordinary attribute access), but the prior code mapped
+  `alias_map["importlib"]` to `"importlib.util"`, so canonicalizing
+  `importlib.util.spec_from_file_location` produced the wrong, doubled
+  path `importlib.util.util.spec_from_file_location` and the banned
+  call escaped detection — also making the function's own docstring
+  claim about `import importlib.util` false. Fixed: without `as`, the
+  bound root now canonicalizes to itself; only `import a.b.c as d`
+  binds `d` to the complete dotted path. Added the exact `import
+  importlib.util` reproduction as an isolated regression, a direct
+  test of `_build_alias_map`'s corrected binding for that exact
+  statement, and a direct canonicalization-level test proving `import
+  os.path` canonicalizes `os.path.join` to exactly `os.path.join` (not
+  `os.path.path.join`) — the latter is a genuine proof, not merely an
+  absence-of-finding assertion, since the pre-fix doubled path for
+  `os.path` also happened not to be in the banned set, so the existing
+  higher-level positive-control test for it had passed even under the
+  bug. Touched only `test_harness_import_boundary.py` again — no
+  fingerprint re-freeze needed, confirmed by all 34 mutation witnesses
+  passing unmodified. Genuine external `python -m scripts.verify
+  --level routine --focus` (same five-file selector) re-run after this
+  fix: all 11 steps PASS, **130 focused / 2323 full-suite tests** (both
+  grew by exactly 3, matching the 3 new tests added) — this is the
+  final, current count.
 - Deviations/known limitations: unchanged from Iteration 1's disclosed
   limitations. No new limitations introduced — this pass only tightens
   validation and traceability; no behavior change to any of the 34
@@ -409,6 +437,6 @@ workflow_version: v3.1-pilot
 slice_kind: tooling
 verification_level: routine
 focused_test_selector: tests/contracts/test_location_contract.py tests/contracts/test_salary_contract.py tests/contracts/test_experience_contract.py tests/contracts/test_harness_self.py tests/contracts/test_harness_import_boundary.py
-focused_test_count: 127
-full_suite_count: 2320
+focused_test_count: 130
+full_suite_count: 2323
 ```
