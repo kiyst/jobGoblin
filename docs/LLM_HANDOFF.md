@@ -98,266 +98,6 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-09-09, Claude Code (Sonnet 5). Risk class R
-  (R-plus-adversarial, unchanged). Base -> ending commit: `88cdb2f` ->
-  this commit; same branch `phase-3/location-classifier`. Bounded
-  correction pass applying eight independently-validated findings from
-  the blind Sol/Astra comparison review of frozen commit `88cdb2f`,
-  per the user's explicit authorization. **Reviewer attribution per
-  finding (which came from Astra Light vs. Sol Medium) was not included
-  in the correction request relayed to the implementer; this entry
-  records the combined validated union of eight defects without
-  per-finding attribution, since fabricating that mapping would not be
-  honest. The user or the reviewing agents should supply the per-finding
-  attribution directly if it needs to be recorded.**
-- Eight findings addressed, no behavior change outside them:
-  1. **Country-alias trailing-period compatibility**: `_normalize_field`'s
-     generic trailing-period strip can remove exactly one period from a
-     `U.S.`/`U.S.A.` alias's own final period. Made only that one final
-     period optional in each alias (`U\.S\.A\.?`/`U\.S\.?`); a genuine
-     doubled terminal period (`"U.S.."`) still correctly fails to
-     fullmatch. Applies uniformly across all four productions that use
-     `_COUNTRY_TOKEN`.
-  2. **State+ZIP country provenance**: `state_zip_form` was wrongly using
-     `Provenance.PARSED_DESCRIPTION` for `country="United States"` even
-     though "United States" is never literally present in a plain
-     `"<geo>, <state> <zip>"` string. Now `Provenance.INFERRED`, matching
-     the bare `state_form` case.
-  3. **Region whitespace trimming + one exact state parser**: a greedy
-     `_GEO_TOKEN` region capture can include incidental trailing
-     whitespace before the next comma (e.g. `"TX "` instead of `"TX"`),
-     which the old ad hoc `.replace(".", "").upper()` + set-membership
-     check did not trim, silently misclassifying a real state as "not a
-     state." Replaced with a single authority, `_is_recognized_state`,
-     that trims covered whitespace then requires an exact fullmatch
-     against the closed `_STATE_TOKEN` grammar (also closes finding 8).
-  4. **Standalone negation/exclusion cues**: `"not"`/`"except"`/
-     `"excluding"`/`"excluded"` inside a discarded geo/region span now
-     reject the whole result the same way the `or`/`and` coordinator
-     check does — `"All countries except, Canada"` and `"Not in, Canada"`
-     no longer confidently extract `country=Canada`.
-  5. **Recognized country in a discarded span is a conflict**: a
-     discarded geo or region span that itself exactly matches the
-     country catalog (`"Canada, France"`, `"Canada, United States"`,
-     `"London, Germany, France"`) is now a rejection trigger, not silently
-     ignored — a genuine multi-country conflict, never resolved by
-     picking the explicit country slot's value. `"Toronto, ON, Canada"`
-     is unaffected (`"ON"` is not a recognized country).
-  6. **ASCII-only case-insensitivity for state matching**: added
-     `re.ASCII` alongside `re.IGNORECASE` on every compiled pattern in
-     this module. Without it, Python's Unicode-aware case-folding could
-     treat U+0130 (Turkish dotted capital İ) as case-equivalent to ASCII
-     "I", letting `"Wİ"` match Wisconsin or `"İN"` match Indiana — neither
-     is an NFKC compatibility variant of "I" (unlike a genuine fullwidth
-     letter, which still folds and still resolves correctly).
-  7. **State-recognition precedence over the coordinator check**: in the
-     three-part form, `"OR"` (Oregon) was being rejected by the
-     `or`/`and` standalone-word check before ever being checked against
-     the state catalog. `region` is now checked against
-     `_is_recognized_state` *first*; only a region that is not a
-     recognized state goes through the open-text validation (coordinator/
-     negation/marker/sentinel/country-conflict checks). A genuinely
-     coordinator-bearing non-state region (`"East or West"`) is still
-     correctly rejected.
-  8. **Exact state-token grammar validated before canonicalization**:
-     `"T...X"`/`"TX..."` no longer fullmatch `_STATE_TOKEN` and are
-     correctly never recognized as states (closed by the same fix as
-     finding 3); `"DC"`/`"D.C"`/`"D.C."` all remain correctly recognized.
-- Files changed: `backend/app/normalization/location.py`,
-  `backend/tests/fixtures/normalization/location_cases.json` (+27 cases,
-  125 total), `docs/LLM_HANDOFF.md`. No other file touched — none of the
-  eight findings required a documentation-attribution or status-line
-  fix.
-- Mutation-proof mapping:
-
-  | Finding | Mechanism | Regression test(s) | Mutation outcome |
-  |---|---|---|---|
-  | 1 | Optional final period on `U.S.`/`U.S.A.` aliases | `country_alias_us_dotted`, `country_alias_us_dotted_no_final_period`, `country_alias_usa_dotted`, `country_alias_usa_dotted_no_final_period` | Reverted both aliases to mandatory final periods: all 4 failed (wrongly unavailable). Restored: all 4 passed. `country_alias_us_doubled_period_rejected` correctly unaffected either way. |
-  | 2 | `state_zip_form` country provenance | `collision_ca_disambiguated_by_zip`, `collision_ga_disambiguated_by_zip`, `noncolliding_state_zip_positive_control`, `city_state_zip_plus4` | Reverted to the `PARSED_DESCRIPTION` default: all 4 failed. Restored: all 4 passed. |
-  | 3 | Region whitespace trim in `_is_recognized_state` | `region_whitespace_space_trimmed_before_comma`, `region_whitespace_nbsp_trimmed_before_comma` | Disabled the trim (`trimmed = raw`): both failed. Restored: both passed. **Note**: `region_whitespace_tab_trimmed_before_comma` does not isolate this mechanism — tab is not in `_GEO_TOKEN`'s character class at all, so the greedy region capture never includes it regardless of trimming; noted directly in its fixture `note`, and it remains a valid neighboring covered-whitespace control per the correction's own request. |
-  | 4 | Standalone negation-word check | `negation_except_rejected`, `negation_not_in_rejected` | Removed the negation-word check: both failed (wrongly extracted `country=Canada`). Restored: both passed. `negation_ordinary_positive_control` correctly unaffected either way. |
-  | 5 | Country-catalog match on a discarded span | `country_conflict_geo_is_country_france`, `country_conflict_geo_is_country_us`, `country_conflict_region_is_country` | Disabled the check (forced it to always return `False`): all 3 failed (wrongly extracted the explicit country). Restored: all 3 passed. `three_part_region_nonUS_country_preserved` (`"Toronto, ON, Canada"`) correctly unaffected either way. |
-  | 6 | `re.ASCII` on the five `_PRODUCTIONS` compiles | `ascii_only_wi_lookalike_rejected`, `ascii_only_in_lookalike_rejected`, `ascii_only_wi_lookalike_zip_rejected` | Removed `re.ASCII` from the five compiled productions: all 3 failed (wrongly resolved Wisconsin/Indiana from the Turkish-İ lookalikes). Restored: all 3 passed. `ascii_only_lowercase_positive_control`/`ascii_only_fullwidth_positive_control` correctly unaffected either way. |
-  | 7 | State-check precedence before the coordinator check | `oregon_state_plus_explicit_us` | Reverted the check order (open-text validation runs unconditionally before the state check): failed (Oregon wrongly rejected). Restored: passed. **Note**: `oregon_state_plus_canada_conflict` does not isolate this mechanism — both the (wrong) coordinator rejection and the (correct) state+non-US-country conflict rule produce the same all-four-unavailable outcome; noted directly in its fixture `note`. `genuine_coordinator_region_rejected` correctly unaffected either way. |
-  | 8 | Exact `_STATE_TOKEN_RE.fullmatch` (shared fix with finding 3) | `malformed_state_dots_rejected_as_state`, `malformed_state_trailing_dots_rejected_as_state` | Replaced the exact-grammar check with the old loose strip+membership check: both failed (`"T...X"`/`"TX..."` wrongly recognized as states, nulling `country` via the state+non-US-country conflict rule instead of preserving it). Restored: both passed. `dc_bare_preserved_three_part`/`dc_one_period_preserved_three_part`/`dc_two_period_preserved_three_part` correctly unaffected either way. |
-
-- Verification: `ruff format --check`/`ruff check`/`mypy` all pass.
-  `python -m scripts.check_repo` exits 0. Genuine external `python -m
-  scripts.verify --level routine --focus tests/test_normalization_location.py`
-  (full run, see metadata below) — all 11 steps PASS, including `handoff
-  metadata validation`. Full unfocused suite: **2193 passed** (was 2166;
-  +27 fixture cases). All previously-approved forms re-verified unchanged
-  (all 98 prior fixtures still pass with no expected-value edits except
-  the four corrected by finding 2).
-- Deviations/known limitations: unchanged from the prior iteration's
-  disclosed limitations (city resolution deferred; synthetic-only
-  corpus apart from the one real Greenhouse fixture; non-US postal
-  codes/subnational abbreviations/parenthesized-marker-prefix form
-  remain unsupported). No new limitations introduced — this pass only
-  fixes the eight reported defects.
-- STOP — this commit is frozen for final Codex re-review. Do not merge,
-  begin pilot slice retrospective, wire into ingestion/persistence,
-  contact providers, or create a migration. No Work review recorded by
-  the implementer — that is the reviewer's to write.
-
-```workflow-metadata
-workflow_version: v3.1-pilot
-slice_kind: parser
-verification_level: routine
-focused_test_selector: tests/test_normalization_location.py
-focused_test_count: 134
-full_suite_count: 2193
-fixture_path: backend/tests/fixtures/normalization/location_cases.json
-fixture_count: 125
-```
-
-### Work review
-
-- Date/reviewer: 2026-09-09, Codex/Sol (combining Astra Light and Sol
-  Medium's blind-comparison findings). Correction diff reviewed:
-  `88cdb2f..071d8dc` on `phase-3/location-classifier` (relayed as text;
-  no `### Work review` commit exists on this branch or its origin).
-- Verdict: **Approved.** All eight findings independently confirmed
-  closed by direct reproduction against the actual committed code (not
-  merely by re-reading the implementer's own report).
-- Independent verification performed, with file/line evidence:
-  1. Dotted `U.S.`/`U.S.A.` aliases — `location.py:349-378` (`_COUNTRY_CANONICAL`/
-     `_COUNTRY_TOKEN`). Reproduced `"Remote, U.S."`, `"Remote, U.S"`,
-     `"Austin, U.S.A."`, `"Austin, U.S.A"` all -> `country=United States`;
-     `"Remote, U.S.."` (genuine doubled terminal period) -> unavailable,
-     confirming no broadened malformed-punctuation acceptance.
-  2. ZIP-implied country provenance — `location.py:591-600` (`state_zip_form`).
-     Reproduced `"Austin, TX 78701"` -> `country.provenance == INFERRED`
-     (was `PARSED_DESCRIPTION`); the three-part explicit form
-     (`"Austin, TX, United States"`) correctly still yields
-     `PARSED_DESCRIPTION` — no cross-contamination between the two paths.
-  3. Region trailing-whitespace bypass — `location.py:488-500`
-     (`_is_recognized_state`). Reproduced `"Toronto, TX , United States"`
-     (ASCII space) and the NBSP variant both -> `state=TX`; mutation-
-     disabled the trim myself (independently, not merely re-reading the
-     implementer's claim) and confirmed both fail without it.
-  4. Negation/exclusion in discarded spans — `location.py:425-433`
-     (`_NEGATION_WORDS_RE`). Reproduced `"All countries except, Canada"`
-     and `"Not in, Canada"` both -> all four unavailable; `"Chicago,
-     Canada"` and `"Andover, NH"` (substring, not standalone) both
-     unaffected.
-  5. Conflicting country tokens — `location.py:454-461`
-     (`_geo_span_is_rejected`'s final check). Reproduced `"Canada,
-     France"`, `"Canada, United States"`, `"London, Germany, France"` all
-     -> all four unavailable; `"Toronto, ON, Canada"` correctly preserved
-     (`"ON"` is not a recognized country).
-  6. Unicode state-token matching — `location.py:333`
-     (`_STATE_TOKEN_RE`), `location.py:401-432` (`_PRODUCTIONS`/`_OR_AND_RE`/
-     `_NEGATION_WORDS_RE`/`_MARKER_WORD_RE`, all now `re.IGNORECASE |
-     re.ASCII`). Reproduced `"Austin, Wİ"`, `"Austin, İN"`, `"Austin, Wİ
-     12345"` (U+0130) all -> unavailable; `"austin, wi"` and `"Austin,
-     ＷＩ"` (genuine NFKC-folding fullwidth letters) both correctly ->
-     `state=WI`. Independently removed `re.ASCII` from the five compiled
-     productions and confirmed the three Turkish-İ cases wrongly resolve
-     to Wisconsin/Indiana without it.
-  7. Oregon `OR` precedence — `location.py:565-576` (`classify_location`'s
-     region-then-coordinator-check ordering). Reproduced `"Austin, OR,
-     United States"` -> `state=OR`; `"Austin, OR, Canada"` -> all four
-     unavailable via the state+non-US-country conflict rule (not the
-     coordinator check); `"Toronto, East or West, Canada"` (genuinely
-     non-state, coordinator-bearing) still correctly rejected.
-  8. Malformed state punctuation — same fix site as finding 3
-     (`_is_recognized_state`'s `_STATE_TOKEN_RE.fullmatch`). Reproduced
-     `"Toronto, T...X, Canada"` and `"Toronto, TX..., Canada"` both ->
-     `country=Canada`/`state` unavailable (never recognized as a state);
-     `"Somewhere, DC/D.C/D.C., United States"` all three -> `state=DC`.
-- **Mutation-proof adequacy, independently re-verified** (not merely
-  accepted from the Work done narrative): the two fixtures flagged
-  "non-isolating" were re-tested directly. `region_whitespace_tab_trimmed_before_comma`
-  (finding 3) genuinely does not isolate the trim mechanism — `_GEO_TOKEN`
-  (`location.py:396`, `r"[A-Za-z][A-Za-z .'\-]*"`) never included tab in
-  its character class, so the greedy region capture excludes it
-  regardless of trimming; confirmed by independently disabling the trim
-  and observing the tab fixture still passes while the space/NBSP
-  fixtures for the same finding correctly fail. `oregon_state_plus_canada_conflict`
-  (finding 7) is similarly confirmed non-isolating — reverting the
-  precedence fix leaves it passing, because the wrong path (coordinator
-  rejection) and the correct path (state+non-US-country conflict rule)
-  both produce all-four-unavailable. In both cases, **at least one other
-  fixture for the same finding is genuinely load-bearing**
-  (`region_whitespace_space_trimmed_before_comma`/
-  `region_whitespace_nbsp_trimmed_before_comma` for finding 3;
-  `oregon_state_plus_explicit_us` for finding 7), independently confirmed
-  to fail under mutation. Workflow v3.1's rule — a test must not be
-  *reported as closing* a finding it does not actually prove when its
-  guard is disabled — is satisfied: the Work done entry already labels
-  both fixtures as non-isolating rather than claiming they close their
-  findings, and does not rely on them as the sole evidence for findings
-  3 or 7. This is a satisfied disclosure, not a remaining process/evidence
-  defect.
-- **Cross-cutting regression checks** (per the review request, beyond
-  the eight findings themselves): no broader alias acceptance (`"U..S."`,
-  `"U.S.A.."`, `"U.S.A.A."` all still correctly rejected); no provenance
-  cross-contamination (explicit-country forms stay `PARSED_DESCRIPTION`,
-  state-inferred forms stay `INFERRED`, confirmed across all four
-  three-part dispatch rules independently); no Unicode bypass beyond
-  finding 6 itself; no new state/country dispatch inconsistency (all
-  four three-part rules and the collision-set ZIP/explicit-US
-  disambiguation paths re-verified unaffected).
-- Historical Work done entry integrity: `git diff 88cdb2f..071d8dc --
-  docs/LLM_HANDOFF.md` shows the location classifier's own prior Work
-  done entry (this iteration's, now renumbered Iteration 1 by the
-  standard two-iteration rotation) preserved byte-for-byte, only
-  appended to. The entry deleted by that same rotation belongs to the
-  already-merged, already-closed `classify_salary` slice, not this one.
-- Missing/inconclusive checks: none. Every finding was reproduced
-  directly; every mutation-proof claim was independently re-executed,
-  not merely re-read.
-- Attribution for the record: **Astra Light** found findings 1 (dotted
-  aliases) and 2 (ZIP-implied country provenance). **Sol Medium** found
-  finding 1 (independently, shared with Astra Light) plus findings 3-8.
-  The combined validated union across both reviewers is eight defects,
-  all now closed.
-- Next action: awaiting the user's separate authorization before any
-  merge or next-parser work.
-- STOP — no merge, no next Phase 3 parser, no mandatory retrospective,
-  without explicit user authorization.
-
-### Merge record
-
-- Date/agent: 2026-09-09, Claude Code (Sonnet 5), per explicit user
-  merge authorization.
-- Approved feature tip: `c1a5235` (`phase-3/location-classifier`,
-  includes the approved `Work review` above). Pre-merge `main`/
-  `origin/main`: `d82445f`, synchronized, clean working tree — verified
-  immediately before merging, not assumed from a prior snapshot.
-- Merge: `git merge --no-ff --no-edit` (no squash, no rebase, no
-  force-push, no implementation changes) of `phase-3/location-classifier`
-  into `main`. Merge commit: `a32b5cc`.
-- Zero-content-difference check: `git diff c1a5235 main` — empty;
-  confirms the merge introduced no content beyond what was already
-  approved on the feature tip.
-- Canonical verifier on merged `main` (`python -m scripts.verify
-  --level routine --focus tests/test_normalization_location.py`): ALL
-  11 CHECKS PASSED — 134 focused / 2193 full-suite tests, `check_repo.py`
-  ok, `git diff --check` ok, `handoff metadata validation` ok.
-- Migration/database state: unchanged. `git diff --stat 88cdb2f main --
-  backend/alembic backend/migrations` and `git log d82445f..main --
-  backend/alembic backend/migrations` both empty — no schema/migration
-  file touched by this slice or its merge; the verifier's disposable
-  test-database reachability preflight passed against the existing
-  schema with no drift.
-- Pushed: `origin/main` now at `a32b5cc` (was `d82445f`).
-- Rollback boundary: `git reset --hard d82445f` on `main` (pre-merge
-  tip) would fully revert this merge; the feature branch
-  `phase-3/location-classifier` at `c1a5235` remains intact and
-  unforced, independently recoverable regardless of any `main` rollback.
-- STOP — merge complete. Do not begin another Phase 3 parser. The
-  mandatory Workflow v3.1 pilot retrospective (three parser slices now
-  merged: `classify_experience`, `classify_salary`, `classify_location`)
-  is required next, under separate explicit user authorization.
-
----
-
-## Iteration 2
-
-### Work done
-
 - Date/agent: 2026-09-09, Claude Code (Sonnet 5). Risk class D
   (documentation-only). Base -> ending commit: `4ecc4b3` -> this commit;
   new branch `tooling/workflow-v3.2-retrospective`. This is the mandatory
@@ -503,3 +243,167 @@ lightweight_checks: git diff --check; python -m scripts.check_repo; python -m sc
   tests) was touched.
 - STOP — merge complete. Do not propose or begin Workflow v3.2 Slice 2
   or 3 without separate explicit user authorization.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-09-12, Claude Code (Sonnet 5). Risk class R
+  (routine tooling — new, self-contained test infrastructure; no
+  production-code, identity, concurrency, security, or external
+  surface). Base -> ending commit: `d28bf03` -> this commit; new branch
+  `tooling/workflow-v3.2-slice2-contract-harness`. Workflow v3.2 Slice 2
+  of the staged proposal: the deterministic parser-contract harness,
+  implemented per the frozen Slice 2 proposal plus Sol's ten binding
+  final clarifications and one further binding resolution (the
+  superseded-guard correction below), all relayed as text and treated as
+  the complete implementation contract — no further proposal round.
+- Outcome: `backend/tests/contracts/` (new package) plus
+  `backend/scripts/contract_mutation_witnesses.py` (new, standalone,
+  never collected by pytest). Covers all three existing parsers
+  (`location`, `salary`, `experience` — only these three seeded, per
+  the binding scope). Key modules: `schema.py` (closed record types; an
+  independently-declared provenance vocabulary, never importing
+  `app.normalization.types.NormalizationResult`), `taxonomy.py` (the
+  guard inventory — see the corrected arithmetic below), `loader.py`
+  (fail-closed JSON loader enforcing ~12 distinct validation
+  categories, including a record_id-to-real-fields consistency check
+  added during self-review), `transforms.py` (five mechanical,
+  parser-independent string transforms; deterministic `ascii_recase`
+  mixed-mode algorithm), `runner.py` (invokes an adapter and compares
+  actual vs. expected), `adapters/{location,salary,experience}.py`
+  (each imports only its own public `classify_*` entry point — enforced
+  at the AST symbol level, including a dynamic-bypass check for
+  `getattr`/`setattr`/`importlib.import_module`/`__import__`, added
+  during self-review), `records/{location,salary,experience}.json` (34
+  hand-authored primary-witness case records, each fully materialized:
+  original input, deterministic transform parameters, expected
+  transformed input, complete expected output, and a durable rationale
+  citing the exact historical commit), and `mutation_registry.py` (34
+  replayable mutants — "simple" ones monkeypatch a live module
+  attribute or small atomic helper function; "structural" ones edit
+  source text via an anchor asserted to occur exactly once and load the
+  mutated text as a fully isolated module via `importlib`, never
+  touching the shared checkout — plus **committed, frozen baseline
+  fingerprints** for the production source file, the JSON record, and
+  the adapter file per guard, corrected during self-review; see below).
+- **Corrected inventory arithmetic** (a factual correction discovered
+  through source-history verification, not a deviation from the
+  authorized contract): `experience/g07-reversed-label-anchor`'s own
+  historical fix (`2589eec` finding 1) was itself fully superseded by a
+  later fix (`2fcdc0f` finding 3, `experience/g18-description-label-
+  value-scope-removed`) that removed the description-side reversed-label
+  path entirely — confirmed directly against the current
+  `experience.py` source, which never calls `_LABEL_VALUE_RE`/
+  `_match_label_value_phrase` from `_extract_description_bounds` in any
+  form. Per the user's binding resolution: g07 is retained as a
+  **historical record**, `status="superseded"`, `superseded_by`
+  pointing to g18, with **no primary witness and no mutant** (a written
+  approval is not a substitute for executable mutation evidence, and
+  g18's own witness is never double-counted as g07's). Corrected counts:
+  **35 historical guard records** (location 8, salary 5, experience 22),
+  of which **34 are active** (experience 21) with exactly one primary
+  witness and mutant each, and **1 is superseded** with neither. The
+  taxonomy module asserts these exact counts at import time.
+  `loader.py` fails closed if any record references the superseded
+  guard, and `collect_all` requires exactly one primary witness per
+  *active* guard only.
+- Fresh-context adversarial self-review (via an independent subagent,
+  per the user's explicit requirement) found six real defects before
+  this entry was written, all fixed and re-verified before commit:
+  1. **[Critical] Vacuous staleness check** — fingerprints were
+     originally computed fresh from current files at import time, then
+     compared against themselves in the same run — a tautology that
+     could never detect drift. Fixed: fingerprints are now committed,
+     frozen baseline values (`_FROZEN_SOURCE_FP`/`_FROZEN_ADAPTER_FP`/
+     `_FROZEN_RECORD_FP`), computed once against this commit's exact
+     content; the witness script recomputes fresh values at run time
+     and compares against these frozen ones. Empirically re-verified:
+     appending a harmless comment to `location.py` and rerunning the
+     `location/g01` witness correctly reports `STALE source
+     fingerprint`; restoring the file and rerunning correctly passes
+     again.
+  2. **[High] AST import-boundary bypassable via dynamic access** —
+     the original checker only inspected literal `Import`/`ImportFrom`/
+     `Attribute` nodes, missing `importlib.import_module`,
+     `__import__`, and computed-name `getattr`/`setattr`/`delattr`.
+     Fixed: a new detector rejects these call forms in every adapter
+     and non-mutation-registry harness module (the mutation registry
+     and witness script are the sole, deliberately exempt, sanctioned
+     users of dynamic access to production internals).
+  3. **[Medium] Misdocumented fingerprint granularity** — the module
+     docstring claimed "exact production source region" precision;
+     fingerprints are actually whole-file hashes. Corrected to disclose
+     this honestly (over-broad staleness triggers, never under-broad).
+  4. **[Low] `record_id` tokens not cross-validated** — a record's
+     embedded transform/target/boundary tokens were never checked
+     against its real fields. Fixed: `loader.py` now rejects a mismatch.
+  5. **[Low] `transform.parameters` accepted unknown extra keys** —
+     fixed via an exact-keys check keyed by transform name
+     (`TRANSFORM_PARAMETER_KEYS`).
+  6. Two existing self-tests whose own fixtures became inconsistent
+     under fix #4's stricter rule were corrected to remain internally
+     consistent (one rewritten to test the new consistency rule
+     directly; one's duplicate-record construction adjusted to keep its
+     copied record's real fields matching its record_id).
+  No confidently-wrong output, cleanup/restoration-on-failure gap, or
+  registry/cardinality drift was found; the reviewer's report is
+  preserved in this session's transcript.
+- Files changed: `backend/tests/contracts/__init__.py`, `schema.py`,
+  `taxonomy.py`, `loader.py`, `runner.py`, `transforms.py`,
+  `mutation_registry.py`, `adapters/__init__.py`,
+  `adapters/{location,salary,experience}.py`,
+  `records/{location,salary,experience}.json`, `test_harness_self.py`,
+  `test_harness_import_boundary.py`,
+  `test_{location,salary,experience}_contract.py`,
+  `backend/scripts/contract_mutation_witnesses.py`, this handoff entry.
+  No production parser, existing fixture, existing parser test,
+  verifier, workflow document, hook, metadata validator, dependency
+  file, or other version-bearing consumer touched.
+- Mutation-witness acceptance run (per binding clarification: run all
+  34 active witnesses now, not added to routine pytest or `verify.py`):
+  `python -m scripts.contract_mutation_witnesses` — **34 passed, 0
+  failed**, each asserting both the documented erroneous output under
+  its mutant and the documented restored output matching its contract
+  record; superseded g07 correctly reported as having no witness, by
+  design, separately from the 34.
+- Verification: `ruff format --check`/`ruff check`/`mypy` all pass (17
+  new source files). `python -m scripts.check_repo` exits 0. Genuine
+  external `python -m scripts.verify --level routine --focus
+  tests/contracts/test_location_contract.py
+  tests/contracts/test_salary_contract.py
+  tests/contracts/test_experience_contract.py
+  tests/contracts/test_harness_self.py
+  tests/contracts/test_harness_import_boundary.py` — all 11 steps PASS:
+  **102 focused / 2295 full-suite tests**. (One full-suite run
+  immediately prior showed 2 unrelated failures in
+  `test_collection_run_provider_attempts.py`/`test_ingestion_pipeline.py`
+  — both passed individually in isolation and the full suite passed
+  cleanly at 2295/2295 on the very next run with no code change in
+  between; recorded here as a one-off database-state artifact from the
+  disposable database container being freshly rebuilt that run, not a
+  regression from this slice, which touches no ingestion/database
+  code.)
+- Deviations/known limitations: only the 34 primary-witness records are
+  committed (no additional generated/transformed records) — within
+  scope, since binding clarification 10 requires exactly one primary
+  witness per active guard but does not mandate additional records.
+  Fingerprint staleness detection is file-level, not anchor/region-level
+  (disclosed in the module docstring, not overclaimed). `experience/g07`
+  is a permanent historical record with no witness, by design.
+- STOP — this is Slice 2 only. Do not implement Slice 3 (fast/final
+  verifier profiles, durable receipts, metadata-schema split, workflow-
+  version activation), touch any production parser/fixture/existing
+  test, or begin another Phase 3/4 parser. Do not merge without separate
+  explicit user authorization.
+
+```workflow-metadata
+workflow_version: v3.1-pilot
+slice_kind: tooling
+verification_level: routine
+focused_test_selector: tests/contracts/test_location_contract.py tests/contracts/test_salary_contract.py tests/contracts/test_experience_contract.py tests/contracts/test_harness_self.py tests/contracts/test_harness_import_boundary.py
+focused_test_count: 102
+full_suite_count: 2295
+```
