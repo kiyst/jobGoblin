@@ -1,0 +1,362 @@
+{
+  "parser": "experience",
+  "records": [
+    {
+      "record_id": "experience-attribution-frame--transform-none--target-description--boundary-attribution_frame--variant-base",
+      "kind": "base",
+      "parser": "experience",
+      "guard_ref": "experience/g01-attribution-frame",
+      "is_primary_witness": true,
+      "historical_defect_ref": "e13d8a6 pre-code amendment 2",
+      "target": {"input_field": "description", "semantic_form": "bare_phrase", "boundary": "attribution_frame"},
+      "original_input": {"title": null, "description": "We require vendors with 5 years of experience."},
+      "transform": {"name": "none", "parameters": {}},
+      "expected_transformed_input": {"title": null, "description": "We require vendors with 5 years of experience."},
+      "expected_output": {
+        "minimum": {"value": null, "provenance": "unavailable"},
+        "maximum": {"value": null, "provenance": "unavailable"}
+      },
+      "rationale": "'vendors with' is not in the closed ATTRIBUTION_OBJECT set, so the frame never reaches the number: the forward-phrase match starts at a nonzero offset within the frame's remainder and is rejected. Traced against _extract_description_bounds's match.start() != 0 check."
+    },
+    {
+      "record_id": "experience-continuation-boundary--transform-none--target-description--boundary-continuation_boundary--variant-base",
+      "kind": "base",
+      "parser": "experience",
+      "guard_ref": "experience/g02-continuation-boundary",
+      "is_primary_witness": true,
+      "historical_defect_ref": "e13d8a6 pre-code amendment 3",
+      "target": {"input_field": "description", "semantic_form": "bare_phrase", "boundary": "continuation_boundary"},
+      "original_input": {"title": null, "description": "This role requires 5 years of experience, however this is negotiable."},
+      "transform": {"name": "none", "parameters": {}},
+      "expected_transformed_input": {"title": null, "description": "This role requires 5 years of experience, however this is negotiable."},
+      "expected_output": {
+        "minimum": {"value": null, "provenance": "unavailable"},
+        "maximum": {"value": null, "provenance": "unavailable"}
+      },
+      "rationale": "An unrecognized trailing hedge must reject the same way a recognized negation would -- only an empty (trailing-punctuation-only) remainder accepts. Traced against _remainder_is_acceptable."
+    },
+    {
+      "record_id": "experience-individual-number-redaction--transform-none--target-title--boundary-numeric_redaction--variant-base",
+      "kind": "base",
+      "parser": "experience",
+      "guard_ref": "experience/g03-individual-number-redaction",
+      "is_primary_witness": true,
+      "historical_defect_ref": "e13d8a6 pre-code amendment 4",
+      "target": {"input_field": "title", "semantic_form": "bare_phrase", "boundary": "numeric_redaction"},
+      "original_input": {"title": "3.5 years experience", "description": null},
+      "transform": {"name": "none", "parameters": {}},
+      "expected_transformed_input": {"title": "3.5 years experience", "description": null},
+      "expected_output": {
+        "minimum": {"value": null, "provenance": "unavailable"},
+        "maximum": {"value": null, "provenance": "unavailable"}
+      },
+      "rationale": "A bare decimal must be redacted (digits replaced with #) before any title-side matching runs, on the title path which has no attribution-frame/continuation-boundary safety net of its own. Traced against _DECIMAL_RE in _POISON_PATTERNS."
+    },
+    {
+      "record_id": "experience-positional-preference-suppression--transform-none--target-description--boundary-preference_suppression--variant-base",
+      "kind": "base",
+      "parser": "experience",
+      "guard_ref": "experience/g04-positional-preference-suppression",
+      "is_primary_witness": true,
+      "historical_defect_ref": "e13d8a6 pre-code amendment 5",
+      "target": {"input_field": "description", "semantic_form": "bare_phrase", "boundary": "preference_suppression"},
+      "original_input": {"title": null, "description": "The ideal candidate must have 5 years of experience."},
+      "transform": {"name": "none", "parameters": {}},
+      "expected_transformed_input": {"title": null, "description": "The ideal candidate must have 5 years of experience."},
+      "expected_output": {
+        "minimum": {"value": 5, "provenance": "parsed_description"},
+        "maximum": {"value": null, "provenance": "unavailable"}
+      },
+      "rationale": "'the ideal candidate' is the closed subject of a REQUIRE_VERB frame, a position the preference check never inspects -- 'ideal' here must never be treated as a preference marker. Traced against _FRAME_RE and the description-side preference check (only a sentence-initial 'Ideally,' is checked, never a lexical scan of the whole sentence)."
+    },
+    {
+      "record_id": "experience-internal-conflict-precedence--transform-none--target-title--boundary-numeric_redaction--variant-base",
+      "kind": "base",
+      "parser": "experience",
+      "guard_ref": "experience/g05-internal-conflict-precedence",
+      "is_primary_witness": true,
+      "historical_defect_ref": "e13d8a6 pre-code amendment 6",
+      "target": {"input_field": "title", "semantic_form": "bare_phrase", "boundary": "numeric_redaction"},
+      "original_input": {"title": "3 years experience and 5 years experience", "description": "This role requires 5 years of experience."},
+      "transform": {"name": "none", "parameters": {}},
+      "expected_transformed_input": {"title": "3 years experience and 5 years experience", "description": "This role requires 5 years of experience."},
+      "expected_output": {
+        "minimum": {"value": null, "provenance": "unavailable"},
+        "maximum": {"value": null, "provenance": "unavailable"}
+      },
+      "rationale": "Two distinct title minima are an internal conflict that must short-circuit to unavailable *before* cross-source comparison, even though the description happens to agree with one of the two conflicting title candidates. Traced against _reconcile_bound's conflict-first ordering."
+    },
+    {
+      "record_id": "experience-original-unicode-hyphen-disambiguation--transform-none--target-title--boundary-title_segment_adjacency--variant-base",
+      "kind": "base",
+      "parser": "experience",
+      "guard_ref": "experience/g06-original-unicode-hyphen-disambiguation",
+      "is_primary_witness": true,
+      "historical_defect_ref": "e13d8a6 pre-code amendment (Risk 5)",
+      "target": {"input_field": "title", "semantic_form": "hyphen_range_phrase", "boundary": "title_segment_adjacency"},
+      "original_input": {"title": "Software Engineer - 3-5 years experience", "description": null},
+      "transform": {"name": "none", "parameters": {}},
+      "expected_transformed_input": {"title": "Software Engineer - 3-5 years experience", "description": null},
+      "expected_output": {
+        "minimum": {"value": 3, "provenance": "inferred"},
+        "maximum": {"value": 5, "provenance": "inferred"}
+      },
+      "rationale": "A digit-hyphen-digit shape ('3-5') is a numeric-range separator, never a segment delimiter -- only the whitespace-surrounded hyphen in 'Engineer - 3-5' is a real segment boundary. Traced against _TITLE_SEGMENT_DELIMITER_RE's digit-adjacency exception."
+    },
+    {
+      "record_id": "experience-title-leading-preference--transform-none--target-title--boundary-preference_suppression--variant-base",
+      "kind": "base",
+      "parser": "experience",
+      "guard_ref": "experience/g08-title-leading-preference",
+      "is_primary_witness": true,
+      "historical_defect_ref": "2589eec finding 2 (leading marker)",
+      "target": {"input_field": "title", "semantic_form": "hyphen_range_phrase", "boundary": "preference_suppression"},
+      "original_input": {"title": "Preferred 3-5 years experience", "description": null},
+      "transform": {"name": "none", "parameters": {}},
+      "expected_transformed_input": {"title": "Preferred 3-5 years experience", "description": null},
+      "expected_output": {
+        "minimum": {"value": null, "provenance": "unavailable"},
+        "maximum": {"value": null, "provenance": "unavailable"}
+      },
+      "rationale": "A leading preference marker in a title segment (comma optional) must suppress the whole segment. Traced against _TITLE_LEADING_PREFERENCE_RE."
+    },
+    {
+      "record_id": "experience-cross-segment-qualifier-following--transform-none--target-title--boundary-title_segment_adjacency--variant-base",
+      "kind": "base",
+      "parser": "experience",
+      "guard_ref": "experience/g09-cross-segment-qualifier-following",
+      "is_primary_witness": true,
+      "historical_defect_ref": "2589eec finding 2 (cross-segment)",
+      "target": {"input_field": "title", "semantic_form": "bare_phrase", "boundary": "title_segment_adjacency"},
+      "original_input": {"title": "5 years experience, not required", "description": null},
+      "transform": {"name": "none", "parameters": {}},
+      "expected_transformed_input": {"title": "5 years experience, not required", "description": null},
+      "expected_output": {
+        "minimum": {"value": null, "provenance": "unavailable"},
+        "maximum": {"value": null, "provenance": "unavailable"}
+      },
+      "rationale": "A qualifier-only segment following the target segment (across a comma) must suppress it. Traced against _nearest_meaningful_neighbor_is_qualifier's following-direction (step=+1) walk."
+    },
+    {
+      "record_id": "experience-trailing-bound-marker--transform-none--target-description--boundary-attribution_frame--variant-base",
+      "kind": "base",
+      "parser": "experience",
+      "guard_ref": "experience/g10-trailing-bound-marker",
+      "is_primary_witness": true,
+      "historical_defect_ref": "2589eec finding 3",
+      "target": {"input_field": "description", "semantic_form": "trailing_marker_phrase", "boundary": "attribution_frame"},
+      "original_input": {"title": null, "description": "This role requires 5 years of experience or fewer."},
+      "transform": {"name": "none", "parameters": {}},
+      "expected_transformed_input": {"title": null, "description": "This role requires 5 years of experience or fewer."},
+      "expected_output": {
+        "minimum": {"value": null, "provenance": "unavailable"},
+        "maximum": {"value": 5, "provenance": "parsed_description"}
+      },
+      "rationale": "A marker positioned *after* the complete 'N years of experience' phrase (bare_trail_hi) must take precedence over the plain bare alternative, yielding maximum=5 rather than a rejected or misread candidate. Traced against _FORWARD_PHRASE_RE's bare_trail_hi alternative and its listed precedence over 'bare'."
+    },
+    {
+      "record_id": "experience-unsupported-prefix-poison--transform-none--target-title--boundary-numeric_redaction--variant-base",
+      "kind": "base",
+      "parser": "experience",
+      "guard_ref": "experience/g11-unsupported-prefix-poison",
+      "is_primary_witness": true,
+      "historical_defect_ref": "2589eec finding 3 (prefix poison)",
+      "target": {"input_field": "title", "semantic_form": "bare_phrase", "boundary": "numeric_redaction"},
+      "original_input": {"title": "less than 5 years of experience", "description": null},
+      "transform": {"name": "none", "parameters": {}},
+      "expected_transformed_input": {"title": "less than 5 years of experience", "description": null},
+      "expected_output": {
+        "minimum": {"value": null, "provenance": "unavailable"},
+        "maximum": {"value": null, "provenance": "unavailable"}
+      },
+      "rationale": "'less than'/'fewer than' are not part of the recognized open-upper catalog and are treated as a poison trigger rather than silently falling back to a bare match. Traced against _UNSUPPORTED_PREFIX_RE in _POISON_PATTERNS."
+    },
+    {
+      "record_id": "experience-fraction-slash-normalization--transform-none--target-title--boundary-numeric_redaction--variant-base",
+      "kind": "base",
+      "parser": "experience",
+      "guard_ref": "experience/g12-fraction-slash-normalization",
+      "is_primary_witness": true,
+      "historical_defect_ref": "2589eec finding 4 (fraction slash)",
+      "target": {"input_field": "title", "semantic_form": "bare_phrase", "boundary": "numeric_redaction"},
+      "original_input": {"title": "½ years experience", "description": null},
+      "transform": {"name": "none", "parameters": {}},
+      "expected_transformed_input": {"title": "½ years experience", "description": null},
+      "expected_output": {
+        "minimum": {"value": null, "provenance": "unavailable"},
+        "maximum": {"value": null, "provenance": "unavailable"}
+      },
+      "rationale": "NFKC decomposes the vulgar fraction U+00BD into digits joined by U+2044 FRACTION SLASH, not the ASCII '/' _FRACTION_RE matches -- _normalize_text substitutes U+2044 to ASCII '/' before poisoning runs, so this is caught the same way '1/2 years experience' is. Traced against _normalize_text's U+2044 substitution and _FRACTION_RE."
+    },
+    {
+      "record_id": "experience-unicode-dash-poison--transform-none--target-title--boundary-numeric_redaction--variant-base",
+      "kind": "base",
+      "parser": "experience",
+      "guard_ref": "experience/g13-unicode-dash-poison",
+      "is_primary_witness": true,
+      "historical_defect_ref": "2589eec finding 4 (dash poison)",
+      "target": {"input_field": "title", "semantic_form": "bare_phrase", "boundary": "numeric_redaction"},
+      "original_input": {"title": "−5 years experience", "description": null},
+      "transform": {"name": "none", "parameters": {}},
+      "expected_transformed_input": {"title": "−5 years experience", "description": null},
+      "expected_output": {
+        "minimum": {"value": null, "provenance": "unavailable"},
+        "maximum": {"value": null, "provenance": "unavailable"}
+      },
+      "rationale": "U+2212 MINUS SIGN is not the ASCII hyphen the range grammar recognizes -- treated as unsupported and poisoned rather than silently accepted. Traced against _UNICODE_DASH_NUMERIC_RE in _POISON_PATTERNS."
+    },
+    {
+      "record_id": "experience-multi-candidate-collection--transform-none--target-title--boundary-title_segment_adjacency--variant-base",
+      "kind": "base",
+      "parser": "experience",
+      "guard_ref": "experience/g14-multi-candidate-collection",
+      "is_primary_witness": true,
+      "historical_defect_ref": "2589eec finding 5",
+      "target": {"input_field": "title", "semantic_form": "bare_phrase", "boundary": "title_segment_adjacency"},
+      "original_input": {"title": "3 years experience and 5 years experience", "description": null},
+      "transform": {"name": "none", "parameters": {}},
+      "expected_transformed_input": {"title": "3 years experience and 5 years experience", "description": null},
+      "expected_output": {
+        "minimum": {"value": null, "provenance": "unavailable"},
+        "maximum": {"value": null, "provenance": "unavailable"}
+      },
+      "rationale": "Every non-overlapping candidate within a segment must be collected, not only the first, so two distinct same-segment values surface as a conflict rather than one silently winning. Traced against _iter_forward_phrases."
+    },
+    {
+      "record_id": "experience-title-segment-order-preservation--transform-none--target-title--boundary-title_segment_adjacency--variant-base",
+      "kind": "base",
+      "parser": "experience",
+      "guard_ref": "experience/g15-title-segment-order-preservation",
+      "is_primary_witness": true,
+      "historical_defect_ref": "2fcdc0f finding 1 (ordering)",
+      "target": {"input_field": "title", "semantic_form": "bare_phrase", "boundary": "title_segment_adjacency"},
+      "original_input": {"title": "Junior Developer, 5 years experience (not required)", "description": null},
+      "transform": {"name": "none", "parameters": {}},
+      "expected_transformed_input": {"title": "Junior Developer, 5 years experience (not required)", "description": null},
+      "expected_output": {
+        "minimum": {"value": null, "provenance": "unavailable"},
+        "maximum": {"value": null, "provenance": "unavailable"}
+      },
+      "rationale": "With three segments, parenthesized content must interleave in original left-to-right order, not be hoisted to the front of the segment list -- otherwise 'not required' is no longer adjacent to '5 years experience' and the qualifier is missed. A two-segment case cannot isolate this (bidirectional checking compensates), which is why this record uses three segments. Traced against _title_segments's order-preserving interleave."
+    },
+    {
+      "record_id": "experience-bidirectional-adjacency--transform-none--target-title--boundary-title_segment_adjacency--variant-base",
+      "kind": "base",
+      "parser": "experience",
+      "guard_ref": "experience/g16-bidirectional-adjacency",
+      "is_primary_witness": true,
+      "historical_defect_ref": "2fcdc0f finding 1 (bidirectional)",
+      "target": {"input_field": "title", "semantic_form": "bare_phrase", "boundary": "title_segment_adjacency"},
+      "original_input": {"title": "Ideally, 5 years of experience", "description": null},
+      "transform": {"name": "none", "parameters": {}},
+      "expected_transformed_input": {"title": "Ideally, 5 years of experience", "description": null},
+      "expected_output": {
+        "minimum": {"value": null, "provenance": "unavailable"},
+        "maximum": {"value": null, "provenance": "unavailable"}
+      },
+      "rationale": "A qualifier-only segment *preceding* the target segment must also suppress it, not only a following one. Traced against _nearest_meaningful_neighbor_is_qualifier's preceding-direction (step=-1) walk."
+    },
+    {
+      "record_id": "experience-composite-range-poison-decimal-fraction--transform-none--target-title--boundary-numeric_redaction--variant-base",
+      "kind": "base",
+      "parser": "experience",
+      "guard_ref": "experience/g17-composite-range-poison-decimal-fraction",
+      "is_primary_witness": true,
+      "historical_defect_ref": "2fcdc0f finding 2",
+      "target": {"input_field": "title", "semantic_form": "to_range_phrase", "boundary": "numeric_redaction"},
+      "original_input": {"title": "3.5 to 5 years experience", "description": null},
+      "transform": {"name": "none", "parameters": {}},
+      "expected_transformed_input": {"title": "3.5 to 5 years experience", "description": null},
+      "expected_output": {
+        "minimum": {"value": null, "provenance": "unavailable"},
+        "maximum": {"value": null, "provenance": "unavailable"}
+      },
+      "rationale": "A decimal combined with an adjacent range separator poisons the whole composite span, not just the decimal's own operand -- otherwise the untouched '5' survives as a bare candidate. Traced against _DECIMAL_COMPOSITE_RANGE_RE."
+    },
+    {
+      "record_id": "experience-description-label-value-scope-removed--transform-none--target-description--boundary-attribution_frame--variant-base",
+      "kind": "base",
+      "parser": "experience",
+      "guard_ref": "experience/g18-description-label-value-scope-removed",
+      "is_primary_witness": true,
+      "historical_defect_ref": "2fcdc0f finding 3 (exemption removed)",
+      "target": {"input_field": "description", "semantic_form": "label_value_phrase", "boundary": "attribution_frame"},
+      "original_input": {"title": null, "description": "Experience: 5+ years."},
+      "transform": {"name": "none", "parameters": {}},
+      "expected_transformed_input": {"title": null, "description": "Experience: 5+ years."},
+      "expected_output": {
+        "minimum": {"value": null, "provenance": "unavailable"},
+        "maximum": {"value": null, "provenance": "unavailable"}
+      },
+      "rationale": "Reversed label:value order has no independent acceptance path on the description side at all -- sentence-initial position is not an approved exception. Traced directly against the current _extract_description_bounds source, which never calls _LABEL_VALUE_RE/_match_label_value_phrase."
+    },
+    {
+      "record_id": "experience-title-label-value-whole-anchor--transform-none--target-title--boundary-attribution_frame--variant-base",
+      "kind": "base",
+      "parser": "experience",
+      "guard_ref": "experience/g19-title-label-value-whole-anchor",
+      "is_primary_witness": true,
+      "historical_defect_ref": "2fcdc0f finding 3 (whole-title anchor)",
+      "target": {"input_field": "title", "semantic_form": "label_value_phrase", "boundary": "attribution_frame"},
+      "original_input": {"title": "Experience: 5", "description": null},
+      "transform": {"name": "none", "parameters": {}},
+      "expected_transformed_input": {"title": "Experience: 5", "description": null},
+      "expected_output": {
+        "minimum": {"value": null, "provenance": "unavailable"},
+        "maximum": {"value": null, "provenance": "unavailable"}
+      },
+      "rationale": "The label:value grammar's unit word is mandatory in both contexts -- a bare 'Experience: 5' with no 'years'/'yrs' at all must not match, on the whole-title-anchored path or the per-segment fallback. Traced against _LABEL_VALUE_RE's mandatory _UNIT requirement."
+    },
+    {
+      "record_id": "experience-empty-segment-adjacency--transform-none--target-title--boundary-title_segment_adjacency--variant-base",
+      "kind": "base",
+      "parser": "experience",
+      "guard_ref": "experience/g20-empty-segment-adjacency",
+      "is_primary_witness": true,
+      "historical_defect_ref": "1610f57 finding 1",
+      "target": {"input_field": "title", "semantic_form": "bare_phrase", "boundary": "title_segment_adjacency"},
+      "original_input": {"title": "(Preferred), 5 years experience", "description": null},
+      "transform": {"name": "none", "parameters": {}},
+      "expected_transformed_input": {"title": "(Preferred), 5 years experience", "description": null},
+      "expected_output": {
+        "minimum": {"value": null, "provenance": "unavailable"},
+        "maximum": {"value": null, "provenance": "unavailable"}
+      },
+      "rationale": "Combined comma+parenthesis splitting inserts a blank segment directly between the qualifier and its target -- the walk must skip past it to the real neighbor rather than treating the blank as a barrier. Traced against _nearest_meaningful_neighbor_is_qualifier's blank-skipping loop."
+    },
+    {
+      "record_id": "experience-composite-range-poison-negative--transform-none--target-title--boundary-numeric_redaction--variant-base",
+      "kind": "base",
+      "parser": "experience",
+      "guard_ref": "experience/g21-composite-range-poison-negative",
+      "is_primary_witness": true,
+      "historical_defect_ref": "1610f57 finding 2",
+      "target": {"input_field": "title", "semantic_form": "to_range_phrase", "boundary": "numeric_redaction"},
+      "original_input": {"title": "-3 to 5 years experience", "description": null},
+      "transform": {"name": "none", "parameters": {}},
+      "expected_transformed_input": {"title": "-3 to 5 years experience", "description": null},
+      "expected_output": {
+        "minimum": {"value": null, "provenance": "unavailable"},
+        "maximum": {"value": null, "provenance": "unavailable"}
+      },
+      "rationale": "A free-standing negative number combined with an adjacent range separator poisons the whole composite span, extending the decimal/fraction composite treatment to the negative case. Traced against _NEGATIVE_COMPOSITE_RANGE_RE."
+    },
+    {
+      "record_id": "experience-composite-poison-casefold--transform-none--target-title--boundary-numeric_redaction--variant-base",
+      "kind": "base",
+      "parser": "experience",
+      "guard_ref": "experience/g22-composite-poison-casefold",
+      "is_primary_witness": true,
+      "historical_defect_ref": "559e77a finding 1",
+      "target": {"input_field": "title", "semantic_form": "to_range_phrase", "boundary": "numeric_redaction"},
+      "original_input": {"title": "3.5 TO 5 years experience", "description": null},
+      "transform": {"name": "none", "parameters": {}},
+      "expected_transformed_input": {"title": "3.5 TO 5 years experience", "description": null},
+      "expected_output": {
+        "minimum": {"value": null, "provenance": "unavailable"},
+        "maximum": {"value": null, "provenance": "unavailable"}
+      },
+      "rationale": "The composite poison patterns must be case-insensitive to match the case-insensitive extraction grammar's own 'to'/'and' separators -- an uppercase 'TO' must not escape poisoning. Traced against re.IGNORECASE on _DECIMAL_COMPOSITE_RANGE_RE/_FRACTION_COMPOSITE_RANGE_RE/_NEGATIVE_COMPOSITE_RANGE_RE."
+    }
+  ]
+}
