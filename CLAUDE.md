@@ -6,20 +6,28 @@ read that file, `docs/PHASE_RISK_CHECKLIST.md`, the latest two iterations in
 Conversation history and compacted summaries are navigation aids, never authority over
 the repository.
 
-## Workflow v3.1 (pilot)
+## Workflow v3.2 (active)
 
-`docs/LLM_WORKFLOW.md`'s "Workflow v3.1 pilot" section is in effect: a claim-to-evidence
-matrix and a historical-defect checklist self-review before implementing a Class H
-proposal introducing a new parsing form/invariant; for parser slices, two further
-implementation-time self-review passes (contract-conformance, counterexample) plus a
-load-bearing mutation proof for every regression test added; a rule that a
-confidently-wrong case can never be an "accepted limitation" without explicit written user
-approval; and a `slice_kind`/`verification_level` metadata block in every `Work done`
-entry, validated by `scripts/check_handoff.py` and required by `scripts/verify.py`. This is
-a measured three-**parser**-slice pilot starting with `classify_experience` — the
-handoff-metadata tooling itself does not count as one of the three — not a permanent
-process change; see that section's mandatory retrospective trigger and numerical
-thresholds.
+`docs/LLM_WORKFLOW.md`'s "Workflow v3.2" section is in effect (superseding the closed
+Workflow v3.1 pilot, whose own section remains in that file as a historical record — see
+`docs/DECISIONS/0008-workflow-v3.1-retrospective-and-v3.2-adoption.md` and
+`docs/DECISIONS/0009-workflow-v3.2-activation.md`). Every claim-to-evidence matrix,
+historical-defect checklist, and implementation-time self-review pass carried over from
+v3.1 remains in force unchanged. New in v3.2: a `--gate fast|final|docs` verification
+profile on `scripts/verify.py`; a schema-v2 `workflow-metadata` block (`state:
+pending|published`, `slice_id`, `risk_class`, `base_sha`, `declared_gate`/`executed_gate`)
+validated by `scripts/check_handoff.py`; durable, create-only verification receipts under
+`docs/verification-receipts/` produced by `scripts/verification_coordinator.py` from a
+disposable detached worktree, never the mutable authoring checkout; and
+`scripts/check_review.py`'s `C -> A -> R` (and merge/post-merge) chain validation. A
+receipt proves verification only — it never proves review approval or authorizes a merge.
+
+## Workflow v3.1 (closed pilot)
+
+Workflow v3.1's pilot (three-parser-slice trial: `classify_experience`, `classify_salary`,
+`classify_location`, plus the Slice 2 contract-harness tooling slice) is closed and
+superseded by v3.2 above. Its retrospective is recorded in ADR 0008; nothing further
+happens under its own mechanism.
 
 ## Compact instructions
 
@@ -30,8 +38,8 @@ resume safely:
 - current branch, HEAD, upstream state, and whether the working tree is clean;
 - the active phase/slice, risk class, latest `Work done`/`Work review` verdict, and
   whether implementation, correction, review, or merge is the next permitted action;
-- the active workflow version (e.g. `v3.1-pilot`, as recorded by the compaction hook) and
-  the active slice's `slice_kind`/`verification_level`, when applicable;
+- the active workflow version (e.g. `v3.2`, as recorded by the compaction hook) and the
+  active slice's `slice_kind`/`risk_class`/`gate`, when applicable;
 - unresolved decisions, known limitations, failed/inconclusive verification, and any
   external side effect already performed;
 - applicable identity, normalization, transaction, locking, database-safety, privacy,

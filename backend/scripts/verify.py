@@ -72,8 +72,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
+import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -396,38 +399,72 @@ def db_reachability_step(
     return StepResult(name, StepStatus.PASS, duration, f"{redact_database_url(test_url)} reachable")
 
 
-def handoff_metadata_step(
-    *,
-    docs_only: bool,
-    pytest_counts: dict[str, dict[str, int] | None],
-    focus_targets: list[str],
-) -> StepResult:
-    """Workflow v3.1 pilot: validates `docs/LLM_HANDOFF.md`'s newest `Work
-    done` entry's structured metadata block against what *this invocation*
-    actually observed. Never launches a subprocess — `pytest_counts` is
-    populated by this same run's own pytest step(s) via `run_pytest_step`'s
-    `counts_sink`, and `check_handoff.validate_handoff` only ever reads
-    `docs/LLM_HANDOFF.md` and (for a parser slice) the declared fixture
-    file directly."""
+def handoff_metadata_step() -> StepResult:
+    """Workflow v3.2: validates `docs/LLM_HANDOFF.md`'s newest `Work done`
+    entry's structured metadata block (schema v2 -- pending/published, see
+    `scripts/check_handoff.py`). Purely structural: never launches a
+    subprocess, never cross-checks a hand-typed count against this run's
+    own pytest output -- that anti-fabrication role is now played by the
+    receipt (built and self-verified by `verification_coordinator.py`),
+    never by comparing prose numbers to a second observation."""
     name = "handoff metadata validation"
     start = time.monotonic()
-    full_counts = pytest_counts.get("full")
-    focused_counts = pytest_counts.get("focused")
-    actual_full = full_counts.get("passed") if full_counts else None
-    actual_focused = focused_counts.get("passed") if focused_counts else None
-    actual_selector = " ".join(focus_targets) if focus_targets else None
     try:
-        check_handoff.validate_handoff(
-            docs_only=docs_only,
-            actual_full_suite_count=actual_full,
-            actual_focused_count=actual_focused,
-            actual_focus_selector=actual_selector,
-        )
+        check_handoff.validate_handoff()
     except check_handoff.HandoffValidationError as exc:
         duration = time.monotonic() - start
         return StepResult(name, StepStatus.FAIL, duration, str(exc))
     duration = time.monotonic() - start
     return StepResult(name, StepStatus.PASS, duration, "ok")
+
+
+def mutation_witness_command(guard_ref: str | None) -> list[str]:
+    command = [sys.executable, "-m", "scripts.contract_mutation_witnesses"]
+    if guard_ref is not None:
+        command.extend(["--guard", guard_ref])
+    return command
+
+
+_WITNESS_SUMMARY_RE = re.compile(r"^PASS (?P<ref>\S+)$", re.MULTILINE)
+_WITNESS_FAIL_RE = re.compile(r"^FAIL (?P<ref>\S+)", re.MULTILINE)
+
+
+def mutation_witnesses_step(
+    guard_refs: list[str], runner: SubprocessRunner = _default_runner
+) -> tuple[StepResult, dict[str, int]]:
+    """Runs `contract_mutation_witnesses.py` once per selected guard (the
+    existing single-guard CLI is never modified) and aggregates the
+    results here. `guard_refs` empty means "run every currently active
+    guard" -- discovered dynamically by the script itself via
+    `tests.contracts.taxonomy.active_guards()`, never a hardcoded count."""
+    name = "contract mutation witnesses"
+    start = time.monotonic()
+    targets: list[str | None] = list(guard_refs) if guard_refs else [None]
+    passed = 0
+    failed: list[str] = []
+    combined_output = ""
+    for ref in targets:
+        proc = runner(mutation_witness_command(ref), BACKEND_DIR)
+        combined_output += (proc.stdout or "") + (proc.stderr or "")
+        if ref is None:
+            # Whole-registry invocation: parse its own aggregate summary line.
+            match = re.search(r"(\d+) passed, (\d+) failed", proc.stdout or "")
+            if match:
+                passed += int(match.group(1))
+                failed.extend(re.findall(r"^FAIL (\S+)", proc.stdout or "", re.MULTILINE))
+            elif proc.returncode != 0:
+                failed.append("(unparseable whole-registry run)")
+        else:
+            if proc.returncode == 0 and f"PASS {ref}" in (proc.stdout or ""):
+                passed += 1
+            else:
+                failed.append(ref)
+    duration = time.monotonic() - start
+    counts = {"passed": passed, "failed": len(failed)}
+    if failed:
+        detail = f"{passed} passed, {len(failed)} failed: {failed}"
+        return (StepResult(name, StepStatus.FAIL, duration, detail), counts)
+    return StepResult(name, StepStatus.PASS, duration, f"{passed} passed, 0 failed"), counts
 
 
 def _run_steps(steps: list[Step]) -> list[StepResult]:
@@ -510,8 +547,26 @@ def validate_focus_target(target: str) -> str:
 # --------------------------------------------------------------------------
 
 
+def _clear_readonly_and_retry(
+    func: Callable[[str], None], target_path: str, exc_info: BaseException
+) -> None:
+    """`shutil.rmtree`'s `onexc` handler: a real Git repository's loose
+    object files are created read-only (a deliberate Git safeguard against
+    accidental corruption) -- on Windows this makes the *default*
+    `shutil.rmtree` fail with `PermissionError` the moment cleanup reaches
+    one, something this project's own test suite started doing the moment
+    it began creating disposable Git repositories under a cleaned-up run
+    directory (see `test_verification_worktree.py`/`test_check_review.py`/
+    `test_verification_coordinator.py`). Clearing the read-only bit and
+    retrying the exact failed operation is the standard, narrow fix -- it
+    never suppresses a genuinely different failure, since `func` is called
+    again and any other error still propagates."""
+    os.chmod(target_path, stat.S_IWRITE)
+    func(target_path)
+
+
 def _default_remove(path: Path) -> None:
-    shutil.rmtree(path)
+    shutil.rmtree(path, onexc=_clear_readonly_and_retry)
 
 
 def safe_rmtree(
@@ -573,8 +628,11 @@ def _build_steps(
     run_dir: Path,
     *,
     docs_only: bool = False,
+    gate: str | None = None,
+    witness_refs: list[str] | None = None,
     runner: SubprocessRunner = _default_runner,
     connectivity_check: Callable[[str], None] = _real_connectivity_check,
+    witness_counts_sink: dict[str, int] | None = None,
 ) -> list[Step]:
     # Shared across the focused/full pytest steps below and the trailing
     # handoff-metadata step — populated as a side effect of `run_pytest_step`
@@ -645,16 +703,18 @@ def _build_steps(
                 ),
             )
         )
-    steps.append(
-        Step(
-            "handoff metadata validation",
-            lambda: handoff_metadata_step(
-                docs_only=docs_only,
-                pytest_counts=pytest_counts,
-                focus_targets=focus_targets,
-            ),
-        )
-    )
+    if gate in ("fast", "final"):
+
+        def _run_witnesses() -> StepResult:
+            refs = list(witness_refs or []) if gate == "fast" else []
+            result, counts = mutation_witnesses_step(refs, runner)
+            if witness_counts_sink is not None:
+                witness_counts_sink.update(counts)
+            return result
+
+        steps.append(Step("contract mutation witnesses", _run_witnesses))
+
+    steps.append(Step("handoff metadata validation", handoff_metadata_step))
     return steps
 
 
@@ -685,15 +745,48 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--docs-only",
         action="store_true",
         help=(
-            "Workflow v3.1 pilot: for a genuinely documentation-only change, skips the "
-            "disposable-database steps and the full/focused pytest steps entirely (reported "
-            "NOT RUN). Mutually exclusive with --focus, since focusing tests implies running "
-            "them."
+            "For a genuinely documentation-only change, skips the disposable-database steps "
+            "and the full/focused pytest steps entirely (reported NOT RUN). Mutually exclusive "
+            "with --focus, since focusing tests implies running them."
         ),
+    )
+    parser.add_argument(
+        "--gate",
+        choices=["fast", "final", "docs"],
+        default=None,
+        help=(
+            "Workflow v3.2: receipt-eligible verification profile. Omitted entirely, this "
+            "invocation runs in the ordinary (compat) mode unchanged from before this "
+            "activation slice -- no mutation-witness step, not receipt-eligible. Normally "
+            "invoked by scripts/verification_coordinator.py from inside a disposable detached "
+            "worktree, never directly against the mutable authoring checkout for a real "
+            "receipt-issuing run."
+        ),
+    )
+    parser.add_argument(
+        "--witness",
+        nargs="+",
+        default=None,
+        metavar="GUARD_REF",
+        help="With --gate fast: the specific mutation-witness guard refs to run (the affected-"
+        "surface-computed set plus any additions). Ignored for --gate final, which always runs "
+        "every currently active guard.",
+    )
+    parser.add_argument(
+        "--emit-step-json",
+        default=None,
+        metavar="PATH",
+        help="Write this invocation's step results and parsed counts as JSON to PATH -- how "
+        "scripts/verification_coordinator.py reads a worktree-isolated run's results without "
+        "scraping console text.",
     )
     args = parser.parse_args(argv)
     if args.docs_only and args.focus:
         parser.error("--docs-only and --focus are mutually exclusive")
+    if args.gate == "docs" and not args.docs_only:
+        parser.error("--gate docs requires --docs-only (the two must always be given together)")
+    if args.docs_only and args.gate != "docs":
+        parser.error("--docs-only requires --gate docs (the two must always be given together)")
     return args
 
 
@@ -739,13 +832,70 @@ def main(argv: list[str] | None = None) -> int:
     test_url = resolve_test_database_url(settings.test_database_url)
 
     run_dir = create_run_dir()
-    steps = _build_steps(focus_targets, dev_url, test_url, run_dir, docs_only=args.docs_only)
+    witness_counts: dict[str, int] = {}
+    steps = _build_steps(
+        focus_targets,
+        dev_url,
+        test_url,
+        run_dir,
+        docs_only=args.docs_only,
+        gate=args.gate,
+        witness_refs=args.witness,
+        witness_counts_sink=witness_counts,
+    )
     results = _execute_and_cleanup(steps, run_dir)
 
     _print_summary(results)
+
+    if args.emit_step_json:
+        _write_step_json(Path(args.emit_step_json), results, witness_counts, focus_targets)
+
     # A failed cleanup makes the overall exit nonzero too — every result,
     # including the cleanup step's own, must be PASS (binding requirement).
     return 0 if all(result.status is StepStatus.PASS for result in results) else 1
+
+
+def _write_step_json(
+    path: Path,
+    results: list[StepResult],
+    witness_counts: dict[str, int],
+    focus_targets: list[str],
+) -> None:
+    def _find(name: str) -> StepResult | None:
+        return next((r for r in results if r.name == name), None)
+
+    focused = _find("focused pytest")
+    full = _find("full pytest suite")
+    payload = {
+        "steps": [
+            {"name": r.name, "status": r.status.value, "duration_seconds": r.duration_seconds}
+            for r in results
+        ],
+        "full_suite": (
+            {"status": "ran", "count": _parse_passed(full)} if full else {"status": "not_run"}
+        ),
+        "focused_tests": (
+            {"status": "ran", "selector": " ".join(focus_targets), "count": _parse_passed(focused)}
+            if focused
+            else {"status": "not_run"}
+        ),
+        "mutation_witnesses": (
+            {
+                "status": "ran",
+                "passed": witness_counts.get("passed", 0),
+                "failed": witness_counts.get("failed", 0),
+            }
+            if witness_counts
+            else {"status": "not_run"}
+        ),
+        "all_passed": all(r.status is StepStatus.PASS for r in results),
+    }
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def _parse_passed(result: StepResult) -> int | None:
+    match = re.search(r"(\d+) passed", result.detail)
+    return int(match.group(1)) if match else None
 
 
 if __name__ == "__main__":

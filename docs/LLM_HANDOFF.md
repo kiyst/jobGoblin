@@ -98,170 +98,6 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-09-12, Claude Code (Sonnet 5). Risk class R
-  (routine tooling — new, self-contained test infrastructure; no
-  production-code, identity, concurrency, security, or external
-  surface). Base -> ending commit: `d28bf03` -> this commit; new branch
-  `tooling/workflow-v3.2-slice2-contract-harness`. Workflow v3.2 Slice 2
-  of the staged proposal: the deterministic parser-contract harness,
-  implemented per the frozen Slice 2 proposal plus Sol's ten binding
-  final clarifications and one further binding resolution (the
-  superseded-guard correction below), all relayed as text and treated as
-  the complete implementation contract — no further proposal round.
-- Outcome: `backend/tests/contracts/` (new package) plus
-  `backend/scripts/contract_mutation_witnesses.py` (new, standalone,
-  never collected by pytest). Covers all three existing parsers
-  (`location`, `salary`, `experience` — only these three seeded, per
-  the binding scope). Key modules: `schema.py` (closed record types; an
-  independently-declared provenance vocabulary, never importing
-  `app.normalization.types.NormalizationResult`), `taxonomy.py` (the
-  guard inventory — see the corrected arithmetic below), `loader.py`
-  (fail-closed JSON loader enforcing ~12 distinct validation
-  categories, including a record_id-to-real-fields consistency check
-  added during self-review), `transforms.py` (five mechanical,
-  parser-independent string transforms; deterministic `ascii_recase`
-  mixed-mode algorithm), `runner.py` (invokes an adapter and compares
-  actual vs. expected), `adapters/{location,salary,experience}.py`
-  (each imports only its own public `classify_*` entry point — enforced
-  at the AST symbol level, including a dynamic-bypass check for
-  `getattr`/`setattr`/`importlib.import_module`/`__import__`, added
-  during self-review), `records/{location,salary,experience}.json` (34
-  hand-authored primary-witness case records, each fully materialized:
-  original input, deterministic transform parameters, expected
-  transformed input, complete expected output, and a durable rationale
-  citing the exact historical commit), and `mutation_registry.py` (34
-  replayable mutants — "simple" ones monkeypatch a live module
-  attribute or small atomic helper function; "structural" ones edit
-  source text via an anchor asserted to occur exactly once and load the
-  mutated text as a fully isolated module via `importlib`, never
-  touching the shared checkout — plus **committed, frozen baseline
-  fingerprints** for the production source file, the JSON record, and
-  the adapter file per guard, corrected during self-review; see below).
-- **Corrected inventory arithmetic** (a factual correction discovered
-  through source-history verification, not a deviation from the
-  authorized contract): `experience/g07-reversed-label-anchor`'s own
-  historical fix (`2589eec` finding 1) was itself fully superseded by a
-  later fix (`2fcdc0f` finding 3, `experience/g18-description-label-
-  value-scope-removed`) that removed the description-side reversed-label
-  path entirely — confirmed directly against the current
-  `experience.py` source, which never calls `_LABEL_VALUE_RE`/
-  `_match_label_value_phrase` from `_extract_description_bounds` in any
-  form. Per the user's binding resolution: g07 is retained as a
-  **historical record**, `status="superseded"`, `superseded_by`
-  pointing to g18, with **no primary witness and no mutant** (a written
-  approval is not a substitute for executable mutation evidence, and
-  g18's own witness is never double-counted as g07's). Corrected counts:
-  **35 historical guard records** (location 8, salary 5, experience 22),
-  of which **34 are active** (experience 21) with exactly one primary
-  witness and mutant each, and **1 is superseded** with neither. The
-  taxonomy module asserts these exact counts at import time.
-  `loader.py` fails closed if any record references the superseded
-  guard, and `collect_all` requires exactly one primary witness per
-  *active* guard only.
-- Fresh-context adversarial self-review (via an independent subagent,
-  per the user's explicit requirement) found six real defects before
-  this entry was written, all fixed and re-verified before commit:
-  1. **[Critical] Vacuous staleness check** — fingerprints were
-     originally computed fresh from current files at import time, then
-     compared against themselves in the same run — a tautology that
-     could never detect drift. Fixed: fingerprints are now committed,
-     frozen baseline values (`_FROZEN_SOURCE_FP`/`_FROZEN_ADAPTER_FP`/
-     `_FROZEN_RECORD_FP`), computed once against this commit's exact
-     content; the witness script recomputes fresh values at run time
-     and compares against these frozen ones. Empirically re-verified:
-     appending a harmless comment to `location.py` and rerunning the
-     `location/g01` witness correctly reports `STALE source
-     fingerprint`; restoring the file and rerunning correctly passes
-     again.
-  2. **[High] AST import-boundary bypassable via dynamic access** —
-     the original checker only inspected literal `Import`/`ImportFrom`/
-     `Attribute` nodes, missing `importlib.import_module`,
-     `__import__`, and computed-name `getattr`/`setattr`/`delattr`.
-     Fixed: a new detector rejects these call forms in every adapter
-     and non-mutation-registry harness module (the mutation registry
-     and witness script are the sole, deliberately exempt, sanctioned
-     users of dynamic access to production internals).
-  3. **[Medium] Misdocumented fingerprint granularity** — the module
-     docstring claimed "exact production source region" precision;
-     fingerprints are actually whole-file hashes. Corrected to disclose
-     this honestly (over-broad staleness triggers, never under-broad).
-  4. **[Low] `record_id` tokens not cross-validated** — a record's
-     embedded transform/target/boundary tokens were never checked
-     against its real fields. Fixed: `loader.py` now rejects a mismatch.
-  5. **[Low] `transform.parameters` accepted unknown extra keys** —
-     fixed via an exact-keys check keyed by transform name
-     (`TRANSFORM_PARAMETER_KEYS`).
-  6. Two existing self-tests whose own fixtures became inconsistent
-     under fix #4's stricter rule were corrected to remain internally
-     consistent (one rewritten to test the new consistency rule
-     directly; one's duplicate-record construction adjusted to keep its
-     copied record's real fields matching its record_id).
-  No confidently-wrong output, cleanup/restoration-on-failure gap, or
-  registry/cardinality drift was found; the reviewer's report is
-  preserved in this session's transcript.
-- Files changed: `backend/tests/contracts/__init__.py`, `schema.py`,
-  `taxonomy.py`, `loader.py`, `runner.py`, `transforms.py`,
-  `mutation_registry.py`, `adapters/__init__.py`,
-  `adapters/{location,salary,experience}.py`,
-  `records/{location,salary,experience}.json`, `test_harness_self.py`,
-  `test_harness_import_boundary.py`,
-  `test_{location,salary,experience}_contract.py`,
-  `backend/scripts/contract_mutation_witnesses.py`, this handoff entry.
-  No production parser, existing fixture, existing parser test,
-  verifier, workflow document, hook, metadata validator, dependency
-  file, or other version-bearing consumer touched.
-- Mutation-witness acceptance run (per binding clarification: run all
-  34 active witnesses now, not added to routine pytest or `verify.py`):
-  `python -m scripts.contract_mutation_witnesses` — **34 passed, 0
-  failed**, each asserting both the documented erroneous output under
-  its mutant and the documented restored output matching its contract
-  record; superseded g07 correctly reported as having no witness, by
-  design, separately from the 34.
-- Verification: `ruff format --check`/`ruff check`/`mypy` all pass (17
-  new source files). `python -m scripts.check_repo` exits 0. Genuine
-  external `python -m scripts.verify --level routine --focus
-  tests/contracts/test_location_contract.py
-  tests/contracts/test_salary_contract.py
-  tests/contracts/test_experience_contract.py
-  tests/contracts/test_harness_self.py
-  tests/contracts/test_harness_import_boundary.py` — all 11 steps PASS:
-  **102 focused / 2295 full-suite tests**. (One full-suite run
-  immediately prior showed 2 unrelated failures in
-  `test_collection_run_provider_attempts.py`/`test_ingestion_pipeline.py`
-  — both passed individually in isolation and the full suite passed
-  cleanly at 2295/2295 on the very next run with no code change in
-  between; recorded here as a one-off database-state artifact from the
-  disposable database container being freshly rebuilt that run, not a
-  regression from this slice, which touches no ingestion/database
-  code.)
-- Deviations/known limitations: only the 34 primary-witness records are
-  committed (no additional generated/transformed records) — within
-  scope, since binding clarification 10 requires exactly one primary
-  witness per active guard but does not mandate additional records.
-  Fingerprint staleness detection is file-level, not anchor/region-level
-  (disclosed in the module docstring, not overclaimed). `experience/g07`
-  is a permanent historical record with no witness, by design.
-- STOP — this is Slice 2 only. Do not implement Slice 3 (fast/final
-  verifier profiles, durable receipts, metadata-schema split, workflow-
-  version activation), touch any production parser/fixture/existing
-  test, or begin another Phase 3/4 parser. Do not merge without separate
-  explicit user authorization.
-
-```workflow-metadata
-workflow_version: v3.1-pilot
-slice_kind: tooling
-verification_level: routine
-focused_test_selector: tests/contracts/test_location_contract.py tests/contracts/test_salary_contract.py tests/contracts/test_experience_contract.py tests/contracts/test_harness_self.py tests/contracts/test_harness_import_boundary.py
-focused_test_count: 102
-full_suite_count: 2295
-```
-
----
-
-## Iteration 2
-
-### Work done
-
 - Date/agent: 2026-09-13, Claude Code (Sonnet 5). Risk class R
   (unchanged). Base -> ending commit: `d8c2c09` -> this commit; same
   branch `tooling/workflow-v3.2-slice2-contract-harness`. Bounded
@@ -494,3 +330,108 @@ full_suite_count: 2323
 - STOP — report the synchronized final `main` SHA and stop. No Workflow
   v3.2 activation, no Slice 3, no other Phase 3/4 parser, without
   separate explicit user authorization.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-09-13, Claude Code (Sonnet 5). Risk class H (process/
+  security-relevant tooling — touches `.claude/hooks/*.py` and every
+  workflow-governing document/checker; "when uncertain, use the
+  higher-risk class"). Base `B` -> candidate `C`: `66202c23facff6bd33d8f
+  624e327cabdd40708b4` -> this commit; branch
+  `tooling/workflow-v3.2-activation`. Workflow v3.2 activation per the
+  frozen contract authorized across this session's proposal/amendment
+  rounds (see `docs/DECISIONS/0009-workflow-v3.2-activation.md`), which
+  supersedes and consolidates that entire negotiation into one accepted
+  design. `slice_kind: tooling`. `slice_id:
+  2026-09-13-workflow-v3-2-activation-66202c2`.
+- Outcome: new `backend/scripts/verification_worktree.py`,
+  `verification_receipts.py`, `verification_scope.py`,
+  `verification_coordinator.py`, `migration_matrix.py`, `check_review.py`
+  (+ their test files); schema-v2 rewrite of `check_handoff.py` (+
+  rewritten `test_check_handoff.py`); `verify.py` gains `--gate
+  {fast,final,docs}`, `--witness`, `--emit-step-json`, and a `contract
+  mutation witnesses` step; `.claude/hooks/compact_checkpoint.py`'s
+  `WORKFLOW_VERSION` -> `"v3.2"`; `CLAUDE.md`/`docs/LLM_WORKFLOW.md`
+  updated (v3.1 pilot section marked closed/historical, new "Workflow
+  v3.2" section added); new ADR 0009; `backend/pyproject.toml` gains a
+  narrow mypy override for `asyncpg` (no stubs, used directly by
+  `migration_matrix.py`).
+- Adversarial/implementation self-review found and fixed, before this
+  entry was written: (1) the generated fresh-database name must itself
+  contain `"test"` or the *existing* `assert_is_disposable_test_database`
+  guard rejects it for the wrong reason; (2) the derived admin
+  (`postgres`) connection must **not** be run through the full
+  `assert_safe_for_local_destructive_lifecycle` (its name correctly never
+  contains `"test"`) — split into a narrower host/production-only check
+  reusing `db_safety`'s own host allowlist, never a second copy; (3) a
+  `--docs-only`/`--gate` argparse bug accepted `--docs-only` with no
+  `--gate` at all; (4) `check_handoff.main()`'s use of mutable
+  module-level defaults as function defaults meant monkeypatching
+  `HANDOFF_PATH`/`REPO_ROOT` in tests silently had no effect — fixed by
+  referencing the module globals inside the function body. Each was
+  caught by a genuinely failing test, fixed, and re-verified.
+- Files changed (new): `backend/scripts/{verification_worktree,
+  verification_receipts,verification_scope,verification_coordinator,
+  migration_matrix,check_review}.py`;
+  `backend/tests/test_{verification_worktree,verification_receipts,
+  verification_scope,verification_coordinator,migration_matrix,
+  check_review}.py`; `docs/DECISIONS/0009-workflow-v3.2-activation.md`.
+  Rewritten: `backend/scripts/check_handoff.py`,
+  `backend/scripts/verify.py`, `backend/tests/test_check_handoff.py`,
+  `backend/tests/test_verify.py` (obsolete v3.1-pilot-schema tests
+  replaced, not merely patched). Edited: `.claude/hooks/
+  compact_checkpoint.py`, `CLAUDE.md`, `docs/LLM_WORKFLOW.md`,
+  `backend/pyproject.toml`, this handoff entry. No production parser
+  (`app/normalization/*`) touched; no migration/model file touched.
+- Verification: `ruff format --check`/`ruff check`/`mypy` all pass
+  (139 source files, backend + `.claude/hooks`). Full pytest suite:
+  **2431 passed** (up from 2323 — 108 new/replacing tests). All 34
+  mutation witnesses pass unmodified
+  (`python -m scripts.contract_mutation_witnesses`). `python -m
+  scripts.check_repo` exits 0.
+- Database-lifecycle evidence (real, against the local disposable
+  Postgres — never the development database beyond a read-only `SELECT
+  current_database()`/state check): `test_migration_matrix.py`'s 13
+  tests genuinely create and drop a real, uniquely-named disposable
+  database via a derived admin connection, cover production/remote-host/
+  pre-existing-name/failed-before-create/acknowledgement-lost-after-
+  create, and confirm a pre-existing database under a collided name is
+  never touched. `capture_development_state` fails closed (raises,
+  never skips) when the development database is unreachable or its
+  state can't be read.
+- Deviations/known limitations (recorded honestly, not silently): (1)
+  `check_review.py`'s merge/post-merge modes validate parent shape and
+  content identity but do not yet implement the outer-launcher/
+  subprocess-reexecution design (running `R`'s own checked-out validator
+  code rather than the caller's in-process copy) or a full per-
+  transition byte-identical-historical-text diff validator — both
+  recorded in ADR 0009 as follow-on hardening, not exercised by this
+  slice's own C/A anyway. (2) `migration_matrix.py` is fully implemented
+  and tested end-to-end against a real database but is not exercised by
+  this candidate's own verification, since this tooling slice touches no
+  `backend/migrations/**`/`backend/alembic.ini`/`backend/app/db/**`
+  path (`migration_matrix.triggered: false` in its own receipt). (3)
+  `--compat-v3.1` is not a separate CLI mode: `verify.py --level routine`
+  with no `--gate` is, unchanged, the honest compatibility profile (the
+  true pre-activation v3.1 binary cannot run against code that
+  postdates it — see ADR 0009's one-time-transition framing); this is a
+  documented interpretation of the frozen contract's "explicitly named
+  compatibility profile" requirement, not a silent scope cut.
+- STOP — this is the activation candidate only. Do not author `R`,
+  merge, activate v3.2 further (this commit + the next, `A`, complete
+  the activation once merged — see the metadata block below), create
+  `M`/`Q`, begin another slice, or modify product/parser behavior.
+
+```workflow-metadata
+workflow_version: v3.2
+state: pending
+slice_id: 2026-09-13-workflow-v3-2-activation-66202c2
+slice_kind: tooling
+risk_class: H
+base_sha: 66202c23facff6bd33d8f624e327cabdd40708b4
+declared_gate: final
+```
