@@ -14,20 +14,26 @@ this run can prove it created it.
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 
 import asyncpg
 from sqlalchemy.engine import make_url
 
 from scripts.db_safety import (
     _LOCAL_DESTRUCTIVE_LIFECYCLE_HOSTS,
+    assert_is_disposable_test_database,
     assert_safe_for_local_destructive_lifecycle,
     redact_database_url,
     resolve_test_database_url,
 )
 
 _MAINTENANCE_DATABASE = "postgres"
+_BACKEND_DIR = Path(__file__).resolve().parent.parent
 
 # Deterministic, conservative repository-root-relative trigger paths (see
 # scripts/verification_scope.py's is_migration_trigger, the single source
@@ -200,6 +206,10 @@ async def provision_fresh_database(development_url: str, app_env: str) -> FreshD
     if lifecycle.created_by_this_run:
         resolved = await query_current_database(target_url)
         if resolved != generated_name:
+            # Unconditional cleanup before raising -- this run already owns
+            # the database it just created; a validation failure past this
+            # point must never leave it behind.
+            await cleanup_fresh_database(lifecycle)
             raise MigrationMatrixError(
                 f"direct connection to the created target resolved to {resolved!r}, "
                 f"expected {generated_name!r} -- refusing to run migrations against it"
@@ -219,3 +229,82 @@ async def cleanup_fresh_database(lifecycle: FreshDatabaseLifecycle) -> None:
         return
     await drop_database(lifecycle.admin_url, lifecycle.generated_name)
     lifecycle.cleaned_up = True
+
+
+def _run_alembic(args: list[str], database_url: str) -> None:
+    """Runs one Alembic command with the validated target passed only
+    through this one subprocess's own environment -- the parent process's
+    environment (`os.environ`) is read from but never mutated."""
+    env = {**os.environ, "DATABASE_URL": database_url}
+    proc = subprocess.run(
+        [sys.executable, *args], cwd=str(_BACKEND_DIR), env=env, capture_output=True, text=True
+    )
+    if proc.returncode != 0:
+        raise MigrationMatrixError(
+            f"alembic {' '.join(args[3:])} failed against "
+            f"{redact_database_url(database_url)}: {proc.stderr.strip()[-2000:]}"
+        )
+
+
+@dataclass
+class MatrixResult:
+    status: str  # "PASS" | "FAIL"
+    detail: str
+    dev_state_before: str | None = None
+    dev_state_after: str | None = None
+    fresh_database_created: bool = False
+    fresh_database_cleaned_up: bool = False
+    steps: list[str] = field(default_factory=list)
+
+
+async def run_full_matrix(
+    development_url: str, existing_target_url: str, *, app_env: str
+) -> MatrixResult:
+    """The complete migration/schema-change verification matrix, run only
+    when a candidate's diff actually triggers it
+    (`verification_scope.is_migration_trigger`): existing-head upgrade,
+    downgrade/upgrade round trip, `alembic check`, and a fresh `base ->
+    head` run against a guarded, disposable database -- development
+    database state is captured before and after and must be identical, or
+    this raises (never returns a "FAIL" result silently; a raised
+    exception here always means no receipt may be issued). Cleanup of the
+    fresh database is unconditional, in `finally`."""
+    steps: list[str] = []
+    dev_before = await capture_development_state(development_url)
+    steps.append("development state captured (before)")
+
+    assert_is_disposable_test_database(existing_target_url, development_url)
+    _run_alembic(ALEMBIC_UPGRADE_HEAD, existing_target_url)
+    steps.append("existing-head upgrade")
+    _run_alembic(ALEMBIC_DOWNGRADE_ONE, existing_target_url)
+    steps.append("downgrade -1")
+    _run_alembic(ALEMBIC_UPGRADE_HEAD, existing_target_url)
+    steps.append("upgrade head (round trip restored)")
+    _run_alembic(ALEMBIC_CHECK, existing_target_url)
+    steps.append("alembic check")
+
+    lifecycle = await provision_fresh_database(development_url, app_env)
+    fresh_created = lifecycle.created_by_this_run
+    try:
+        _run_alembic(ALEMBIC_UPGRADE_HEAD, lifecycle.target_url)
+        steps.append("fresh base -> head upgrade")
+    finally:
+        await cleanup_fresh_database(lifecycle)
+
+    dev_after = await capture_development_state(development_url)
+    steps.append("development state captured (after)")
+    if dev_after != dev_before:
+        raise MigrationMatrixError(
+            "development database state changed during the migration matrix -- "
+            f"before={dev_before!r} after={dev_after!r}"
+        )
+
+    return MatrixResult(
+        status="PASS",
+        detail=f"{len(steps)} steps completed",
+        dev_state_before=dev_before,
+        dev_state_after=dev_after,
+        fresh_database_created=fresh_created,
+        fresh_database_cleaned_up=lifecycle.cleaned_up,
+        steps=steps,
+    )

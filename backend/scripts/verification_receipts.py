@@ -234,20 +234,66 @@ def validate_receipt_schema(data: dict[str, Any]) -> None:
         raise ReceiptError("approval_eligible must be a boolean")
 
 
+def _required_step_names_present(data: dict[str, Any]) -> bool:
+    """Every gate requires at least the static/repository checks to have
+    genuinely run -- a receipt with an empty step list (or one missing
+    these names) can never be eligible, regardless of what its other
+    fields claim."""
+    required = {"ruff format --check", "ruff check", "mypy", "check_repo.py", "git diff --check"}
+    present = {step["name"] for step in data["steps"]}
+    return required.issubset(present)
+
+
+def _full_suite_genuinely_ran(data: dict[str, Any]) -> bool:
+    full_suite = data["full_suite"]
+    if full_suite.get("status") != "ran":
+        return False
+    count = full_suite.get("count")
+    return isinstance(count, int) and not isinstance(count, bool) and count > 0
+
+
+def _witnesses_genuinely_ran_and_passed(data: dict[str, Any]) -> bool:
+    witnesses = data["mutation_witnesses"]
+    if witnesses.get("status") != "ran":
+        return False
+    passed = witnesses.get("passed")
+    failed = witnesses.get("failed")
+    if not (isinstance(passed, int) and isinstance(failed, int)):
+        return False
+    if isinstance(passed, bool) or isinstance(failed, bool):
+        return False
+    return failed == 0 and passed > 0
+
+
 def compute_approval_eligible(data: dict[str, Any]) -> bool:
     """Recomputed from the receipt's own content -- never trusted as
     asserted. False for `fast`. True only for a successful executable
-    `final` (every step PASS/NOT_RUN as applicable, both worktree
-    snapshots equal, cleanup PASS). True for a successful `docs` gate run
-    on the same terms -- but a `docs`-gate receipt is only ever *merge*-
+    `final` where: every named static-check step is present; cleanup
+    passed; both worktree snapshots are identical and non-trivial; no
+    step reports FAIL; the full suite genuinely ran with a positive
+    numeric count (never `not_run`, never a non-numeric/boolean value);
+    and every dynamically active mutation guard ran and passed (a
+    positive numeric `passed` count, zero `failed`). A receipt with an
+    empty step list and every execution group left `not_run` is the
+    degenerate case this function must reject outright -- it satisfies no
+    positive requirement below. True for a successful `docs` gate run on
+    the analogous terms -- but a `docs`-gate receipt is only ever *merge*-
     eligible when the paired handoff metadata separately declares
     `slice_kind: docs` (checked by `check_review.py`, which has access to
     both records; this receipt alone never knows the handoff's
     `slice_kind`)."""
+    if not data["steps"]:
+        return False
+    if not _required_step_names_present(data):
+        return False
     if data["cleanup"].get("status") != "PASS":
         return False
     coordinator = data["coordinator"]
-    if coordinator["worktree_initial_snapshot"] != coordinator["worktree_final_snapshot"]:
+    initial = coordinator["worktree_initial_snapshot"]
+    final = coordinator["worktree_final_snapshot"]
+    if initial != final:
+        return False
+    if not initial.get("tracked_tree_sha"):
         return False
     if any(step["status"] == "FAIL" for step in data["steps"]):
         return False
@@ -256,5 +302,5 @@ def compute_approval_eligible(data: dict[str, Any]) -> bool:
     if gate == "fast":
         return False
     if gate == "final":
-        return True
+        return _full_suite_genuinely_ran(data) and _witnesses_genuinely_ran_and_passed(data)
     return bool(gate == "docs")

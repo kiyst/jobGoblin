@@ -198,3 +198,104 @@ async def test_capture_development_state_fails_closed_when_unreachable() -> None
         await mm.capture_development_state(
             "postgresql+asyncpg://nobody:nothing@127.0.0.1:1/does_not_exist"
         )
+
+
+# ---------------------------------------------------------------------------
+# run_full_matrix -- the complete, integrated matrix (real Alembic + real DB)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_run_full_matrix_happy_path_real_alembic() -> None:
+    result = await mm.run_full_matrix(
+        _dev_url(), db_safety.resolve_test_database_url(None), app_env="test"
+    )
+    assert result.status == "PASS"
+    assert result.dev_state_before == result.dev_state_after
+    assert result.fresh_database_created is True
+    assert result.fresh_database_cleaned_up is True
+    assert "fresh base -> head upgrade" in result.steps
+    # left the shared disposable database back at head -- confirmed via a
+    # real `alembic check` immediately after, from this same test.
+    mm._run_alembic(mm.ALEMBIC_CHECK, db_safety.resolve_test_database_url(None))
+
+
+@pytest.mark.asyncio
+async def test_run_full_matrix_cleans_up_fresh_database_when_a_later_step_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Exception *after* the fresh database was genuinely created (during
+    the upgrade against it) must still result in cleanup -- proven here by
+    confirming the real database is gone afterward, not merely that no
+    exception escaped `cleanup_fresh_database` itself."""
+    real_run_alembic = mm._run_alembic
+    created_name_holder: dict[str, str] = {}
+
+    def _fail_on_fresh_target(args: list[str], database_url: str) -> None:
+        if args == mm.ALEMBIC_UPGRADE_HEAD and "jobgoblin_test_verify_" in database_url:
+            from sqlalchemy.engine import make_url
+
+            created_name_holder["name"] = make_url(database_url).database or ""
+            raise mm.MigrationMatrixError("simulated failure during fresh-target upgrade")
+        real_run_alembic(args, database_url)
+
+    monkeypatch.setattr(mm, "_run_alembic", _fail_on_fresh_target)
+
+    with pytest.raises(mm.MigrationMatrixError, match="simulated failure"):
+        await mm.run_full_matrix(
+            _dev_url(), db_safety.resolve_test_database_url(None), app_env="test"
+        )
+
+    admin_url = mm.derive_admin_url(db_safety.resolve_test_database_url(None))
+    assert created_name_holder["name"]
+    assert await mm.query_database_exists(admin_url, created_name_holder["name"]) is False
+
+
+@pytest.mark.asyncio
+async def test_run_full_matrix_raises_and_cleans_up_when_direct_target_validation_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Simulates the direct-target `SELECT current_database()` confirmation
+    failing inside `provision_fresh_database` (called from within
+    `run_full_matrix`) -- must propagate and must not leave the fresh
+    database behind."""
+    real_query_current_database = mm.query_current_database
+    created_name_holder: dict[str, str] = {}
+
+    async def _wrong_name(url: str) -> str:
+        actual = await real_query_current_database(url)
+        if "jobgoblin_test_verify_" in url:
+            created_name_holder["name"] = actual
+            return "not-the-right-database"
+        return actual
+
+    monkeypatch.setattr(mm, "query_current_database", _wrong_name)
+
+    with pytest.raises(mm.MigrationMatrixError, match="refusing to run migrations"):
+        await mm.run_full_matrix(
+            _dev_url(), db_safety.resolve_test_database_url(None), app_env="test"
+        )
+
+    admin_url = mm.derive_admin_url(db_safety.resolve_test_database_url(None))
+    assert created_name_holder["name"]
+    assert await mm.query_database_exists(admin_url, created_name_holder["name"]) is False
+
+
+@pytest.mark.asyncio
+async def test_run_full_matrix_fails_closed_if_development_state_changes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = {"n": 0}
+    real_capture = mm.capture_development_state
+
+    async def _flip_flop(url: str) -> str:
+        calls["n"] += 1
+        real_value = await real_capture(url)
+        return real_value if calls["n"] == 1 else f"{real_value}-mutated"
+
+    monkeypatch.setattr(mm, "capture_development_state", _flip_flop)
+
+    with pytest.raises(mm.MigrationMatrixError, match="state changed"):
+        await mm.run_full_matrix(
+            _dev_url(), db_safety.resolve_test_database_url(None), app_env="test"
+        )

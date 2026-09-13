@@ -15,6 +15,7 @@ every smaller unit it composes (command builders, step-execution functions,
 temp-directory safety guard) is tested directly and independently instead.
 """
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -1094,3 +1095,108 @@ def test_print_summary_never_prints_raw_output_for_a_passing_step(
     verify._print_summary(results)
     output = capsys.readouterr().out
     assert "should not appear" not in output
+
+
+# --------------------------------------------------------------------------
+# --migration-required / --compat-v3.1 -- Workflow v3.2 corrections
+# --------------------------------------------------------------------------
+
+
+def test_parse_args_accepts_migration_required() -> None:
+    args = verify._parse_args(["--level", "routine", "--migration-required"])
+    assert args.migration_required is True
+
+
+def test_parse_args_defaults_migration_required_to_false() -> None:
+    args = verify._parse_args(["--level", "routine"])
+    assert args.migration_required is False
+
+
+def test_parse_args_accepts_compat_v3_1() -> None:
+    args = verify._parse_args(["--level", "routine", "--compat-v3.1"])
+    assert args.compat_v3_1 is True
+
+
+def test_parse_args_rejects_compat_v3_1_combined_with_gate() -> None:
+    with pytest.raises(SystemExit):
+        verify._parse_args(["--level", "routine", "--compat-v3.1", "--gate", "final"])
+
+
+def test_build_steps_migration_required_adds_migration_matrix_step() -> None:
+    steps = verify._build_steps(
+        [],
+        _DEV_URL,
+        _TEST_URL,
+        Path("/tmp/run-dir"),
+        gate="final",
+        migration_required=True,
+        runner=_unused_runner,
+        connectivity_check=_unused_connectivity_check,
+    )
+    names = [s.name for s in steps]
+    assert "migration matrix" in names
+    assert names.index("migration matrix") < names.index("handoff metadata validation")
+
+
+def test_build_steps_migration_not_required_omits_migration_matrix_step() -> None:
+    steps = verify._build_steps(
+        [],
+        _DEV_URL,
+        _TEST_URL,
+        Path("/tmp/run-dir"),
+        gate="final",
+        migration_required=False,
+        runner=_unused_runner,
+        connectivity_check=_unused_connectivity_check,
+    )
+    assert "migration matrix" not in [s.name for s in steps]
+
+
+def test_build_steps_docs_only_never_adds_migration_matrix_step_even_if_requested() -> None:
+    steps = verify._build_steps(
+        [],
+        _DEV_URL,
+        _TEST_URL,
+        Path("/tmp/run-dir"),
+        docs_only=True,
+        migration_required=True,
+        runner=_unused_runner,
+        connectivity_check=_unused_connectivity_check,
+    )
+    assert "migration matrix" not in [s.name for s in steps]
+
+
+def test_migration_matrix_step_passes_on_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _FakeResult:
+        detail = "4 steps completed"
+
+    async def _fake_run_full_matrix(dev_url: str, test_url: str, *, app_env: str) -> _FakeResult:
+        return _FakeResult()
+
+    import scripts.migration_matrix as mm
+
+    monkeypatch.setattr(mm, "run_full_matrix", _fake_run_full_matrix)
+    result = verify.migration_matrix_step(_DEV_URL, _TEST_URL)
+    assert result.status is verify.StepStatus.PASS
+    assert "4 steps" in result.detail
+
+
+def test_migration_matrix_step_fails_on_migration_matrix_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import scripts.migration_matrix as mm
+
+    async def _fake_raise(dev_url: str, test_url: str, *, app_env: str) -> None:
+        raise mm.MigrationMatrixError("simulated failure")
+
+    monkeypatch.setattr(mm, "run_full_matrix", _fake_raise)
+    result = verify.migration_matrix_step(_DEV_URL, _TEST_URL)
+    assert result.status is verify.StepStatus.FAIL
+    assert "simulated failure" in result.detail
+
+
+def test_write_step_json_records_profile(tmp_path: Path) -> None:
+    out = tmp_path / "steps.json"
+    verify._write_step_json(out, [], {}, [], profile="compat-v3.1")
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    assert payload["profile"] == "compat-v3.1"

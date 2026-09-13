@@ -25,6 +25,7 @@ _STAND_IN_VERIFY_PY = """
 import argparse
 import json
 import sys
+from pathlib import Path
 
 def main():
     parser = argparse.ArgumentParser()
@@ -35,8 +36,28 @@ def main():
     parser.add_argument("--docs-only", action="store_true")
     parser.add_argument("--emit-step-json", default=None)
     args = parser.parse_args()
+
+    # Mirrors the real verify.py's own --focus resolution: each target
+    # must resolve to a real file under this script's own tests/
+    # directory, relative to cwd -- catches exactly the class of bug
+    # where a caller passes a repo-root-relative ("backend/tests/...")
+    # path instead of a backend-relative ("tests/...") one.
+    backend_dir = Path(__file__).resolve().parent.parent
+    tests_root = (backend_dir / "tests").resolve()
+    for target in args.focus or []:
+        resolved = (backend_dir / target).resolve()
+        if not resolved.is_relative_to(tests_root) or not resolved.is_file():
+            print(f"error: bad --focus target {target!r}", file=sys.stderr)
+            sys.exit(2)
+
     payload = {
-        "steps": [{"name": "stand-in check", "status": "PASS", "duration_seconds": 0.01}],
+        "steps": [
+            {"name": "ruff format --check", "status": "PASS", "duration_seconds": 0.01},
+            {"name": "ruff check", "status": "PASS", "duration_seconds": 0.01},
+            {"name": "mypy", "status": "PASS", "duration_seconds": 0.01},
+            {"name": "check_repo.py", "status": "PASS", "duration_seconds": 0.01},
+            {"name": "git diff --check", "status": "PASS", "duration_seconds": 0.01},
+        ],
         "full_suite": {"status": "ran", "count": 7},
         "focused_tests": {"status": "not_run"},
         "mutation_witnesses": {"status": "ran", "passed": 3, "failed": 0},
@@ -58,7 +79,7 @@ def _git(args: list[str], cwd: Path) -> None:
 
 def _init_disposable_repo(root: Path) -> tuple[str, str]:
     """Returns (base_sha, candidate_sha)."""
-    _git(["init", "-q"], root)
+    _git(["init", "-q", "-b", "main"], root)
     _git(["config", "user.email", "t@example.com"], root)
     _git(["config", "user.name", "Test"], root)
 
@@ -77,6 +98,15 @@ def _init_disposable_repo(root: Path) -> tuple[str, str]:
     base_sha = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=root, check=True, capture_output=True, text=True
     ).stdout.strip()
+
+    # A real `origin` remote whose `main` sits at exactly base_sha -- the
+    # coordinator now fetches and enforces `base_sha == origin/main` before
+    # anything else runs, so every disposable test repo needs a genuine
+    # remote, not just a local-only history.
+    origin_bare = root.parent / "origin.git"
+    _git(["init", "-q", "--bare", "-b", "main", str(origin_bare)], root)
+    _git(["remote", "add", "origin", str(origin_bare)], root)
+    _git(["push", "-q", "origin", "main"], root)
 
     (root / "backend" / "scripts" / "extra.py").write_text("X = 1\n", encoding="utf-8")
     _git(["add", "-A"], root)
@@ -241,3 +271,258 @@ def test_diff_paths_reports_real_changed_files(
     root, base_sha, candidate_sha = disposable_activation_repo
     paths = coord._diff_paths(base_sha, candidate_sha)
     assert paths == ["backend/scripts/extra.py"]
+
+
+# ---------------------------------------------------------------------------
+# enforce_base_authoritative -- Sol's correction 4
+# ---------------------------------------------------------------------------
+
+
+def test_enforce_base_authoritative_passes_for_the_real_fixture(
+    disposable_activation_repo: tuple[Path, str, str],
+) -> None:
+    root, base_sha, candidate_sha = disposable_activation_repo
+    coord.enforce_base_authoritative(base_sha, candidate_sha, f"2026-09-13-example-{base_sha[:7]}")
+
+
+def test_enforce_base_authoritative_rejects_when_origin_main_has_advanced(
+    disposable_activation_repo: tuple[Path, str, str],
+) -> None:
+    root, base_sha, candidate_sha = disposable_activation_repo
+    # Advance origin/main independently of this checkout's own base_sha --
+    # simulates another slice having merged in the meantime.
+    other_clone = root.parent / "other-clone"
+    subprocess.run(
+        ["git", "clone", "-q", str(root.parent / "origin.git"), str(other_clone)],
+        check=True,
+        capture_output=True,
+    )
+    (other_clone / "unrelated.txt").write_text("x\n", encoding="utf-8")
+    _git(["add", "-A"], other_clone)
+    _git(
+        ["-c", "user.email=t@example.com", "-c", "user.name=Test", "commit", "-q", "-m", "advance"],
+        other_clone,
+    )
+    _git(["push", "-q", "origin", "main"], other_clone)
+
+    with pytest.raises(coord.CoordinatorError, match="main has advanced"):
+        coord.enforce_base_authoritative(
+            base_sha, candidate_sha, f"2026-09-13-example-{base_sha[:7]}"
+        )
+
+
+def test_enforce_base_authoritative_rejects_mismatched_slice_id_suffix(
+    disposable_activation_repo: tuple[Path, str, str],
+) -> None:
+    root, base_sha, candidate_sha = disposable_activation_repo
+    with pytest.raises(coord.CoordinatorError, match="base suffix does not match"):
+        coord.enforce_base_authoritative(base_sha, candidate_sha, "2026-09-13-example-0000000")
+
+
+def test_enforce_base_authoritative_rejects_non_ancestor_base(
+    disposable_activation_repo: tuple[Path, str, str],
+) -> None:
+    root, base_sha, candidate_sha = disposable_activation_repo
+    # A base_sha equal to origin/main but not an ancestor of the given
+    # "candidate" (an unrelated commit) must still be rejected.
+    unrelated_dir = root.parent / "unrelated-checkout"
+    subprocess.run(
+        ["git", "clone", "-q", str(root.parent / "origin.git"), str(unrelated_dir)],
+        check=True,
+        capture_output=True,
+    )
+    _git(["config", "user.email", "t@example.com"], unrelated_dir)
+    _git(["config", "user.name", "Test"], unrelated_dir)
+    _git(["checkout", "-q", "--orphan", "unrelated-branch"], unrelated_dir)
+    (unrelated_dir / "z.txt").write_text("z\n", encoding="utf-8")
+    _git(["add", "-A"], unrelated_dir)
+    _git(["commit", "-q", "-m", "unrelated root commit"], unrelated_dir)
+    unrelated_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=unrelated_dir, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+    with pytest.raises(coord.CoordinatorError, match="is not an ancestor"):
+        coord.enforce_base_authoritative(
+            base_sha, unrelated_sha, f"2026-09-13-example-{base_sha[:7]}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# cleanup_stale_coordinator_dirs -- only our own prefix, never other entries
+# ---------------------------------------------------------------------------
+
+
+def test_cleanup_stale_coordinator_dirs_removes_only_own_prefix(tmp_path: Path) -> None:
+    run_root = tmp_path / ".verify-tmp"
+    run_root.mkdir()
+    stale_coordinator_dir = run_root / "coordinator-abc123"
+    stale_coordinator_dir.mkdir()
+    (stale_coordinator_dir / "leftover.txt").write_text("x\n", encoding="utf-8")
+    unrelated_verify_run_dir = run_root / "run-xyz789"
+    unrelated_verify_run_dir.mkdir()
+    unrelated_named_dir = run_root / "review-contracts"
+    unrelated_named_dir.mkdir()
+
+    original_root = coord.COORDINATOR_RUN_ROOT
+    coord.COORDINATOR_RUN_ROOT = run_root
+    try:
+        removed = coord.cleanup_stale_coordinator_dirs()
+    finally:
+        coord.COORDINATOR_RUN_ROOT = original_root
+
+    assert removed == ["coordinator-abc123"]
+    assert not stale_coordinator_dir.exists()
+    assert unrelated_verify_run_dir.exists()
+    assert unrelated_named_dir.exists()
+
+
+# ---------------------------------------------------------------------------
+# Fail-closed: no receipt on verifier failure / malformed step JSON
+# ---------------------------------------------------------------------------
+
+
+def test_no_receipt_when_worktree_verify_invocation_fails(
+    disposable_activation_repo: tuple[Path, str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, base_sha, candidate_sha = disposable_activation_repo
+    # Overwrite the stand-in verify.py, inside the *source* tree (so the
+    # worktree checks out the failing version), to exit non-zero and never
+    # write a step JSON at all.
+    failing_verify_py = "import sys\nsys.exit(1)\n"
+    (root / "backend" / "scripts" / "verify.py").write_text(failing_verify_py, encoding="utf-8")
+    _git(["add", "-A"], root)
+    _git(["commit", "-q", "-m", "break verify.py"], root)
+    broken_candidate_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=root, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+    request = coord.ReceiptEligibleRequest(
+        candidate_sha=broken_candidate_sha,
+        gate="final",
+        slice_id=f"2026-09-13-example-{base_sha[:7]}",
+        risk_class="R",
+        base_sha=base_sha,
+        focus_targets=[],
+        witness_refs=[],
+    )
+    with pytest.raises(coord.CoordinatorError, match="no valid step JSON"):
+        coord.run_receipt_eligible_verification(request)
+
+    receipts_dir = root / "docs" / "verification-receipts" / broken_candidate_sha
+    assert not receipts_dir.exists()
+    # The authoring checkout itself must be clean and untouched afterward.
+    status = subprocess.run(
+        ["git", "status", "--porcelain"], cwd=root, check=True, capture_output=True, text=True
+    ).stdout
+    assert status.strip() == ""
+
+
+def test_no_receipt_when_malformed_step_json_is_produced(
+    disposable_activation_repo: tuple[Path, str, str],
+) -> None:
+    root, base_sha, candidate_sha = disposable_activation_repo
+    malformed_verify_py = (
+        "import argparse, sys\n"
+        "p = argparse.ArgumentParser()\n"
+        "p.add_argument('--level', required=True)\n"
+        "p.add_argument('--gate', default=None)\n"
+        "p.add_argument('--focus', nargs='+', default=None)\n"
+        "p.add_argument('--witness', nargs='+', default=None)\n"
+        "p.add_argument('--docs-only', action='store_true')\n"
+        "p.add_argument('--emit-step-json', default=None)\n"
+        "args = p.parse_args()\n"
+        "if args.emit_step_json:\n"
+        "    open(args.emit_step_json, 'w').write('not valid json{{{')\n"
+        "sys.exit(0)\n"
+    )
+    (root / "backend" / "scripts" / "verify.py").write_text(malformed_verify_py, encoding="utf-8")
+    _git(["add", "-A"], root)
+    _git(["commit", "-q", "-m", "malformed step json"], root)
+    broken_candidate_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=root, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+    request = coord.ReceiptEligibleRequest(
+        candidate_sha=broken_candidate_sha,
+        gate="final",
+        slice_id=f"2026-09-13-example-{base_sha[:7]}",
+        risk_class="R",
+        base_sha=base_sha,
+        focus_targets=[],
+        witness_refs=[],
+    )
+    with pytest.raises(coord.CoordinatorError, match="no valid step JSON"):
+        coord.run_receipt_eligible_verification(request)
+
+    receipts_dir = root / "docs" / "verification-receipts" / broken_candidate_sha
+    assert not receipts_dir.exists()
+
+
+def test_no_receipt_when_worktree_removal_fails(
+    disposable_activation_repo: tuple[Path, str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Simulates a `git worktree remove` failure -- cleanup failure must
+    block receipt emission even though verification itself succeeded."""
+    root, base_sha, candidate_sha = disposable_activation_repo
+
+    def _fail_remove(worktree_path: Path) -> None:
+        raise coord.vw.WorktreeError("simulated worktree removal failure")
+
+    monkeypatch.setattr(coord.vw, "remove_worktree", _fail_remove)
+
+    request = coord.ReceiptEligibleRequest(
+        candidate_sha=candidate_sha,
+        gate="final",
+        slice_id=f"2026-09-13-example-{base_sha[:7]}",
+        risk_class="R",
+        base_sha=base_sha,
+        focus_targets=[],
+        witness_refs=[],
+    )
+    with pytest.raises(coord.CoordinatorError, match="cleanup"):
+        coord.run_receipt_eligible_verification(request)
+
+    receipts_dir = root / "docs" / "verification-receipts" / candidate_sha
+    assert not receipts_dir.exists()
+
+
+def test_computed_focus_targets_are_converted_to_backend_relative_paths(
+    disposable_activation_repo: tuple[Path, str, str],
+) -> None:
+    """Reproduces the real bug found while bootstrapping this correction:
+    `verification_scope.compute_required_coverage` returns repo-root-
+    relative paths (e.g. "backend/tests/test_x.py", matching `git diff
+    --name-only`'s own output), but `verify.py --focus` resolves targets
+    relative to its own `backend/` directory instead. The disposable
+    repo's stand-in `verify.py` replicates the real script's own --focus
+    validation, so a coordinator that failed to convert the prefix would
+    make this test fail exactly the way the real bootstrap run once did."""
+    root, base_sha, candidate_sha = disposable_activation_repo
+    (root / "backend" / "tests").mkdir(parents=True, exist_ok=True)
+    (root / "backend" / "tests" / "__init__.py").write_text("", encoding="utf-8")
+    (root / "backend" / "tests" / "test_something.py").write_text(
+        "def test_x():\n    assert True\n", encoding="utf-8"
+    )
+    _git(["add", "-A"], root)
+    _git(["commit", "-q", "--amend", "--no-edit"], root)
+    new_candidate_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=root, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+    request = coord.ReceiptEligibleRequest(
+        candidate_sha=new_candidate_sha,
+        gate="final",
+        slice_id=f"2026-09-13-example-{base_sha[:7]}",
+        risk_class="R",
+        base_sha=base_sha,
+        focus_targets=[],
+        witness_refs=[],
+    )
+    receipt_path = coord.run_receipt_eligible_verification(request)
+
+    from scripts import verification_receipts as vr
+
+    receipt = vr.load_receipt(receipt_path)
+    assert (
+        "backend/tests/test_something.py" in receipt["affected_surface"]["directly_executed_tests"]
+    )

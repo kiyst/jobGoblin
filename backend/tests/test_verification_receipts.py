@@ -93,10 +93,16 @@ def _minimal_valid_receipt(**overrides: object) -> dict:
         "checker_hash": "e" * 64,
         "dependency_and_config_inputs": [],
         "environment_descriptor": vr.environment_descriptor(postgresql_version="16.0"),
-        "steps": [{"name": "ruff check", "status": "PASS", "duration_seconds": 0.1}],
+        "steps": [
+            {"name": "ruff format --check", "status": "PASS", "duration_seconds": 0.1},
+            {"name": "ruff check", "status": "PASS", "duration_seconds": 0.1},
+            {"name": "mypy", "status": "PASS", "duration_seconds": 0.1},
+            {"name": "check_repo.py", "status": "PASS", "duration_seconds": 0.1},
+            {"name": "git diff --check", "status": "PASS", "duration_seconds": 0.1},
+        ],
         "full_suite": {"status": "ran", "count": 2323},
         "focused_tests": {"status": "not_run"},
-        "mutation_witnesses": {"status": "ran", "guard_refs": [], "passed": 0, "failed": 0},
+        "mutation_witnesses": {"status": "ran", "guard_refs": [], "passed": 34, "failed": 0},
         "affected_surface": {
             "base_sha": "6" * 40,
             "computed_categories": [],
@@ -205,4 +211,51 @@ def test_compute_approval_eligible_false_if_any_step_failed() -> None:
 def test_compute_approval_eligible_false_if_cleanup_failed() -> None:
     receipt = _minimal_valid_receipt(gate="final")
     receipt["cleanup"] = {"attempted": True, "status": "FAIL"}
+    assert vr.compute_approval_eligible(receipt) is False
+
+
+def test_compute_approval_eligible_false_for_empty_steps_and_all_groups_not_run() -> None:
+    """The reproduced degenerate case: an empty step list with every
+    execution group left `not_run` must be rejected outright -- it
+    satisfies no positive requirement, regardless of gate or cleanup
+    status."""
+    receipt = _minimal_valid_receipt(
+        gate="final",
+        steps=[],
+        full_suite={"status": "not_run"},
+        focused_tests={"status": "not_run"},
+        mutation_witnesses={"status": "not_run"},
+    )
+    assert vr.compute_approval_eligible(receipt) is False
+
+
+def test_compute_approval_eligible_false_if_required_step_name_missing() -> None:
+    receipt = _minimal_valid_receipt(gate="final")
+    receipt["steps"] = [s for s in receipt["steps"] if s["name"] != "mypy"]
+    assert vr.compute_approval_eligible(receipt) is False
+
+
+def test_compute_approval_eligible_false_if_full_suite_count_not_positive_int() -> None:
+    receipt = _minimal_valid_receipt(gate="final", full_suite={"status": "ran", "count": 0})
+    assert vr.compute_approval_eligible(receipt) is False
+
+
+def test_compute_approval_eligible_false_if_full_suite_count_is_bool() -> None:
+    receipt = _minimal_valid_receipt(gate="final", full_suite={"status": "ran", "count": True})
+    assert vr.compute_approval_eligible(receipt) is False
+
+
+def test_compute_approval_eligible_false_if_no_witnesses_passed() -> None:
+    receipt = _minimal_valid_receipt(
+        gate="final",
+        mutation_witnesses={"status": "ran", "guard_refs": [], "passed": 0, "failed": 0},
+    )
+    assert vr.compute_approval_eligible(receipt) is False
+
+
+def test_compute_approval_eligible_false_if_any_witness_failed() -> None:
+    receipt = _minimal_valid_receipt(
+        gate="final",
+        mutation_witnesses={"status": "ran", "guard_refs": [], "passed": 33, "failed": 1},
+    )
     assert vr.compute_approval_eligible(receipt) is False

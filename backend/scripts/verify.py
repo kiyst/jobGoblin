@@ -418,6 +418,28 @@ def handoff_metadata_step() -> StepResult:
     return StepResult(name, StepStatus.PASS, duration, "ok")
 
 
+def migration_matrix_step(dev_url: str, test_url: str) -> StepResult:
+    """Workflow v3.2: the complete migration/schema-change verification
+    matrix (`scripts.migration_matrix.run_full_matrix`) -- only added to
+    the step list when the caller (normally the coordinator, which
+    computes this from the candidate's `base_sha..candidate_sha` diff
+    *before* any step runs) determines a migration/model path actually
+    changed. A raised `MigrationMatrixError` here is a hard step failure,
+    never a soft warning; no receipt may be issued past it."""
+    name = "migration matrix"
+    start = time.monotonic()
+    from scripts.migration_matrix import MigrationMatrixError, run_full_matrix
+
+    try:
+        settings = get_settings()
+        result = asyncio.run(run_full_matrix(dev_url, test_url, app_env=settings.app_env))
+    except MigrationMatrixError as exc:
+        duration = time.monotonic() - start
+        return StepResult(name, StepStatus.FAIL, duration, str(exc))
+    duration = time.monotonic() - start
+    return StepResult(name, StepStatus.PASS, duration, result.detail)
+
+
 def mutation_witness_command(guard_ref: str | None) -> list[str]:
     command = [sys.executable, "-m", "scripts.contract_mutation_witnesses"]
     if guard_ref is not None:
@@ -630,6 +652,7 @@ def _build_steps(
     docs_only: bool = False,
     gate: str | None = None,
     witness_refs: list[str] | None = None,
+    migration_required: bool = False,
     runner: SubprocessRunner = _default_runner,
     connectivity_check: Callable[[str], None] = _real_connectivity_check,
     witness_counts_sink: dict[str, int] | None = None,
@@ -714,6 +737,9 @@ def _build_steps(
 
         steps.append(Step("contract mutation witnesses", _run_witnesses))
 
+    if migration_required and not docs_only:
+        steps.append(Step("migration matrix", lambda: migration_matrix_step(dev_url, test_url)))
+
     steps.append(Step("handoff metadata validation", handoff_metadata_step))
     return steps
 
@@ -780,6 +806,24 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "scripts/verification_coordinator.py reads a worktree-isolated run's results without "
         "scraping console text.",
     )
+    parser.add_argument(
+        "--migration-required",
+        action="store_true",
+        help="Adds the 'migration matrix' step (scripts.migration_matrix.run_full_matrix). Set "
+        "only by a caller that has already computed, from the candidate's base_sha..candidate_sha "
+        "diff, that a migration/model path actually changed -- never inferred by this script "
+        "itself.",
+    )
+    parser.add_argument(
+        "--compat-v3.1",
+        dest="compat_v3_1",
+        action="store_true",
+        help="The explicitly named Workflow v3.2 compatibility profile: reproduces exactly the "
+        "pre-activation v3.1 check set (identical step list to omitting --gate) using the "
+        "current code -- an honest substitute proving equivalent coverage, since the true "
+        "pre-activation binary cannot run against code that postdates it. Mutually exclusive "
+        "with --gate.",
+    )
     args = parser.parse_args(argv)
     if args.docs_only and args.focus:
         parser.error("--docs-only and --focus are mutually exclusive")
@@ -787,6 +831,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("--gate docs requires --docs-only (the two must always be given together)")
     if args.docs_only and args.gate != "docs":
         parser.error("--docs-only requires --gate docs (the two must always be given together)")
+    if args.compat_v3_1 and args.gate is not None:
+        parser.error("--compat-v3.1 and --gate are mutually exclusive")
     return args
 
 
@@ -831,6 +877,9 @@ def main(argv: list[str] | None = None) -> int:
     dev_url = settings.database_url
     test_url = resolve_test_database_url(settings.test_database_url)
 
+    if args.compat_v3_1:
+        print("=== Workflow v3.2 compatibility profile (--compat-v3.1) ===")
+
     run_dir = create_run_dir()
     witness_counts: dict[str, int] = {}
     steps = _build_steps(
@@ -841,6 +890,7 @@ def main(argv: list[str] | None = None) -> int:
         docs_only=args.docs_only,
         gate=args.gate,
         witness_refs=args.witness,
+        migration_required=args.migration_required,
         witness_counts_sink=witness_counts,
     )
     results = _execute_and_cleanup(steps, run_dir)
@@ -848,7 +898,13 @@ def main(argv: list[str] | None = None) -> int:
     _print_summary(results)
 
     if args.emit_step_json:
-        _write_step_json(Path(args.emit_step_json), results, witness_counts, focus_targets)
+        _write_step_json(
+            Path(args.emit_step_json),
+            results,
+            witness_counts,
+            focus_targets,
+            profile="compat-v3.1" if args.compat_v3_1 else (args.gate or "ungated"),
+        )
 
     # A failed cleanup makes the overall exit nonzero too — every result,
     # including the cleanup step's own, must be PASS (binding requirement).
@@ -860,6 +916,8 @@ def _write_step_json(
     results: list[StepResult],
     witness_counts: dict[str, int],
     focus_targets: list[str],
+    *,
+    profile: str = "ungated",
 ) -> None:
     def _find(name: str) -> StepResult | None:
         return next((r for r in results if r.name == name), None)
@@ -867,6 +925,7 @@ def _write_step_json(
     focused = _find("focused pytest")
     full = _find("full pytest suite")
     payload = {
+        "profile": profile,
         "steps": [
             {"name": r.name, "status": r.status.value, "duration_seconds": r.duration_seconds}
             for r in results

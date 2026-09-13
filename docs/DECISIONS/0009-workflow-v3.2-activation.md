@@ -101,12 +101,18 @@ never a precedent for skipping schema validation on any later slice.
 - Rollback boundary: reverting this slice's merge commit restores Workflow v3.1 as the
   sole active workflow, atomically. No further slice begins during any rollback-
   consideration window.
-- Known scope limits, recorded honestly rather than silently: `scripts/check_review.py`'s
-  merge/post-merge modes validate parent-shape and content-identity but do not yet
-  implement the full outer-launcher/subprocess-reexecution design (running `R`'s own
-  checked-out validator code rather than the caller's in-process copy) or the complete
-  per-transition byte-identical-historical-text diff validator; `scripts/migration_matrix.py`
-  is implemented and tested end-to-end against a real disposable database but is not
-  exercised by this slice's own candidate (a tooling slice that touches no migration/model
-  path). Both are follow-on hardening for a future slice, not a gap in this activation's
-  own verification.
+- **Correction round 1** (Sol review: Changes requested on the original candidate
+  `16ec8b3`/publication `c1c2cc1`, superseded and not reused) completed the outer-launcher/
+  subprocess-reexecution design for `check_review.py` (proven against this project's own
+  editable-install `sys.path` precedence), the complete `C..A`/`A..R` byte-identical
+  transition validators, explicit `Q`/`validate_published` post-merge validation, deep
+  receipt-content validation (required step names, genuinely positive numeric counts, the
+  reproduced empty-steps/all-`not_run` negative case), fully fail-closed coordinator
+  cleanup ordering (including safe removal of only its own stale scratch directories), the
+  `base_sha == origin/main` + ancestry + slice-ID enforcement performed before any
+  execution, pre-execution coverage computation feeding the actual `--focus`/`--witness`
+  arguments, full `migration_matrix.run_full_matrix` integration into `verify.py` as a real
+  step, and an explicit, separately named `--compat-v3.1` flag. No scope limit remains
+  undocumented; `migration_matrix.run_full_matrix` is exercised by real, passing
+  fault-injection tests but is still not triggered by this slice's own candidate diff,
+  since this tooling slice touches no migration/model path.

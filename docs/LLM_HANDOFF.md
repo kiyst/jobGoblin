@@ -403,42 +403,70 @@ full_suite_count: 2323
   never touched. `capture_development_state` fails closed (raises,
   never skips) when the development database is unreachable or its
   state can't be read.
-- Deviations/known limitations (recorded honestly, not silently): (1)
-  `check_review.py`'s merge/post-merge modes validate parent shape and
-  content identity but do not yet implement the outer-launcher/
-  subprocess-reexecution design (running `R`'s own checked-out validator
-  code rather than the caller's in-process copy) or a full per-
-  transition byte-identical-historical-text diff validator — both
-  recorded in ADR 0009 as follow-on hardening, not exercised by this
-  slice's own C/A anyway. (2) `migration_matrix.py` is fully implemented
-  and tested end-to-end against a real database but is not exercised by
-  this candidate's own verification, since this tooling slice touches no
-  `backend/migrations/**`/`backend/alembic.ini`/`backend/app/db/**`
-  path (`migration_matrix.triggered: false` in its own receipt). (3)
-  `--compat-v3.1` is not a separate CLI mode: `verify.py --level routine`
-  with no `--gate` is, unchanged, the honest compatibility profile (the
-  true pre-activation v3.1 binary cannot run against code that
-  postdates it — see ADR 0009's one-time-transition framing); this is a
-  documented interpretation of the frozen contract's "explicitly named
-  compatibility profile" requirement, not a silent scope cut.
-- STOP — this is the activation candidate only. Do not author `R`,
-  merge, activate v3.2 further (this commit + the next, `A`, complete
-  the activation once merged — see the metadata block below), create
-  `M`/`Q`, begin another slice, or modify product/parser behavior.
+- Deviations/known limitations, as of the original candidate (superseded
+  below): (1) `check_review.py`'s merge/post-merge modes validated
+  parent shape and content identity but did not yet implement the
+  outer-launcher/subprocess-reexecution design or a full per-transition
+  byte-identical-historical-text diff validator. (2) `migration_matrix.py`
+  was implemented and tested but not yet wired into `verify.py`/the
+  coordinator as an executable step. (3) `--compat-v3.1` did not yet
+  exist as a distinct, named CLI mode.
+
+#### Correction round 1 (Sol review: Changes requested)
+
+- **Supersedes candidate `C` = `16ec8b35b58ece71a9f83c4cc380d97b424a01ed`
+  and publication `A` = `c1c2cc1b4f7e2dda5ea911afbd859086bc7f3d99`.** The
+  receipt published there
+  (`docs/verification-receipts/16ec8b35b58ece71a9f83c4cc380d97b424a01ed/
+  885fbb02-2bdf-49a8-a1ef-639e53b27df2.json`) is **not reusable** and is
+  superseded by this correction round's own fresh candidate/publication
+  cycle below. `C`/`A` themselves are left exactly as pushed, per Git
+  gates — never amended or rewritten.
+- Implements every required correction: `check_review.py` now has closed
+  primary/escalation review schemas, exact `C -> A -> R` cross-
+  references, byte-identical `C..A`/`A..R` transition validation (with
+  fault-injection tests for a smuggled edit, a historical-iteration
+  rewrite, and a second smuggled receipt), a distinct
+  `check_merge_eligibility` (record validity vs. merge eligibility),
+  explicit `Q` validation, an outer detached-checkout launcher that
+  re-executes the *target commit's own* `check_review.py` as a
+  subprocess (proven against this project's real editable-install
+  precedence, not merely asserted), and `validate_published` (full
+  post-merge re-derivation, never trusting the artifact's own claims).
+  `verification_receipts.compute_approval_eligible` now deep-validates
+  required step names, a genuinely positive numeric full-suite count,
+  and a genuinely positive numeric witness-passed count with zero
+  failures — the reproduced negative case (empty steps, every execution
+  group `not_run`) is a dedicated test and is correctly ineligible.
+  `verification_coordinator.py` now fetches `origin/main` and enforces
+  `base_sha == origin/main` plus ancestry plus `slice_id`-suffix
+  consistency *before* anything else runs; computes the
+  `base_sha..candidate_sha` diff and required coverage *before* creating
+  any worktree (`verification_scope.compute_required_coverage`); enforces
+  forced-final categories; safely removes only its own stale
+  `coordinator-*` scratch directories on startup; and wraps every stage
+  in `finally` so cache/worktree/run-directory cleanup is always
+  attempted and a cleanup failure blocks receipt emission. The migration
+  matrix (`migration_matrix.run_full_matrix`) is now a real `verify.py`
+  step (`--migration-required`), with fault-injection tests for a
+  failure after fresh-database creation and for direct-target-validation
+  failure (both proven to still clean up correctly — the latter exposed
+  and fixed a real gap where `provision_fresh_database` could leave a
+  database behind on that specific failure path). `verify.py` gains an
+  explicit, separately named `--compat-v3.1` flag.
+- Verification (this correction round): `ruff format --check`/
+  `ruff check`/`mypy` clean (139 source files). Full pytest suite:
+  **2480 passed**. All 34 mutation witnesses pass unmodified.
+  `check_repo.py` exits 0. `git diff --check` clean.
+- STOP — this is a bounded correction only. Do not author `R`, merge,
+  create `M`/`Q`, begin another slice, or modify product/parser behavior.
 
 ```workflow-metadata
 workflow_version: v3.2
-state: published
+state: pending
 slice_id: 2026-09-13-workflow-v3-2-activation-66202c2
 slice_kind: tooling
 risk_class: H
 base_sha: 66202c23facff6bd33d8f624e327cabdd40708b4
 declared_gate: final
-executed_gate: final
-candidate_sha: 16ec8b35b58ece71a9f83c4cc380d97b424a01ed
-receipt_id: 885fbb02-2bdf-49a8-a1ef-639e53b27df2
-receipt_path: docs/verification-receipts/16ec8b35b58ece71a9f83c4cc380d97b424a01ed/885fbb02-2bdf-49a8-a1ef-639e53b27df2.json
-full_suite_count: 2431
-focused_test_count: 130
-mutation_witness_count: 34
 ```
