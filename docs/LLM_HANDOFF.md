@@ -428,10 +428,17 @@ full_suite_count: 2323
 
 ```workflow-metadata
 workflow_version: v3.2
-state: pending
+state: published
 slice_id: 2026-09-13-workflow-v3-2-activation-66202c2
 slice_kind: tooling
 risk_class: H
 base_sha: 66202c23facff6bd33d8f624e327cabdd40708b4
 declared_gate: final
+executed_gate: final
+candidate_sha: 16ec8b35b58ece71a9f83c4cc380d97b424a01ed
+receipt_id: 885fbb02-2bdf-49a8-a1ef-639e53b27df2
+receipt_path: docs/verification-receipts/16ec8b35b58ece71a9f83c4cc380d97b424a01ed/885fbb02-2bdf-49a8-a1ef-639e53b27df2.json
+full_suite_count: 2431
+focused_test_count: 130
+mutation_witness_count: 34
 ```
