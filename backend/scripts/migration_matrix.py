@@ -14,12 +14,14 @@ this run can prove it created it.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import subprocess
 import sys
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import asyncpg
 from sqlalchemy.engine import make_url
@@ -109,6 +111,19 @@ async def query_current_database(url: str) -> str:
         await conn.close()
 
 
+async def query_postgresql_server_version(url: str) -> str:
+    """The real PostgreSQL server version string (`SELECT version()`) --
+    captured separately from, and never confused with, `current_database()`
+    (a prior version of this module mislabeled the latter as
+    `postgresql_version` in the environment descriptor)."""
+    conn = await asyncpg.connect(_to_asyncpg_dsn(url))
+    try:
+        value: str = await conn.fetchval("SELECT version()")
+        return value
+    finally:
+        await conn.close()
+
+
 async def query_database_exists(admin_url: str, database_name: str) -> bool:
     conn = await asyncpg.connect(_to_asyncpg_dsn(admin_url))
     try:
@@ -134,17 +149,52 @@ async def drop_database(admin_url: str, database_name: str) -> None:
         await conn.close()
 
 
-async def capture_development_state(development_url: str) -> str:
+@dataclass(frozen=True)
+class DevelopmentState:
+    """A meaningful snapshot of the development database's schema state --
+    the Alembic revision alone is not sufficient (two different schemas
+    could share a revision if migrations were edited after being applied
+    elsewhere), so this also fingerprints the actual column-level shape
+    of every table in the `public` schema."""
+
+    alembic_revision: str | None
+    schema_fingerprint: str
+
+
+async def _capture_schema_fingerprint(conn: Any) -> str:
+    rows = await conn.fetch(
+        "SELECT table_name, column_name, data_type FROM information_schema.columns "
+        "WHERE table_schema = 'public' ORDER BY table_name, column_name"
+    )
+    payload = "\n".join(f"{r['table_name']}.{r['column_name']}:{r['data_type']}" for r in rows)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+async def capture_development_state(development_url: str) -> DevelopmentState:
     """Fail-closed: an unreachable development database, or one whose
     state cannot be read, is never treated as a skip -- it blocks the
     entire migration-matrix run for a schema-changing candidate."""
     try:
-        return await query_current_database(development_url)
+        conn = await asyncpg.connect(_to_asyncpg_dsn(development_url))
     except Exception as exc:  # noqa: BLE001 -- re-raised as a hard failure, never swallowed
         raise MigrationMatrixError(
             f"development database state could not be read: {type(exc).__name__} -- "
             "failing closed, no receipt/post-merge evidence may be issued"
         ) from exc
+    try:
+        try:
+            revision = await conn.fetchval("SELECT version_num FROM alembic_version")
+        except asyncpg.PostgresError:
+            revision = None
+        fingerprint = await _capture_schema_fingerprint(conn)
+        return DevelopmentState(alembic_revision=revision, schema_fingerprint=fingerprint)
+    except Exception as exc:  # noqa: BLE001 -- re-raised as a hard failure, never swallowed
+        raise MigrationMatrixError(
+            f"development database state could not be read: {type(exc).__name__} -- "
+            "failing closed, no receipt/post-merge evidence may be issued"
+        ) from exc
+    finally:
+        await conn.close()
 
 
 def generate_fresh_database_name() -> str:
@@ -204,11 +254,16 @@ async def provision_fresh_database(development_url: str, app_env: str) -> FreshD
     # SELECT current_database() to equal the generated name, before any
     # Alembic command runs against it.
     if lifecycle.created_by_this_run:
-        resolved = await query_current_database(target_url)
+        # Unconditional cleanup guarantee: this run already owns the
+        # database it just created, so *any* failure past this point --
+        # whether the direct-target query raises outright, or it succeeds
+        # but returns the wrong name -- must never leave it behind.
+        try:
+            resolved = await query_current_database(target_url)
+        except Exception:
+            await cleanup_fresh_database(lifecycle)
+            raise
         if resolved != generated_name:
-            # Unconditional cleanup before raising -- this run already owns
-            # the database it just created; a validation failure past this
-            # point must never leave it behind.
             await cleanup_fresh_database(lifecycle)
             raise MigrationMatrixError(
                 f"direct connection to the created target resolved to {resolved!r}, "
@@ -250,8 +305,9 @@ def _run_alembic(args: list[str], database_url: str) -> None:
 class MatrixResult:
     status: str  # "PASS" | "FAIL"
     detail: str
-    dev_state_before: str | None = None
-    dev_state_after: str | None = None
+    dev_state_before: DevelopmentState | None = None
+    dev_state_after: DevelopmentState | None = None
+    postgresql_server_version: str | None = None
     fresh_database_created: bool = False
     fresh_database_cleaned_up: bool = False
     steps: list[str] = field(default_factory=list)
@@ -270,6 +326,7 @@ async def run_full_matrix(
     exception here always means no receipt may be issued). Cleanup of the
     fresh database is unconditional, in `finally`."""
     steps: list[str] = []
+    postgresql_server_version = await query_postgresql_server_version(development_url)
     dev_before = await capture_development_state(development_url)
     steps.append("development state captured (before)")
 
@@ -304,6 +361,7 @@ async def run_full_matrix(
         detail=f"{len(steps)} steps completed",
         dev_state_before=dev_before,
         dev_state_after=dev_after,
+        postgresql_server_version=postgresql_server_version,
         fresh_database_created=fresh_created,
         fresh_database_cleaned_up=lifecycle.cleaned_up,
         steps=steps,

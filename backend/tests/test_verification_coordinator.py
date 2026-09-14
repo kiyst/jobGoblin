@@ -57,10 +57,12 @@ def main():
             {"name": "mypy", "status": "PASS", "duration_seconds": 0.01},
             {"name": "check_repo.py", "status": "PASS", "duration_seconds": 0.01},
             {"name": "git diff --check", "status": "PASS", "duration_seconds": 0.01},
+            {"name": "full pytest suite", "status": "PASS", "duration_seconds": 0.02},
+            {"name": "contract mutation witnesses", "status": "PASS", "duration_seconds": 0.02},
         ],
         "full_suite": {"status": "ran", "count": 7},
         "focused_tests": {"status": "not_run"},
-        "mutation_witnesses": {"status": "ran", "passed": 3, "failed": 0},
+        "mutation_witnesses": {"status": "ran", "guard_refs": [], "passed": 3, "failed": 0},
         "all_passed": True,
     }
     if args.emit_step_json:
@@ -353,11 +355,28 @@ def test_enforce_base_authoritative_rejects_non_ancestor_base(
 
 
 def test_cleanup_stale_coordinator_dirs_removes_only_own_prefix(tmp_path: Path) -> None:
+    """ "Stale" is proven via the ownership lock, never guessed from the
+    directory name/prefix alone: an abandoned (unlocked) coordinator
+    directory is removed; a directory with no lock file at all is left
+    alone (ownership unprovable); and paths outside our own prefix are
+    never touched regardless."""
     run_root = tmp_path / ".verify-tmp"
     run_root.mkdir()
-    stale_coordinator_dir = run_root / "coordinator-abc123"
-    stale_coordinator_dir.mkdir()
-    (stale_coordinator_dir / "leftover.txt").write_text("x\n", encoding="utf-8")
+
+    abandoned_coordinator_dir = run_root / "coordinator-abandoned"
+    abandoned_coordinator_dir.mkdir()
+    (abandoned_coordinator_dir / "leftover.txt").write_text("x\n", encoding="utf-8")
+    # A genuinely-abandoned run: the lock file exists but nothing holds it
+    # (the handle that created it was already released).
+    stale_lock_handle = coord.vl.try_acquire_exclusive_lock(
+        abandoned_coordinator_dir / coord._LOCK_FILE_NAME
+    )
+    assert stale_lock_handle is not None
+    stale_lock_handle.release()
+
+    no_lock_coordinator_dir = run_root / "coordinator-no-lock-file"
+    no_lock_coordinator_dir.mkdir()
+
     unrelated_verify_run_dir = run_root / "run-xyz789"
     unrelated_verify_run_dir.mkdir()
     unrelated_named_dir = run_root / "review-contracts"
@@ -370,10 +389,102 @@ def test_cleanup_stale_coordinator_dirs_removes_only_own_prefix(tmp_path: Path) 
     finally:
         coord.COORDINATOR_RUN_ROOT = original_root
 
-    assert removed == ["coordinator-abc123"]
-    assert not stale_coordinator_dir.exists()
+    assert removed == ["coordinator-abandoned"]
+    assert not abandoned_coordinator_dir.exists()
+    assert no_lock_coordinator_dir.exists()  # no lock file -- left alone
     assert unrelated_verify_run_dir.exists()
     assert unrelated_named_dir.exists()
+
+
+def test_cleanup_stale_coordinator_dirs_never_removes_an_actively_locked_run(
+    tmp_path: Path,
+) -> None:
+    run_root = tmp_path / ".verify-tmp"
+    run_root.mkdir()
+    active_dir = run_root / "coordinator-active"
+    active_dir.mkdir()
+    active_handle = coord.vl.try_acquire_exclusive_lock(active_dir / coord._LOCK_FILE_NAME)
+    assert active_handle is not None
+    try:
+        original_root = coord.COORDINATOR_RUN_ROOT
+        coord.COORDINATOR_RUN_ROOT = run_root
+        try:
+            removed = coord.cleanup_stale_coordinator_dirs()
+        finally:
+            coord.COORDINATOR_RUN_ROOT = original_root
+
+        assert removed == []
+        assert active_dir.exists()
+    finally:
+        active_handle.release()
+
+
+def test_genuine_concurrent_coordinator_run_is_never_cleaned_up_by_another(
+    tmp_path: Path,
+) -> None:
+    """A real second process holds the ownership lock on a coordinator
+    run directory (simulating a genuinely concurrent, still-active
+    receipt-eligible run) -- `cleanup_stale_coordinator_dirs`, called from
+    this process while that lock is held, must never remove it."""
+    import subprocess
+    import sys
+    import time
+
+    run_root = tmp_path / ".verify-tmp"
+    run_root.mkdir()
+    active_dir = run_root / "coordinator-genuinely-concurrent"
+    active_dir.mkdir()
+    lock_path = active_dir / coord._LOCK_FILE_NAME
+    backend_dir = str(Path(coord.__file__).resolve().parent.parent)
+
+    holder_script = f"""
+import sys
+import time
+sys.path.insert(0, {backend_dir!r})
+from scripts import verification_lock as lock
+from pathlib import Path
+
+handle = lock.try_acquire_exclusive_lock(Path(sys.argv[1]))
+if handle is None:
+    print("FAILED_TO_ACQUIRE")
+    sys.exit(1)
+print("ACQUIRED", flush=True)
+time.sleep(float(sys.argv[2]))
+handle.release()
+print("RELEASED", flush=True)
+"""
+    holder = subprocess.Popen(
+        [sys.executable, "-c", holder_script, str(lock_path), "1.5"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        deadline = time.monotonic() + 5.0
+        acquired = False
+        while time.monotonic() < deadline:
+            line = holder.stdout.readline() if holder.stdout else ""
+            if "ACQUIRED" in line:
+                acquired = True
+                break
+        assert acquired, "holder subprocess never reported acquiring the lock"
+
+        original_root = coord.COORDINATOR_RUN_ROOT
+        coord.COORDINATOR_RUN_ROOT = run_root
+        try:
+            removed = coord.cleanup_stale_coordinator_dirs()
+        finally:
+            coord.COORDINATOR_RUN_ROOT = original_root
+
+        assert removed == []
+        assert active_dir.exists()
+
+        holder.wait(timeout=10)
+        assert holder.returncode == 0
+    finally:
+        if holder.poll() is None:
+            holder.kill()
+            holder.wait()
 
 
 # ---------------------------------------------------------------------------

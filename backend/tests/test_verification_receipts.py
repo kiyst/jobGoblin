@@ -99,6 +99,8 @@ def _minimal_valid_receipt(**overrides: object) -> dict:
             {"name": "mypy", "status": "PASS", "duration_seconds": 0.1},
             {"name": "check_repo.py", "status": "PASS", "duration_seconds": 0.1},
             {"name": "git diff --check", "status": "PASS", "duration_seconds": 0.1},
+            {"name": "full pytest suite", "status": "PASS", "duration_seconds": 100.0},
+            {"name": "contract mutation witnesses", "status": "PASS", "duration_seconds": 1.0},
         ],
         "full_suite": {"status": "ran", "count": 2323},
         "focused_tests": {"status": "not_run"},
@@ -259,3 +261,145 @@ def test_compute_approval_eligible_false_if_any_witness_failed() -> None:
         mutation_witnesses={"status": "ran", "guard_refs": [], "passed": 33, "failed": 1},
     )
     assert vr.compute_approval_eligible(receipt) is False
+
+
+# ---------------------------------------------------------------------------
+# Recursively closed/typed schema -- unknown-nested-field regressions
+# ---------------------------------------------------------------------------
+
+
+def test_unknown_nested_field_in_coordinator_rejected() -> None:
+    receipt = _minimal_valid_receipt()
+    receipt["coordinator"]["unexpected_field"] = "surprise"
+    with pytest.raises(vr.ReceiptError, match="unrecognized field"):
+        vr.validate_receipt_schema(receipt)
+
+
+def test_unknown_nested_field_in_worktree_snapshot_rejected() -> None:
+    receipt = _minimal_valid_receipt()
+    receipt["coordinator"]["worktree_initial_snapshot"]["extra"] = 1
+    with pytest.raises(vr.ReceiptError, match="unrecognized field"):
+        vr.validate_receipt_schema(receipt)
+
+
+def test_unknown_nested_field_in_run_cache_redirect_rejected() -> None:
+    receipt = _minimal_valid_receipt()
+    receipt["coordinator"]["run_cache_redirect"]["extra"] = True
+    with pytest.raises(vr.ReceiptError, match="unrecognized field"):
+        vr.validate_receipt_schema(receipt)
+
+
+def test_unknown_nested_field_in_step_rejected() -> None:
+    receipt = _minimal_valid_receipt()
+    receipt["steps"][0]["raw_output"] = "should not be here"
+    with pytest.raises(vr.ReceiptError, match="unrecognized field"):
+        vr.validate_receipt_schema(receipt)
+
+
+def test_unknown_nested_field_in_full_suite_rejected() -> None:
+    receipt = _minimal_valid_receipt()
+    receipt["full_suite"]["extra"] = 1
+    with pytest.raises(vr.ReceiptError, match="unrecognized field"):
+        vr.validate_receipt_schema(receipt)
+
+
+def test_unknown_nested_field_in_mutation_witnesses_rejected() -> None:
+    receipt = _minimal_valid_receipt()
+    receipt["mutation_witnesses"]["extra"] = 1
+    with pytest.raises(vr.ReceiptError, match="unrecognized field"):
+        vr.validate_receipt_schema(receipt)
+
+
+def test_unknown_nested_field_in_affected_surface_rejected() -> None:
+    receipt = _minimal_valid_receipt()
+    receipt["affected_surface"]["extra"] = 1
+    with pytest.raises(vr.ReceiptError, match="unrecognized field"):
+        vr.validate_receipt_schema(receipt)
+
+
+def test_unknown_nested_field_in_cleanup_rejected() -> None:
+    receipt = _minimal_valid_receipt()
+    receipt["cleanup"]["extra"] = 1
+    with pytest.raises(vr.ReceiptError, match="unrecognized field"):
+        vr.validate_receipt_schema(receipt)
+
+
+def test_unknown_nested_field_in_dependency_input_rejected() -> None:
+    receipt = _minimal_valid_receipt()
+    receipt["dependency_and_config_inputs"] = [
+        {"repo_relative_path": "x.toml", "sha256": "a" * 64, "extra": 1}
+    ]
+    with pytest.raises(vr.ReceiptError, match="unrecognized field"):
+        vr.validate_receipt_schema(receipt)
+
+
+def test_unknown_nested_field_in_environment_descriptor_rejected() -> None:
+    receipt = _minimal_valid_receipt()
+    receipt["environment_descriptor"]["extra"] = 1
+    with pytest.raises(vr.ReceiptError, match="unrecognized field"):
+        vr.validate_receipt_schema(receipt)
+
+
+def test_unknown_nested_field_in_triggered_migration_matrix_rejected() -> None:
+    receipt = _minimal_valid_receipt()
+    receipt["migration_matrix"] = {"triggered": True, "extra": 1}
+    with pytest.raises(vr.ReceiptError, match="unrecognized field"):
+        vr.validate_receipt_schema(receipt)
+
+
+def test_duplicate_step_name_rejected() -> None:
+    receipt = _minimal_valid_receipt()
+    receipt["steps"].append({"name": "mypy", "status": "PASS", "duration_seconds": 0.2})
+    with pytest.raises(vr.ReceiptError, match="duplicate step name"):
+        vr.validate_receipt_schema(receipt)
+
+
+def test_full_suite_ran_without_matching_pass_step_rejected() -> None:
+    receipt = _minimal_valid_receipt()
+    receipt["steps"] = [s for s in receipt["steps"] if s["name"] != "full pytest suite"]
+    with pytest.raises(vr.ReceiptError, match="does not appear exactly once"):
+        vr.validate_receipt_schema(receipt)
+
+
+def test_full_suite_ran_with_failed_matching_step_rejected() -> None:
+    receipt = _minimal_valid_receipt()
+    for step in receipt["steps"]:
+        if step["name"] == "full pytest suite":
+            step["status"] = "FAIL"
+    with pytest.raises(vr.ReceiptError, match="is not PASS"):
+        vr.validate_receipt_schema(receipt)
+
+
+def test_valid_triggered_migration_matrix_passes_schema() -> None:
+    receipt = _minimal_valid_receipt()
+    receipt["migration_matrix"] = {
+        "triggered": True,
+        "status": "PASS",
+        "dev_state_before": {"alembic_revision": "0017", "schema_fingerprint": "a" * 64},
+        "dev_state_after": {"alembic_revision": "0017", "schema_fingerprint": "a" * 64},
+        "postgresql_server_version": "PostgreSQL 16.0",
+        "fresh_database_created": True,
+        "fresh_database_cleaned_up": True,
+        "steps": ["existing-head upgrade"],
+    }
+    vr.validate_receipt_schema(receipt)
+
+
+def test_triggered_migration_matrix_with_unknown_dev_state_field_rejected() -> None:
+    receipt = _minimal_valid_receipt()
+    receipt["migration_matrix"] = {
+        "triggered": True,
+        "status": "PASS",
+        "dev_state_before": {
+            "alembic_revision": "0017",
+            "schema_fingerprint": "a" * 64,
+            "extra": 1,
+        },
+        "dev_state_after": {"alembic_revision": "0017", "schema_fingerprint": "a" * 64},
+        "postgresql_server_version": "PostgreSQL 16.0",
+        "fresh_database_created": True,
+        "fresh_database_cleaned_up": True,
+        "steps": ["existing-head upgrade"],
+    }
+    with pytest.raises(vr.ReceiptError, match="unrecognized field"):
+        vr.validate_receipt_schema(receipt)

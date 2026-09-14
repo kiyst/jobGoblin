@@ -170,6 +170,36 @@ async def test_acknowledgement_lost_after_create_is_still_cleaned_up(
 
 
 @pytest.mark.asyncio
+async def test_direct_target_verification_exception_still_cleans_up(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Distinct from the "wrong database name returned" case: here the
+    direct-target `SELECT current_database()` call itself *raises* (e.g. a
+    dropped connection) rather than returning an unexpected value --
+    `provision_fresh_database` must still clean up the database it
+    already owns before propagating."""
+    real_query_current_database = mm.query_current_database
+    created_name_holder: dict[str, str] = {}
+
+    async def _raise_on_fresh_target(url: str) -> str:
+        if "jobgoblin_test_verify_" in url:
+            from sqlalchemy.engine import make_url
+
+            created_name_holder["name"] = make_url(url).database or ""
+            raise ConnectionResetError("simulated direct-target connection drop")
+        return await real_query_current_database(url)
+
+    monkeypatch.setattr(mm, "query_current_database", _raise_on_fresh_target)
+
+    with pytest.raises(ConnectionResetError):
+        await mm.provision_fresh_database(_dev_url(), app_env="test")
+
+    admin_url = mm.derive_admin_url(db_safety.resolve_test_database_url(None))
+    assert created_name_holder["name"]
+    assert await mm.query_database_exists(admin_url, created_name_holder["name"]) is False
+
+
+@pytest.mark.asyncio
 async def test_failed_before_create_produces_no_database_and_no_cleanup() -> None:
     """A CREATE that fails with no side effect at all (e.g. a malformed
     name) must never be treated as owned, and cleanup must be a no-op."""
@@ -189,7 +219,14 @@ async def test_failed_before_create_produces_no_database_and_no_cleanup() -> Non
 @pytest.mark.asyncio
 async def test_capture_development_state_reads_real_database() -> None:
     state = await mm.capture_development_state(_dev_url())
-    assert state  # a real database name was returned
+    assert isinstance(state, mm.DevelopmentState)
+    # A real, already-migrated database: a genuine Alembic revision string
+    # (never the database name -- see finding 4) and a non-empty,
+    # deterministic schema fingerprint.
+    assert state.alembic_revision
+    assert len(state.schema_fingerprint) == 64  # sha256 hex
+    again = await mm.capture_development_state(_dev_url())
+    assert again == state  # deterministic for an unchanged schema
 
 
 @pytest.mark.asyncio
@@ -198,6 +235,30 @@ async def test_capture_development_state_fails_closed_when_unreachable() -> None
         await mm.capture_development_state(
             "postgresql+asyncpg://nobody:nothing@127.0.0.1:1/does_not_exist"
         )
+
+
+@pytest.mark.asyncio
+async def test_capture_development_state_handles_a_database_with_no_alembic_table() -> None:
+    """A fresh database (no `alembic_version` table yet) must still
+    produce a valid state -- `alembic_revision: None`, never a crash --
+    and the connection must remain usable afterward for the schema-
+    fingerprint query (proving the failed statement didn't poison the
+    connection's implicit per-statement transaction)."""
+    lifecycle = await mm.provision_fresh_database(_dev_url(), app_env="test")
+    try:
+        state = await mm.capture_development_state(lifecycle.target_url)
+        assert state.alembic_revision is None
+        assert len(state.schema_fingerprint) == 64
+    finally:
+        await mm.cleanup_fresh_database(lifecycle)
+
+
+@pytest.mark.asyncio
+async def test_query_postgresql_server_version_is_a_real_distinct_string() -> None:
+    version = await mm.query_postgresql_server_version(_dev_url())
+    assert "PostgreSQL" in version
+    database_name = await mm.query_current_database(_dev_url())
+    assert version != database_name
 
 
 # ---------------------------------------------------------------------------
@@ -288,10 +349,15 @@ async def test_run_full_matrix_fails_closed_if_development_state_changes(
     calls = {"n": 0}
     real_capture = mm.capture_development_state
 
-    async def _flip_flop(url: str) -> str:
+    async def _flip_flop(url: str) -> mm.DevelopmentState:
         calls["n"] += 1
         real_value = await real_capture(url)
-        return real_value if calls["n"] == 1 else f"{real_value}-mutated"
+        if calls["n"] == 1:
+            return real_value
+        return mm.DevelopmentState(
+            alembic_revision=real_value.alembic_revision,
+            schema_fingerprint=f"{real_value.schema_fingerprint}-mutated",
+        )
 
     monkeypatch.setattr(mm, "capture_development_state", _flip_flop)
 

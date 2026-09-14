@@ -67,6 +67,8 @@ def _minimal_receipt(candidate_sha: str, receipt_id: str, *, gate: str = "final"
             {"name": "mypy", "status": "PASS", "duration_seconds": 0.1},
             {"name": "check_repo.py", "status": "PASS", "duration_seconds": 0.1},
             {"name": "git diff --check", "status": "PASS", "duration_seconds": 0.1},
+            {"name": "full pytest suite", "status": "PASS", "duration_seconds": 1.0},
+            {"name": "contract mutation witnesses", "status": "PASS", "duration_seconds": 1.0},
         ],
         "full_suite": {"status": "ran", "count": 1},
         "focused_tests": {"status": "not_run"},
@@ -116,13 +118,15 @@ def _handoff_header() -> str:
     return "# handoff\n\n## Iteration 1\n\n### Work done\n\nplaceholder text\n\n"
 
 
-def _pending_block(*, slice_id: str, risk_class: str, base_sha: str, gate: str) -> str:
+def _pending_block(
+    *, slice_id: str, risk_class: str, base_sha: str, gate: str, slice_kind: str = "tooling"
+) -> str:
     return (
         "```workflow-metadata\n"
         "workflow_version: v3.2\n"
         "state: pending\n"
         f"slice_id: {slice_id}\n"
-        "slice_kind: tooling\n"
+        f"slice_kind: {slice_kind}\n"
         f"risk_class: {risk_class}\n"
         f"base_sha: {base_sha}\n"
         f"declared_gate: {gate}\n"
@@ -138,13 +142,14 @@ def _published_block(
     gate: str,
     candidate_sha: str,
     receipt_id: str,
+    slice_kind: str = "tooling",
 ) -> str:
     return (
         "```workflow-metadata\n"
         "workflow_version: v3.2\n"
         "state: published\n"
         f"slice_id: {slice_id}\n"
-        "slice_kind: tooling\n"
+        f"slice_kind: {slice_kind}\n"
         f"risk_class: {risk_class}\n"
         f"base_sha: {base_sha}\n"
         f"declared_gate: {gate}\n"
@@ -164,6 +169,7 @@ def _build_c_a_r(
     reviewer_model: str = "Sol Medium",
     gate: str = "final",
     risk_class: str = "H",
+    slice_kind: str = "tooling",
 ) -> tuple[str, str, str, str]:
     base_sha = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
@@ -172,7 +178,13 @@ def _build_c_a_r(
 
     (repo / "docs" / "LLM_HANDOFF.md").write_text(
         _handoff_header()
-        + _pending_block(slice_id=slice_id, risk_class=risk_class, base_sha=base_sha, gate=gate),
+        + _pending_block(
+            slice_id=slice_id,
+            risk_class=risk_class,
+            base_sha=base_sha,
+            gate=gate,
+            slice_kind=slice_kind,
+        ),
         encoding="utf-8",
     )
     (repo / "src.txt").write_text("v1\n", encoding="utf-8")
@@ -197,6 +209,7 @@ def _build_c_a_r(
             gate=gate,
             candidate_sha=candidate_sha,
             receipt_id=receipt_id,
+            slice_kind=slice_kind,
         ),
         encoding="utf-8",
     )
@@ -266,6 +279,98 @@ def test_class_h_primary_review_requires_sol_medium(car_repo: Path) -> None:
     candidate_sha, publication_sha, review_sha, _ = _build_c_a_r(car_repo, reviewer_model="Astra")
     with pytest.raises(cr.ReviewValidationError, match="Sol Medium"):
         cr.validate_c_a_r_chain(candidate_sha, publication_sha, review_sha, repo_root=car_repo)
+
+
+def test_primary_review_requires_sol_medium_for_executable_slice_kind_even_at_low_risk(
+    car_repo: Path,
+) -> None:
+    """Sol's second-round finding: the Sol Medium requirement must trigger
+    for every executable (parser/tooling) primary approval, not only
+    risk_class: H -- proven here with risk_class: D."""
+    candidate_sha, publication_sha, review_sha, _ = _build_c_a_r(
+        car_repo, risk_class="D", slice_kind="tooling", reviewer_model="Astra"
+    )
+    with pytest.raises(cr.ReviewValidationError, match="Sol Medium"):
+        cr.validate_c_a_r_chain(candidate_sha, publication_sha, review_sha, repo_root=car_repo)
+
+
+def test_primary_review_permits_non_sol_medium_for_low_risk_docs_slice(car_repo: Path) -> None:
+    """Conversely, a low-risk `docs` slice (never executable) must not be
+    forced into the Sol Medium requirement."""
+    candidate_sha, publication_sha, review_sha, _ = _build_c_a_r(
+        car_repo, gate="docs", risk_class="D", slice_kind="docs", reviewer_model="Astra"
+    )
+    fields = cr.validate_c_a_r_chain(candidate_sha, publication_sha, review_sha, repo_root=car_repo)
+    assert fields["verdict"] == "approved"
+
+
+def test_docs_gate_requires_published_slice_kind_docs_for_merge_eligibility(
+    car_repo: Path,
+) -> None:
+    candidate_sha, publication_sha, review_sha, _ = _build_c_a_r(
+        car_repo, gate="docs", risk_class="D", slice_kind="tooling", reviewer_model="Sol Medium"
+    )
+    with pytest.raises(cr.ReviewValidationError, match="slice_kind: docs"):
+        cr.check_merge_eligibility(candidate_sha, publication_sha, review_sha, repo_root=car_repo)
+
+
+def test_docs_gate_merge_eligible_when_slice_kind_genuinely_docs(car_repo: Path) -> None:
+    candidate_sha, publication_sha, review_sha, _ = _build_c_a_r(
+        car_repo, gate="docs", risk_class="D", slice_kind="docs", reviewer_model="Astra"
+    )
+    fields = cr.check_merge_eligibility(
+        candidate_sha, publication_sha, review_sha, repo_root=car_repo
+    )
+    assert fields["verdict"] == "approved"
+
+
+def test_cross_check_rejects_published_review_slice_id_mismatch() -> None:
+    published_fields = {
+        "slice_id": "2026-09-13-example-abc1234",
+        "risk_class": "H",
+        "candidate_sha": "c" * 40,
+        "executed_gate": "final",
+        "receipt_id": "11111111-1111-4111-8111-111111111111",
+        "receipt_path": "docs/verification-receipts/" + "c" * 40 + "/x.json",
+    }
+    review_fields = {
+        "slice_id": "2026-09-13-different-abc1234",
+        "risk_class": "H",
+        "candidate_sha": "c" * 40,
+        "gate": "final",
+        "receipt_id": "11111111-1111-4111-8111-111111111111",
+        "receipt_path": "docs/verification-receipts/" + "c" * 40 + "/x.json",
+    }
+    with pytest.raises(cr.ReviewValidationError, match="slice_id"):
+        cr._cross_check_published_and_review_metadata(published_fields, review_fields)
+
+
+def test_cross_check_rejects_published_review_gate_mismatch() -> None:
+    published_fields = {
+        "slice_id": "2026-09-13-example-abc1234",
+        "risk_class": "H",
+        "candidate_sha": "c" * 40,
+        "executed_gate": "final",
+        "receipt_id": "11111111-1111-4111-8111-111111111111",
+        "receipt_path": "docs/verification-receipts/" + "c" * 40 + "/x.json",
+    }
+    review_fields = dict(published_fields)
+    review_fields["gate"] = "fast"
+    del review_fields["executed_gate"]
+    with pytest.raises(cr.ReviewValidationError, match="gate"):
+        cr._cross_check_published_and_review_metadata(published_fields, review_fields)
+
+
+def test_require_base_sha_ancestor_rejects_an_unrelated_commit(car_repo: Path) -> None:
+    candidate_sha, _, _, _ = _build_c_a_r(car_repo)
+    with pytest.raises(cr.ReviewValidationError, match="not an ancestor"):
+        cr._require_base_sha_ancestor("0" * 40, candidate_sha, repo_root=car_repo)
+
+
+def test_require_base_sha_ancestor_accepts_a_genuine_ancestor(car_repo: Path) -> None:
+    candidate_sha, publication_sha, _, _ = _build_c_a_r(car_repo)
+    base_sha = _git(["rev-parse", f"{candidate_sha}^"], car_repo)
+    cr._require_base_sha_ancestor(base_sha, candidate_sha, repo_root=car_repo)
 
 
 def test_single_review_can_validate_even_with_changes_requested(car_repo: Path) -> None:
@@ -497,7 +602,39 @@ def test_escalation_block_never_satisfies_approval_alone(car_repo: Path) -> None
 # ---------------------------------------------------------------------------
 
 
-def _build_m_q(car_repo: Path, review_sha: str, base_main_sha: str) -> tuple[str, str]:
+def _valid_post_merge_coordinator() -> dict:
+    return {
+        "authoring_checkout_head_at_start": "6" * 40,
+        "worktree_initial_snapshot": {"tracked_tree_sha": "x", "untracked_present": False},
+        "run_cache_redirect": {
+            "pytest_basetemp_redirected": True,
+            "ruff_cache_redirected": True,
+            "mypy_cache_redirected": True,
+            "pycache_redirected": True,
+        },
+        "worktree_final_snapshot": {"tracked_tree_sha": "x", "untracked_present": False},
+        "worktree_removed": True,
+        "worktree_leak_check": "ok",
+        "authoring_checkout_head_at_receipt": "6" * 40,
+        "authoring_checkout_clean_at_receipt": True,
+    }
+
+
+def _build_m_q(
+    car_repo: Path,
+    review_sha: str,
+    base_main_sha: str,
+    *,
+    slice_id: str = "2026-09-13-example-0000000",
+    base_sha: str = "6" * 40,
+    candidate_sha: str = "1" * 40,
+    publication_commit_sha: str = "2" * 40,
+    review_commit_sha: str = "3" * 40,
+    original_receipt_id: str = "00000000-0000-0000-0000-000000000000",
+    original_receipt_path: str = "docs/verification-receipts/placeholder/placeholder.json",
+) -> tuple[str, str]:
+    from scripts import verification_receipts as vr
+
     _git(["checkout", "-q", "-b", "main-line-mq", base_main_sha], car_repo)
     subprocess.run(
         ["git", "merge", "--no-ff", "-m", "M: merge", review_sha],
@@ -511,20 +648,24 @@ def _build_m_q(car_repo: Path, review_sha: str, base_main_sha: str) -> tuple[str
     artifact = {
         "schema_version": "1",
         "kind": "post_merge_verification",
-        "slice_id": "placeholder",
-        "base_sha": "6" * 40,
-        "candidate_sha": "placeholder",
-        "publication_commit_sha": "placeholder",
-        "review_commit_sha": "placeholder",
-        "original_receipt_id": "placeholder",
-        "original_receipt_path": "placeholder",
+        "slice_id": slice_id,
+        "base_sha": base_sha,
+        "candidate_sha": candidate_sha,
+        "publication_commit_sha": publication_commit_sha,
+        "review_commit_sha": review_commit_sha,
+        "original_receipt_id": original_receipt_id,
+        "original_receipt_path": original_receipt_path,
         "merged_commit": merge_sha,
-        "environment_descriptor": {},
-        "coordinator": {},
+        "environment_descriptor": vr.environment_descriptor(postgresql_version=None),
+        "coordinator": _valid_post_merge_coordinator(),
         "full_suite": {"status": "ran", "count": 1},
-        "mutation_witnesses": {"status": "ran", "guard_refs": [], "passed": 0, "failed": 0},
+        "mutation_witnesses": {"status": "ran", "guard_refs": [], "passed": 1, "failed": 0},
         "migration_matrix": {"triggered": False},
-        "steps": [],
+        "steps": [
+            {"name": "ruff check", "status": "PASS", "duration_seconds": 0.1},
+            {"name": "full pytest suite", "status": "PASS", "duration_seconds": 1.0},
+            {"name": "contract mutation witnesses", "status": "PASS", "duration_seconds": 1.0},
+        ],
         "cleanup": {"attempted": True, "status": "PASS"},
     }
     artifact_dir = car_repo / "docs" / "post-merge"
@@ -559,11 +700,18 @@ def test_validate_published_end_to_end(car_repo: Path) -> None:
     base_main_sha = _git(["rev-parse", "HEAD~3"], car_repo)
     merge_sha, q_sha = _build_m_q(car_repo, review_sha, base_main_sha)
 
+    slice_id = f"2026-09-13-example-{base_main_sha[:7]}"
+    receipt_path = f"docs/verification-receipts/{candidate_sha}/{receipt_id}.json"
+
     artifact_path = car_repo / "docs" / "post-merge" / "artifact.json"
     artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+    artifact["slice_id"] = slice_id
+    artifact["base_sha"] = base_main_sha
     artifact["candidate_sha"] = candidate_sha
     artifact["publication_commit_sha"] = publication_sha
     artifact["review_commit_sha"] = review_sha
+    artifact["original_receipt_id"] = receipt_id
+    artifact["original_receipt_path"] = receipt_path
     artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
     _git(["add", "-A"], car_repo)
     _git(["commit", "-q", "--amend", "--no-edit"], car_repo)
@@ -579,6 +727,117 @@ def test_validate_published_end_to_end(car_repo: Path) -> None:
         repo_root=car_repo,
     )
     assert result["merged_commit"] == merge_sha
+
+
+def test_validate_q_rejects_artifact_with_a_failed_step(car_repo: Path) -> None:
+    candidate_sha, publication_sha, review_sha, _ = _build_c_a_r(car_repo)
+    base_main_sha = _git(["rev-parse", "HEAD~3"], car_repo)
+    merge_sha, q_sha = _build_m_q(car_repo, review_sha, base_main_sha)
+
+    artifact_path = car_repo / "docs" / "post-merge" / "artifact.json"
+    artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+    artifact["steps"][0]["status"] = "FAIL"
+    artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
+    _git(["add", "-A"], car_repo)
+    _git(["commit", "-q", "--amend", "--no-edit"], car_repo)
+    fixed_q_sha = _git(["rev-parse", "HEAD"], car_repo)
+
+    with pytest.raises(cr.ReviewValidationError, match="FAILed step"):
+        cr.validate_q(merge_sha, fixed_q_sha, repo_root=car_repo)
+
+
+def test_validate_q_rejects_artifact_whose_full_suite_did_not_genuinely_run(
+    car_repo: Path,
+) -> None:
+    candidate_sha, publication_sha, review_sha, _ = _build_c_a_r(car_repo)
+    base_main_sha = _git(["rev-parse", "HEAD~3"], car_repo)
+    merge_sha, q_sha = _build_m_q(car_repo, review_sha, base_main_sha)
+
+    artifact_path = car_repo / "docs" / "post-merge" / "artifact.json"
+    artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+    artifact["full_suite"] = {"status": "not_run"}
+    artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
+    _git(["add", "-A"], car_repo)
+    _git(["commit", "-q", "--amend", "--no-edit"], car_repo)
+    fixed_q_sha = _git(["rev-parse", "HEAD"], car_repo)
+
+    with pytest.raises(cr.ReviewValidationError, match="full suite did not genuinely run"):
+        cr.validate_q(merge_sha, fixed_q_sha, repo_root=car_repo)
+
+
+def test_validate_q_rejects_artifact_with_unknown_coordinator_field(car_repo: Path) -> None:
+    candidate_sha, publication_sha, review_sha, _ = _build_c_a_r(car_repo)
+    base_main_sha = _git(["rev-parse", "HEAD~3"], car_repo)
+    merge_sha, q_sha = _build_m_q(car_repo, review_sha, base_main_sha)
+
+    artifact_path = car_repo / "docs" / "post-merge" / "artifact.json"
+    artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+    artifact["coordinator"]["extra"] = 1
+    artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
+    _git(["add", "-A"], car_repo)
+    _git(["commit", "-q", "--amend", "--no-edit"], car_repo)
+    fixed_q_sha = _git(["rev-parse", "HEAD"], car_repo)
+
+    with pytest.raises(cr.ReviewValidationError, match="unrecognized field"):
+        cr.validate_q(merge_sha, fixed_q_sha, repo_root=car_repo)
+
+
+def test_validate_q_rejects_a_triggered_migration_matrix_that_did_not_pass(
+    car_repo: Path,
+) -> None:
+    candidate_sha, publication_sha, review_sha, _ = _build_c_a_r(car_repo)
+    base_main_sha = _git(["rev-parse", "HEAD~3"], car_repo)
+    merge_sha, q_sha = _build_m_q(car_repo, review_sha, base_main_sha)
+
+    artifact_path = car_repo / "docs" / "post-merge" / "artifact.json"
+    artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+    artifact["migration_matrix"] = {
+        "triggered": True,
+        "status": "FAIL",
+        "dev_state_before": {"alembic_revision": "0017", "schema_fingerprint": "a" * 64},
+        "dev_state_after": {"alembic_revision": "0017", "schema_fingerprint": "a" * 64},
+        "postgresql_server_version": "PostgreSQL 16.0",
+        "fresh_database_created": True,
+        "fresh_database_cleaned_up": True,
+        "steps": ["existing-head upgrade"],
+    }
+    artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
+    _git(["add", "-A"], car_repo)
+    _git(["commit", "-q", "--amend", "--no-edit"], car_repo)
+    fixed_q_sha = _git(["rev-parse", "HEAD"], car_repo)
+
+    with pytest.raises(cr.ReviewValidationError, match="migration matrix was triggered"):
+        cr.validate_q(merge_sha, fixed_q_sha, repo_root=car_repo)
+
+
+def test_m_to_q_transition_rejects_a_historical_rewrite(car_repo: Path) -> None:
+    candidate_sha, publication_sha, review_sha, _ = _build_c_a_r(car_repo)
+    base_main_sha = _git(["rev-parse", "HEAD~3"], car_repo)
+    merge_sha, q_sha = _build_m_q(car_repo, review_sha, base_main_sha)
+
+    handoff_path = car_repo / "docs" / "LLM_HANDOFF.md"
+    text = handoff_path.read_text(encoding="utf-8")
+    handoff_path.write_text(text.replace("placeholder text", "REWRITTEN"), encoding="utf-8")
+    _git(["add", "-A"], car_repo)
+    _git(["commit", "-q", "--amend", "--no-edit"], car_repo)
+    fixed_q_sha = _git(["rev-parse", "HEAD"], car_repo)
+
+    with pytest.raises(cr.ReviewValidationError, match="pure append"):
+        cr.validate_m_to_q_transition(
+            merge_sha,
+            fixed_q_sha,
+            cr.read_file_at_commit(merge_sha, "docs/LLM_HANDOFF.md", repo_root=car_repo),
+            cr.read_file_at_commit(fixed_q_sha, "docs/LLM_HANDOFF.md", repo_root=car_repo),
+            repo_root=car_repo,
+        )
+
+
+def test_m_to_q_transition_permits_no_handoff_change_at_all(car_repo: Path) -> None:
+    candidate_sha, publication_sha, review_sha, _ = _build_c_a_r(car_repo)
+    base_main_sha = _git(["rev-parse", "HEAD~3"], car_repo)
+    merge_sha, q_sha = _build_m_q(car_repo, review_sha, base_main_sha)
+    handoff_text = cr.read_file_at_commit(merge_sha, "docs/LLM_HANDOFF.md", repo_root=car_repo)
+    cr.validate_m_to_q_transition(merge_sha, q_sha, handoff_text, handoff_text, repo_root=car_repo)
 
 
 def test_validate_published_rejects_artifact_with_wrong_chain_references(car_repo: Path) -> None:
@@ -627,3 +886,33 @@ def test_run_via_detached_checkout_executes_the_target_commits_own_code(
         ["git", "worktree", "list"], cwd=car_repo, check=True, capture_output=True, text=True
     ).stdout
     assert len(worktree_list.strip().splitlines()) == 1
+
+
+def test_run_via_detached_checkout_fails_closed_when_worktree_teardown_fails(
+    car_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A worktree-removal failure must be raised, never silently
+    swallowed -- and the caller must be able to trust that a raised
+    exception means cleanup was surfaced, not silently partial."""
+    candidate_sha, publication_sha, review_sha, _ = _build_c_a_r(car_repo)
+    monkeypatch.setattr(cr.vw, "REPO_ROOT", car_repo)
+
+    def _fail_remove(worktree_path: Path) -> None:
+        raise cr.vw.WorktreeError("simulated worktree teardown failure")
+
+    monkeypatch.setattr(cr.vw, "remove_worktree", _fail_remove)
+
+    with pytest.raises(cr.ReviewValidationError, match="cleanup failed"):
+        cr.run_via_detached_checkout(
+            review_sha,
+            "single",
+            [
+                "--candidate",
+                candidate_sha,
+                "--publication",
+                publication_sha,
+                "--review",
+                review_sha,
+            ],
+            repo_root=car_repo,
+        )

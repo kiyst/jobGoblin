@@ -31,10 +31,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from scripts import verification_lock as vl
 from scripts import verification_receipts as vr
 from scripts import verification_scope as vs
 from scripts import verification_worktree as vw
-from scripts.migration_matrix import capture_development_state
+from scripts.migration_matrix import query_postgresql_server_version
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BACKEND_DIR = REPO_ROOT / "backend"
@@ -86,8 +87,19 @@ def _git(args: list[str], cwd: Path = REPO_ROOT) -> str:
 # Stage 0: safely remove any stale coordinator scratch directory left behind
 # by a crashed prior run -- only our own prefix, never another `.verify-tmp`
 # entry (e.g. `verify.py`'s own `run-*` directories, or unrelated named
-# review directories).
+# review directories). "Stale" is proven, never guessed: every run holds an
+# exclusive OS advisory lock (`verification_lock`) on its own directory for
+# its entire lifetime; a directory is only ever removed here if this
+# process can itself acquire that lock (meaning no live process holds it --
+# the kernel releases an advisory lock automatically on process exit or
+# crash, which is exactly the "provably abandoned" signal required). A
+# directory currently owned by another active run is never touched,
+# regardless of age; a directory with no lock file at all (a vanishingly
+# rare crash window between mkdtemp and lock acquisition) is also left
+# alone, since ownership cannot be proven either way.
 # ---------------------------------------------------------------------------
+
+_LOCK_FILE_NAME = ".owner.lock"
 
 
 def cleanup_stale_coordinator_dirs() -> list[str]:
@@ -95,15 +107,23 @@ def cleanup_stale_coordinator_dirs() -> list[str]:
         return []
     removed: list[str] = []
     for entry in COORDINATOR_RUN_ROOT.iterdir():
-        if entry.is_dir() and entry.name.startswith(_COORDINATOR_DIR_PREFIX):
-            try:
-                _rmtree(entry)
-                removed.append(entry.name)
-            except OSError:
-                # Best-effort only -- a directory still in use by another
-                # concurrent run must never be force-removed out from under
-                # it. Never touches anything outside our own prefix.
-                continue
+        if not (entry.is_dir() and entry.name.startswith(_COORDINATOR_DIR_PREFIX)):
+            continue
+        lock_path = entry / _LOCK_FILE_NAME
+        if not lock_path.is_file():
+            continue  # cannot prove abandonment either way -- leave it alone
+        handle = vl.try_acquire_exclusive_lock(lock_path)
+        if handle is None:
+            continue  # still owned by a live process -- never touched
+        # Release (closing the file handle) *before* removing the
+        # directory: on Windows, deleting a file still held open by this
+        # same process fails outright.
+        handle.release()
+        try:
+            _rmtree(entry)
+            removed.append(entry.name)
+        except OSError:
+            continue
     return removed
 
 
@@ -190,12 +210,15 @@ def _clean_cache_dirs(run_dir: Path) -> None:
 
 
 def _postgresql_version(docs_only: bool) -> str | None:
+    """The real PostgreSQL server version (`SELECT version()`), captured
+    separately from any schema-state check -- never the development
+    database's name or schema fingerprint."""
     if docs_only:
         return None
     try:
         from app.config import get_settings
 
-        version = asyncio.run(capture_development_state(get_settings().database_url))
+        version = asyncio.run(query_postgresql_server_version(get_settings().database_url))
     except Exception:  # noqa: BLE001 -- best-effort descriptor field, never blocks the run itself
         return None
     return version
@@ -250,6 +273,18 @@ def run_receipt_eligible_verification(request: ReceiptEligibleRequest) -> Path:
 
     COORDINATOR_RUN_ROOT.mkdir(parents=True, exist_ok=True)
     run_dir = Path(tempfile.mkdtemp(prefix=_COORDINATOR_DIR_PREFIX, dir=str(COORDINATOR_RUN_ROOT)))
+
+    # Acquire ownership of this run directory for its entire lifetime --
+    # `cleanup_stale_coordinator_dirs` (stage 0, above) will never remove
+    # a directory whose lock it cannot itself acquire. `mkdtemp` just
+    # created this exact directory uniquely, so failure to acquire here
+    # would mean something else already raced onto our own fresh path --
+    # treated as a hard failure, never silently proceeding unlocked.
+    lock_handle = vl.try_acquire_exclusive_lock(run_dir / _LOCK_FILE_NAME)
+    if lock_handle is None:
+        raise CoordinatorError(
+            f"could not acquire ownership lock for fresh run directory {run_dir}"
+        )
 
     worktree: Path | None = None
     initial_snapshot = None
@@ -314,6 +349,10 @@ def run_receipt_eligible_verification(request: ReceiptEligibleRequest) -> Path:
                 step_data = json.loads(step_json_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 step_data = None
+        # Release ownership before removing the directory that contains
+        # the lock file -- on Windows, deleting a file this same process
+        # still holds open fails outright.
+        lock_handle.release()
         try:
             if run_dir.exists():
                 _rmtree(run_dir)
@@ -397,7 +436,7 @@ def run_receipt_eligible_verification(request: ReceiptEligibleRequest) -> Path:
             "directly_executed_tests": sorted(coverage.directly_executed_tests),
             "not_applicable_reason": coverage.not_applicable_reason,
         },
-        "migration_matrix": {"triggered": migration_required},
+        "migration_matrix": step_data.get("migration_matrix") or {"triggered": migration_required},
         "cleanup": {"attempted": True, "status": cleanup_status},
         "approval_eligible": False,
     }

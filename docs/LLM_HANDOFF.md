@@ -461,19 +461,99 @@ full_suite_count: 2323
 - STOP — this is a bounded correction only. Do not author `R`, merge,
   create `M`/`Q`, begin another slice, or modify product/parser behavior.
 
+#### Correction round 2 (Sol review: Changes requested)
+
+- **Supersedes candidate `C2` = `854be7c46de3d26592e145f6cdad23f9f7b5fc6b`
+  and publication `A2` = `c1f612fd50eb3291255d888ecdba03dce8cd8c5c`.** The
+  receipt published there
+  (`docs/verification-receipts/854be7c46de3d26592e145f6cdad23f9f7b5fc6b/
+  8dc185bf-1dc6-4798-a20e-fb1218fd1c03.json`) is **not reusable** and is
+  superseded by this correction round's own fresh candidate/publication
+  cycle below. `C2`/`A2` themselves are left exactly as pushed, per Git
+  gates — never amended or rewritten.
+- Implements every required correction from Sol's second review: (1)
+  `verification_receipts.py`'s receipt schema is now fully recursively
+  closed/typed — every nested object (`coordinator`, `steps[]`,
+  `full_suite`/`focused_tests`/`mutation_witnesses`, `migration_matrix`,
+  `cleanup`, `dependency_and_config_inputs[]`, `environment_descriptor`)
+  rejects an unrecognized field, duplicate step names are rejected, and a
+  "ran" suite/witness summary must bind to a corresponding step that
+  exists exactly once with status `PASS` — with dedicated regression
+  tests for an unrecognized field nested at every level and for the
+  binding failure itself. (2) `check_review.py` now parses and
+  structurally re-validates the *published* (`A`) `workflow-metadata`
+  block during `C -> A -> R` validation (reusing `check_handoff.py`'s own
+  validator), cross-checks `slice_id`/`risk_class`/`candidate_sha`/
+  `gate`/`receipt_id`/`receipt_path` against the review metadata,
+  requires the published `base_sha` to be a genuine ancestor of the
+  candidate, and cross-checks the receipt's own `slice_id`/`risk_class`/
+  `base_sha` against the published block. The Sol Medium primary-
+  reviewer requirement now triggers for every executable
+  (`parser`/`tooling`) slice, not only `risk_class: H`. A `gate: docs`
+  receipt is merge-eligible only when the bound published slice is
+  genuinely `slice_kind: docs`. (3) Post-merge artifact validation is now
+  deep: `_validate_post_merge_artifact_schema` reuses
+  `verification_receipts.py`'s own nested validators for
+  `coordinator`/`steps`/`full_suite`/`mutation_witnesses`/
+  `migration_matrix`/`cleanup`/`environment_descriptor`; a new
+  `_validate_post_merge_artifact_evidence` requires a genuinely positive
+  full-suite count, genuinely positive passing witnesses, no `FAIL`
+  step, passing cleanup, and (when triggered) a passing migration
+  matrix; `validate_published` now cross-checks the artifact's
+  `base_sha`/`slice_id`/`original_receipt_id`/`original_receipt_path`
+  against the independently recomputed chain, then re-reads and
+  re-validates the original receipt at `M` itself and cross-checks its
+  content against the artifact's claims. A new
+  `validate_m_to_q_transition` restricts `Q`'s optional handoff change to
+  a pure, at-most-once append, mirroring `validate_a_to_r_transition`.
+  (4) `migration_matrix.py` now captures a real `DevelopmentState`
+  (Alembic revision + a schema fingerprint over `information_schema.
+  columns`) before/after, and a real, distinct PostgreSQL server version
+  (`query_postgresql_server_version`); `provision_fresh_database`'s
+  direct-target verification now cleans up on a raised exception, not
+  only on a wrong-name return. (5) `verify.py --gate fast` now genuinely
+  omits the full suite (the `full pytest suite` step is only appended
+  when `gate != "fast"`); `--gate final` and the ungated compat profile
+  still always include it. (6) A new `verification_lock.py` provides a
+  cross-platform, genuinely non-blocking exclusive advisory file lock
+  (`msvcrt.locking` / `fcntl.flock`). `verification_coordinator.py` now
+  holds this lock for a run's entire lifetime and only removes a stale
+  `coordinator-*` scratch directory when it can itself acquire that
+  directory's lock (proving no live owner) — proven with a genuine
+  concurrent-subprocess regression test that a live run is never cleaned
+  up by another. The detached-review-launcher's cleanup
+  (`run_via_detached_checkout`) now fails closed on a worktree-teardown
+  failure and verifies no residual worktree/run directory remains,
+  instead of silently swallowing the error.
+- Real bug found and fixed while implementing finding (1) above (not
+  itself one of Sol's findings): the real `verify.py` never included
+  `guard_refs` in its `mutation_witnesses` step-JSON payload, so the
+  stricter, now-required schema binding would have made every real
+  receipt with `mutation_witnesses.status: "ran"` fail validation. Fixed
+  in `mutation_witnesses_step`/`_build_steps`/`_write_step_json` (the
+  whole-registry run's actual per-guard `PASS`/`FAIL` lines are now
+  parsed to populate it); proven by a fixture that previously omitted it
+  now failing until fixed.
+- Files changed: `backend/scripts/{check_review,migration_matrix,
+  verification_coordinator,verification_receipts,verify}.py` (edited);
+  `backend/scripts/verification_lock.py` (new);
+  `backend/tests/test_{check_review,migration_matrix,
+  verification_coordinator,verification_receipts,verify}.py` (edited);
+  `backend/tests/test_verification_lock.py` (new). No production parser
+  (`app/normalization/*`) touched; no migration/model file touched.
+- Verification (this correction round): `ruff format --check`/
+  `ruff check`/`mypy` clean (158 source files, backend + `.claude/hooks`).
+  Full pytest suite: **2531 passed**. All 34 mutation witnesses pass
+  unmodified. `check_repo.py` exits 0. `git diff --check` clean.
+- STOP — this is a bounded correction only. Do not author `R`, merge,
+  create `M`/`Q`, begin another slice, or modify product/parser behavior.
+
 ```workflow-metadata
 workflow_version: v3.2
-state: published
+state: pending
 slice_id: 2026-09-13-workflow-v3-2-activation-66202c2
 slice_kind: tooling
 risk_class: H
 base_sha: 66202c23facff6bd33d8f624e327cabdd40708b4
 declared_gate: final
-executed_gate: final
-candidate_sha: 854be7c46de3d26592e145f6cdad23f9f7b5fc6b
-receipt_id: 8dc185bf-1dc6-4798-a20e-fb1218fd1c03
-receipt_path: docs/verification-receipts/854be7c46de3d26592e145f6cdad23f9f7b5fc6b/8dc185bf-1dc6-4798-a20e-fb1218fd1c03.json
-full_suite_count: 2481
-focused_test_count: 314
-mutation_witness_count: 34
 ```

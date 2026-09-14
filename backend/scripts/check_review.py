@@ -29,7 +29,6 @@ commit, never the caller's in-process copy. `main()` implements the
 from __future__ import annotations
 
 import argparse
-import contextlib
 import re
 import shutil
 import subprocess
@@ -86,6 +85,7 @@ _VALID_ESCALATION_TRIGGERS = frozenset(
 _VALID_REVIEWER_ROLES = frozenset({"primary", "escalation"})
 _VALID_VERDICTS = frozenset({"approved", "changes_requested"})
 _REQUIRED_PRIMARY_REVIEWER_MODEL = "Sol Medium"
+_EXECUTABLE_SLICE_KINDS = frozenset({"parser", "tooling"})
 
 _REQUIRED_POST_MERGE_ARTIFACT_FIELDS = (
     "schema_version",
@@ -190,7 +190,11 @@ def extract_escalation_blocks(handoff_text: str) -> list[dict[str, str]]:
     ]
 
 
-def validate_review_metadata_structure(fields: dict[str, str]) -> None:
+def validate_review_metadata_structure(fields: dict[str, str], *, slice_kind: str) -> None:
+    """`slice_kind` is the *published* (`A`) commit's own genuinely
+    validated `workflow-metadata.slice_kind` -- never read from the review
+    block itself (the review schema carries no such field), so a
+    dishonest review block can never lower its own reviewer-policy bar."""
     missing = [k for k in _REQUIRED_REVIEW_FIELDS if k not in fields]
     if missing:
         raise ReviewValidationError(f"review metadata missing required field(s): {missing}")
@@ -202,17 +206,17 @@ def validate_review_metadata_structure(fields: dict[str, str]) -> None:
         )
     _validate_verdict_findings_pair(fields["verdict"], fields["findings"], context="review")
 
-    # Simplified scope: enforced here using only what review metadata
-    # itself carries (risk_class). Fully cross-checking "executable"
-    # (slice_kind: parser|tooling) against the published Work-done
-    # metadata at the same commit is recorded as follow-on hardening.
+    # Sol Medium is required for the primary review of every Class H
+    # proposal *and* every executable (parser/tooling) slice, regardless
+    # of risk_class -- not only risk_class == H.
+    requires_sol_medium = fields["risk_class"] == "H" or slice_kind in _EXECUTABLE_SLICE_KINDS
     if (
         fields["reviewer_role"] == "primary"
-        and fields["risk_class"] == "H"
+        and requires_sol_medium
         and fields["reviewer_model"] != _REQUIRED_PRIMARY_REVIEWER_MODEL
     ):
         raise ReviewValidationError(
-            f"the primary reviewer for Class H work must be "
+            f"the primary reviewer for Class H or executable (parser/tooling) work must be "
             f"{_REQUIRED_PRIMARY_REVIEWER_MODEL!r}, got {fields['reviewer_model']!r}"
         )
 
@@ -227,6 +231,74 @@ def validate_escalation_metadata_structure(fields: dict[str, str]) -> None:
             f"got {fields['trigger']!r}"
         )
     _validate_verdict_findings_pair(fields["verdict"], fields["findings"], context="escalation")
+
+
+def extract_and_validate_published_metadata(
+    handoff_at_a: str, *, publication_sha: str
+) -> dict[str, str]:
+    """Parses and structurally validates `A`'s own `workflow-metadata`
+    block (reusing `check_handoff.py`'s own validator, never a parallel
+    reimplementation of that schema) and asserts it is genuinely
+    `state: published` -- a block that merely parses is never trusted as
+    correct without this."""
+    metadata_text = ch.extract_latest_work_done_metadata_text(handoff_at_a)
+    fields = ch.parse_metadata_fields(metadata_text)
+    try:
+        ch.validate_structure(fields)
+    except ch.HandoffValidationError as exc:
+        raise ReviewValidationError(
+            f"A ({publication_sha}) workflow-metadata block is invalid: {exc}"
+        ) from exc
+    if fields["state"] != "published":
+        raise ReviewValidationError(
+            f"A ({publication_sha}) workflow-metadata state must be 'published', "
+            f"got {fields['state']!r}"
+        )
+    return fields
+
+
+def _cross_check_published_and_review_metadata(
+    published_fields: dict[str, str], review_fields: dict[str, str]
+) -> None:
+    """The published (`A`) and review (`R`) metadata blocks describe the
+    same slice from two different commits -- every field they both carry
+    must agree exactly; a reviewer's own claims are never trusted over
+    what `A` itself published."""
+    pairs = (
+        ("slice_id", published_fields["slice_id"], review_fields["slice_id"]),
+        ("risk_class", published_fields["risk_class"], review_fields["risk_class"]),
+        ("candidate_sha", published_fields["candidate_sha"], review_fields["candidate_sha"]),
+        ("gate", published_fields["executed_gate"], review_fields["gate"]),
+        ("receipt_id", published_fields["receipt_id"], review_fields["receipt_id"]),
+        ("receipt_path", published_fields["receipt_path"], review_fields["receipt_path"]),
+    )
+    for name, published_value, review_value in pairs:
+        if published_value != review_value:
+            raise ReviewValidationError(
+                f"published (A) workflow-metadata {name}={published_value!r} does not match "
+                f"review (R) metadata {name}={review_value!r}"
+            )
+
+
+def _require_base_sha_ancestor(base_sha: str, candidate_sha: str, *, repo_root: Path) -> None:
+    result = subprocess.run(
+        [
+            "git",
+            "-c",
+            f"safe.directory={repo_root.as_posix()}",
+            "merge-base",
+            "--is-ancestor",
+            base_sha,
+            candidate_sha,
+        ],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise ReviewValidationError(
+            f"published base_sha {base_sha!r} is not an ancestor of candidate {candidate_sha!r}"
+        )
 
 
 def _validate_verdict_findings_pair(verdict: str, findings: str, *, context: str) -> None:
@@ -274,9 +346,19 @@ def validate_c_a_r_chain(
         publication_sha, review_sha, handoff_at_a, handoff_at_r, repo_root=repo_root
     )
 
+    published_fields = extract_and_validate_published_metadata(
+        handoff_at_a, publication_sha=publication_sha
+    )
+    if published_fields["candidate_sha"] != candidate_sha:
+        raise ReviewValidationError(
+            f"published (A) workflow-metadata candidate_sha "
+            f"{published_fields['candidate_sha']!r} != actual C {candidate_sha!r}"
+        )
+    _require_base_sha_ancestor(published_fields["base_sha"], candidate_sha, repo_root=repo_root)
+
     review_text = extract_review_metadata_text(handoff_at_r)
     review_fields = ch.parse_metadata_fields(review_text)
-    validate_review_metadata_structure(review_fields)
+    validate_review_metadata_structure(review_fields, slice_kind=published_fields["slice_kind"])
     for escalation_fields in extract_escalation_blocks(handoff_at_r):
         validate_escalation_metadata_structure(escalation_fields)
 
@@ -290,6 +372,7 @@ def validate_c_a_r_chain(
             f"review metadata publication_commit_sha {review_fields['publication_commit_sha']!r} "
             f"!= actual A {publication_sha!r}"
         )
+    _cross_check_published_and_review_metadata(published_fields, review_fields)
 
     receipt_text = read_file_at_commit(
         publication_sha, review_fields["receipt_path"], repo_root=repo_root
@@ -302,6 +385,18 @@ def validate_c_a_r_chain(
         raise ReviewValidationError("review metadata gate does not match the receipt's own gate")
     if receipt["candidate_sha"] != candidate_sha:
         raise ReviewValidationError("receipt's own candidate_sha does not match C")
+    if receipt["slice_id"] != published_fields["slice_id"]:
+        raise ReviewValidationError(
+            "receipt's own slice_id does not match the published (A) workflow-metadata slice_id"
+        )
+    if receipt["risk_class"] != published_fields["risk_class"]:
+        raise ReviewValidationError(
+            "receipt's own risk_class does not match the published (A) workflow-metadata risk_class"
+        )
+    if receipt["base_sha"] != published_fields["base_sha"]:
+        raise ReviewValidationError(
+            "receipt's own base_sha does not match the published (A) workflow-metadata base_sha"
+        )
 
     recomputed_eligible = vr.compute_approval_eligible(receipt)
     if review_fields["verdict"] == "approved" and not recomputed_eligible:
@@ -309,6 +404,13 @@ def validate_c_a_r_chain(
             "verdict: approved but the receipt's recomputed approval_eligible is false"
         )
 
+    # Internal-only keys, never present in the parsed review text itself --
+    # carry the independently-validated published metadata forward to
+    # `check_merge_eligibility` and `validate_published` (e.g. for the
+    # gate: docs merge-eligibility restriction and the post-merge
+    # artifact's B/C/A/R cross-check) without re-reading the handoff again.
+    review_fields["published_slice_kind"] = published_fields["slice_kind"]
+    review_fields["published_base_sha"] = published_fields["base_sha"]
     return review_fields
 
 
@@ -316,16 +418,25 @@ def check_merge_eligibility(
     candidate_sha: str, publication_sha: str, review_sha: str, *, repo_root: Path = REPO_ROOT
 ) -> dict[str, str]:
     """Record validity (`validate_c_a_r_chain`) plus the additional,
-    stricter requirement that the record is actually *merge*-eligible:
+    stricter requirements that make a record actually *merge*-eligible:
     `verdict: approved` (findings: none and reviewer-policy compliance are
     already enforced by `validate_review_metadata_structure`, and
-    approval-eligibility is already cross-checked above)."""
+    approval-eligibility is already cross-checked above); and, for a
+    `gate: docs` receipt specifically, that the bound published slice is
+    genuinely `slice_kind: docs` -- a docs-gate receipt (which never runs
+    the full suite or witnesses) must never be reused to merge
+    parser/tooling work."""
     review_fields = validate_c_a_r_chain(
         candidate_sha, publication_sha, review_sha, repo_root=repo_root
     )
     if review_fields["verdict"] != "approved":
         raise ReviewValidationError(
             f"not merge-eligible: verdict is {review_fields['verdict']!r}, not 'approved'"
+        )
+    if review_fields["gate"] == "docs" and review_fields["published_slice_kind"] != "docs":
+        raise ReviewValidationError(
+            "gate: docs is only merge-eligible when the published slice is genuinely "
+            f"slice_kind: docs, got {review_fields['published_slice_kind']!r}"
         )
     return review_fields
 
@@ -447,6 +558,11 @@ def validate_merge(
 
 
 def _validate_post_merge_artifact_schema(artifact: dict[str, Any]) -> None:
+    """Recursively closed/typed, mirroring `verification_receipts.py`'s
+    own nested validators for every field this artifact shares with a
+    receipt (`coordinator`, `steps`, `full_suite`, `mutation_witnesses`,
+    `migration_matrix`, `cleanup`, `environment_descriptor`) -- never a
+    parallel, drifting reimplementation of those same rules."""
     missing = [k for k in _REQUIRED_POST_MERGE_ARTIFACT_FIELDS if k not in artifact]
     if missing:
         raise ReviewValidationError(f"post-merge artifact missing required field(s): {missing}")
@@ -464,6 +580,140 @@ def _validate_post_merge_artifact_schema(artifact: dict[str, Any]) -> None:
     # would be a schema violation, enforced here by the closed field list
     # above simply never including any "publication of self" key.
 
+    for sha_field in (
+        "base_sha",
+        "candidate_sha",
+        "publication_commit_sha",
+        "review_commit_sha",
+        "merged_commit",
+    ):
+        value = artifact[sha_field]
+        if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{40}", value):
+            raise ReviewValidationError(
+                f"post-merge artifact {sha_field!r} must be a full 40-hex commit SHA, "
+                f"got {value!r}"
+            )
+
+    # Every nested-shape check below reuses `verification_receipts.py`'s
+    # own (private) validators -- never a parallel reimplementation --
+    # so its `ReceiptError` is converted to this module's own exception
+    # type at this single boundary, once.
+    try:
+        vr._require_str(artifact, "schema_version", context="post-merge artifact")
+        vr._require_str(artifact, "slice_id", context="post-merge artifact")
+        vr.validate_receipt_id(artifact["original_receipt_id"])
+        vr._require_str(artifact, "original_receipt_path", context="post-merge artifact")
+        if not artifact["original_receipt_path"]:
+            raise vr.ReceiptError("post-merge artifact 'original_receipt_path' must not be empty")
+
+        env_descriptor = vr._require_exact_keys(
+            artifact["environment_descriptor"],
+            vr._ENV_DESCRIPTOR_KEYS,
+            context="environment_descriptor",
+        )
+        vr._require_str(env_descriptor, "python_version", context="environment_descriptor")
+        vr._require_str(env_descriptor, "platform", context="environment_descriptor")
+        if env_descriptor["postgresql_version"] is not None and not isinstance(
+            env_descriptor["postgresql_version"], str
+        ):
+            raise vr.ReceiptError("environment_descriptor.postgresql_version must be a str or null")
+        vr._require_str(
+            env_descriptor, "installed_distributions_digest", context="environment_descriptor"
+        )
+
+        vr._validate_coordinator(artifact["coordinator"])
+        vr._validate_steps(artifact)
+        vr._validate_ran_or_not_run_summary(
+            artifact, "full_suite", ran_keys=frozenset({"status", "count"})
+        )
+        vr._validate_ran_or_not_run_summary(
+            artifact,
+            "mutation_witnesses",
+            ran_keys=frozenset({"status", "guard_refs", "passed", "failed"}),
+        )
+        vr._validate_migration_matrix(artifact)
+
+        cleanup = vr._require_exact_keys(artifact["cleanup"], vr._CLEANUP_KEYS, context="cleanup")
+        vr._require_bool(cleanup, "attempted", context="cleanup")
+        if cleanup["status"] not in ("PASS", "FAIL"):
+            raise vr.ReceiptError("cleanup.status must be 'PASS' or 'FAIL'")
+    except vr.ReceiptError as exc:
+        raise ReviewValidationError(f"post-merge artifact invalid: {exc}") from exc
+
+
+def _validate_post_merge_artifact_evidence(artifact: dict[str, Any]) -> None:
+    """Beyond shape: a post-merge artifact must show genuine, positive
+    success evidence -- mirroring `verification_receipts.compute_approval_
+    eligible`'s logic, but for the always-full-suite `M..Q` re-verification
+    record specifically (post-merge verification is never partial)."""
+    if not artifact["steps"]:
+        raise ReviewValidationError("post-merge artifact has no recorded steps")
+    if any(step["status"] == "FAIL" for step in artifact["steps"]):
+        raise ReviewValidationError("post-merge artifact records a FAILed step")
+    if artifact["cleanup"].get("status") != "PASS":
+        raise ReviewValidationError("post-merge artifact's cleanup did not pass")
+
+    full_suite = artifact["full_suite"]
+    count = full_suite.get("count")
+    if (
+        full_suite.get("status") != "ran"
+        or not isinstance(count, int)
+        or isinstance(count, bool)
+        or count <= 0
+    ):
+        raise ReviewValidationError(
+            "post-merge artifact's full suite did not genuinely run and pass"
+        )
+
+    witnesses = artifact["mutation_witnesses"]
+    passed = witnesses.get("passed")
+    failed = witnesses.get("failed")
+    numeric = (
+        isinstance(passed, int)
+        and isinstance(failed, int)
+        and not isinstance(passed, bool)
+        and not isinstance(failed, bool)
+    )
+    if witnesses.get("status") != "ran" or not numeric or failed != 0 or passed <= 0:
+        raise ReviewValidationError(
+            "post-merge artifact's mutation witnesses did not genuinely run and pass"
+        )
+
+    migration = artifact["migration_matrix"]
+    if migration.get("triggered") and migration.get("status") != "PASS":
+        raise ReviewValidationError(
+            "post-merge artifact's migration matrix was triggered but did not pass"
+        )
+
+
+def validate_m_to_q_transition(
+    merge_sha: str,
+    q_sha: str,
+    handoff_at_m: str,
+    handoff_at_q: str,
+    *,
+    repo_root: Path = REPO_ROOT,
+) -> None:
+    """`M..Q` may touch `docs/LLM_HANDOFF.md` at most once, and only by
+    *appending* -- mirrors `validate_a_to_r_transition`'s pure-append
+    check. Unlike `A..R`, an append is not mandatory: `Q` may add only the
+    post-merge artifact and leave the handoff untouched."""
+    lines = _name_status_lines(merge_sha, q_sha, repo_root)
+    handoff_lines = [line for line in lines if line.endswith("docs/LLM_HANDOFF.md")]
+    if len(handoff_lines) > 1:
+        raise ReviewValidationError("M..Q must touch docs/LLM_HANDOFF.md at most once")
+    if not handoff_lines:
+        return
+    if not handoff_lines[0].startswith("M\t"):
+        raise ReviewValidationError(
+            f"M..Q must modify (not add/delete/rename) docs/LLM_HANDOFF.md, got {handoff_lines}"
+        )
+    if not handoff_at_q.startswith(handoff_at_m):
+        raise ReviewValidationError(
+            "M..Q must be a pure append to docs/LLM_HANDOFF.md -- every existing byte "
+            "must remain unchanged"
+        )
+
 
 def validate_q(
     merge_sha: str,
@@ -474,7 +724,8 @@ def validate_q(
     """`Q` is identified *externally*, as the caller-supplied direct child
     of `M` -- never discovered by walking `M`'s children (Git has no such
     query). `M..Q` may add exactly one post-merge artifact (status `A`)
-    plus the permitted merge-record addition to `docs/LLM_HANDOFF.md`."""
+    plus the permitted append-only merge-record addition to
+    `docs/LLM_HANDOFF.md` (see `validate_m_to_q_transition`)."""
     require_single_parent(q_sha, merge_sha, label="Q", repo_root=repo_root)
 
     lines = _name_status_lines(merge_sha, q_sha, repo_root)
@@ -488,13 +739,16 @@ def validate_q(
     unexpected = [line for line in other if line not in handoff_lines]
     if unexpected:
         raise ReviewValidationError(f"M..Q must not change any other path, got {unexpected}")
-    if len(handoff_lines) > 1:
-        raise ReviewValidationError("M..Q must touch docs/LLM_HANDOFF.md at most once")
+
+    handoff_at_m = read_file_at_commit(merge_sha, "docs/LLM_HANDOFF.md", repo_root=repo_root)
+    handoff_at_q = read_file_at_commit(q_sha, "docs/LLM_HANDOFF.md", repo_root=repo_root)
+    validate_m_to_q_transition(merge_sha, q_sha, handoff_at_m, handoff_at_q, repo_root=repo_root)
 
     artifact_path = artifact_additions[0].split("\t", 1)[1]
     artifact_text = read_file_at_commit(q_sha, artifact_path, repo_root=repo_root)
     artifact = vr.load_receipt_from_text(artifact_text)
     _validate_post_merge_artifact_schema(artifact)
+    _validate_post_merge_artifact_evidence(artifact)
     if artifact["merged_commit"] != merge_sha:
         raise ReviewValidationError("post-merge artifact's merged_commit does not match M")
     return artifact
@@ -511,10 +765,12 @@ def validate_published(
     repo_root: Path = REPO_ROOT,
 ) -> dict[str, Any]:
     """The complete post-merge validation: independently re-derives
-    `C -> A -> R`, validates `M`, validates `Q`'s artifact, and cross-
-    checks the artifact's own recorded references against the
-    independently recomputed chain -- a reader recomputes, it never
-    trusts the artifact's own claims alone."""
+    `C -> A -> R`, validates `M`, validates `Q`'s artifact, cross-checks
+    the artifact's own recorded `B`/`C`/`A`/`R` references against the
+    independently recomputed chain, and cross-checks the artifact's
+    recorded original-receipt reference against that receipt's own
+    content, re-read and re-validated at `M` -- a reader recomputes, it
+    never trusts the artifact's own claims alone."""
     review_fields = validate_c_a_r_chain(
         candidate_sha, publication_sha, review_sha, repo_root=repo_root
     )
@@ -525,10 +781,31 @@ def validate_published(
         artifact["candidate_sha"] != candidate_sha
         or artifact["publication_commit_sha"] != publication_sha
         or artifact["review_commit_sha"] != review_sha
+        or artifact["base_sha"] != review_fields["published_base_sha"]
+        or artifact["slice_id"] != review_fields["slice_id"]
+        or artifact["original_receipt_id"] != review_fields["receipt_id"]
+        or artifact["original_receipt_path"] != review_fields["receipt_path"]
     ):
         raise ReviewValidationError(
-            "post-merge artifact's recorded C/A/R do not match the independently recomputed chain"
+            "post-merge artifact's recorded B/C/A/R references do not match "
+            "the independently recomputed chain"
         )
+
+    original_receipt_text = read_file_at_commit(
+        merge_sha, artifact["original_receipt_path"], repo_root=repo_root
+    )
+    original_receipt = vr.load_receipt_from_text(original_receipt_text)
+    vr.validate_receipt_schema(original_receipt)
+    if (
+        original_receipt["receipt_id"] != artifact["original_receipt_id"]
+        or original_receipt["candidate_sha"] != artifact["candidate_sha"]
+        or original_receipt["base_sha"] != artifact["base_sha"]
+    ):
+        raise ReviewValidationError(
+            "post-merge artifact's original_receipt reference does not match "
+            "that receipt's own content"
+        )
+
     if review_fields["verdict"] != "approved":
         raise ReviewValidationError("post-merge validation requires an approved review record")
     return artifact
@@ -543,8 +820,16 @@ def validate_published(
 def run_via_detached_checkout(
     commit_sha: str, mode: str, extra_args: list[str], *, repo_root: Path = REPO_ROOT
 ) -> subprocess.CompletedProcess[str]:
+    """Fails closed on cleanup: unlike a prior version of this function
+    (which suppressed `WorktreeError` and used `shutil.rmtree(...,
+    ignore_errors=True)`, silently swallowing any teardown failure), a
+    worktree-removal or run-directory-removal failure here is raised as
+    `ReviewValidationError` -- the caller can rely on either a clean
+    return (no residual worktree or run directory, verified below) or an
+    explicit exception, never a silent partial cleanup."""
     run_dir = Path(tempfile.mkdtemp(prefix="launcher-"))
     worktree: Path | None = None
+    cleanup_errors: list[str] = []
     try:
         worktree = vw.create_detached_worktree(commit_sha, run_dir)
         command = [
@@ -555,14 +840,35 @@ def run_via_detached_checkout(
             mode,
             *extra_args,
         ]
-        return subprocess.run(
+        result = subprocess.run(
             command, cwd=str(worktree / "backend"), capture_output=True, text=True
         )
     finally:
         if worktree is not None:
-            with contextlib.suppress(vw.WorktreeError):
+            try:
                 vw.remove_worktree(worktree)
-        shutil.rmtree(run_dir, ignore_errors=True)
+                vw.confirm_no_leak(worktree)
+            except (vw.WorktreeError, OSError) as exc:
+                cleanup_errors.append(f"worktree teardown: {exc}")
+        try:
+            if run_dir.exists():
+                shutil.rmtree(run_dir)
+        except OSError as exc:
+            cleanup_errors.append(f"run directory removal: {exc}")
+
+    if cleanup_errors:
+        raise ReviewValidationError(
+            f"detached-checkout launcher cleanup failed: {'; '.join(cleanup_errors)}"
+        )
+    if worktree is not None and worktree.exists():
+        raise ReviewValidationError(
+            f"detached-checkout launcher left a residual worktree: {worktree}"
+        )
+    if run_dir.exists():
+        raise ReviewValidationError(
+            f"detached-checkout launcher left a residual run directory: {run_dir}"
+        )
+    return result
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
