@@ -548,18 +548,101 @@ def _require_positive_int_allow_zero(obj: dict[str, Any], key: str, *, context: 
     return value
 
 
-def _required_step_names_present(data: dict[str, Any]) -> bool:
-    """Every gate requires at least the static/repository checks to have
-    genuinely run -- a receipt with an empty step list, one missing these
-    names, one declaring a required name more than once, or one where a
-    required step's own status is not PASS, can never be eligible,
-    regardless of what its other fields claim."""
-    required = {"ruff format --check", "ruff check", "mypy", "check_repo.py", "git diff --check"}
-    for name in required:
+_ALWAYS_REQUIRED_STEP_NAMES = frozenset(
+    {"ruff format --check", "ruff check", "mypy", "check_repo.py", "git diff --check"}
+)
+_FINAL_EXECUTABLE_BASE_STEP_NAMES = _ALWAYS_REQUIRED_STEP_NAMES | frozenset(
+    {
+        "disposable test-database URL validation",
+        "test-database reachability preflight",
+        "full pytest suite",
+        "contract mutation witnesses",
+        "handoff metadata validation",
+        "temporary-directory cleanup",
+    }
+)
+_DOCS_STEP_NAMES = _ALWAYS_REQUIRED_STEP_NAMES | frozenset(
+    {"handoff metadata validation", "temporary-directory cleanup"}
+)
+
+
+def compute_applicable_final_step_names(
+    *, focused_tests_computed: bool, migration_triggered: bool
+) -> frozenset[str]:
+    """The exact step-name set an executable `final`-gate run (or the
+    always-full post-merge re-verification) must show, each present
+    exactly once with status PASS -- defined once here and reused by both
+    `compute_approval_eligible` (below) and `check_review.py`'s post-merge
+    artifact evidence check, so the two can never independently drift.
+    `focused_tests_computed`/`migration_triggered` are the only two
+    conditionally-applicable steps `verify.py` itself ever omits for an
+    executable run (`verify.py --gate final` never omits the DB/full-
+    suite/witness/handoff/cleanup steps unconditionally present below)."""
+    names = set(_FINAL_EXECUTABLE_BASE_STEP_NAMES)
+    if focused_tests_computed:
+        names.add("focused pytest")
+    if migration_triggered:
+        names.add("migration matrix")
+    return frozenset(names)
+
+
+def compute_applicable_docs_step_names() -> frozenset[str]:
+    """The exact, separate step-name set for a `docs`-gate run --
+    `verify.py --docs-only` genuinely skips the DB/full-suite/focused/
+    witness/migration steps entirely (reported nowhere, not even
+    `NOT_RUN`), so those must never be required here."""
+    return _DOCS_STEP_NAMES
+
+
+def _step_names_present_exactly_once_pass(data: dict[str, Any], names: frozenset[str]) -> bool:
+    """Every applicable step name must exist exactly once in `steps`,
+    with status PASS -- a receipt with an empty step list, one missing a
+    name, one declaring a name more than once, one where an applicable
+    step is present but `NOT_RUN`, or one where an applicable step's own
+    status is not PASS, can never be eligible, regardless of what its
+    other fields claim."""
+    for name in names:
         matching = [s for s in data["steps"] if s["name"] == name]
         if len(matching) != 1 or matching[0]["status"] != "PASS":
             return False
     return True
+
+
+def _migration_matrix_genuinely_passed(data: dict[str, Any]) -> bool:
+    """When `migration_matrix.triggered` is true, approval eligibility
+    requires: the `migration matrix` step exists exactly once with PASS
+    (checked by the caller via `_step_names_present_exactly_once_pass`,
+    reused here defensively); the matrix's own `status` is PASS; the
+    before/after `DevelopmentState` values are equal (a migration that
+    genuinely round-tripped leaves the schema exactly as it found it --
+    drift here means the matrix itself is untrustworthy even if it
+    reported PASS); and the fresh-database lifecycle was both created and
+    cleaned up. Untriggered is vacuously fine -- nothing to check."""
+    migration = data["migration_matrix"]
+    if not isinstance(migration, dict):
+        return False
+    if not migration.get("triggered"):
+        return True
+    if migration.get("status") != "PASS":
+        return False
+    matching = [s for s in data["steps"] if s.get("name") == "migration matrix"]
+    if len(matching) != 1 or matching[0].get("status") != "PASS":
+        return False
+    dev_before = migration.get("dev_state_before")
+    dev_after = migration.get("dev_state_after")
+    if not isinstance(dev_before, dict) or not isinstance(dev_after, dict):
+        return False
+    if dev_before != dev_after:
+        return False
+    if migration.get("fresh_database_created") is not True:
+        return False
+    if migration.get("fresh_database_cleaned_up") is not True:
+        return False
+    postgresql_version = migration.get("postgresql_server_version")
+    if not isinstance(postgresql_version, str) or not postgresql_version:
+        return False
+    steps_list = migration.get("steps")
+    return isinstance(steps_list, list) and bool(steps_list)
 
 
 def _full_suite_genuinely_ran(data: dict[str, Any]) -> bool:
@@ -586,24 +669,42 @@ def _witnesses_genuinely_ran_and_passed(data: dict[str, Any]) -> bool:
 def compute_approval_eligible(data: dict[str, Any]) -> bool:
     """Recomputed from the receipt's own content -- never trusted as
     asserted. False for `fast`. True only for a successful executable
-    `final` where: every named static-check step is present; cleanup
-    passed; both worktree snapshots are identical and non-trivial; no
-    step reports FAIL; the full suite genuinely ran with a positive
-    numeric count (never `not_run`, never a non-numeric/boolean value);
-    and every dynamically active mutation guard ran and passed (a
-    positive numeric `passed` count, zero `failed`). A receipt with an
-    empty step list and every execution group left `not_run` is the
-    degenerate case this function must reject outright -- it satisfies no
-    positive requirement below. True for a successful `docs` gate run on
-    the analogous terms -- but a `docs`-gate receipt is only ever *merge*-
-    eligible when the paired handoff metadata separately declares
-    `slice_kind: docs` (checked by `check_review.py`, which has access to
-    both records; this receipt alone never knows the handoff's
-    `slice_kind`)."""
+    `final` where: every applicable step for this run (static checks, DB
+    URL safety, DB reachability, focused tests when computed, full suite,
+    all witnesses, migration matrix when triggered, handoff validation,
+    and temporary-directory cleanup -- see `compute_applicable_final_
+    step_names`) is present exactly once with PASS; cleanup passed; both
+    worktree snapshots are identical and non-trivial; no step reports
+    FAIL; the full suite genuinely ran with a positive numeric count
+    (never `not_run`, never a non-numeric/boolean value); every
+    dynamically active mutation guard ran and passed (a positive numeric
+    `passed` count, zero `failed`); and, when `migration_matrix.triggered`
+    is true, its own evidence genuinely passed (see
+    `_migration_matrix_genuinely_passed`). A receipt with an empty step
+    list and every execution group left `not_run` is the degenerate case
+    this function must reject outright -- it satisfies no positive
+    requirement below. True for a successful `docs` gate run against its
+    own separate, smaller step set (`compute_applicable_docs_step_names`)
+    -- but a `docs`-gate receipt is only ever *merge*-eligible when the
+    paired handoff metadata separately declares `slice_kind: docs`
+    (checked by `check_review.py`, which has access to both records; this
+    receipt alone never knows the handoff's `slice_kind`)."""
     if not data["steps"]:
         return False
-    if not _required_step_names_present(data):
+
+    gate: str = data["gate"]
+    if gate == "fast":
         return False
+    if gate == "docs":
+        required_names = compute_applicable_docs_step_names()
+    else:
+        required_names = compute_applicable_final_step_names(
+            focused_tests_computed=data["focused_tests"].get("status") == "ran",
+            migration_triggered=bool(data["migration_matrix"].get("triggered")),
+        )
+    if not _step_names_present_exactly_once_pass(data, required_names):
+        return False
+
     if data["cleanup"].get("status") != "PASS":
         return False
     coordinator = data["coordinator"]
@@ -615,10 +716,9 @@ def compute_approval_eligible(data: dict[str, Any]) -> bool:
         return False
     if any(step["status"] == "FAIL" for step in data["steps"]):
         return False
-
-    gate: str = data["gate"]
-    if gate == "fast":
+    if not _migration_matrix_genuinely_passed(data):
         return False
+
     if gate == "final":
         return _full_suite_genuinely_ran(data) and _witnesses_genuinely_ran_and_passed(data)
-    return bool(gate == "docs")
+    return True

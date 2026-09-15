@@ -31,10 +31,57 @@ def _commit(repo: Path, message: str) -> str:
     return _git(["rev-parse", "HEAD"], repo)
 
 
+def _real_active_guard_refs() -> list[str]:
+    from tests.contracts.taxonomy import active_guards
+
+    return sorted(active_guards().keys())
+
+
 def _minimal_receipt(
     candidate_sha: str, receipt_id: str, *, gate: str = "final", repo_root: Path
 ) -> dict:
     from scripts import verification_receipts as vr
+
+    static_steps = [
+        {"name": "ruff format --check", "status": "PASS", "duration_seconds": 0.1},
+        {"name": "ruff check", "status": "PASS", "duration_seconds": 0.1},
+        {"name": "mypy", "status": "PASS", "duration_seconds": 0.1},
+        {"name": "check_repo.py", "status": "PASS", "duration_seconds": 0.1},
+        {"name": "git diff --check", "status": "PASS", "duration_seconds": 0.1},
+    ]
+    tail_steps = [
+        {"name": "handoff metadata validation", "status": "PASS", "duration_seconds": 0.0},
+        {"name": "temporary-directory cleanup", "status": "PASS", "duration_seconds": 0.1},
+    ]
+    if gate == "final":
+        guard_refs = _real_active_guard_refs()
+        steps = [
+            *static_steps,
+            {
+                "name": "disposable test-database URL validation",
+                "status": "PASS",
+                "duration_seconds": 0.0,
+            },
+            {
+                "name": "test-database reachability preflight",
+                "status": "PASS",
+                "duration_seconds": 0.1,
+            },
+            {"name": "full pytest suite", "status": "PASS", "duration_seconds": 1.0},
+            {"name": "contract mutation witnesses", "status": "PASS", "duration_seconds": 1.0},
+            *tail_steps,
+        ]
+        full_suite = {"status": "ran", "count": 1}
+        mutation_witnesses = {
+            "status": "ran",
+            "guard_refs": guard_refs,
+            "passed": len(guard_refs),
+            "failed": 0,
+        }
+    else:  # docs
+        steps = [*static_steps, *tail_steps]
+        full_suite = {"status": "not_run"}
+        mutation_witnesses = {"status": "not_run"}
 
     return {
         "schema_version": "1",
@@ -66,18 +113,10 @@ def _minimal_receipt(
             repo_root, ["backend/pyproject.toml"]
         ),
         "environment_descriptor": vr.environment_descriptor(postgresql_version=None),
-        "steps": [
-            {"name": "ruff format --check", "status": "PASS", "duration_seconds": 0.1},
-            {"name": "ruff check", "status": "PASS", "duration_seconds": 0.1},
-            {"name": "mypy", "status": "PASS", "duration_seconds": 0.1},
-            {"name": "check_repo.py", "status": "PASS", "duration_seconds": 0.1},
-            {"name": "git diff --check", "status": "PASS", "duration_seconds": 0.1},
-            {"name": "full pytest suite", "status": "PASS", "duration_seconds": 1.0},
-            {"name": "contract mutation witnesses", "status": "PASS", "duration_seconds": 1.0},
-        ],
-        "full_suite": {"status": "ran", "count": 1},
+        "steps": steps,
+        "full_suite": full_suite,
         "focused_tests": {"status": "not_run"},
-        "mutation_witnesses": {"status": "ran", "guard_refs": [], "passed": 1, "failed": 0},
+        "mutation_witnesses": mutation_witnesses,
         "affected_surface": {
             "base_sha": "6" * 40,
             # `_build_c_a_r` always adds `src.txt` (real `verification_scope`
@@ -94,7 +133,7 @@ def _minimal_receipt(
         },
         "migration_matrix": {"triggered": False},
         "cleanup": {"attempted": True, "status": "PASS"},
-        "approval_eligible": gate == "final",
+        "approval_eligible": True,
     }
 
 
@@ -233,6 +272,16 @@ def _build_c_a_r(
     receipt["base_sha"] = base_sha
     if migration_matrix_override is not None:
         receipt["migration_matrix"] = migration_matrix_override
+        if migration_matrix_override.get("triggered"):
+            receipt["steps"].append(
+                {
+                    "name": "migration matrix",
+                    "status": (
+                        "PASS" if migration_matrix_override.get("status") == "PASS" else "FAIL"
+                    ),
+                    "duration_seconds": 1.0,
+                }
+            )
     if receipt_mutator is not None:
         receipt_mutator(receipt)
     receipt_dir = repo / "docs" / "verification-receipts" / candidate_sha
@@ -503,20 +552,29 @@ def test_migration_trigger_mismatch_rejects_merge_eligibility(car_repo: Path) ->
         cr.check_merge_eligibility(candidate_sha, publication_sha, review_sha, repo_root=car_repo)
 
 
+def _valid_triggered_migration_matrix() -> dict:
+    # The development database itself is never migrated by the matrix --
+    # only its state is read before/after to prove no side effect -- so a
+    # genuinely PASSing matrix always has dev_state_before == dev_state_after
+    # (see `migration_matrix.run_full_matrix`, which itself raises otherwise).
+    dev_state = {"alembic_revision": "0011", "schema_fingerprint": "a" * 64}
+    return {
+        "triggered": True,
+        "status": "PASS",
+        "dev_state_before": dict(dev_state),
+        "dev_state_after": dict(dev_state),
+        "postgresql_server_version": "PostgreSQL 16.0",
+        "fresh_database_created": True,
+        "fresh_database_cleaned_up": True,
+        "steps": ["existing-head upgrade"],
+    }
+
+
 def test_migration_trigger_matching_true_passes(car_repo: Path) -> None:
     candidate_sha, publication_sha, review_sha, _ = _build_c_a_r(
         car_repo,
         extra_files={"backend/migrations/versions/0001_add_table.py": "# migration\n"},
-        migration_matrix_override={
-            "triggered": True,
-            "status": "PASS",
-            "dev_state_before": {"alembic_revision": "0000", "schema_fingerprint": "a" * 64},
-            "dev_state_after": {"alembic_revision": "0001", "schema_fingerprint": "b" * 64},
-            "postgresql_server_version": "PostgreSQL 16.0",
-            "fresh_database_created": True,
-            "fresh_database_cleaned_up": True,
-            "steps": ["existing-head upgrade"],
-        },
+        migration_matrix_override=_valid_triggered_migration_matrix(),
     )
     fields = cr.validate_c_a_r_chain(candidate_sha, publication_sha, review_sha, repo_root=car_repo)
     assert fields["verdict"] == "approved"
@@ -591,15 +649,71 @@ def test_witness_guard_refs_missing_required_ref_rejected(car_repo: Path) -> Non
         receipt["steps"].append(
             {"name": "focused pytest", "status": "PASS", "duration_seconds": 1.0}
         )
-        # `mutation_witnesses.guard_refs` is deliberately left empty (the
-        # `_minimal_receipt` default) -- required_guard_refs is non-empty
-        # for this diff, so this must be rejected.
+        # Explicitly emptied (the `_minimal_receipt` default for gate:
+        # final is now the complete active-guard inventory, which would
+        # otherwise trivially satisfy this diff's required subset) --
+        # required_guard_refs is non-empty for this diff, so this must be
+        # rejected.
+        receipt["mutation_witnesses"] = {
+            "status": "ran",
+            "guard_refs": [],
+            "passed": 0,
+            "failed": 0,
+        }
 
     candidate_sha, publication_sha, review_sha, _ = _build_c_a_r(
         car_repo, extra_files=extra_files, receipt_mutator=_mutate
     )
     with pytest.raises(cr.ReviewValidationError, match="mutation_witnesses.guard_refs"):
         cr.validate_c_a_r_chain(candidate_sha, publication_sha, review_sha, repo_root=car_repo)
+
+
+def test_final_gate_witness_inventory_rejects_a_single_claimed_guard(car_repo: Path) -> None:
+    """The exact required regression: for gate: final, a receipt claiming
+    only one of the complete active-guard inventory must be rejected --
+    final always runs (and must record) every currently active guard, not
+    merely a subset."""
+
+    def _mutate(receipt: dict) -> None:
+        only_one = _real_active_guard_refs()[:1]
+        receipt["mutation_witnesses"] = {
+            "status": "ran",
+            "guard_refs": only_one,
+            "passed": len(only_one),
+            "failed": 0,
+        }
+
+    candidate_sha, publication_sha, review_sha, _ = _build_c_a_r(car_repo, receipt_mutator=_mutate)
+    with pytest.raises(
+        cr.ReviewValidationError, match="does not equal the complete active-guard inventory"
+    ):
+        cr.validate_c_a_r_chain(candidate_sha, publication_sha, review_sha, repo_root=car_repo)
+
+
+def test_final_gate_witness_inventory_rejects_passed_count_mismatch(car_repo: Path) -> None:
+    """Even with the complete guard set claimed, `passed` must equal
+    `len(guard_refs)` and `failed` must be zero."""
+
+    def _mutate(receipt: dict) -> None:
+        all_guards = _real_active_guard_refs()
+        receipt["mutation_witnesses"] = {
+            "status": "ran",
+            "guard_refs": all_guards,
+            "passed": len(all_guards) - 1,
+            "failed": 1,
+        }
+
+    candidate_sha, publication_sha, review_sha, _ = _build_c_a_r(car_repo, receipt_mutator=_mutate)
+    with pytest.raises(cr.ReviewValidationError, match="must equal len\\(guard_refs\\)"):
+        cr.validate_c_a_r_chain(candidate_sha, publication_sha, review_sha, repo_root=car_repo)
+
+
+def test_final_gate_witness_inventory_does_not_apply_to_fast_gate() -> None:
+    """`_cross_check_final_gate_witness_inventory` is a no-op for any
+    gate other than `final` -- proven directly, since a `fast`-gate
+    record legitimately claims only a subset of guards."""
+    receipt = {"gate": "fast", "mutation_witnesses": {"status": "ran", "guard_refs": ["only-one"]}}
+    cr._cross_check_final_gate_witness_inventory(receipt)  # must not raise
 
 
 def test_verifier_hash_mismatch_rejected(car_repo: Path) -> None:
@@ -909,9 +1023,20 @@ def _build_m_q(
             {"name": "mypy", "status": "PASS", "duration_seconds": 0.1},
             {"name": "check_repo.py", "status": "PASS", "duration_seconds": 0.1},
             {"name": "git diff --check", "status": "PASS", "duration_seconds": 0.1},
+            {
+                "name": "disposable test-database URL validation",
+                "status": "PASS",
+                "duration_seconds": 0.0,
+            },
+            {
+                "name": "test-database reachability preflight",
+                "status": "PASS",
+                "duration_seconds": 0.1,
+            },
             {"name": "full pytest suite", "status": "PASS", "duration_seconds": 1.0},
             {"name": "contract mutation witnesses", "status": "PASS", "duration_seconds": 1.0},
             {"name": "handoff metadata validation", "status": "PASS", "duration_seconds": 0.01},
+            {"name": "temporary-directory cleanup", "status": "PASS", "duration_seconds": 0.1},
         ],
         "cleanup": {"attempted": True, "status": "PASS"},
     }
@@ -978,13 +1103,28 @@ def test_validate_published_end_to_end(car_repo: Path) -> None:
 
 @pytest.mark.parametrize(
     "omitted_step_name",
-    ["ruff format --check", "mypy", "check_repo.py", "git diff --check"],
+    [
+        "ruff format --check",
+        "mypy",
+        "check_repo.py",
+        "git diff --check",
+        "disposable test-database URL validation",
+        "test-database reachability preflight",
+        "full pytest suite",
+        "contract mutation witnesses",
+        "handoff metadata validation",
+        "temporary-directory cleanup",
+    ],
 )
 def test_validate_q_rejects_artifact_omitting_a_required_static_check_step(
     car_repo: Path, omitted_step_name: str
 ) -> None:
     """The exact required regression: a Q artifact omitting Ruff format,
-    mypy, check_repo, or git diff --check must be rejected."""
+    mypy, check_repo, or git diff --check must be rejected -- and, per
+    Sol's fourth correction round, the same holds for every other
+    applicable non-static step (DB URL safety, DB reachability, full
+    suite, all witnesses, handoff validation, temporary-directory
+    cleanup)."""
     candidate_sha, publication_sha, review_sha, _ = _build_c_a_r(car_repo)
     base_main_sha = _git(["rev-parse", "HEAD~3"], car_repo)
     merge_sha, q_sha = _build_m_q(car_repo, review_sha, base_main_sha)
@@ -1003,14 +1143,27 @@ def test_validate_q_rejects_artifact_omitting_a_required_static_check_step(
 
 @pytest.mark.parametrize(
     "not_run_step_name",
-    ["ruff format --check", "ruff check", "mypy", "check_repo.py", "git diff --check"],
+    [
+        "ruff format --check",
+        "ruff check",
+        "mypy",
+        "check_repo.py",
+        "git diff --check",
+        "disposable test-database URL validation",
+        "test-database reachability preflight",
+        "full pytest suite",
+        "contract mutation witnesses",
+        "handoff metadata validation",
+        "temporary-directory cleanup",
+    ],
 )
 def test_validate_q_rejects_artifact_marking_a_required_step_not_run(
     car_repo: Path, not_run_step_name: str
 ) -> None:
     """The exact required regression: a Q artifact marking one of the
     required static checks NOT_RUN must be rejected, identically to an
-    omission."""
+    omission -- and, per Sol's fourth correction round, the same holds
+    for every other applicable non-static step."""
     candidate_sha, publication_sha, review_sha, _ = _build_c_a_r(car_repo)
     base_main_sha = _git(["rev-parse", "HEAD~3"], car_repo)
     merge_sha, q_sha = _build_m_q(car_repo, review_sha, base_main_sha)
@@ -1058,16 +1211,7 @@ def test_validate_published_rejects_migration_trigger_mismatch(car_repo: Path) -
         # the real diff), so `validate_c_a_r_chain`'s own recomputation
         # passes cleanly -- isolating this test to the *artifact's*
         # migration_matrix, which is deliberately left wrong below.
-        migration_matrix_override={
-            "triggered": True,
-            "status": "PASS",
-            "dev_state_before": {"alembic_revision": "0000", "schema_fingerprint": "a" * 64},
-            "dev_state_after": {"alembic_revision": "0001", "schema_fingerprint": "b" * 64},
-            "postgresql_server_version": "PostgreSQL 16.0",
-            "fresh_database_created": True,
-            "fresh_database_cleaned_up": True,
-            "steps": ["existing-head upgrade"],
-        },
+        migration_matrix_override=_valid_triggered_migration_matrix(),
     )
     base_main_sha = _git(["rev-parse", "HEAD~3"], car_repo)
     merge_sha, q_sha = _build_m_q(car_repo, review_sha, base_main_sha)
@@ -1113,13 +1257,14 @@ def test_validate_q_rejects_artifact_with_a_failed_step(car_repo: Path) -> None:
 
     artifact_path = car_repo / "docs" / "post-merge" / "artifact.json"
     artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
-    # Flip a step outside the required-static-check set and unbound to any
-    # ran/not_run summary, so this exercises the generic FAIL-anywhere
-    # check specifically -- not the more specific required-step-must-be-
-    # PASS or summary-binding checks (each covered by their own tests).
-    for step in artifact["steps"]:
-        if step["name"] == "handoff metadata validation":
-            step["status"] = "FAIL"
+    # Every step name in the default fixture is now part of the required
+    # applicable-step set -- add an extra, non-required step and fail
+    # *that* one, so this exercises the generic FAIL-anywhere check
+    # specifically, not the more specific required-step-must-be-PASS or
+    # summary-binding checks (each covered by their own tests).
+    artifact["steps"].append(
+        {"name": "extra diagnostic step", "status": "FAIL", "duration_seconds": 0.1}
+    )
     artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
     _git(["add", "-A"], car_repo)
     _git(["commit", "-q", "--amend", "--no-edit"], car_repo)
@@ -1184,6 +1329,13 @@ def test_validate_q_rejects_a_triggered_migration_matrix_that_did_not_pass(
         "fresh_database_cleaned_up": True,
         "steps": ["existing-head upgrade"],
     }
+    # The "migration matrix" step itself is present and PASS (so the
+    # required-step-presence check does not fire first) -- this isolates
+    # the test to `_migration_matrix_genuinely_passed`'s own status check,
+    # which must never trust a mismatched, more-detailed status: FAIL.
+    artifact["steps"].append(
+        {"name": "migration matrix", "status": "PASS", "duration_seconds": 1.0}
+    )
     artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
     _git(["add", "-A"], car_repo)
     _git(["commit", "-q", "--amend", "--no-edit"], car_repo)

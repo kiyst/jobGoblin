@@ -462,6 +462,39 @@ def _cross_check_affected_surface(
         )
 
 
+def _cross_check_final_gate_witness_inventory(receipt: dict[str, Any]) -> None:
+    """For `gate: final` specifically, the receipt's `mutation_witnesses`
+    must cover the *complete* active-guard inventory -- never merely the
+    diff-computed required subset (that weaker check is `_cross_check_
+    affected_surface`'s job, and still applies for `fast`). `final` always
+    runs every currently active guard (`verify.py`'s own `mutation_
+    witnesses_step` passes `refs=[]` whenever `gate != 'fast'`), discovered
+    here via this checkout's own contract taxonomy module -- the target
+    commit's own copy when run through the detached-checkout launcher,
+    never a reviewer's possibly-stale in-process copy."""
+    if receipt["gate"] != "final":
+        return
+    from tests.contracts.taxonomy import active_guards
+
+    active_guard_refs = frozenset(active_guards().keys())
+    witnesses = receipt["mutation_witnesses"]
+    recorded_guard_refs = frozenset(witnesses.get("guard_refs", []))
+    if recorded_guard_refs != active_guard_refs:
+        raise ReviewValidationError(
+            "receipt's mutation_witnesses.guard_refs does not equal the complete active-guard "
+            f"inventory for gate: final (missing "
+            f"{sorted(active_guard_refs - recorded_guard_refs)!r}, unexpected "
+            f"{sorted(recorded_guard_refs - active_guard_refs)!r})"
+        )
+    passed = witnesses.get("passed")
+    failed = witnesses.get("failed")
+    if passed != len(recorded_guard_refs) or failed != 0:
+        raise ReviewValidationError(
+            f"receipt's mutation_witnesses passed/failed ({passed!r}/{failed!r}) must equal "
+            f"len(guard_refs)={len(recorded_guard_refs)}/0 for gate: final"
+        )
+
+
 def _validate_verdict_findings_pair(verdict: str, findings: str, *, context: str) -> None:
     if verdict not in _VALID_VERDICTS:
         raise ReviewValidationError(
@@ -563,6 +596,7 @@ def validate_c_a_r_chain(
         published_fields["base_sha"], candidate_sha, receipt, repo_root=repo_root
     )
     _cross_check_recorded_hashes(candidate_sha, receipt, repo_root=repo_root)
+    _cross_check_final_gate_witness_inventory(receipt)
 
     recomputed_eligible = vr.compute_approval_eligible(receipt)
     if review_fields["verdict"] == "approved" and not recomputed_eligible:
@@ -812,17 +846,24 @@ def _validate_post_merge_artifact_schema(artifact: dict[str, Any]) -> None:
         raise ReviewValidationError(f"post-merge artifact invalid: {exc}") from exc
 
 
-_REQUIRED_POST_MERGE_STEP_NAMES = frozenset(
-    {"ruff format --check", "ruff check", "mypy", "check_repo.py", "git diff --check"}
-)
-
-
 def _require_post_merge_steps_present(artifact: dict[str, Any]) -> None:
-    """Every applicable final-gate static check must exist in the
-    post-merge artifact's own `steps` exactly once, with status `PASS` --
-    an omitted step and a step merely present-but-`NOT_RUN` are both
-    rejected identically, never treated as "close enough"."""
-    for name in _REQUIRED_POST_MERGE_STEP_NAMES:
+    """Every applicable step for an always-full post-merge re-verification
+    -- static checks, DB URL safety, DB reachability, full suite, all
+    witnesses, migration matrix when triggered, handoff validation, and
+    temporary-directory cleanup (post-merge never has a "focused tests"
+    concept, so that one conditional step of `compute_applicable_final_
+    step_names` never applies here) -- must exist in the post-merge
+    artifact's own `steps` exactly once, with status `PASS`. Reuses the
+    *same* step-name computation `verification_receipts.compute_approval_
+    eligible` uses for a receipt, defined once, so the two can never
+    independently drift. An omitted step and a step merely present-but-
+    `NOT_RUN` are both rejected identically, never treated as "close
+    enough"."""
+    required_names = vr.compute_applicable_final_step_names(
+        focused_tests_computed=False,
+        migration_triggered=bool(artifact["migration_matrix"].get("triggered")),
+    )
+    for name in required_names:
         matching = [s for s in artifact["steps"] if s["name"] == name]
         if len(matching) != 1:
             raise ReviewValidationError(
@@ -875,10 +916,14 @@ def _validate_post_merge_artifact_evidence(artifact: dict[str, Any]) -> None:
             "post-merge artifact's mutation witnesses did not genuinely run and pass"
         )
 
-    migration = artifact["migration_matrix"]
-    if migration.get("triggered") and migration.get("status") != "PASS":
+    # Reuses the same deep migration-evidence check a receipt's own
+    # `compute_approval_eligible` applies -- exists exactly once with
+    # PASS (already required above), matrix status PASS, before/after
+    # DevelopmentState equal, fresh database created and cleaned up.
+    if not vr._migration_matrix_genuinely_passed(artifact):
         raise ReviewValidationError(
-            "post-merge artifact's migration matrix was triggered but did not pass"
+            "post-merge artifact's migration matrix was triggered but its evidence is invalid "
+            "or did not genuinely pass"
         )
 
 

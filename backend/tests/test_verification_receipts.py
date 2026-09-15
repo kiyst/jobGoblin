@@ -99,8 +99,20 @@ def _minimal_valid_receipt(**overrides: object) -> dict:
             {"name": "mypy", "status": "PASS", "duration_seconds": 0.1},
             {"name": "check_repo.py", "status": "PASS", "duration_seconds": 0.1},
             {"name": "git diff --check", "status": "PASS", "duration_seconds": 0.1},
+            {
+                "name": "disposable test-database URL validation",
+                "status": "PASS",
+                "duration_seconds": 0.0,
+            },
+            {
+                "name": "test-database reachability preflight",
+                "status": "PASS",
+                "duration_seconds": 0.1,
+            },
             {"name": "full pytest suite", "status": "PASS", "duration_seconds": 100.0},
             {"name": "contract mutation witnesses", "status": "PASS", "duration_seconds": 1.0},
+            {"name": "handoff metadata validation", "status": "PASS", "duration_seconds": 0.0},
+            {"name": "temporary-directory cleanup", "status": "PASS", "duration_seconds": 0.1},
         ],
         "full_suite": {"status": "ran", "count": 2323},
         "focused_tests": {"status": "not_run"},
@@ -339,6 +351,188 @@ def test_compute_approval_eligible_false_if_any_witness_failed() -> None:
         mutation_witnesses={"status": "ran", "guard_refs": [], "passed": 33, "failed": 1},
     )
     assert vr.compute_approval_eligible(receipt) is False
+
+
+# ---------------------------------------------------------------------------
+# Sol's fourth correction round: gate-aware applicable step matrix
+# (findings 2/3) -- omission and NOT_RUN regressions for every
+# non-static-check applicable step, and migration-matrix-triggered
+# evidence requirements.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "step_name",
+    [
+        "disposable test-database URL validation",
+        "test-database reachability preflight",
+        "full pytest suite",
+        "contract mutation witnesses",
+        "handoff metadata validation",
+        "temporary-directory cleanup",
+    ],
+)
+def test_compute_approval_eligible_false_if_non_static_step_omitted(step_name: str) -> None:
+    receipt = _minimal_valid_receipt(gate="final")
+    receipt["steps"] = [s for s in receipt["steps"] if s["name"] != step_name]
+    assert vr.compute_approval_eligible(receipt) is False
+
+
+@pytest.mark.parametrize(
+    "step_name",
+    [
+        "disposable test-database URL validation",
+        "test-database reachability preflight",
+        "full pytest suite",
+        "contract mutation witnesses",
+        "handoff metadata validation",
+        "temporary-directory cleanup",
+    ],
+)
+def test_compute_approval_eligible_false_if_non_static_step_not_run(step_name: str) -> None:
+    receipt = _minimal_valid_receipt(gate="final")
+    for step in receipt["steps"]:
+        if step["name"] == step_name:
+            step["status"] = "NOT_RUN"
+    assert vr.compute_approval_eligible(receipt) is False
+
+
+def test_compute_applicable_final_step_names_includes_focused_pytest_when_computed() -> None:
+    names = vr.compute_applicable_final_step_names(
+        focused_tests_computed=True, migration_triggered=False
+    )
+    assert "focused pytest" in names
+    names_without = vr.compute_applicable_final_step_names(
+        focused_tests_computed=False, migration_triggered=False
+    )
+    assert "focused pytest" not in names_without
+
+
+def test_compute_applicable_final_step_names_includes_migration_matrix_when_triggered() -> None:
+    names = vr.compute_applicable_final_step_names(
+        focused_tests_computed=False, migration_triggered=True
+    )
+    assert "migration matrix" in names
+    names_without = vr.compute_applicable_final_step_names(
+        focused_tests_computed=False, migration_triggered=False
+    )
+    assert "migration matrix" not in names_without
+
+
+def test_compute_applicable_docs_step_names_excludes_db_and_suite_steps() -> None:
+    names = vr.compute_applicable_docs_step_names()
+    assert "disposable test-database URL validation" not in names
+    assert "full pytest suite" not in names
+    assert "contract mutation witnesses" not in names
+    assert "handoff metadata validation" in names
+    assert "temporary-directory cleanup" in names
+
+
+def test_compute_approval_eligible_true_for_successful_docs() -> None:
+    receipt = _minimal_valid_receipt(
+        gate="docs",
+        steps=[
+            {"name": "ruff format --check", "status": "PASS", "duration_seconds": 0.1},
+            {"name": "ruff check", "status": "PASS", "duration_seconds": 0.1},
+            {"name": "mypy", "status": "PASS", "duration_seconds": 0.1},
+            {"name": "check_repo.py", "status": "PASS", "duration_seconds": 0.1},
+            {"name": "git diff --check", "status": "PASS", "duration_seconds": 0.1},
+            {"name": "handoff metadata validation", "status": "PASS", "duration_seconds": 0.0},
+            {"name": "temporary-directory cleanup", "status": "PASS", "duration_seconds": 0.1},
+        ],
+        full_suite={"status": "not_run"},
+        mutation_witnesses={"status": "not_run"},
+    )
+    assert vr.compute_approval_eligible(receipt) is True
+
+
+def test_compute_approval_eligible_false_for_docs_missing_handoff_step() -> None:
+    receipt = _minimal_valid_receipt(
+        gate="docs",
+        steps=[
+            {"name": "ruff format --check", "status": "PASS", "duration_seconds": 0.1},
+            {"name": "ruff check", "status": "PASS", "duration_seconds": 0.1},
+            {"name": "mypy", "status": "PASS", "duration_seconds": 0.1},
+            {"name": "check_repo.py", "status": "PASS", "duration_seconds": 0.1},
+            {"name": "git diff --check", "status": "PASS", "duration_seconds": 0.1},
+            {"name": "temporary-directory cleanup", "status": "PASS", "duration_seconds": 0.1},
+        ],
+        full_suite={"status": "not_run"},
+        mutation_witnesses={"status": "not_run"},
+    )
+    assert vr.compute_approval_eligible(receipt) is False
+
+
+def _valid_triggered_migration_matrix() -> dict:
+    dev_state = {"alembic_revision": "0011", "schema_fingerprint": "a" * 64}
+    return {
+        "triggered": True,
+        "status": "PASS",
+        "dev_state_before": dict(dev_state),
+        "dev_state_after": dict(dev_state),
+        "postgresql_server_version": "PostgreSQL 16.0",
+        "fresh_database_created": True,
+        "fresh_database_cleaned_up": True,
+        "steps": ["existing-head upgrade"],
+    }
+
+
+def _receipt_with_triggered_migration(**migration_overrides: object) -> dict:
+    matrix = _valid_triggered_migration_matrix()
+    matrix.update(migration_overrides)
+    receipt = _minimal_valid_receipt(gate="final", migration_matrix=matrix)
+    receipt["steps"].append({"name": "migration matrix", "status": "PASS", "duration_seconds": 1.0})
+    return receipt
+
+
+def test_compute_approval_eligible_true_for_genuinely_passed_migration_matrix() -> None:
+    receipt = _receipt_with_triggered_migration()
+    assert vr.compute_approval_eligible(receipt) is True
+
+
+def test_compute_approval_eligible_false_for_migration_matrix_status_fail() -> None:
+    """The exact required regression: a schema-valid `status: FAIL`
+    reproduction (triggered, otherwise well-formed) must be rejected."""
+    receipt = _receipt_with_triggered_migration(status="FAIL")
+    vr.validate_receipt_schema(receipt)  # schema-valid despite status: FAIL
+    assert vr.compute_approval_eligible(receipt) is False
+
+
+def test_compute_approval_eligible_false_if_migration_dev_state_before_after_differ() -> None:
+    receipt = _receipt_with_triggered_migration(
+        dev_state_after={"alembic_revision": "0012", "schema_fingerprint": "b" * 64}
+    )
+    assert vr.compute_approval_eligible(receipt) is False
+
+
+def test_compute_approval_eligible_false_if_migration_fresh_database_not_created() -> None:
+    receipt = _receipt_with_triggered_migration(fresh_database_created=False)
+    assert vr.compute_approval_eligible(receipt) is False
+
+
+def test_compute_approval_eligible_false_if_migration_fresh_database_not_cleaned_up() -> None:
+    receipt = _receipt_with_triggered_migration(fresh_database_cleaned_up=False)
+    assert vr.compute_approval_eligible(receipt) is False
+
+
+def test_compute_approval_eligible_false_if_migration_step_missing() -> None:
+    matrix = _valid_triggered_migration_matrix()
+    receipt = _minimal_valid_receipt(gate="final", migration_matrix=matrix)
+    # No "migration matrix" step appended -- omitted entirely.
+    assert vr.compute_approval_eligible(receipt) is False
+
+
+def test_compute_approval_eligible_false_if_migration_step_not_run() -> None:
+    receipt = _receipt_with_triggered_migration()
+    for step in receipt["steps"]:
+        if step["name"] == "migration matrix":
+            step["status"] = "NOT_RUN"
+    assert vr.compute_approval_eligible(receipt) is False
+
+
+def test_compute_approval_eligible_true_when_migration_not_triggered_is_vacuous() -> None:
+    receipt = _minimal_valid_receipt(gate="final", migration_matrix={"triggered": False})
+    assert vr.compute_approval_eligible(receipt) is True
 
 
 # ---------------------------------------------------------------------------

@@ -628,19 +628,65 @@ full_suite_count: 2323
 - STOP — this is a bounded correction only. Do not author `R`, merge,
   create `M`/`Q`, begin another slice, or modify product/parser behavior.
 
+#### Correction round 4 (Sol review: Changes requested)
+
+- **Supersedes candidate `C4` = `0ad2c4e594fed8a736863040fe934893169a5044`
+  and publication `A4` = `6271dc83027d307fbe3ad8563e791c2fbb2939e1`.** The
+  receipt published there
+  (`docs/verification-receipts/0ad2c4e594fed8a736863040fe934893169a5044/
+  d70b98e7-f70f-464e-ac51-0d6a1f3e9604.json`) is **not reusable** and is
+  superseded by this correction round's own fresh candidate/publication
+  cycle below. `C4`/`A4` themselves are left exactly as pushed, per Git
+  gates — never amended or rewritten.
+- Implements every required correction from Sol's fourth review: (1)
+  `check_review.py` now independently discovers the complete active
+  mutation-guard inventory for `gate: final` using this checkout's own
+  `tests.contracts.taxonomy` module (the target commit's own copy when
+  run through the detached-checkout launcher) and requires the receipt's
+  `mutation_witnesses.guard_refs` to equal that exact set, with
+  `passed == len(guard_refs)` and `failed == 0` — never merely a subset,
+  which remains the (weaker, diff-computed) requirement for `fast`. (2)
+  `verification_receipts.compute_approval_eligible` now requires, when
+  `migration_matrix.triggered` is true: the `migration matrix` step
+  exists exactly once with PASS; the matrix's own `status` is PASS;
+  before/after `DevelopmentState` values are equal (the development
+  database is only ever *read*, never migrated, by
+  `migration_matrix.run_full_matrix` — drift here means the matrix itself
+  is untrustworthy even if it reported PASS); the fresh-database
+  lifecycle was both created and cleaned up; and the remaining evidence
+  fields (`postgresql_server_version`, `steps`) are present and valid.
+  Untriggered remains vacuously fine. (3) A new `compute_applicable_
+  final_step_names`/`compute_applicable_docs_step_names` pair in
+  `verification_receipts.py` defines the exact, gate-specific applicable-
+  step-name matrix *once* — static checks, DB URL safety, DB reachability,
+  focused tests when computed, full suite, all witnesses, migration
+  matrix when triggered, handoff validation, and temporary-directory
+  cleanup for `final`; the separate, smaller static+handoff+cleanup set
+  for `docs` — and both `compute_approval_eligible` (receipt) and
+  `check_review.py`'s post-merge artifact evidence check
+  (`_require_post_merge_steps_present`) now reuse it, so the two can
+  never independently drift. Every applicable step must exist exactly
+  once with PASS; an omitted step and a step present but `NOT_RUN` are
+  both rejected identically. Post-merge migration-matrix evidence now
+  also reuses the same deep validation as finding (2), for the same
+  consistency reason.
+- Files changed: `backend/scripts/{check_review,verification_receipts}.py`
+  (edited); `backend/tests/test_{check_review,verification_receipts,
+  verification_coordinator}.py` (edited). No production parser
+  (`app/normalization/*`) touched; no migration/model file touched.
+- Verification (this correction round): `ruff format --check`/
+  `ruff check`/`mypy` clean (158 source files, backend + `.claude/hooks`).
+  Full pytest suite: **2619 passed**. All 34 mutation witnesses pass
+  unmodified. `check_repo.py` exits 0. `git diff --check` clean.
+- STOP — this is a bounded correction only. Do not author `R`, merge,
+  create `M`/`Q`, begin another slice, or modify product/parser behavior.
+
 ```workflow-metadata
 workflow_version: v3.2
-state: published
+state: pending
 slice_id: 2026-09-13-workflow-v3-2-activation-66202c2
 slice_kind: tooling
 risk_class: H
 base_sha: 66202c23facff6bd33d8f624e327cabdd40708b4
 declared_gate: final
-executed_gate: final
-candidate_sha: 0ad2c4e594fed8a736863040fe934893169a5044
-receipt_id: d70b98e7-f70f-464e-ac51-0d6a1f3e9604
-receipt_path: docs/verification-receipts/0ad2c4e594fed8a736863040fe934893169a5044/d70b98e7-f70f-464e-ac51-0d6a1f3e9604.json
-full_suite_count: 2579
-focused_test_count: 412
-mutation_witness_count: 34
 ```
