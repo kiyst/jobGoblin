@@ -157,6 +157,84 @@ def test_malformed_sha_rejected() -> None:
         vr.validate_receipt_schema(receipt)
 
 
+def test_non_string_sha_rejected_without_crashing() -> None:
+    receipt = _minimal_valid_receipt(candidate_sha=1234567890)
+    with pytest.raises(vr.ReceiptError, match="40-hex"):
+        vr.validate_receipt_schema(receipt)
+
+
+def test_numeric_schema_version_rejected() -> None:
+    receipt = _minimal_valid_receipt(schema_version=1)
+    with pytest.raises(vr.ReceiptError, match="schema_version"):
+        vr.validate_receipt_schema(receipt)
+
+
+def test_unsupported_schema_version_string_rejected() -> None:
+    receipt = _minimal_valid_receipt(schema_version="999")
+    with pytest.raises(vr.ReceiptError, match="schema_version"):
+        vr.validate_receipt_schema(receipt)
+
+
+def test_numeric_slice_id_rejected() -> None:
+    receipt = _minimal_valid_receipt(slice_id=20260913)
+    with pytest.raises(vr.ReceiptError, match="slice_id"):
+        vr.validate_receipt_schema(receipt)
+
+
+def test_malformed_slice_id_string_rejected() -> None:
+    receipt = _minimal_valid_receipt(slice_id="not-a-valid-slice-id")
+    with pytest.raises(vr.ReceiptError, match="slice_id"):
+        vr.validate_receipt_schema(receipt)
+
+
+def test_validate_slice_id_accepts_a_wellformed_value() -> None:
+    vr.validate_slice_id("2026-09-13-workflow-v3-2-activation-66202c2")  # must not raise
+
+
+@pytest.mark.parametrize("bad", [20260913, None, "not-a-valid-slice-id", ""])
+def test_validate_slice_id_rejects_bad_values(bad: object) -> None:
+    with pytest.raises(vr.ReceiptError):
+        vr.validate_slice_id(bad)
+
+
+def test_malformed_verifier_hash_wrong_length_rejected() -> None:
+    receipt = _minimal_valid_receipt(verifier_hash="d" * 63)
+    with pytest.raises(vr.ReceiptError, match="verifier_hash"):
+        vr.validate_receipt_schema(receipt)
+
+
+def test_malformed_verifier_hash_uppercase_rejected() -> None:
+    receipt = _minimal_valid_receipt(verifier_hash="D" * 64)
+    with pytest.raises(vr.ReceiptError, match="verifier_hash"):
+        vr.validate_receipt_schema(receipt)
+
+
+def test_non_string_checker_hash_rejected_without_crashing() -> None:
+    receipt = _minimal_valid_receipt(checker_hash=12345)
+    with pytest.raises(vr.ReceiptError, match="checker_hash"):
+        vr.validate_receipt_schema(receipt)
+
+
+def test_malformed_dependency_input_hash_rejected() -> None:
+    receipt = _minimal_valid_receipt(
+        dependency_and_config_inputs=[
+            {"repo_relative_path": "backend/pyproject.toml", "sha256": "not-a-hash"}
+        ]
+    )
+    with pytest.raises(vr.ReceiptError, match="sha256"):
+        vr.validate_receipt_schema(receipt)
+
+
+@pytest.mark.parametrize("bad", ["d" * 63, "D" * 64, "not-a-hash", 12345, None])
+def test_validate_sha256_hex_rejects_bad_values(bad: object) -> None:
+    with pytest.raises(vr.ReceiptError):
+        vr.validate_sha256_hex(bad, field="x")
+
+
+def test_validate_sha256_hex_accepts_a_wellformed_value() -> None:
+    vr.validate_sha256_hex("d" * 64, field="x")  # must not raise
+
+
 def test_write_receipt_atomic_creates_file(tmp_path: Path) -> None:
     target = tmp_path / "sub" / "receipt.json"
     vr.write_receipt_atomic(target, _minimal_valid_receipt())

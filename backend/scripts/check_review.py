@@ -39,6 +39,7 @@ from typing import Any
 
 from scripts import check_handoff as ch
 from scripts import verification_receipts as vr
+from scripts import verification_scope as vs
 from scripts import verification_worktree as vw
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -86,6 +87,9 @@ _VALID_REVIEWER_ROLES = frozenset({"primary", "escalation"})
 _VALID_VERDICTS = frozenset({"approved", "changes_requested"})
 _REQUIRED_PRIMARY_REVIEWER_MODEL = "Sol Medium"
 _EXECUTABLE_SLICE_KINDS = frozenset({"parser", "tooling"})
+_SUPPORTED_REVIEW_SCHEMA_VERSION = "2"
+_SUPPORTED_ESCALATION_SCHEMA_VERSION = "2"
+_SUPPORTED_POST_MERGE_ARTIFACT_SCHEMA_VERSION = "1"
 
 _REQUIRED_POST_MERGE_ARTIFACT_FIELDS = (
     "schema_version",
@@ -198,6 +202,14 @@ def validate_review_metadata_structure(fields: dict[str, str], *, slice_kind: st
     missing = [k for k in _REQUIRED_REVIEW_FIELDS if k not in fields]
     if missing:
         raise ReviewValidationError(f"review metadata missing required field(s): {missing}")
+    unknown = [k for k in fields if k not in _REQUIRED_REVIEW_FIELDS]
+    if unknown:
+        raise ReviewValidationError(f"review metadata declares unrecognized field(s): {unknown}")
+    if fields["schema_version"] != _SUPPORTED_REVIEW_SCHEMA_VERSION:
+        raise ReviewValidationError(
+            f"review metadata 'schema_version' must be {_SUPPORTED_REVIEW_SCHEMA_VERSION!r}, "
+            f"got {fields['schema_version']!r}"
+        )
 
     if fields["reviewer_role"] not in _VALID_REVIEWER_ROLES:
         raise ReviewValidationError(
@@ -225,6 +237,16 @@ def validate_escalation_metadata_structure(fields: dict[str, str]) -> None:
     missing = [k for k in _REQUIRED_ESCALATION_FIELDS if k not in fields]
     if missing:
         raise ReviewValidationError(f"escalation metadata missing required field(s): {missing}")
+    unknown = [k for k in fields if k not in _REQUIRED_ESCALATION_FIELDS]
+    if unknown:
+        raise ReviewValidationError(
+            f"escalation metadata declares unrecognized field(s): {unknown}"
+        )
+    if fields["schema_version"] != _SUPPORTED_ESCALATION_SCHEMA_VERSION:
+        raise ReviewValidationError(
+            f"escalation metadata 'schema_version' must be "
+            f"{_SUPPORTED_ESCALATION_SCHEMA_VERSION!r}, got {fields['schema_version']!r}"
+        )
     if fields["trigger"] not in _VALID_ESCALATION_TRIGGERS:
         raise ReviewValidationError(
             f"'trigger' must be one of {sorted(_VALID_ESCALATION_TRIGGERS)}, "
@@ -298,6 +320,145 @@ def _require_base_sha_ancestor(base_sha: str, candidate_sha: str, *, repo_root: 
     if result.returncode != 0:
         raise ReviewValidationError(
             f"published base_sha {base_sha!r} is not an ancestor of candidate {candidate_sha!r}"
+        )
+
+
+def _diff_name_only(base_sha: str, candidate_sha: str, *, repo_root: Path) -> list[str]:
+    output = _git(["diff", "--name-only", f"{base_sha}..{candidate_sha}"], repo_root)
+    return [line for line in output.splitlines() if line.strip()]
+
+
+def _recompute_hashes_at_candidate(
+    candidate_sha: str, *, repo_root: Path
+) -> tuple[str, str, list[dict[str, str]]]:
+    """Recomputes `verifier_hash`/`checker_hash`/`dependency_and_config_
+    inputs` from a genuine, disposable checkout at `candidate_sha` -- never
+    from `git show`'s raw blob bytes, which can (and, under this project's
+    own `core.autocrlf=true`, genuinely do) diverge from the coordinator's
+    own working-tree-based hash. The coordinator hashes real checked-out
+    files (`verification_coordinator._file_hash_at`); this reproduces that
+    exact same on-disk form via a real `git worktree`, so the comparison is
+    never a false mismatch caused only by line-ending normalization."""
+    run_dir = Path(tempfile.mkdtemp(prefix="review-hash-"))
+    worktree: Path | None = None
+    try:
+        worktree = vw.create_detached_worktree(candidate_sha, run_dir)
+        verifier_hash = vr.file_hash(worktree / "backend" / "scripts" / "verify.py")
+        checker_hash = vr.file_hash(worktree / "backend" / "scripts" / "check_handoff.py")
+        dependency_inputs = vr.dependency_and_config_inputs(worktree, ["backend/pyproject.toml"])
+    finally:
+        if worktree is not None:
+            try:
+                vw.remove_worktree(worktree)
+                vw.confirm_no_leak(worktree)
+            except (vw.WorktreeError, OSError) as exc:
+                raise ReviewValidationError(
+                    f"hash-recomputation worktree teardown failed: {exc}"
+                ) from exc
+        if run_dir.exists():
+            try:
+                shutil.rmtree(run_dir)
+            except OSError as exc:
+                raise ReviewValidationError(
+                    f"hash-recomputation run directory removal failed: {exc}"
+                ) from exc
+    return verifier_hash, checker_hash, dependency_inputs
+
+
+def _cross_check_recorded_hashes(
+    candidate_sha: str, receipt: dict[str, Any], *, repo_root: Path
+) -> None:
+    verifier_hash, checker_hash, dependency_inputs = _recompute_hashes_at_candidate(
+        candidate_sha, repo_root=repo_root
+    )
+    if receipt["verifier_hash"] != verifier_hash:
+        raise ReviewValidationError(
+            "receipt's verifier_hash does not match backend/scripts/verify.py at C"
+        )
+    if receipt["checker_hash"] != checker_hash:
+        raise ReviewValidationError(
+            "receipt's checker_hash does not match backend/scripts/check_handoff.py at C"
+        )
+    if receipt["dependency_and_config_inputs"] != dependency_inputs:
+        raise ReviewValidationError(
+            "receipt's dependency_and_config_inputs does not match the recomputed hashes at C"
+        )
+
+
+def _recompute_migration_required(base_sha: str, candidate_sha: str, *, repo_root: Path) -> bool:
+    """Independently derives whether migration evidence is required for
+    `base_sha..candidate_sha`, using this checkout's own `verification_
+    scope.is_migration_trigger` -- never a value merely asserted by a
+    receipt or post-merge artifact."""
+    changed_paths = _diff_name_only(base_sha, candidate_sha, repo_root=repo_root)
+    return any(vs.is_migration_trigger(p) for p in changed_paths)
+
+
+def _cross_check_affected_surface(
+    base_sha: str, candidate_sha: str, receipt: dict[str, Any], *, repo_root: Path
+) -> None:
+    """Independently recomputes `base_sha..candidate_sha` affected-surface
+    coverage and migration triggering *using this checkout's own
+    `verification_scope` module* -- when this validation runs inside
+    `run_via_detached_checkout`'s subprocess, that module resolves to the
+    target commit's own copy (the same cwd-precedence already proven for
+    `check_review.py` itself), never the reviewer's possibly-stale
+    in-process copy. Cross-checks every recomputed field against the
+    receipt's own claims -- a receipt can never merely assert a
+    convenient scope."""
+    changed_paths = _diff_name_only(base_sha, candidate_sha, repo_root=repo_root)
+    classifications = vs.classify_all(changed_paths)
+    coverage = vs.compute_required_coverage(changed_paths)
+    migration_required = any(vs.is_migration_trigger(p) for p in changed_paths)
+
+    affected_surface = receipt["affected_surface"]
+    recomputed_categories = sorted({c.category for c in classifications})
+    if recomputed_categories != affected_surface["computed_categories"]:
+        raise ReviewValidationError(
+            "receipt's affected_surface.computed_categories does not match the recomputed "
+            f"categories for {base_sha}..{candidate_sha} ({recomputed_categories!r} != "
+            f"{affected_surface['computed_categories']!r})"
+        )
+    if (
+        sorted(coverage.required_contract_families)
+        != affected_surface["required_contract_families"]
+    ):
+        raise ReviewValidationError(
+            "receipt's affected_surface.required_contract_families does not match the "
+            "recomputed required contract families"
+        )
+    if sorted(coverage.required_guard_refs) != affected_surface["required_guard_refs"]:
+        raise ReviewValidationError(
+            "receipt's affected_surface.required_guard_refs does not match the recomputed "
+            "required guard refs"
+        )
+    if sorted(coverage.directly_executed_tests) != affected_surface["directly_executed_tests"]:
+        raise ReviewValidationError(
+            "receipt's affected_surface.directly_executed_tests does not match the recomputed "
+            "directly-executed tests"
+        )
+    if migration_required != receipt["migration_matrix"]["triggered"]:
+        raise ReviewValidationError(
+            f"recomputed migration trigger ({migration_required}) does not match receipt's "
+            f"migration_matrix.triggered ({receipt['migration_matrix']['triggered']}) for "
+            f"{base_sha}..{candidate_sha}"
+        )
+
+    computed_focus_targets = {
+        target.removeprefix("backend/") for target in coverage.required_focus_targets
+    }
+    recorded_selector = set(receipt["focused_tests"].get("selector", "").split())
+    if not computed_focus_targets <= recorded_selector:
+        raise ReviewValidationError(
+            "receipt's focused_tests.selector does not cover the recomputed required focus "
+            f"targets (missing {sorted(computed_focus_targets - recorded_selector)!r})"
+        )
+
+    recorded_guard_refs = set(receipt["mutation_witnesses"].get("guard_refs", []))
+    if not coverage.required_guard_refs <= recorded_guard_refs:
+        raise ReviewValidationError(
+            "receipt's mutation_witnesses.guard_refs does not cover the recomputed required "
+            f"guard refs (missing {sorted(coverage.required_guard_refs - recorded_guard_refs)!r})"
         )
 
 
@@ -397,6 +558,11 @@ def validate_c_a_r_chain(
         raise ReviewValidationError(
             "receipt's own base_sha does not match the published (A) workflow-metadata base_sha"
         )
+
+    _cross_check_affected_surface(
+        published_fields["base_sha"], candidate_sha, receipt, repo_root=repo_root
+    )
+    _cross_check_recorded_hashes(candidate_sha, receipt, repo_root=repo_root)
 
     recomputed_eligible = vr.compute_approval_eligible(receipt)
     if review_fields["verdict"] == "approved" and not recomputed_eligible:
@@ -599,8 +765,13 @@ def _validate_post_merge_artifact_schema(artifact: dict[str, Any]) -> None:
     # so its `ReceiptError` is converted to this module's own exception
     # type at this single boundary, once.
     try:
-        vr._require_str(artifact, "schema_version", context="post-merge artifact")
-        vr._require_str(artifact, "slice_id", context="post-merge artifact")
+        if artifact["schema_version"] != _SUPPORTED_POST_MERGE_ARTIFACT_SCHEMA_VERSION:
+            raise vr.ReceiptError(
+                f"post-merge artifact 'schema_version' must be "
+                f"{_SUPPORTED_POST_MERGE_ARTIFACT_SCHEMA_VERSION!r}, "
+                f"got {artifact['schema_version']!r}"
+            )
+        vr.validate_slice_id(artifact["slice_id"])
         vr.validate_receipt_id(artifact["original_receipt_id"])
         vr._require_str(artifact, "original_receipt_path", context="post-merge artifact")
         if not artifact["original_receipt_path"]:
@@ -641,6 +812,30 @@ def _validate_post_merge_artifact_schema(artifact: dict[str, Any]) -> None:
         raise ReviewValidationError(f"post-merge artifact invalid: {exc}") from exc
 
 
+_REQUIRED_POST_MERGE_STEP_NAMES = frozenset(
+    {"ruff format --check", "ruff check", "mypy", "check_repo.py", "git diff --check"}
+)
+
+
+def _require_post_merge_steps_present(artifact: dict[str, Any]) -> None:
+    """Every applicable final-gate static check must exist in the
+    post-merge artifact's own `steps` exactly once, with status `PASS` --
+    an omitted step and a step merely present-but-`NOT_RUN` are both
+    rejected identically, never treated as "close enough"."""
+    for name in _REQUIRED_POST_MERGE_STEP_NAMES:
+        matching = [s for s in artifact["steps"] if s["name"] == name]
+        if len(matching) != 1:
+            raise ReviewValidationError(
+                f"post-merge artifact must declare step {name!r} exactly once, found "
+                f"{len(matching)}"
+            )
+        if matching[0]["status"] != "PASS":
+            raise ReviewValidationError(
+                f"post-merge artifact's step {name!r} is not PASS (status: "
+                f"{matching[0]['status']!r})"
+            )
+
+
 def _validate_post_merge_artifact_evidence(artifact: dict[str, Any]) -> None:
     """Beyond shape: a post-merge artifact must show genuine, positive
     success evidence -- mirroring `verification_receipts.compute_approval_
@@ -648,6 +843,7 @@ def _validate_post_merge_artifact_evidence(artifact: dict[str, Any]) -> None:
     record specifically (post-merge verification is never partial)."""
     if not artifact["steps"]:
         raise ReviewValidationError("post-merge artifact has no recorded steps")
+    _require_post_merge_steps_present(artifact)
     if any(step["status"] == "FAIL" for step in artifact["steps"]):
         raise ReviewValidationError("post-merge artifact records a FAILed step")
     if artifact["cleanup"].get("status") != "PASS":
@@ -804,6 +1000,17 @@ def validate_published(
         raise ReviewValidationError(
             "post-merge artifact's original_receipt reference does not match "
             "that receipt's own content"
+        )
+
+    migration_required = _recompute_migration_required(
+        review_fields["published_base_sha"], candidate_sha, repo_root=repo_root
+    )
+    if migration_required != artifact["migration_matrix"]["triggered"]:
+        raise ReviewValidationError(
+            f"post-merge artifact's migration_matrix.triggered "
+            f"({artifact['migration_matrix']['triggered']}) does not match the independently "
+            f"recomputed migration trigger ({migration_required}) for the original "
+            f"{review_fields['published_base_sha']}..{candidate_sha} diff"
         )
 
     if review_fields["verdict"] != "approved":

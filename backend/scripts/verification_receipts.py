@@ -26,7 +26,14 @@ from typing import Any
 
 _RECEIPT_ID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 _UTC_TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|\+00:00)$")
+# Duplicated from `check_handoff.py`'s own `_SLICE_ID_RE` -- intentionally,
+# not imported, since `check_handoff.py` already imports from this module
+# and importing back the other way would be circular. Kept in sync by hand;
+# both anchor the same frozen `<date>-<slug>-<base-short-sha>` format.
+_SLICE_ID_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-[a-z0-9]+(?:-[a-z0-9]+)*-[0-9a-f]{7,40}$")
+_SHA256_HEX_RE = re.compile(r"^[0-9a-f]{64}$")
 
+_SUPPORTED_SCHEMA_VERSION = "1"
 _GATES = frozenset({"fast", "final", "docs"})
 _STEP_STATUSES = frozenset({"PASS", "FAIL", "NOT_RUN"})
 
@@ -44,16 +51,26 @@ def generate_receipt_id() -> str:
     return str(uuid.uuid4())
 
 
-def validate_receipt_id(receipt_id: str) -> None:
-    if not _RECEIPT_ID_RE.match(receipt_id):
+def validate_receipt_id(receipt_id: Any) -> None:
+    if not isinstance(receipt_id, str) or not _RECEIPT_ID_RE.match(receipt_id):
         raise ReceiptError(
             f"receipt_id must be a canonical lowercase UUID4 (8-4-4-4-12 hyphenated hex), "
             f"got {receipt_id!r}"
         )
 
 
-def validate_utc_timestamp(value: str, *, field: str) -> None:
-    if not _UTC_TIMESTAMP_RE.match(value):
+def validate_slice_id(slice_id: Any) -> None:
+    if not isinstance(slice_id, str) or not _SLICE_ID_RE.match(slice_id):
+        raise ReceiptError(f"slice_id must match <date>-<slug>-<base-short-sha>, got {slice_id!r}")
+
+
+def validate_sha256_hex(value: Any, *, field: str) -> None:
+    if not isinstance(value, str) or not _SHA256_HEX_RE.match(value):
+        raise ReceiptError(f"{field!r} must be a 64-character lowercase hex sha256, got {value!r}")
+
+
+def validate_utc_timestamp(value: Any, *, field: str) -> None:
+    if not isinstance(value, str) or not _UTC_TIMESTAMP_RE.match(value):
         raise ReceiptError(
             f"{field!r} must be a fully-specified UTC ISO-8601 timestamp "
             f"(explicit Z or +00:00), got {value!r}"
@@ -431,6 +448,11 @@ def validate_receipt_schema(data: dict[str, Any]) -> None:
     if missing:
         raise ReceiptError(f"receipt is missing required field(s): {sorted(missing)}")
 
+    if data["schema_version"] != _SUPPORTED_SCHEMA_VERSION:
+        raise ReceiptError(
+            f"schema_version must be {_SUPPORTED_SCHEMA_VERSION!r}, got {data['schema_version']!r}"
+        )
+    validate_slice_id(data["slice_id"])
     validate_receipt_id(data["receipt_id"])
     if data["gate"] not in _GATES:
         raise ReceiptError(f"gate must be one of {sorted(_GATES)}, got {data['gate']!r}")
@@ -440,11 +462,11 @@ def validate_receipt_schema(data: dict[str, Any]) -> None:
 
     for sha_field in ("base_sha", "candidate_sha"):
         value = data[sha_field]
-        if not re.fullmatch(r"[0-9a-f]{40}", value):
+        if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{40}", value):
             raise ReceiptError(f"{sha_field!r} must be a full 40-hex commit SHA, got {value!r}")
 
-    _require_str(data, "verifier_hash", context="receipt")
-    _require_str(data, "checker_hash", context="receipt")
+    validate_sha256_hex(data["verifier_hash"], field="verifier_hash")
+    validate_sha256_hex(data["checker_hash"], field="checker_hash")
 
     dependency_inputs = data["dependency_and_config_inputs"]
     if not isinstance(dependency_inputs, list):
@@ -454,7 +476,7 @@ def validate_receipt_schema(data: dict[str, Any]) -> None:
             entry, _DEPENDENCY_INPUT_KEYS, context="dependency_and_config_inputs[]"
         )
         _require_str(item, "repo_relative_path", context="dependency_and_config_inputs[]")
-        _require_str(item, "sha256", context="dependency_and_config_inputs[]")
+        validate_sha256_hex(item["sha256"], field="dependency_and_config_inputs[].sha256")
 
     env_descriptor = _require_exact_keys(
         data["environment_descriptor"], _ENV_DESCRIPTOR_KEYS, context="environment_descriptor"

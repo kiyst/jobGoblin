@@ -253,6 +253,138 @@ async def test_capture_development_state_handles_a_database_with_no_alembic_tabl
         await mm.cleanup_fresh_database(lifecycle)
 
 
+# ---------------------------------------------------------------------------
+# schema_fingerprint's expanded migration-relevant surface (Sol's third
+# correction round, finding 4): columns (nullability/default), constraints
+# (including FK actions, via pg_get_constraintdef), and indexes -- each
+# proven, against a real disposable database, to change the fingerprint on
+# its own while the Alembic revision (absent here) stays unchanged.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_schema_fingerprint_changes_on_default_only_mutation() -> None:
+    lifecycle = await mm.provision_fresh_database(_dev_url(), app_env="test")
+    try:
+        conn = await asyncpg.connect(mm._to_asyncpg_dsn(lifecycle.target_url))
+        try:
+            await conn.execute("CREATE TABLE fp_probe (id integer, note text)")
+            before = await mm.capture_development_state(lifecycle.target_url)
+            await conn.execute("ALTER TABLE fp_probe ALTER COLUMN note SET DEFAULT 'x'")
+            after = await mm.capture_development_state(lifecycle.target_url)
+        finally:
+            await conn.close()
+        assert before.alembic_revision == after.alembic_revision
+        assert before.schema_fingerprint != after.schema_fingerprint
+    finally:
+        await mm.cleanup_fresh_database(lifecycle)
+
+
+@pytest.mark.asyncio
+async def test_schema_fingerprint_changes_on_nullability_only_mutation() -> None:
+    lifecycle = await mm.provision_fresh_database(_dev_url(), app_env="test")
+    try:
+        conn = await asyncpg.connect(mm._to_asyncpg_dsn(lifecycle.target_url))
+        try:
+            await conn.execute("CREATE TABLE fp_probe (id integer, note text)")
+            before = await mm.capture_development_state(lifecycle.target_url)
+            await conn.execute("ALTER TABLE fp_probe ALTER COLUMN note SET NOT NULL")
+            after = await mm.capture_development_state(lifecycle.target_url)
+        finally:
+            await conn.close()
+        assert before.alembic_revision == after.alembic_revision
+        assert before.schema_fingerprint != after.schema_fingerprint
+    finally:
+        await mm.cleanup_fresh_database(lifecycle)
+
+
+@pytest.mark.asyncio
+async def test_schema_fingerprint_changes_on_constraint_only_mutation() -> None:
+    lifecycle = await mm.provision_fresh_database(_dev_url(), app_env="test")
+    try:
+        conn = await asyncpg.connect(mm._to_asyncpg_dsn(lifecycle.target_url))
+        try:
+            await conn.execute("CREATE TABLE fp_probe (id integer, note text)")
+            before = await mm.capture_development_state(lifecycle.target_url)
+            await conn.execute(
+                "ALTER TABLE fp_probe ADD CONSTRAINT fp_probe_id_positive CHECK (id > 0)"
+            )
+            after = await mm.capture_development_state(lifecycle.target_url)
+        finally:
+            await conn.close()
+        assert before.alembic_revision == after.alembic_revision
+        assert before.schema_fingerprint != after.schema_fingerprint
+    finally:
+        await mm.cleanup_fresh_database(lifecycle)
+
+
+@pytest.mark.asyncio
+async def test_schema_fingerprint_changes_on_index_only_mutation() -> None:
+    lifecycle = await mm.provision_fresh_database(_dev_url(), app_env="test")
+    try:
+        conn = await asyncpg.connect(mm._to_asyncpg_dsn(lifecycle.target_url))
+        try:
+            await conn.execute("CREATE TABLE fp_probe (id integer, note text)")
+            before = await mm.capture_development_state(lifecycle.target_url)
+            await conn.execute("CREATE INDEX fp_probe_note_idx ON fp_probe (note)")
+            after = await mm.capture_development_state(lifecycle.target_url)
+        finally:
+            await conn.close()
+        assert before.alembic_revision == after.alembic_revision
+        assert before.schema_fingerprint != after.schema_fingerprint
+    finally:
+        await mm.cleanup_fresh_database(lifecycle)
+
+
+@pytest.mark.asyncio
+async def test_schema_fingerprint_changes_on_foreign_key_action_only_mutation() -> None:
+    """A FOREIGN KEY's own ON DELETE/ON UPDATE action is never visible in
+    column name/type/nullability/default alone -- only in the constraint's
+    own definition text (`pg_get_constraintdef`), which is what this
+    fingerprint now hashes."""
+    lifecycle = await mm.provision_fresh_database(_dev_url(), app_env="test")
+    try:
+        conn = await asyncpg.connect(mm._to_asyncpg_dsn(lifecycle.target_url))
+        try:
+            await conn.execute("CREATE TABLE fp_parent (id integer PRIMARY KEY)")
+            await conn.execute(
+                "CREATE TABLE fp_child (id integer, parent_id integer REFERENCES fp_parent(id))"
+            )
+            before = await mm.capture_development_state(lifecycle.target_url)
+            await conn.execute("ALTER TABLE fp_child DROP CONSTRAINT fp_child_parent_id_fkey")
+            await conn.execute(
+                "ALTER TABLE fp_child ADD CONSTRAINT fp_child_parent_id_fkey "
+                "FOREIGN KEY (parent_id) REFERENCES fp_parent(id) ON DELETE CASCADE"
+            )
+            after = await mm.capture_development_state(lifecycle.target_url)
+        finally:
+            await conn.close()
+        assert before.alembic_revision == after.alembic_revision
+        assert before.schema_fingerprint != after.schema_fingerprint
+    finally:
+        await mm.cleanup_fresh_database(lifecycle)
+
+
+@pytest.mark.asyncio
+async def test_schema_fingerprint_is_deterministic_across_repeated_reads() -> None:
+    lifecycle = await mm.provision_fresh_database(_dev_url(), app_env="test")
+    try:
+        conn = await asyncpg.connect(mm._to_asyncpg_dsn(lifecycle.target_url))
+        try:
+            await conn.execute("CREATE TABLE fp_probe (id integer, note text DEFAULT 'x')")
+            await conn.execute("CREATE INDEX fp_probe_note_idx ON fp_probe (note)")
+            await conn.execute(
+                "ALTER TABLE fp_probe ADD CONSTRAINT fp_probe_id_positive CHECK (id > 0)"
+            )
+        finally:
+            await conn.close()
+        first = await mm.capture_development_state(lifecycle.target_url)
+        second = await mm.capture_development_state(lifecycle.target_url)
+        assert first == second
+    finally:
+        await mm.cleanup_fresh_database(lifecycle)
+
+
 @pytest.mark.asyncio
 async def test_query_postgresql_server_version_is_a_real_distinct_string() -> None:
     version = await mm.query_postgresql_server_version(_dev_url())

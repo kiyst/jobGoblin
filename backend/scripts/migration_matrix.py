@@ -162,11 +162,52 @@ class DevelopmentState:
 
 
 async def _capture_schema_fingerprint(conn: Any) -> str:
-    rows = await conn.fetch(
-        "SELECT table_name, column_name, data_type FROM information_schema.columns "
-        "WHERE table_schema = 'public' ORDER BY table_name, column_name"
+    """Hashes the full migration-relevant schema surface for `public` --
+    not just column name/type (a prior version of this fingerprint), which
+    left a constraint-only, index-only, or default/nullability-only change
+    invisible even though it genuinely changes what a migration must
+    reconcile. Three deterministically-ordered sections, sha256'd together:
+
+    - columns: name, type, nullability, *and* default;
+    - constraints: every `pg_constraint`'s own full definition text via
+      `pg_get_constraintdef` -- this single rendering already covers
+      PRIMARY KEY/UNIQUE/CHECK/FOREIGN KEY, *including* a FOREIGN KEY's
+      own ON DELETE/ON UPDATE action, so no separate confdeltype/
+      confupdtype lookup is needed;
+    - indexes: every `pg_indexes` entry's own full definition text.
+    """
+    columns = await conn.fetch(
+        "SELECT table_name, column_name, data_type, is_nullable, column_default "
+        "FROM information_schema.columns WHERE table_schema = 'public' "
+        "ORDER BY table_name, column_name"
     )
-    payload = "\n".join(f"{r['table_name']}.{r['column_name']}:{r['data_type']}" for r in rows)
+    constraints = await conn.fetch(
+        "SELECT conrelid::regclass::text AS table_name, conname, "
+        "pg_get_constraintdef(oid) AS definition FROM pg_constraint "
+        "WHERE connamespace = 'public'::regnamespace "
+        "ORDER BY conrelid::regclass::text, conname"
+    )
+    indexes = await conn.fetch(
+        "SELECT tablename, indexname, indexdef FROM pg_indexes "
+        "WHERE schemaname = 'public' ORDER BY tablename, indexname"
+    )
+    column_lines = [
+        f"{r['table_name']}.{r['column_name']}:{r['data_type']}:"
+        f"{r['is_nullable']}:{r['column_default'] or ''}"
+        for r in columns
+    ]
+    constraint_lines = [f"{r['table_name']}.{r['conname']}:{r['definition']}" for r in constraints]
+    index_lines = [f"{r['tablename']}.{r['indexname']}:{r['indexdef']}" for r in indexes]
+    payload = "\n".join(
+        [
+            "[columns]",
+            *column_lines,
+            "[constraints]",
+            *constraint_lines,
+            "[indexes]",
+            *index_lines,
+        ]
+    )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 

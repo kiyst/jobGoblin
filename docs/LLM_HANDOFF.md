@@ -548,19 +548,92 @@ full_suite_count: 2323
 - STOP — this is a bounded correction only. Do not author `R`, merge,
   create `M`/`Q`, begin another slice, or modify product/parser behavior.
 
+#### Correction round 3 (Sol review: Changes requested)
+
+- **Supersedes candidate `C3` = `ca7e4233ba880fb8e25b6019a575caafef9829f6`
+  and publication `A3` = `081f6f7ddd9960524a999c662fa677aa1338886a`.** The
+  receipt published there
+  (`docs/verification-receipts/ca7e4233ba880fb8e25b6019a575caafef9829f6/
+  94b13ec0-9327-46fa-aff6-f228c92e9059.json`) is **not reusable** and is
+  superseded by this correction round's own fresh candidate/publication
+  cycle below. `C3`/`A3` themselves are left exactly as pushed, per Git
+  gates — never amended or rewritten.
+- Implements every required correction from Sol's third review: (1)
+  `check_review.py` now independently recomputes `B..C` affected-surface
+  coverage and migration triggering using this checkout's own
+  `verification_scope` module (never the reviewer's possibly-stale
+  in-process copy when run through the detached-checkout launcher), and
+  cross-checks the receipt's `affected_surface.computed_categories`/
+  `required_contract_families`/`required_guard_refs`/
+  `directly_executed_tests`, `migration_matrix.triggered`,
+  `focused_tests.selector` (superset of recomputed required focus
+  targets), and `mutation_witnesses.guard_refs` (superset of recomputed
+  required guard refs) against that recomputation. It also independently
+  recomputes `verifier_hash`/`checker_hash`/
+  `dependency_and_config_inputs` from a genuine disposable checkout at
+  `C` (never `git show`'s raw blob bytes, which this project's own
+  `core.autocrlf=true` proved would diverge from the coordinator's own
+  working-tree-based hash) and cross-checks them against the receipt.
+  The exact required regression — a candidate changing
+  `backend/migrations/versions/...` with the receipt claiming
+  `migration_matrix.triggered: false` — is now rejected by both
+  `validate_c_a_r_chain` and `check_merge_eligibility`. (2) The review
+  and escalation metadata schemas are now fully closed (unrecognized
+  fields rejected) and require an exact supported `schema_version`.
+  `verification_receipts.py`'s receipt schema now requires an exact
+  supported `schema_version`, a typed and format-valid `slice_id`
+  (matching `check_handoff.py`'s own `<date>-<slug>-<base-short-sha>`
+  format), full `sha256` hex format for `verifier_hash`/`checker_hash`/
+  `dependency_and_config_inputs[].sha256`, and every SHA/receipt-ID/
+  timestamp field now guards against a non-string JSON value before
+  regex-matching it (previously a crash, not a clean rejection). New
+  regressions cover a numeric `schema_version`/`slice_id` and a malformed
+  hash. (3) The post-merge artifact's evidence validation now requires
+  every applicable final-gate static-check step (`ruff format --check`,
+  `ruff check`, `mypy`, `check_repo.py`, `git diff --check`) to exist
+  exactly once with status `PASS` — an omitted step and a step present
+  but `NOT_RUN` are both rejected identically — and `validate_published`
+  now independently re-derives whether migration evidence was required
+  for the original slice diff and cross-checks it against the artifact's
+  own `migration_matrix.triggered`. (4) `DevelopmentState.schema_
+  fingerprint` now hashes the full migration-relevant schema surface for
+  `public`: every column's type, nullability, *and* default; every
+  constraint's full definition text (`pg_get_constraintdef`, which
+  already renders a FOREIGN KEY's own ON DELETE/ON UPDATE action into the
+  definition, so no separate lookup was needed); and every index's full
+  definition text — proven, against the real disposable Postgres, that a
+  default-only, nullability-only, constraint-only, index-only, or
+  FK-action-only mutation each independently changes the fingerprint
+  while the Alembic revision (absent in these fresh, migration-free
+  probe databases) stays unchanged.
+- Real bug found and fixed while implementing finding 1's hash
+  recomputation (not itself one of Sol's findings): the disposable test
+  fixture (`test_check_review.py`'s `car_repo`) had no `backend/scripts/
+  verify.py`/`check_handoff.py`/`pyproject.toml` files at all, and
+  `verification_worktree.py`'s module-level `REPO_ROOT` (fixed at import
+  time to the real project root) meant every worktree-creating call in
+  that test file needed the disposable repo monkeypatched in, not just
+  the two detached-checkout-launcher tests that already did so — fixed by
+  adding the stand-in files and moving the monkeypatch into the `car_repo`
+  fixture itself.
+- Files changed: `backend/scripts/{check_review,verification_receipts,
+  migration_matrix}.py` (edited); `backend/tests/test_{check_review,
+  verification_receipts,migration_matrix}.py` (edited). No production
+  parser (`app/normalization/*`) touched; no migration/model file
+  touched.
+- Verification (this correction round): `ruff format --check`/
+  `ruff check`/`mypy` clean (158 source files, backend + `.claude/hooks`).
+  Full pytest suite: **2579 passed**. All 34 mutation witnesses pass
+  unmodified. `check_repo.py` exits 0. `git diff --check` clean.
+- STOP — this is a bounded correction only. Do not author `R`, merge,
+  create `M`/`Q`, begin another slice, or modify product/parser behavior.
+
 ```workflow-metadata
 workflow_version: v3.2
-state: published
+state: pending
 slice_id: 2026-09-13-workflow-v3-2-activation-66202c2
 slice_kind: tooling
 risk_class: H
 base_sha: 66202c23facff6bd33d8f624e327cabdd40708b4
 declared_gate: final
-executed_gate: final
-candidate_sha: ca7e4233ba880fb8e25b6019a575caafef9829f6
-receipt_id: 94b13ec0-9327-46fa-aff6-f228c92e9059
-receipt_path: docs/verification-receipts/ca7e4233ba880fb8e25b6019a575caafef9829f6/94b13ec0-9327-46fa-aff6-f228c92e9059.json
-full_suite_count: 2531
-focused_test_count: 364
-mutation_witness_count: 34
 ```

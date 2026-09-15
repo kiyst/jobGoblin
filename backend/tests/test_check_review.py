@@ -5,11 +5,12 @@ a synthetic in-memory chain."""
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import tempfile
 import uuid
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from pathlib import Path
 
 import pytest
@@ -30,7 +31,9 @@ def _commit(repo: Path, message: str) -> str:
     return _git(["rev-parse", "HEAD"], repo)
 
 
-def _minimal_receipt(candidate_sha: str, receipt_id: str, *, gate: str = "final") -> dict:
+def _minimal_receipt(
+    candidate_sha: str, receipt_id: str, *, gate: str = "final", repo_root: Path
+) -> dict:
     from scripts import verification_receipts as vr
 
     return {
@@ -57,9 +60,11 @@ def _minimal_receipt(candidate_sha: str, receipt_id: str, *, gate: str = "final"
             "authoring_checkout_head_at_receipt": candidate_sha,
             "authoring_checkout_clean_at_receipt": True,
         },
-        "verifier_hash": "d" * 64,
-        "checker_hash": "e" * 64,
-        "dependency_and_config_inputs": [],
+        "verifier_hash": vr.file_hash(repo_root / "backend" / "scripts" / "verify.py"),
+        "checker_hash": vr.file_hash(repo_root / "backend" / "scripts" / "check_handoff.py"),
+        "dependency_and_config_inputs": vr.dependency_and_config_inputs(
+            repo_root, ["backend/pyproject.toml"]
+        ),
         "environment_descriptor": vr.environment_descriptor(postgresql_version=None),
         "steps": [
             {"name": "ruff format --check", "status": "PASS", "duration_seconds": 0.1},
@@ -75,7 +80,13 @@ def _minimal_receipt(candidate_sha: str, receipt_id: str, *, gate: str = "final"
         "mutation_witnesses": {"status": "ran", "guard_refs": [], "passed": 1, "failed": 0},
         "affected_surface": {
             "base_sha": "6" * 40,
-            "computed_categories": [],
+            # `_build_c_a_r` always adds `src.txt` (real `verification_scope`
+            # category: unmapped) and modifies `docs/LLM_HANDOFF.md` (real
+            # category: handoff-transition) between base and candidate --
+            # these are the *genuinely* recomputable categories for that
+            # diff, cross-checked by `check_review._cross_check_affected_
+            # surface` against the real, installed `verification_scope`.
+            "computed_categories": ["handoff-transition", "unmapped"],
             "required_contract_families": [],
             "required_guard_refs": [],
             "directly_executed_tests": [],
@@ -88,7 +99,7 @@ def _minimal_receipt(candidate_sha: str, receipt_id: str, *, gate: str = "final"
 
 
 @pytest.fixture()
-def car_repo() -> Generator[Path, None, None]:
+def car_repo(monkeypatch: pytest.MonkeyPatch) -> Generator[Path, None, None]:
     # Short-root temp dir, not pytest's own nested `tmp_path`: receipt paths
     # here embed a 40-hex SHA and a 36-char UUID, which combined with
     # `verify.py`'s own basetemp redirection when this suite runs *through*
@@ -107,7 +118,25 @@ def car_repo() -> Generator[Path, None, None]:
     (root / "backend" / "scripts" / "check_review.py").write_text(
         "import sys\nprint('WORKTREE-OWN-CHECK-REVIEW-MARKER')\nsys.exit(0)\n", encoding="utf-8"
     )
+    # Stand-ins for the two hashed files plus the hashed config file --
+    # never executed by these tests, only ever read and sha256'd, by both
+    # `_build_c_a_r` (to populate a receipt's verifier_hash/checker_hash/
+    # dependency_and_config_inputs with the *real* recomputable value) and
+    # `check_review.py`'s own `_cross_check_recorded_hashes`.
+    (root / "backend" / "scripts" / "verify.py").write_text(
+        "# stand-in verify.py\n", encoding="utf-8"
+    )
+    (root / "backend" / "scripts" / "check_handoff.py").write_text(
+        "# stand-in check_handoff.py\n", encoding="utf-8"
+    )
+    (root / "backend" / "pyproject.toml").write_text("[tool.example]\nx = 1\n", encoding="utf-8")
     _commit(root, "base")
+    # `verification_worktree.py`'s `REPO_ROOT` is fixed at module-import
+    # time to the real project root; every worktree-creating call this
+    # test file exercises (the detached-checkout launcher tests, and now
+    # `check_review.py`'s own hash-recomputation cross-check) must instead
+    # target this disposable repo.
+    monkeypatch.setattr(cr.vw, "REPO_ROOT", root)
     try:
         yield root
     finally:
@@ -170,6 +199,9 @@ def _build_c_a_r(
     gate: str = "final",
     risk_class: str = "H",
     slice_kind: str = "tooling",
+    extra_files: dict[str, str] | None = None,
+    migration_matrix_override: dict | None = None,
+    receipt_mutator: Callable[[dict], None] | None = None,
 ) -> tuple[str, str, str, str]:
     base_sha = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
@@ -187,14 +219,22 @@ def _build_c_a_r(
         ),
         encoding="utf-8",
     )
+    for rel_path, content in (extra_files or {}).items():
+        target = repo / rel_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
     (repo / "src.txt").write_text("v1\n", encoding="utf-8")
     candidate_sha = _commit(repo, "C: candidate")
 
     receipt_id = str(uuid.uuid4())
-    receipt = _minimal_receipt(candidate_sha, receipt_id, gate=gate)
+    receipt = _minimal_receipt(candidate_sha, receipt_id, gate=gate, repo_root=repo)
     receipt["slice_id"] = slice_id
     receipt["risk_class"] = risk_class
     receipt["base_sha"] = base_sha
+    if migration_matrix_override is not None:
+        receipt["migration_matrix"] = migration_matrix_override
+    if receipt_mutator is not None:
+        receipt_mutator(receipt)
     receipt_dir = repo / "docs" / "verification-receipts" / candidate_sha
     receipt_dir.mkdir(parents=True)
     receipt_path = receipt_dir / f"{receipt_id}.json"
@@ -444,6 +484,145 @@ def test_check_merge_eligibility_rejects_changes_requested(car_repo: Path) -> No
 
 
 # ---------------------------------------------------------------------------
+# Independent affected-surface/migration-trigger/hash recomputation
+# (Sol's third correction round, finding 1)
+# ---------------------------------------------------------------------------
+
+
+def test_migration_trigger_mismatch_rejects_merge_eligibility(car_repo: Path) -> None:
+    """The exact required regression: a candidate changes a real migration
+    path, but the receipt claims `migration_matrix.triggered: false` --
+    merge eligibility (and record validity) must reject it."""
+    candidate_sha, publication_sha, review_sha, _ = _build_c_a_r(
+        car_repo,
+        extra_files={"backend/migrations/versions/0001_add_table.py": "# migration\n"},
+    )
+    with pytest.raises(cr.ReviewValidationError, match="migration trigger"):
+        cr.validate_c_a_r_chain(candidate_sha, publication_sha, review_sha, repo_root=car_repo)
+    with pytest.raises(cr.ReviewValidationError, match="migration trigger"):
+        cr.check_merge_eligibility(candidate_sha, publication_sha, review_sha, repo_root=car_repo)
+
+
+def test_migration_trigger_matching_true_passes(car_repo: Path) -> None:
+    candidate_sha, publication_sha, review_sha, _ = _build_c_a_r(
+        car_repo,
+        extra_files={"backend/migrations/versions/0001_add_table.py": "# migration\n"},
+        migration_matrix_override={
+            "triggered": True,
+            "status": "PASS",
+            "dev_state_before": {"alembic_revision": "0000", "schema_fingerprint": "a" * 64},
+            "dev_state_after": {"alembic_revision": "0001", "schema_fingerprint": "b" * 64},
+            "postgresql_server_version": "PostgreSQL 16.0",
+            "fresh_database_created": True,
+            "fresh_database_cleaned_up": True,
+            "steps": ["existing-head upgrade"],
+        },
+    )
+    fields = cr.validate_c_a_r_chain(candidate_sha, publication_sha, review_sha, repo_root=car_repo)
+    assert fields["verdict"] == "approved"
+
+
+def test_affected_surface_category_mismatch_rejected(car_repo: Path) -> None:
+    def _mutate(receipt: dict) -> None:
+        receipt["affected_surface"]["computed_categories"] = []
+
+    candidate_sha, publication_sha, review_sha, _ = _build_c_a_r(car_repo, receipt_mutator=_mutate)
+    with pytest.raises(cr.ReviewValidationError, match="computed_categories"):
+        cr.validate_c_a_r_chain(candidate_sha, publication_sha, review_sha, repo_root=car_repo)
+
+
+def test_focused_selector_missing_required_target_rejected(car_repo: Path) -> None:
+    from scripts import verification_scope as scope_mod
+
+    extra_files = {"backend/app/normalization/salary.py": "# salary parser change\n"}
+    changed_paths = ["docs/LLM_HANDOFF.md", "src.txt", *extra_files]
+    classifications = scope_mod.classify_all(changed_paths)
+    coverage = scope_mod.compute_required_coverage(changed_paths)
+
+    def _mutate(receipt: dict) -> None:
+        receipt["affected_surface"]["computed_categories"] = sorted(
+            {c.category for c in classifications}
+        )
+        receipt["affected_surface"]["required_contract_families"] = sorted(
+            coverage.required_contract_families
+        )
+        receipt["affected_surface"]["required_guard_refs"] = sorted(coverage.required_guard_refs)
+        receipt["affected_surface"]["directly_executed_tests"] = sorted(
+            coverage.directly_executed_tests
+        )
+        receipt["mutation_witnesses"]["guard_refs"] = sorted(coverage.required_guard_refs)
+        # `focused_tests` is deliberately left at `not_run` -- real coverage
+        # for a parser change requires a focus selector, so this must fail.
+
+    candidate_sha, publication_sha, review_sha, _ = _build_c_a_r(
+        car_repo, extra_files=extra_files, receipt_mutator=_mutate
+    )
+    with pytest.raises(cr.ReviewValidationError, match="focused_tests.selector"):
+        cr.validate_c_a_r_chain(candidate_sha, publication_sha, review_sha, repo_root=car_repo)
+
+
+def test_witness_guard_refs_missing_required_ref_rejected(car_repo: Path) -> None:
+    from scripts import verification_scope as scope_mod
+
+    extra_files = {"backend/app/normalization/salary.py": "# salary parser change\n"}
+    changed_paths = ["docs/LLM_HANDOFF.md", "src.txt", *extra_files]
+    classifications = scope_mod.classify_all(changed_paths)
+    coverage = scope_mod.compute_required_coverage(changed_paths)
+    computed_focus_targets = {
+        target.removeprefix("backend/") for target in coverage.required_focus_targets
+    }
+
+    def _mutate(receipt: dict) -> None:
+        receipt["affected_surface"]["computed_categories"] = sorted(
+            {c.category for c in classifications}
+        )
+        receipt["affected_surface"]["required_contract_families"] = sorted(
+            coverage.required_contract_families
+        )
+        receipt["affected_surface"]["required_guard_refs"] = sorted(coverage.required_guard_refs)
+        receipt["affected_surface"]["directly_executed_tests"] = sorted(
+            coverage.directly_executed_tests
+        )
+        receipt["focused_tests"] = {
+            "status": "ran",
+            "selector": " ".join(sorted(computed_focus_targets)),
+            "count": 1,
+        }
+        receipt["steps"].append(
+            {"name": "focused pytest", "status": "PASS", "duration_seconds": 1.0}
+        )
+        # `mutation_witnesses.guard_refs` is deliberately left empty (the
+        # `_minimal_receipt` default) -- required_guard_refs is non-empty
+        # for this diff, so this must be rejected.
+
+    candidate_sha, publication_sha, review_sha, _ = _build_c_a_r(
+        car_repo, extra_files=extra_files, receipt_mutator=_mutate
+    )
+    with pytest.raises(cr.ReviewValidationError, match="mutation_witnesses.guard_refs"):
+        cr.validate_c_a_r_chain(candidate_sha, publication_sha, review_sha, repo_root=car_repo)
+
+
+def test_verifier_hash_mismatch_rejected(car_repo: Path) -> None:
+    def _mutate(receipt: dict) -> None:
+        receipt["verifier_hash"] = "f" * 64
+
+    candidate_sha, publication_sha, review_sha, _ = _build_c_a_r(car_repo, receipt_mutator=_mutate)
+    with pytest.raises(cr.ReviewValidationError, match="verifier_hash"):
+        cr.validate_c_a_r_chain(candidate_sha, publication_sha, review_sha, repo_root=car_repo)
+
+
+def test_dependency_and_config_inputs_hash_mismatch_rejected(car_repo: Path) -> None:
+    def _mutate(receipt: dict) -> None:
+        receipt["dependency_and_config_inputs"] = [
+            {"repo_relative_path": "backend/pyproject.toml", "sha256": "f" * 64}
+        ]
+
+    candidate_sha, publication_sha, review_sha, _ = _build_c_a_r(car_repo, receipt_mutator=_mutate)
+    with pytest.raises(cr.ReviewValidationError, match="dependency_and_config_inputs"):
+        cr.validate_c_a_r_chain(candidate_sha, publication_sha, review_sha, repo_root=car_repo)
+
+
+# ---------------------------------------------------------------------------
 # C..A / A..R transition-diff fault injection
 # ---------------------------------------------------------------------------
 
@@ -565,6 +744,69 @@ def test_escalation_block_rejects_invalid_trigger() -> None:
         cr.validate_escalation_metadata_structure(fields)
 
 
+def test_escalation_block_rejects_unknown_field() -> None:
+    fields = {
+        "schema_version": "2",
+        "slice_id": "2026-09-13-example-abc1234",
+        "reviewer": "Astra",
+        "reviewer_model": "Astra",
+        "reviewed_at": "2026-09-13T14:00:00Z",
+        "candidate_sha": "c" * 40,
+        "verdict": "approved",
+        "findings": "none",
+        "trigger": "disputed_finding",
+        "unexpected_field": "surprise",
+    }
+    with pytest.raises(cr.ReviewValidationError, match="unrecognized"):
+        cr.validate_escalation_metadata_structure(fields)
+
+
+def test_escalation_block_rejects_wrong_schema_version() -> None:
+    fields = {
+        "schema_version": "1",
+        "slice_id": "2026-09-13-example-abc1234",
+        "reviewer": "Astra",
+        "reviewer_model": "Astra",
+        "reviewed_at": "2026-09-13T14:00:00Z",
+        "candidate_sha": "c" * 40,
+        "verdict": "approved",
+        "findings": "none",
+        "trigger": "disputed_finding",
+    }
+    with pytest.raises(cr.ReviewValidationError, match="schema_version"):
+        cr.validate_escalation_metadata_structure(fields)
+
+
+def test_review_metadata_rejects_unknown_field(car_repo: Path) -> None:
+    candidate_sha, publication_sha, review_sha, _ = _build_c_a_r(car_repo)
+    handoff_path = car_repo / "docs" / "LLM_HANDOFF.md"
+    text = handoff_path.read_text(encoding="utf-8")
+    tampered = text.replace(
+        "findings: none\n```", "findings: none\nunexpected_field: surprise\n```"
+    )
+    assert tampered != text
+    handoff_path.write_text(tampered, encoding="utf-8")
+    _git(["add", "-A"], car_repo)
+    _git(["commit", "-q", "--amend", "--no-edit"], car_repo)
+    new_review_sha = _git(["rev-parse", "HEAD"], car_repo)
+    with pytest.raises(cr.ReviewValidationError, match="unrecognized"):
+        cr.validate_c_a_r_chain(candidate_sha, publication_sha, new_review_sha, repo_root=car_repo)
+
+
+def test_review_metadata_rejects_wrong_schema_version(car_repo: Path) -> None:
+    candidate_sha, publication_sha, review_sha, _ = _build_c_a_r(car_repo)
+    handoff_path = car_repo / "docs" / "LLM_HANDOFF.md"
+    text = handoff_path.read_text(encoding="utf-8")
+    tampered = text.replace("schema_version: 2\n", "schema_version: 999\n")
+    assert tampered != text
+    handoff_path.write_text(tampered, encoding="utf-8")
+    _git(["add", "-A"], car_repo)
+    _git(["commit", "-q", "--amend", "--no-edit"], car_repo)
+    new_review_sha = _git(["rev-parse", "HEAD"], car_repo)
+    with pytest.raises(cr.ReviewValidationError, match="schema_version"):
+        cr.validate_c_a_r_chain(candidate_sha, publication_sha, new_review_sha, repo_root=car_repo)
+
+
 def test_escalation_block_never_satisfies_approval_alone(car_repo: Path) -> None:
     """An escalation-only 'approved' block must never make merge eligible
     on its own -- only the primary review block is read for eligibility."""
@@ -662,9 +904,14 @@ def _build_m_q(
         "mutation_witnesses": {"status": "ran", "guard_refs": [], "passed": 1, "failed": 0},
         "migration_matrix": {"triggered": False},
         "steps": [
+            {"name": "ruff format --check", "status": "PASS", "duration_seconds": 0.1},
             {"name": "ruff check", "status": "PASS", "duration_seconds": 0.1},
+            {"name": "mypy", "status": "PASS", "duration_seconds": 0.1},
+            {"name": "check_repo.py", "status": "PASS", "duration_seconds": 0.1},
+            {"name": "git diff --check", "status": "PASS", "duration_seconds": 0.1},
             {"name": "full pytest suite", "status": "PASS", "duration_seconds": 1.0},
             {"name": "contract mutation witnesses", "status": "PASS", "duration_seconds": 1.0},
+            {"name": "handoff metadata validation", "status": "PASS", "duration_seconds": 0.01},
         ],
         "cleanup": {"attempted": True, "status": "PASS"},
     }
@@ -729,6 +976,136 @@ def test_validate_published_end_to_end(car_repo: Path) -> None:
     assert result["merged_commit"] == merge_sha
 
 
+@pytest.mark.parametrize(
+    "omitted_step_name",
+    ["ruff format --check", "mypy", "check_repo.py", "git diff --check"],
+)
+def test_validate_q_rejects_artifact_omitting_a_required_static_check_step(
+    car_repo: Path, omitted_step_name: str
+) -> None:
+    """The exact required regression: a Q artifact omitting Ruff format,
+    mypy, check_repo, or git diff --check must be rejected."""
+    candidate_sha, publication_sha, review_sha, _ = _build_c_a_r(car_repo)
+    base_main_sha = _git(["rev-parse", "HEAD~3"], car_repo)
+    merge_sha, q_sha = _build_m_q(car_repo, review_sha, base_main_sha)
+
+    artifact_path = car_repo / "docs" / "post-merge" / "artifact.json"
+    artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+    artifact["steps"] = [s for s in artifact["steps"] if s["name"] != omitted_step_name]
+    artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
+    _git(["add", "-A"], car_repo)
+    _git(["commit", "-q", "--amend", "--no-edit"], car_repo)
+    fixed_q_sha = _git(["rev-parse", "HEAD"], car_repo)
+
+    with pytest.raises(cr.ReviewValidationError, match=re.escape(omitted_step_name)):
+        cr.validate_q(merge_sha, fixed_q_sha, repo_root=car_repo)
+
+
+@pytest.mark.parametrize(
+    "not_run_step_name",
+    ["ruff format --check", "ruff check", "mypy", "check_repo.py", "git diff --check"],
+)
+def test_validate_q_rejects_artifact_marking_a_required_step_not_run(
+    car_repo: Path, not_run_step_name: str
+) -> None:
+    """The exact required regression: a Q artifact marking one of the
+    required static checks NOT_RUN must be rejected, identically to an
+    omission."""
+    candidate_sha, publication_sha, review_sha, _ = _build_c_a_r(car_repo)
+    base_main_sha = _git(["rev-parse", "HEAD~3"], car_repo)
+    merge_sha, q_sha = _build_m_q(car_repo, review_sha, base_main_sha)
+
+    artifact_path = car_repo / "docs" / "post-merge" / "artifact.json"
+    artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+    for step in artifact["steps"]:
+        if step["name"] == not_run_step_name:
+            step["status"] = "NOT_RUN"
+    artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
+    _git(["add", "-A"], car_repo)
+    _git(["commit", "-q", "--amend", "--no-edit"], car_repo)
+    fixed_q_sha = _git(["rev-parse", "HEAD"], car_repo)
+
+    with pytest.raises(cr.ReviewValidationError, match="is not PASS"):
+        cr.validate_q(merge_sha, fixed_q_sha, repo_root=car_repo)
+
+
+def test_validate_q_rejects_artifact_with_a_duplicate_required_step(car_repo: Path) -> None:
+    candidate_sha, publication_sha, review_sha, _ = _build_c_a_r(car_repo)
+    base_main_sha = _git(["rev-parse", "HEAD~3"], car_repo)
+    merge_sha, q_sha = _build_m_q(car_repo, review_sha, base_main_sha)
+
+    artifact_path = car_repo / "docs" / "post-merge" / "artifact.json"
+    artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+    artifact["steps"].append({"name": "mypy", "status": "PASS", "duration_seconds": 0.2})
+    artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
+    _git(["add", "-A"], car_repo)
+    _git(["commit", "-q", "--amend", "--no-edit"], car_repo)
+    fixed_q_sha = _git(["rev-parse", "HEAD"], car_repo)
+
+    with pytest.raises(cr.ReviewValidationError, match="duplicate step name"):
+        cr.validate_q(merge_sha, fixed_q_sha, repo_root=car_repo)
+
+
+def test_validate_published_rejects_migration_trigger_mismatch(car_repo: Path) -> None:
+    """`validate_published` independently re-derives whether migration
+    evidence is required for the original slice diff -- a post-merge
+    artifact claiming `migration_matrix.triggered: false` when the slice
+    genuinely changed a migration path must be rejected."""
+    candidate_sha, publication_sha, review_sha, _ = _build_c_a_r(
+        car_repo,
+        extra_files={"backend/migrations/versions/0001_add_table.py": "# migration\n"},
+        # The receipt's own migration evidence must be correct (matching
+        # the real diff), so `validate_c_a_r_chain`'s own recomputation
+        # passes cleanly -- isolating this test to the *artifact's*
+        # migration_matrix, which is deliberately left wrong below.
+        migration_matrix_override={
+            "triggered": True,
+            "status": "PASS",
+            "dev_state_before": {"alembic_revision": "0000", "schema_fingerprint": "a" * 64},
+            "dev_state_after": {"alembic_revision": "0001", "schema_fingerprint": "b" * 64},
+            "postgresql_server_version": "PostgreSQL 16.0",
+            "fresh_database_created": True,
+            "fresh_database_cleaned_up": True,
+            "steps": ["existing-head upgrade"],
+        },
+    )
+    base_main_sha = _git(["rev-parse", "HEAD~3"], car_repo)
+    merge_sha, q_sha = _build_m_q(car_repo, review_sha, base_main_sha)
+
+    slice_id = f"2026-09-13-example-{base_main_sha[:7]}"
+    receipt_path = next((car_repo / "docs" / "verification-receipts").glob("*/*.json"))
+    receipt_id = receipt_path.stem
+
+    artifact_path = car_repo / "docs" / "post-merge" / "artifact.json"
+    artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+    artifact["slice_id"] = slice_id
+    artifact["base_sha"] = base_main_sha
+    artifact["candidate_sha"] = candidate_sha
+    artifact["publication_commit_sha"] = publication_sha
+    artifact["review_commit_sha"] = review_sha
+    artifact["original_receipt_id"] = receipt_id
+    artifact["original_receipt_path"] = (
+        f"docs/verification-receipts/{candidate_sha}/{receipt_id}.json"
+    )
+    # migration_matrix stays at the fixture default {"triggered": False},
+    # which is wrong for this diff -- must be rejected.
+    artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
+    _git(["add", "-A"], car_repo)
+    _git(["commit", "-q", "--amend", "--no-edit"], car_repo)
+    fixed_q_sha = _git(["rev-parse", "HEAD"], car_repo)
+
+    with pytest.raises(cr.ReviewValidationError, match="migration trigger"):
+        cr.validate_published(
+            candidate_sha,
+            publication_sha,
+            review_sha,
+            merge_sha,
+            fixed_q_sha,
+            base_main_sha,
+            repo_root=car_repo,
+        )
+
+
 def test_validate_q_rejects_artifact_with_a_failed_step(car_repo: Path) -> None:
     candidate_sha, publication_sha, review_sha, _ = _build_c_a_r(car_repo)
     base_main_sha = _git(["rev-parse", "HEAD~3"], car_repo)
@@ -736,7 +1113,13 @@ def test_validate_q_rejects_artifact_with_a_failed_step(car_repo: Path) -> None:
 
     artifact_path = car_repo / "docs" / "post-merge" / "artifact.json"
     artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
-    artifact["steps"][0]["status"] = "FAIL"
+    # Flip a step outside the required-static-check set and unbound to any
+    # ran/not_run summary, so this exercises the generic FAIL-anywhere
+    # check specifically -- not the more specific required-step-must-be-
+    # PASS or summary-binding checks (each covered by their own tests).
+    for step in artifact["steps"]:
+        if step["name"] == "handoff metadata validation":
+            step["status"] = "FAIL"
     artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
     _git(["add", "-A"], car_repo)
     _git(["commit", "-q", "--amend", "--no-edit"], car_repo)
