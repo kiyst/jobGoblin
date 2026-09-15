@@ -27,6 +27,19 @@ import json
 import sys
 from pathlib import Path
 
+def _discover_active_guards():
+    # A disposable test repo's own `backend/tests/__init__.py` (added by
+    # some tests to exercise a real focus target) shadows the real
+    # project's `.pth`-installed `tests` package for this subprocess --
+    # this stand-in is only a lightweight mechanics fixture, so it falls
+    # back to an empty inventory rather than crashing; the *real*
+    # verify.py always runs against the real, complete `tests` package.
+    try:
+        from tests.contracts.taxonomy import active_guards
+        return sorted(active_guards().keys())
+    except ImportError:
+        return []
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--level", required=True)
@@ -49,6 +62,8 @@ def main():
         if not resolved.is_relative_to(tests_root) or not resolved.is_file():
             print(f"error: bad --focus target {target!r}", file=sys.stderr)
             sys.exit(2)
+
+    guard_refs = _discover_active_guards()
 
     payload = {
         "steps": [
@@ -74,7 +89,12 @@ def main():
         ],
         "full_suite": {"status": "ran", "count": 7},
         "focused_tests": {"status": "not_run"},
-        "mutation_witnesses": {"status": "ran", "guard_refs": [], "passed": 3, "failed": 0},
+        "mutation_witnesses": {
+            "status": "ran",
+            "guard_refs": guard_refs,
+            "passed": len(guard_refs),
+            "failed": 0,
+        },
         "all_passed": True,
     }
     if args.emit_step_json:

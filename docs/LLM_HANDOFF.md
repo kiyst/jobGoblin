@@ -681,19 +681,55 @@ full_suite_count: 2323
 - STOP — this is a bounded correction only. Do not author `R`, merge,
   create `M`/`Q`, begin another slice, or modify product/parser behavior.
 
+#### Correction round 5 (Sol review: Changes requested)
+
+- **Supersedes candidate `C5` = `d3c2d74d794b320f4f9adca331e31cabb26b9d20`
+  and publication `A5` = `eae5d01e0bcdead422c58321970a8159fda5f7a1`.** The
+  receipt published there
+  (`docs/verification-receipts/d3c2d74d794b320f4f9adca331e31cabb26b9d20/
+  4e833d27-5d2f-407f-aa92-e0d877072436.json`) is **not reusable** and is
+  superseded by this correction round's own fresh candidate/publication
+  cycle below. `C5`/`A5` themselves are left exactly as pushed, per Git
+  gates — never amended or rewritten.
+- Implements the one remaining bounded finding: unifies witness-inventory
+  validation into a single shared mechanism, used identically in all
+  three places it previously existed independently. New
+  `verification_receipts.compute_active_guard_refs()` (the complete,
+  dynamically discovered active-guard inventory, resolved via whichever
+  `tests.contracts.taxonomy` module is importable in the current process
+  -- the target commit's own copy when run inside a disposable worktree
+  or detached-checkout subprocess) and `witnesses_match_complete_active_
+  inventory()` (the shared predicate: `mutation_witnesses.guard_refs`
+  must exactly equal that inventory, `passed == len(guard_refs)`,
+  `failed == 0` -- never a positive-count-only or subset-only path) are
+  now the *only* witness-completeness check anywhere in this codebase.
+  `compute_approval_eligible` uses it directly for a `final`-gate receipt
+  (replacing the old, weaker `_witnesses_genuinely_ran_and_passed`, which
+  is deleted, not merely superseded). `check_review.py`'s pre-merge
+  `C -> A -> R` cross-check and its post-merge artifact/Q evidence check
+  both now call the same shared predicate (via a new `_require_complete_
+  active_witness_inventory` helper that adds a detailed diff to the
+  raised error) instead of each independently re-deriving or weakening
+  the requirement — the post-merge path previously only required a
+  positive count with zero failures, never the complete inventory, which
+  is exactly the gap this round closes.
+- Files changed: `backend/scripts/{check_review,verification_receipts}.py`
+  (edited); `backend/tests/test_{check_review,verification_receipts,
+  verification_coordinator}.py` (edited). No production parser
+  (`app/normalization/*`) touched; no migration/model file touched.
+- Verification (this correction round): `ruff format --check`/
+  `ruff check`/`mypy` clean (158 source files, backend + `.claude/hooks`).
+  Full pytest suite: **2625 passed**. All 34 mutation witnesses pass
+  unmodified. `check_repo.py` exits 0. `git diff --check` clean.
+- STOP — this is a bounded correction only. Do not author `R`, merge,
+  create `M`/`Q`, begin another slice, or modify product/parser behavior.
+
 ```workflow-metadata
 workflow_version: v3.2
-state: published
+state: pending
 slice_id: 2026-09-13-workflow-v3-2-activation-66202c2
 slice_kind: tooling
 risk_class: H
 base_sha: 66202c23facff6bd33d8f624e327cabdd40708b4
 declared_gate: final
-executed_gate: final
-candidate_sha: d3c2d74d794b320f4f9adca331e31cabb26b9d20
-receipt_id: 4e833d27-5d2f-407f-aa92-e0d877072436
-receipt_path: docs/verification-receipts/d3c2d74d794b320f4f9adca331e31cabb26b9d20/4e833d27-5d2f-407f-aa92-e0d877072436.json
-full_suite_count: 2619
-focused_test_count: 452
-mutation_witness_count: 34
 ```

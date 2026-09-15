@@ -1015,7 +1015,12 @@ def _build_m_q(
         "environment_descriptor": vr.environment_descriptor(postgresql_version=None),
         "coordinator": _valid_post_merge_coordinator(),
         "full_suite": {"status": "ran", "count": 1},
-        "mutation_witnesses": {"status": "ran", "guard_refs": [], "passed": 1, "failed": 0},
+        "mutation_witnesses": {
+            "status": "ran",
+            "guard_refs": sorted(vr.compute_active_guard_refs()),
+            "passed": len(vr.compute_active_guard_refs()),
+            "failed": 0,
+        },
         "migration_matrix": {"triggered": False},
         "steps": [
             {"name": "ruff format --check", "status": "PASS", "duration_seconds": 0.1},
@@ -1290,6 +1295,37 @@ def test_validate_q_rejects_artifact_whose_full_suite_did_not_genuinely_run(
     fixed_q_sha = _git(["rev-parse", "HEAD"], car_repo)
 
     with pytest.raises(cr.ReviewValidationError, match="full suite did not genuinely run"):
+        cr.validate_q(merge_sha, fixed_q_sha, repo_root=car_repo)
+
+
+def test_validate_q_rejects_artifact_claiming_only_one_of_the_active_guards(
+    car_repo: Path,
+) -> None:
+    """The exact required regression (Sol's fifth correction round): a
+    schema-valid post-merge artifact claiming only one of the complete
+    active-guard inventory must be rejected -- post-merge is inherently
+    full/final-equivalent, so a positive count alone is never enough."""
+    candidate_sha, publication_sha, review_sha, _ = _build_c_a_r(car_repo)
+    base_main_sha = _git(["rev-parse", "HEAD~3"], car_repo)
+    merge_sha, q_sha = _build_m_q(car_repo, review_sha, base_main_sha)
+
+    artifact_path = car_repo / "docs" / "post-merge" / "artifact.json"
+    artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+    only_one = _real_active_guard_refs()[:1]
+    artifact["mutation_witnesses"] = {
+        "status": "ran",
+        "guard_refs": only_one,
+        "passed": len(only_one),
+        "failed": 0,
+    }
+    artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
+    _git(["add", "-A"], car_repo)
+    _git(["commit", "-q", "--amend", "--no-edit"], car_repo)
+    fixed_q_sha = _git(["rev-parse", "HEAD"], car_repo)
+
+    with pytest.raises(
+        cr.ReviewValidationError, match="does not equal the complete active-guard inventory"
+    ):
         cr.validate_q(merge_sha, fixed_q_sha, repo_root=car_repo)
 
 

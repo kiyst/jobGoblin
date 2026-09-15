@@ -653,9 +653,37 @@ def _full_suite_genuinely_ran(data: dict[str, Any]) -> bool:
     return isinstance(count, int) and not isinstance(count, bool) and count > 0
 
 
-def _witnesses_genuinely_ran_and_passed(data: dict[str, Any]) -> bool:
+def compute_active_guard_refs() -> frozenset[str]:
+    """The complete, dynamically discovered active-guard inventory --
+    resolved via whichever `tests.contracts.taxonomy` module is
+    importable in the *current* process. When this executes inside a
+    disposable worktree or detached-checkout subprocess at a specific
+    commit, that is the target commit's own copy (the same cwd-precedence
+    already relied on by `verification_scope.compute_required_coverage`),
+    never a hardcoded count and never a stale in-process copy."""
+    from tests.contracts.taxonomy import active_guards
+
+    return frozenset(active_guards().keys())
+
+
+def witnesses_match_complete_active_inventory(data: dict[str, Any]) -> bool:
+    """The single, shared complete-active-witness validation mechanism --
+    reused, unchanged, by `compute_approval_eligible` below (a receipt),
+    `check_review.py`'s pre-merge `C -> A -> R` cross-check, and its
+    post-merge artifact/Q evidence check, so the three can never
+    independently drift or retain a weaker positive-count-only path.
+    `data["mutation_witnesses"]` must be `status: ran`, with `guard_refs`
+    exactly equal to `compute_active_guard_refs()` -- never merely a
+    positive count, never merely a subset -- `passed == len(guard_refs)`,
+    and `failed == 0`."""
     witnesses = data["mutation_witnesses"]
-    if witnesses.get("status") != "ran":
+    if not isinstance(witnesses, dict) or witnesses.get("status") != "ran":
+        return False
+    guard_refs = witnesses.get("guard_refs")
+    if not isinstance(guard_refs, list) or not all(isinstance(g, str) for g in guard_refs):
+        return False
+    recorded = frozenset(guard_refs)
+    if recorded != compute_active_guard_refs():
         return False
     passed = witnesses.get("passed")
     failed = witnesses.get("failed")
@@ -663,7 +691,7 @@ def _witnesses_genuinely_ran_and_passed(data: dict[str, Any]) -> bool:
         return False
     if isinstance(passed, bool) or isinstance(failed, bool):
         return False
-    return failed == 0 and passed > 0
+    return passed == len(recorded) and failed == 0
 
 
 def compute_approval_eligible(data: dict[str, Any]) -> bool:
@@ -676,11 +704,14 @@ def compute_approval_eligible(data: dict[str, Any]) -> bool:
     step_names`) is present exactly once with PASS; cleanup passed; both
     worktree snapshots are identical and non-trivial; no step reports
     FAIL; the full suite genuinely ran with a positive numeric count
-    (never `not_run`, never a non-numeric/boolean value); every
-    dynamically active mutation guard ran and passed (a positive numeric
-    `passed` count, zero `failed`); and, when `migration_matrix.triggered`
-    is true, its own evidence genuinely passed (see
-    `_migration_matrix_genuinely_passed`). A receipt with an empty step
+    (never `not_run`, never a non-numeric/boolean value); `mutation_
+    witnesses.guard_refs` exactly equals the complete, dynamically
+    discovered active-guard inventory (never merely a positive count,
+    never merely a subset -- see `witnesses_match_complete_active_
+    inventory`, the single shared mechanism also reused by `check_
+    review.py`'s pre-merge and post-merge witness validation); and, when
+    `migration_matrix.triggered` is true, its own evidence genuinely
+    passed (see `_migration_matrix_genuinely_passed`). A receipt with an empty step
     list and every execution group left `not_run` is the degenerate case
     this function must reject outright -- it satisfies no positive
     requirement below. True for a successful `docs` gate run against its
@@ -720,5 +751,5 @@ def compute_approval_eligible(data: dict[str, Any]) -> bool:
         return False
 
     if gate == "final":
-        return _full_suite_genuinely_ran(data) and _witnesses_genuinely_ran_and_passed(data)
+        return _full_suite_genuinely_ran(data) and witnesses_match_complete_active_inventory(data)
     return True

@@ -462,37 +462,45 @@ def _cross_check_affected_surface(
         )
 
 
+def _require_complete_active_witness_inventory(data: dict[str, Any], *, context: str) -> None:
+    """Reuses `verification_receipts.witnesses_match_complete_active_
+    inventory` -- the single mechanism shared by `compute_approval_
+    eligible` (a receipt), this pre-merge cross-check, and the post-merge
+    artifact/Q evidence check below -- so all three can never
+    independently drift, and none of them retains a weaker positive-
+    count-only or subset-only path. Raised with a detailed diff (never
+    merely "false") by independently recomputing the same active-guard
+    inventory the shared predicate itself uses."""
+    if vr.witnesses_match_complete_active_inventory(data):
+        return
+    active_guard_refs = vr.compute_active_guard_refs()
+    witnesses = data["mutation_witnesses"]
+    recorded_guard_refs = frozenset(witnesses.get("guard_refs") or [])
+    if recorded_guard_refs != active_guard_refs:
+        raise ReviewValidationError(
+            f"{context}'s mutation_witnesses.guard_refs does not equal the complete "
+            f"active-guard inventory (missing "
+            f"{sorted(active_guard_refs - recorded_guard_refs)!r}, unexpected "
+            f"{sorted(recorded_guard_refs - active_guard_refs)!r})"
+        )
+    passed = witnesses.get("passed")
+    failed = witnesses.get("failed")
+    raise ReviewValidationError(
+        f"{context}'s mutation_witnesses passed/failed ({passed!r}/{failed!r}) must equal "
+        f"len(guard_refs)={len(recorded_guard_refs)}/0"
+    )
+
+
 def _cross_check_final_gate_witness_inventory(receipt: dict[str, Any]) -> None:
     """For `gate: final` specifically, the receipt's `mutation_witnesses`
     must cover the *complete* active-guard inventory -- never merely the
     diff-computed required subset (that weaker check is `_cross_check_
     affected_surface`'s job, and still applies for `fast`). `final` always
     runs every currently active guard (`verify.py`'s own `mutation_
-    witnesses_step` passes `refs=[]` whenever `gate != 'fast'`), discovered
-    here via this checkout's own contract taxonomy module -- the target
-    commit's own copy when run through the detached-checkout launcher,
-    never a reviewer's possibly-stale in-process copy."""
+    witnesses_step` passes `refs=[]` whenever `gate != 'fast'`)."""
     if receipt["gate"] != "final":
         return
-    from tests.contracts.taxonomy import active_guards
-
-    active_guard_refs = frozenset(active_guards().keys())
-    witnesses = receipt["mutation_witnesses"]
-    recorded_guard_refs = frozenset(witnesses.get("guard_refs", []))
-    if recorded_guard_refs != active_guard_refs:
-        raise ReviewValidationError(
-            "receipt's mutation_witnesses.guard_refs does not equal the complete active-guard "
-            f"inventory for gate: final (missing "
-            f"{sorted(active_guard_refs - recorded_guard_refs)!r}, unexpected "
-            f"{sorted(recorded_guard_refs - active_guard_refs)!r})"
-        )
-    passed = witnesses.get("passed")
-    failed = witnesses.get("failed")
-    if passed != len(recorded_guard_refs) or failed != 0:
-        raise ReviewValidationError(
-            f"receipt's mutation_witnesses passed/failed ({passed!r}/{failed!r}) must equal "
-            f"len(guard_refs)={len(recorded_guard_refs)}/0 for gate: final"
-        )
+    _require_complete_active_witness_inventory(receipt, context="receipt")
 
 
 def _validate_verdict_findings_pair(verdict: str, findings: str, *, context: str) -> None:
@@ -902,19 +910,11 @@ def _validate_post_merge_artifact_evidence(artifact: dict[str, Any]) -> None:
             "post-merge artifact's full suite did not genuinely run and pass"
         )
 
-    witnesses = artifact["mutation_witnesses"]
-    passed = witnesses.get("passed")
-    failed = witnesses.get("failed")
-    numeric = (
-        isinstance(passed, int)
-        and isinstance(failed, int)
-        and not isinstance(passed, bool)
-        and not isinstance(failed, bool)
-    )
-    if witnesses.get("status") != "ran" or not numeric or failed != 0 or passed <= 0:
-        raise ReviewValidationError(
-            "post-merge artifact's mutation witnesses did not genuinely run and pass"
-        )
+    # Post-merge is inherently full/final-equivalent (never gated) -- the
+    # complete active-guard inventory is always required here, the exact
+    # same shared mechanism `compute_approval_eligible` and the pre-merge
+    # cross-check use.
+    _require_complete_active_witness_inventory(artifact, context="post-merge artifact")
 
     # Reuses the same deep migration-evidence check a receipt's own
     # `compute_approval_eligible` applies -- exists exactly once with

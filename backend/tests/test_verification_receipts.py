@@ -116,7 +116,12 @@ def _minimal_valid_receipt(**overrides: object) -> dict:
         ],
         "full_suite": {"status": "ran", "count": 2323},
         "focused_tests": {"status": "not_run"},
-        "mutation_witnesses": {"status": "ran", "guard_refs": [], "passed": 34, "failed": 0},
+        "mutation_witnesses": {
+            "status": "ran",
+            "guard_refs": sorted(vr.compute_active_guard_refs()),
+            "passed": len(vr.compute_active_guard_refs()),
+            "failed": 0,
+        },
         "affected_surface": {
             "base_sha": "6" * 40,
             "computed_categories": [],
@@ -351,6 +356,50 @@ def test_compute_approval_eligible_false_if_any_witness_failed() -> None:
         mutation_witnesses={"status": "ran", "guard_refs": [], "passed": 33, "failed": 1},
     )
     assert vr.compute_approval_eligible(receipt) is False
+
+
+def test_compute_approval_eligible_false_if_only_one_of_the_active_guards_claimed() -> None:
+    """The exact required regression (Sol's fifth correction round): a
+    schema-valid final receipt claiming only one of the complete active-
+    guard inventory must recompute `approval_eligible: false` -- a
+    positive count alone (here, 1 passed, 0 failed) is never sufficient."""
+    only_one = sorted(vr.compute_active_guard_refs())[:1]
+    receipt = _minimal_valid_receipt(
+        gate="final",
+        mutation_witnesses={
+            "status": "ran",
+            "guard_refs": only_one,
+            "passed": len(only_one),
+            "failed": 0,
+        },
+    )
+    vr.validate_receipt_schema(receipt)  # schema-valid despite the incomplete inventory
+    assert vr.compute_approval_eligible(receipt) is False
+
+
+def test_witnesses_match_complete_active_inventory_true_for_the_real_full_set() -> None:
+    all_guards = sorted(vr.compute_active_guard_refs())
+    data = {
+        "mutation_witnesses": {
+            "status": "ran",
+            "guard_refs": all_guards,
+            "passed": len(all_guards),
+            "failed": 0,
+        }
+    }
+    assert vr.witnesses_match_complete_active_inventory(data) is True
+
+
+@pytest.mark.parametrize(
+    "witnesses",
+    [
+        {"status": "not_run"},
+        {"status": "ran", "guard_refs": [], "passed": 0, "failed": 0},
+        {"status": "ran", "guard_refs": "not-a-list", "passed": 0, "failed": 0},
+    ],
+)
+def test_witnesses_match_complete_active_inventory_false_for_bad_shapes(witnesses: dict) -> None:
+    assert vr.witnesses_match_complete_active_inventory({"mutation_witnesses": witnesses}) is False
 
 
 # ---------------------------------------------------------------------------
