@@ -198,8 +198,14 @@ def _require_clean_authoring_checkout(candidate_sha: str) -> None:
         raise CoordinatorError("authoring checkout is not clean -- refusing to proceed")
 
 
-def _file_hash_at(relative_path: str) -> str:
-    return vr.file_hash(REPO_ROOT / relative_path)
+def _file_hash_at(candidate_sha: str, relative_path: str) -> str:
+    """The canonical committed-blob hash at `candidate_sha` -- never a
+    working-tree read, which can diverge from a fresh checkout's bytes
+    whenever a local checkout filter (e.g. `core.autocrlf`) converts line
+    endings on smudge (see `verification_receipts.committed_file_hash`,
+    the single mechanism this and `check_review.py`'s review-time
+    recomputation both use)."""
+    return vr.committed_file_hash(candidate_sha, relative_path, repo_root=REPO_ROOT)
 
 
 def _clean_cache_dirs(run_dir: Path) -> None:
@@ -416,10 +422,10 @@ def run_receipt_eligible_verification(request: ReceiptEligibleRequest) -> Path:
             "authoring_checkout_head_at_receipt": request.candidate_sha,
             "authoring_checkout_clean_at_receipt": True,
         },
-        "verifier_hash": _file_hash_at("backend/scripts/verify.py"),
-        "checker_hash": _file_hash_at("backend/scripts/check_handoff.py"),
+        "verifier_hash": _file_hash_at(request.candidate_sha, "backend/scripts/verify.py"),
+        "checker_hash": _file_hash_at(request.candidate_sha, "backend/scripts/check_handoff.py"),
         "dependency_and_config_inputs": vr.dependency_and_config_inputs(
-            REPO_ROOT, ["backend/pyproject.toml"]
+            request.candidate_sha, ["backend/pyproject.toml"], repo_root=REPO_ROOT
         ),
         "environment_descriptor": vr.environment_descriptor(
             postgresql_version=_postgresql_version(request.docs_only)

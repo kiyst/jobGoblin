@@ -217,6 +217,43 @@ def test_receipt_eligible_run_produces_a_valid_create_only_receipt(
     assert len(worktree_list.strip().splitlines()) == 1
 
 
+def test_receipt_generation_and_review_recomputation_agree_on_the_same_hashes(
+    disposable_activation_repo: tuple[Path, str, str],
+) -> None:
+    """The exact required regression (Sol's sixth correction round):
+    receipt generation (`verification_coordinator.py`) and review-time
+    recomputation (`check_review.py`) call the same canonical committed-
+    blob mechanism and must agree -- even after the authoring checkout's
+    own on-disk bytes are mutated post-receipt (the precise scenario that
+    caused the original false-mismatch bug, since neither side reads the
+    working tree for this check)."""
+    root, base_sha, candidate_sha = disposable_activation_repo
+    request = coord.ReceiptEligibleRequest(
+        candidate_sha=candidate_sha,
+        gate="final",
+        slice_id=f"2026-09-13-example-{base_sha[:7]}",
+        risk_class="R",
+        base_sha=base_sha,
+        focus_targets=[],
+        witness_refs=[],
+    )
+    receipt_path = coord.run_receipt_eligible_verification(request)
+
+    from scripts import check_review as cr
+    from scripts import verification_receipts as vr
+
+    receipt = vr.load_receipt(receipt_path)
+
+    # Mutate the authoring checkout's own on-disk bytes for one of the
+    # hashed files -- never staged/committed -- simulating exactly the
+    # divergence (e.g. a line-ending change) that broke the old worktree-
+    # based recomputation.
+    hashed_file = root / "backend" / "scripts" / "check_handoff.py"
+    hashed_file.write_bytes(hashed_file.read_bytes().replace(b"\n", b"\r\n"))
+
+    cr._cross_check_recorded_hashes(candidate_sha, receipt, repo_root=root)  # must not raise
+
+
 def test_receipt_eligible_run_refuses_when_authoring_checkout_is_dirty(
     disposable_activation_repo: tuple[Path, str, str],
 ) -> None:

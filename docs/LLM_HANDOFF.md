@@ -769,3 +769,81 @@ gate: final
 verdict: approved
 findings: none
 ```
+
+---
+
+## Iteration 3
+
+### Work done
+
+- Date/agent: 2026-09-15, Claude Code (Sonnet 5). Risk class H (same
+  process/security-relevant tooling as Iteration 2). Base `B` -> candidate
+  `C7`: `66202c23facff6bd33d8f624e327cabdd40708b4` -> this commit; branch
+  `tooling/workflow-v3.2-activation` (continued). `slice_kind: tooling`.
+  `slice_id: 2026-09-13-workflow-v3-2-activation-66202c2` (unchanged --
+  same base, same underlying activation slice).
+- **Supersedes Iteration 2's review record.** Sol approved `C6` =
+  `332947196d028b9a46a52aa3c44e51028d5f7e0c` / `A6` =
+  `4ee69a96981c01b12bce1ad3ce7706ff34b5a149`, with `R` =
+  `0c42aae891a24181f871df56e52b732322fd1d0e` recording that verdict.
+  Immediately after, independently running the full `check_review.
+  validate_c_a_r_chain(C6, A6, R)` (and therefore `check_merge_
+  eligibility`) for the first time -- Sol's own approval was necessarily
+  based on direct receipt/repo inspection, since `R` did not yet exist
+  when they reviewed -- surfaced a genuine failure: the receipt's
+  `checker_hash` for `backend/scripts/check_handoff.py` did not match
+  what `check_review.py`'s own hash cross-check recomputed. Root cause:
+  that cross-check hashed a *fresh detached-worktree checkout* of the
+  file, while the coordinator that produced the receipt hashes the
+  *authoring checkout's on-disk bytes* directly -- and that file
+  currently carries LF-only line endings in the long-lived authoring
+  checkout (never freshly re-checked-out under this project's
+  `core.autocrlf=true`), while a fresh worktree checkout smudges it to
+  CRLF, so the two hashes diverge. This is a latent defect in `check_
+  review.py`'s own tooling, not a problem with `C6`/`A6`'s actual content
+  -- `R`'s own structure, the `A6..R` append-only diff, and the review-
+  metadata cross-check all independently passed. Per explicit user
+  instruction: `C6`/`A6`/`R` are preserved exactly as pushed, never
+  amended or rewritten, but this cycle's review record is **not treated
+  as valid merge-eligible approval** -- a fresh `C7`/`A7` cycle (this
+  iteration) is required, with a new `R` to be authored only after a
+  fresh Sol re-review.
+- Fix: defines one canonical, platform-independent hashing mechanism,
+  reused identically everywhere a file's content is hashed for receipt
+  purposes. New `verification_receipts.blob_bytes_at_commit`/
+  `committed_file_hash` read the exact committed Git blob bytes for
+  `<commit_sha>:<repo_relative_path>` directly from the object database
+  via `git cat-file` -- never a working-tree or fresh-checkout read,
+  which can differ from the committed bytes whenever a local checkout
+  filter (`core.autocrlf`) converts line endings on smudge. Never text-
+  decoded, never newline-normalized. Fails closed for a missing commit/
+  path, a git failure, or a non-blob object. `dependency_and_config_
+  inputs` is rewritten on top of it (now takes `commit_sha` instead of a
+  working-tree `repo_root` read) and fails closed on a duplicate or
+  malformed path. `verification_coordinator._file_hash_at` and `check_
+  review.py`'s `_cross_check_recorded_hashes` (the worktree-spinning-up
+  `_recompute_hashes_at_candidate` is deleted entirely, no longer needed)
+  both now call this single mechanism, so receipt generation and review-
+  time recomputation can never independently diverge again.
+- Verification: `ruff format --check`/`ruff check`/`mypy` clean (158
+  source files, backend + `.claude/hooks`). Full pytest suite: **2637
+  passed**. All 34 mutation witnesses pass unmodified. `check_repo.py`
+  exits 0. `git diff --check` clean. New regressions prove: an LF
+  authoring-checkout hash and a genuinely CRLF-smudged fresh-worktree
+  hash for the same commit are identical; changing committed content
+  changes the hash; mutating working-tree bytes without changing the Git
+  blob does not; and a real coordinator-generated receipt's hashes agree
+  with `check_review.py`'s independent recomputation even after the
+  authoring checkout is subsequently mutated on disk.
+- Deviations/known limitations: none beyond the superseded Iteration 2
+  review record noted above.
+
+```workflow-metadata
+workflow_version: v3.2
+state: pending
+slice_id: 2026-09-13-workflow-v3-2-activation-66202c2
+slice_kind: tooling
+risk_class: H
+base_sha: 66202c23facff6bd33d8f624e327cabdd40708b4
+declared_gate: final
+```

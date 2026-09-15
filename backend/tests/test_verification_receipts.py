@@ -1,11 +1,24 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
 
 from scripts import verification_receipts as vr
+
+
+def _git(args: list[str], cwd: Path) -> str:
+    result = subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True)
+    return result.stdout.strip()
+
+
+def _init_repo(root: Path) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    _git(["init", "-q"], root)
+    _git(["config", "user.email", "t@example.com"], root)
+    _git(["config", "user.name", "Test"], root)
 
 
 def test_generate_receipt_id_is_canonical_uuid4() -> None:
@@ -57,11 +70,153 @@ def test_environment_descriptor_never_contains_a_url_or_local_path() -> None:
 
 
 def test_dependency_and_config_inputs_sorted_and_hashed(tmp_path: Path) -> None:
-    (tmp_path / "a.toml").write_text("a = 1\n", encoding="utf-8")
-    (tmp_path / "b.toml").write_text("b = 2\n", encoding="utf-8")
-    entries = vr.dependency_and_config_inputs(tmp_path, ["b.toml", "a.toml"])
+    root = tmp_path / "repo"
+    _init_repo(root)
+    (root / "a.toml").write_text("a = 1\n", encoding="utf-8")
+    (root / "b.toml").write_text("b = 2\n", encoding="utf-8")
+    _git(["add", "-A"], root)
+    _git(["commit", "-q", "-m", "initial"], root)
+    commit_sha = _git(["rev-parse", "HEAD"], root)
+
+    entries = vr.dependency_and_config_inputs(commit_sha, ["b.toml", "a.toml"], repo_root=root)
     assert [e["repo_relative_path"] for e in entries] == ["a.toml", "b.toml"]
     assert all(len(e["sha256"]) == 64 for e in entries)
+
+
+def test_dependency_and_config_inputs_rejects_duplicate_path(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    _init_repo(root)
+    (root / "a.toml").write_text("a = 1\n", encoding="utf-8")
+    _git(["add", "-A"], root)
+    _git(["commit", "-q", "-m", "initial"], root)
+    commit_sha = _git(["rev-parse", "HEAD"], root)
+
+    with pytest.raises(vr.ReceiptError, match="duplicate"):
+        vr.dependency_and_config_inputs(commit_sha, ["a.toml", "a.toml"], repo_root=root)
+
+
+@pytest.mark.parametrize("bad_path", ["", "/a.toml", "../a.toml", "sub/../a.toml"])
+def test_dependency_and_config_inputs_rejects_malformed_path(tmp_path: Path, bad_path: str) -> None:
+    root = tmp_path / "repo"
+    _init_repo(root)
+    (root / "a.toml").write_text("a = 1\n", encoding="utf-8")
+    _git(["add", "-A"], root)
+    _git(["commit", "-q", "-m", "initial"], root)
+    commit_sha = _git(["rev-parse", "HEAD"], root)
+
+    with pytest.raises(vr.ReceiptError, match="malformed"):
+        vr.dependency_and_config_inputs(commit_sha, [bad_path], repo_root=root)
+
+
+# ---------------------------------------------------------------------------
+# Canonical committed-blob hashing (Sol's sixth correction round): the
+# single, platform-independent mechanism -- proven, with real Git
+# repositories/worktrees, to be immune to checkout-time line-ending
+# conversion and to genuinely change only when the committed content itself
+# changes.
+# ---------------------------------------------------------------------------
+
+
+def test_committed_file_hash_same_across_lf_authoring_checkout_and_crlf_fresh_worktree(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "repo"
+    _init_repo(root)
+    _git(["config", "core.autocrlf", "true"], root)
+    (root / "probe.py").write_bytes(b"line one\nline two\n")
+    _git(["add", "-A"], root)
+    _git(["commit", "-q", "-m", "initial"], root)
+    commit_sha = _git(["rev-parse", "HEAD"], root)
+
+    # The authoring checkout's own on-disk bytes are LF (as written above,
+    # never re-touched by a fresh checkout operation since).
+    authoring_hash = vr.committed_file_hash(commit_sha, "probe.py", repo_root=root)
+
+    # A genuinely fresh worktree checkout, under the same core.autocrlf=true,
+    # smudges LF -> CRLF on disk -- proving the divergence scenario is real,
+    # not hypothetical.
+    worktree_dir = tmp_path / "worktree"
+    _git(["worktree", "add", "--detach", str(worktree_dir), commit_sha], root)
+    try:
+        worktree_bytes = (worktree_dir / "probe.py").read_bytes()
+        assert b"\r\n" in worktree_bytes  # genuinely smudged to CRLF
+        worktree_hash = vr.committed_file_hash(commit_sha, "probe.py", repo_root=worktree_dir)
+    finally:
+        _git(["worktree", "remove", "--force", str(worktree_dir)], root)
+
+    assert authoring_hash == worktree_hash
+
+
+def test_committed_file_hash_changes_when_committed_content_changes(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    _init_repo(root)
+    (root / "probe.py").write_text("version = 1\n", encoding="utf-8")
+    _git(["add", "-A"], root)
+    _git(["commit", "-q", "-m", "v1"], root)
+    v1_sha = _git(["rev-parse", "HEAD"], root)
+
+    (root / "probe.py").write_text("version = 2\n", encoding="utf-8")
+    _git(["add", "-A"], root)
+    _git(["commit", "-q", "-m", "v2"], root)
+    v2_sha = _git(["rev-parse", "HEAD"], root)
+
+    assert vr.committed_file_hash(v1_sha, "probe.py", repo_root=root) != vr.committed_file_hash(
+        v2_sha, "probe.py", repo_root=root
+    )
+
+
+def test_committed_file_hash_unaffected_by_working_tree_only_mutation(tmp_path: Path) -> None:
+    """Merely changing checkout line endings (or any other working-tree-
+    only mutation) without changing the Git blob must not change the
+    hash -- it is never read from disk."""
+    root = tmp_path / "repo"
+    _init_repo(root)
+    (root / "probe.py").write_bytes(b"line one\nline two\n")
+    _git(["add", "-A"], root)
+    _git(["commit", "-q", "-m", "initial"], root)
+    commit_sha = _git(["rev-parse", "HEAD"], root)
+
+    before = vr.committed_file_hash(commit_sha, "probe.py", repo_root=root)
+    (root / "probe.py").write_bytes(b"line one\r\nline two\r\n")  # never staged/committed
+    after = vr.committed_file_hash(commit_sha, "probe.py", repo_root=root)
+
+    assert before == after
+
+
+def test_blob_bytes_at_commit_fails_closed_for_missing_path(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    _init_repo(root)
+    (root / "probe.py").write_text("x = 1\n", encoding="utf-8")
+    _git(["add", "-A"], root)
+    _git(["commit", "-q", "-m", "initial"], root)
+    commit_sha = _git(["rev-parse", "HEAD"], root)
+
+    with pytest.raises(vr.ReceiptError):
+        vr.blob_bytes_at_commit(commit_sha, "does_not_exist.py", repo_root=root)
+
+
+def test_blob_bytes_at_commit_fails_closed_for_missing_commit(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    _init_repo(root)
+    (root / "probe.py").write_text("x = 1\n", encoding="utf-8")
+    _git(["add", "-A"], root)
+    _git(["commit", "-q", "-m", "initial"], root)
+
+    with pytest.raises(vr.ReceiptError):
+        vr.blob_bytes_at_commit("0" * 40, "probe.py", repo_root=root)
+
+
+def test_blob_bytes_at_commit_fails_closed_for_non_blob_object(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    _init_repo(root)
+    (root / "sub").mkdir()
+    (root / "sub" / "probe.py").write_text("x = 1\n", encoding="utf-8")
+    _git(["add", "-A"], root)
+    _git(["commit", "-q", "-m", "initial"], root)
+    commit_sha = _git(["rev-parse", "HEAD"], root)
+
+    with pytest.raises(vr.ReceiptError, match="not a blob"):
+        vr.blob_bytes_at_commit(commit_sha, "sub", repo_root=root)
 
 
 def _minimal_valid_receipt(**overrides: object) -> dict:

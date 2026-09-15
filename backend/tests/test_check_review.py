@@ -107,10 +107,14 @@ def _minimal_receipt(
             "authoring_checkout_head_at_receipt": candidate_sha,
             "authoring_checkout_clean_at_receipt": True,
         },
-        "verifier_hash": vr.file_hash(repo_root / "backend" / "scripts" / "verify.py"),
-        "checker_hash": vr.file_hash(repo_root / "backend" / "scripts" / "check_handoff.py"),
+        "verifier_hash": vr.committed_file_hash(
+            candidate_sha, "backend/scripts/verify.py", repo_root=repo_root
+        ),
+        "checker_hash": vr.committed_file_hash(
+            candidate_sha, "backend/scripts/check_handoff.py", repo_root=repo_root
+        ),
         "dependency_and_config_inputs": vr.dependency_and_config_inputs(
-            repo_root, ["backend/pyproject.toml"]
+            candidate_sha, ["backend/pyproject.toml"], repo_root=repo_root
         ),
         "environment_descriptor": vr.environment_descriptor(postgresql_version=None),
         "steps": steps,

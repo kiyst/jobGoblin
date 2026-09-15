@@ -17,6 +17,7 @@ import json
 import os
 import platform
 import re
+import subprocess
 import sys
 import tempfile
 import uuid
@@ -104,23 +105,84 @@ def environment_descriptor(*, postgresql_version: str | None) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Canonical committed-blob hashing -- the single mechanism reused by receipt
+# generation (`verification_coordinator.py`), review-time recomputation
+# (`check_review.py`), and dependency/config input hashing, so all three can
+# never independently diverge. Reads the exact Git blob bytes for
+# `<commit_sha>:<repo_relative_path>` -- never a working-tree or fresh-
+# checkout read, which can differ from the committed bytes whenever a local
+# checkout filter (e.g. `core.autocrlf`) converts line endings on smudge.
+# Never text-decoded, never newline-normalized.
+# ---------------------------------------------------------------------------
+
+
+def blob_bytes_at_commit(commit_sha: str, repo_relative_path: str, *, repo_root: Path) -> bytes:
+    """The exact, canonical committed Git blob bytes for `<commit_sha>:
+    <repo_relative_path>`, read directly from the object database via
+    `git cat-file` -- unaffected by `core.autocrlf` or any other checkout-
+    time filter (those apply only to `checkout`/`add`, never to a direct
+    `cat-file`/`<rev>:<path>` object read). Fails closed for a missing
+    commit/path, a git failure, or an object that is not a genuine blob
+    (e.g. the path names a directory or submodule in that commit)."""
+    object_ref = f"{commit_sha}:{repo_relative_path}"
+    type_result = subprocess.run(
+        ["git", "-c", f"safe.directory={repo_root.as_posix()}", "cat-file", "-t", object_ref],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if type_result.returncode != 0:
+        raise ReceiptError(f"could not resolve {object_ref!r}: {type_result.stderr.strip()}")
+    object_type = type_result.stdout.strip()
+    if object_type != "blob":
+        raise ReceiptError(
+            f"{object_ref!r} is not a blob (found {object_type!r}), refusing to hash"
+        )
+
+    content_result = subprocess.run(
+        ["git", "-c", f"safe.directory={repo_root.as_posix()}", "cat-file", "-p", object_ref],
+        cwd=repo_root,
+        capture_output=True,
+        text=False,
+    )
+    if content_result.returncode != 0:
+        stderr = content_result.stderr.decode("utf-8", errors="replace").strip()
+        raise ReceiptError(f"could not read blob content for {object_ref!r}: {stderr}")
+    return content_result.stdout
+
+
+def committed_file_hash(commit_sha: str, repo_relative_path: str, *, repo_root: Path) -> str:
+    """sha256 hex digest of the exact committed blob bytes."""
+    return hashlib.sha256(
+        blob_bytes_at_commit(commit_sha, repo_relative_path, repo_root=repo_root)
+    ).hexdigest()
+
+
+# ---------------------------------------------------------------------------
 # Dependency/config input hashing -- explicit per-file array, never a
 # combined/opaque hash.
 # ---------------------------------------------------------------------------
 
 
 def dependency_and_config_inputs(
-    repo_root: Path, relative_paths: list[str]
+    commit_sha: str, relative_paths: list[str], *, repo_root: Path
 ) -> list[dict[str, str]]:
+    """Explicit per-file array of exact committed blob hashes at
+    `commit_sha` -- never a working-tree read. Fails closed on a
+    duplicate or malformed path."""
+    if len(set(relative_paths)) != len(relative_paths):
+        raise ReceiptError(f"duplicate dependency/config path(s) in {relative_paths!r}")
     entries = []
     for rel in sorted(relative_paths):
-        content = (repo_root / rel).read_bytes()
-        entries.append({"repo_relative_path": rel, "sha256": hashlib.sha256(content).hexdigest()})
+        if not rel or rel.startswith("/") or "\\" in rel or ".." in rel.split("/"):
+            raise ReceiptError(f"malformed dependency/config path: {rel!r}")
+        entries.append(
+            {
+                "repo_relative_path": rel,
+                "sha256": committed_file_hash(commit_sha, rel, repo_root=repo_root),
+            }
+        )
     return entries
-
-
-def file_hash(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 # ---------------------------------------------------------------------------

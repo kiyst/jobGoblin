@@ -328,48 +328,26 @@ def _diff_name_only(base_sha: str, candidate_sha: str, *, repo_root: Path) -> li
     return [line for line in output.splitlines() if line.strip()]
 
 
-def _recompute_hashes_at_candidate(
-    candidate_sha: str, *, repo_root: Path
-) -> tuple[str, str, list[dict[str, str]]]:
-    """Recomputes `verifier_hash`/`checker_hash`/`dependency_and_config_
-    inputs` from a genuine, disposable checkout at `candidate_sha` -- never
-    from `git show`'s raw blob bytes, which can (and, under this project's
-    own `core.autocrlf=true`, genuinely do) diverge from the coordinator's
-    own working-tree-based hash. The coordinator hashes real checked-out
-    files (`verification_coordinator._file_hash_at`); this reproduces that
-    exact same on-disk form via a real `git worktree`, so the comparison is
-    never a false mismatch caused only by line-ending normalization."""
-    run_dir = Path(tempfile.mkdtemp(prefix="review-hash-"))
-    worktree: Path | None = None
-    try:
-        worktree = vw.create_detached_worktree(candidate_sha, run_dir)
-        verifier_hash = vr.file_hash(worktree / "backend" / "scripts" / "verify.py")
-        checker_hash = vr.file_hash(worktree / "backend" / "scripts" / "check_handoff.py")
-        dependency_inputs = vr.dependency_and_config_inputs(worktree, ["backend/pyproject.toml"])
-    finally:
-        if worktree is not None:
-            try:
-                vw.remove_worktree(worktree)
-                vw.confirm_no_leak(worktree)
-            except (vw.WorktreeError, OSError) as exc:
-                raise ReviewValidationError(
-                    f"hash-recomputation worktree teardown failed: {exc}"
-                ) from exc
-        if run_dir.exists():
-            try:
-                shutil.rmtree(run_dir)
-            except OSError as exc:
-                raise ReviewValidationError(
-                    f"hash-recomputation run directory removal failed: {exc}"
-                ) from exc
-    return verifier_hash, checker_hash, dependency_inputs
-
-
 def _cross_check_recorded_hashes(
     candidate_sha: str, receipt: dict[str, Any], *, repo_root: Path
 ) -> None:
-    verifier_hash, checker_hash, dependency_inputs = _recompute_hashes_at_candidate(
-        candidate_sha, repo_root=repo_root
+    """Recomputes `verifier_hash`/`checker_hash`/`dependency_and_config_
+    inputs` via `verification_receipts.committed_file_hash`/`dependency_
+    and_config_inputs` -- the exact same canonical committed-blob
+    mechanism `verification_coordinator.py` uses to produce the receipt
+    in the first place, so the two can never diverge on a local checkout
+    filter (e.g. `core.autocrlf`). No worktree is created for this check
+    at all: a direct `git cat-file` read of `<candidate_sha>:<path>` is
+    unaffected by checkout-time smudging, unlike a fresh `git worktree
+    add` (which previously caused a genuine false-mismatch bug here)."""
+    verifier_hash = vr.committed_file_hash(
+        candidate_sha, "backend/scripts/verify.py", repo_root=repo_root
+    )
+    checker_hash = vr.committed_file_hash(
+        candidate_sha, "backend/scripts/check_handoff.py", repo_root=repo_root
+    )
+    dependency_inputs = vr.dependency_and_config_inputs(
+        candidate_sha, ["backend/pyproject.toml"], repo_root=repo_root
     )
     if receipt["verifier_hash"] != verifier_hash:
         raise ReviewValidationError(
