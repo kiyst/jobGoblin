@@ -946,10 +946,17 @@ findings: none
 
 ```workflow-metadata
 workflow_version: v3.2
-state: pending
+state: published
 slice_id: 2026-09-13-workflow-v3-2-activation-66202c2
 slice_kind: tooling
 risk_class: H
 base_sha: 66202c23facff6bd33d8f624e327cabdd40708b4
 declared_gate: final
+executed_gate: final
+candidate_sha: 5a3e18787b878d61035815bca0d31d2f04603e8a
+receipt_id: 7801c0b5-4993-4d24-8b8e-8a99142fa230
+receipt_path: docs/verification-receipts/5a3e18787b878d61035815bca0d31d2f04603e8a/7801c0b5-4993-4d24-8b8e-8a99142fa230.json
+full_suite_count: 2643
+focused_test_count: 476
+mutation_witness_count: 34
 ```
