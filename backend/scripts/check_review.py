@@ -47,6 +47,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 _REVIEW_METADATA_BLOCK_RE = re.compile(r"```workflow-review-metadata\n(.*?)\n```", re.DOTALL)
 _ESCALATION_BLOCK_RE = re.compile(r"```workflow-escalation-metadata\n(.*?)\n```", re.DOTALL)
 _METADATA_BLOCK_RE = re.compile(r"```workflow-metadata\n.*?\n```", re.DOTALL)
+_ITERATION_RE = re.compile(r"^## Iteration \d+\s*$", re.MULTILINE)
 
 _REQUIRED_REVIEW_FIELDS = (
     "schema_version",
@@ -179,8 +180,22 @@ def read_file_at_commit(commit: str, relative_path: str, *, repo_root: Path = RE
 # ---------------------------------------------------------------------------
 
 
+def _latest_iteration_text(handoff_text: str) -> str:
+    """Scopes to the newest `## Iteration N` section only -- mirrors
+    `check_handoff.py`'s own per-iteration scoping for its metadata-block
+    search. A historical review (or escalation) block from an earlier,
+    superseded iteration must never be confused with the current one; an
+    unscoped whole-file search would find both once a second iteration's
+    own `### Work review` exists alongside an earlier iteration's."""
+    matches = list(_ITERATION_RE.finditer(handoff_text))
+    if not matches:
+        raise ReviewValidationError("no '## Iteration N' heading found in docs/LLM_HANDOFF.md")
+    return handoff_text[matches[-1].start() :]
+
+
 def extract_review_metadata_text(handoff_text: str) -> str:
-    matches = list(_REVIEW_METADATA_BLOCK_RE.finditer(handoff_text))
+    latest = _latest_iteration_text(handoff_text)
+    matches = list(_REVIEW_METADATA_BLOCK_RE.finditer(latest))
     if not matches:
         raise ReviewValidationError("no 'workflow-review-metadata' block found")
     if len(matches) > 1:
@@ -189,9 +204,8 @@ def extract_review_metadata_text(handoff_text: str) -> str:
 
 
 def extract_escalation_blocks(handoff_text: str) -> list[dict[str, str]]:
-    return [
-        ch.parse_metadata_fields(m.group(1)) for m in _ESCALATION_BLOCK_RE.finditer(handoff_text)
-    ]
+    latest = _latest_iteration_text(handoff_text)
+    return [ch.parse_metadata_fields(m.group(1)) for m in _ESCALATION_BLOCK_RE.finditer(latest)]
 
 
 def validate_review_metadata_structure(fields: dict[str, str], *, slice_kind: str) -> None:

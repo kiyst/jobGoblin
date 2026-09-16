@@ -838,19 +838,60 @@ findings: none
 - Deviations/known limitations: none beyond the superseded Iteration 2
   review record noted above.
 
+#### Correction round 1 (own follow-on finding, before Sol re-review)
+
+- **Supersedes candidate `C7` = `cf60c424dcbc551874f94686fd8b3332cb9d4a86`
+  and publication `A7` = `f215fe8031eab8da4a48c5410de5cd0afdf1d6f4`.** The
+  receipt published there
+  (`docs/verification-receipts/cf60c424dcbc551874f94686fd8b3332cb9d4a86/
+  562fad62-93f1-45be-9f52-4e69ced38a82.json`) is **not reusable** and is
+  superseded by this correction round's own fresh candidate/publication
+  cycle below. Neither `C7` nor `A7` was ever pushed to `origin`, so this
+  supersession is purely local -- but both are still preserved unamended,
+  never rewritten, per the same discipline as every other correction
+  round in this project.
+- Found while independently proving the frozen contract's own required
+  step -- "the complete `C7 -> A7 -> synthetic-R` chain validates
+  successfully before publishing the real `R`" -- using a throwaway,
+  never-pushed synthetic `R` in a disposable worktree (deleted
+  immediately after). `check_review.extract_review_metadata_text` (and
+  `extract_escalation_blocks`) scanned the *entire* handoff file for a
+  `workflow-review-metadata`/`workflow-escalation-metadata` block,
+  instead of scoping to the newest `## Iteration N` section the way
+  `check_handoff.py`'s own metadata-block search already does. Once
+  Iteration 2's real `R` (recording Sol's approval of `C6`/`A6`,
+  preserved unchanged) and this iteration's own review block coexist in
+  the same file, that unscoped search finds both and raises "more than
+  one block found" -- this is not merely a test artifact: it would also
+  have broken the real `R` for this iteration once authored, since
+  Iteration 2's historical block never goes away.
+- Fix: new `_latest_iteration_text` scopes to the text from the newest
+  `## Iteration N` heading onward (mirroring `check_handoff.py`'s own
+  per-iteration scoping); both `extract_review_metadata_text` and
+  `extract_escalation_blocks` now search within that scope only. New
+  regressions prove: extraction correctly returns the latest iteration's
+  own block when an earlier iteration's historical block coexists (never
+  raising "more than one" for two blocks in two different iterations);
+  escalation-block extraction is scoped identically; and two genuine
+  blocks within the *same* latest iteration are still correctly rejected
+  as "more than one".
+- Files changed (this correction only): `backend/scripts/check_review.py`
+  (edited); `backend/tests/test_check_review.py` (edited). No production
+  parser (`app/normalization/*`) touched; no migration/model file
+  touched.
+- Verification: `ruff format --check`/`ruff check`/`mypy` clean (158
+  source files, backend + `.claude/hooks`). Full pytest suite: **2640
+  passed**. All 34 mutation witnesses pass unmodified. `check_repo.py`
+  exits 0. `git diff --check` clean.
+- STOP — this is a bounded correction only. Do not author `R`, merge,
+  create `M`/`Q`, begin another slice, or modify product/parser behavior.
+
 ```workflow-metadata
 workflow_version: v3.2
-state: published
+state: pending
 slice_id: 2026-09-13-workflow-v3-2-activation-66202c2
 slice_kind: tooling
 risk_class: H
 base_sha: 66202c23facff6bd33d8f624e327cabdd40708b4
 declared_gate: final
-executed_gate: final
-candidate_sha: cf60c424dcbc551874f94686fd8b3332cb9d4a86
-receipt_id: 562fad62-93f1-45be-9f52-4e69ced38a82
-receipt_path: docs/verification-receipts/cf60c424dcbc551874f94686fd8b3332cb9d4a86/562fad62-93f1-45be-9f52-4e69ced38a82.json
-full_suite_count: 2637
-focused_test_count: 470
-mutation_witness_count: 34
 ```

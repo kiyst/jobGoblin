@@ -827,6 +827,114 @@ def test_a_to_r_rejects_an_unrelated_path_change(car_repo: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Iteration-scoped review/escalation-block extraction (Sol's sixth
+# correction round, follow-on finding): a historical review block from an
+# earlier, superseded iteration must never be confused with the current
+# iteration's own -- an unscoped whole-file search would find both once a
+# second iteration's own `### Work review` coexists with an earlier one's.
+# ---------------------------------------------------------------------------
+
+
+def _two_iteration_handoff_text() -> str:
+    return (
+        "# handoff\n\n"
+        "## Iteration 1\n\n"
+        "### Work done\n\nhistorical work\n\n"
+        "### Work review\n\n"
+        "```workflow-review-metadata\n"
+        "schema_version: 2\n"
+        "slice_id: 2026-01-01-old-slice-abc1234\n"
+        "risk_class: H\n"
+        "reviewer: Sol\n"
+        "reviewer_role: primary\n"
+        "reviewer_model: Sol Medium\n"
+        "reviewed_at: 2026-01-01T00:00:00Z\n"
+        f"candidate_sha: {'a' * 40}\n"
+        f"publication_commit_sha: {'b' * 40}\n"
+        "receipt_path: docs/verification-receipts/old/old.json\n"
+        "receipt_id: 11111111-1111-4111-8111-111111111111\n"
+        "gate: final\n"
+        "verdict: approved\n"
+        "findings: none\n"
+        "```\n\n"
+        "```workflow-escalation-metadata\n"
+        "schema_version: 2\n"
+        "slice_id: 2026-01-01-old-slice-abc1234\n"
+        "reviewer: Astra\n"
+        "reviewer_model: Astra\n"
+        "reviewed_at: 2026-01-01T01:00:00Z\n"
+        f"candidate_sha: {'a' * 40}\n"
+        "verdict: approved\n"
+        "findings: none\n"
+        "trigger: disputed_finding\n"
+        "```\n\n"
+        "---\n\n"
+        "## Iteration 2\n\n"
+        "### Work done\n\nnew work\n\n"
+        "### Work review\n\n"
+        "```workflow-review-metadata\n"
+        "schema_version: 2\n"
+        "slice_id: 2026-09-13-new-slice-def5678\n"
+        "risk_class: H\n"
+        "reviewer: Sol\n"
+        "reviewer_role: primary\n"
+        "reviewer_model: Sol Medium\n"
+        "reviewed_at: 2026-09-15T00:00:00Z\n"
+        f"candidate_sha: {'c' * 40}\n"
+        f"publication_commit_sha: {'d' * 40}\n"
+        "receipt_path: docs/verification-receipts/new/new.json\n"
+        "receipt_id: 22222222-2222-4222-8222-222222222222\n"
+        "gate: final\n"
+        "verdict: approved\n"
+        "findings: none\n"
+        "```\n"
+    )
+
+
+def test_extract_review_metadata_text_scopes_to_the_latest_iteration_only() -> None:
+    """The exact required regression: once a second iteration's own R
+    coexists with an earlier iteration's historical R, extraction must
+    scope to the latest iteration only -- never raise "more than one
+    block found" for two blocks belonging to two different,
+    non-overlapping iterations."""
+    review_text = cr.extract_review_metadata_text(_two_iteration_handoff_text())
+    review_fields = cr.ch.parse_metadata_fields(review_text)
+    assert review_fields["slice_id"] == "2026-09-13-new-slice-def5678"
+    assert review_fields["candidate_sha"] == "c" * 40
+
+
+def test_extract_escalation_blocks_scopes_to_the_latest_iteration_only() -> None:
+    escalation_blocks = cr.extract_escalation_blocks(_two_iteration_handoff_text())
+    assert escalation_blocks == []  # Iteration 2 has no escalation block; Iteration 1's is ignored
+
+
+def test_extract_review_metadata_text_still_rejects_two_blocks_in_the_same_iteration() -> None:
+    # Iteration 2's block is the last content in `_two_iteration_handoff_text()`
+    # (nothing follows it) -- appending a second block here still lands
+    # inside Iteration 2, genuinely reproducing "two blocks, one iteration".
+    handoff_text = _two_iteration_handoff_text() + (
+        "\n```workflow-review-metadata\n"
+        "schema_version: 2\n"
+        "slice_id: 2026-09-13-new-slice-def5678\n"
+        "risk_class: H\n"
+        "reviewer: Sol\n"
+        "reviewer_role: primary\n"
+        "reviewer_model: Sol Medium\n"
+        "reviewed_at: 2026-09-15T02:00:00Z\n"
+        f"candidate_sha: {'c' * 40}\n"
+        f"publication_commit_sha: {'d' * 40}\n"
+        "receipt_path: docs/verification-receipts/new/new2.json\n"
+        "receipt_id: 33333333-3333-4333-8333-333333333333\n"
+        "gate: final\n"
+        "verdict: approved\n"
+        "findings: none\n"
+        "```\n"
+    )
+    with pytest.raises(cr.ReviewValidationError, match="more than one"):
+        cr.extract_review_metadata_text(handoff_text)
+
+
+# ---------------------------------------------------------------------------
 # Escalation blocks
 # ---------------------------------------------------------------------------
 
