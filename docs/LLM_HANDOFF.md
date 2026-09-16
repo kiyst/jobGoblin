@@ -846,10 +846,15 @@ findings: none
   (`docs/verification-receipts/cf60c424dcbc551874f94686fd8b3332cb9d4a86/
   562fad62-93f1-45be-9f52-4e69ced38a82.json`) is **not reusable** and is
   superseded by this correction round's own fresh candidate/publication
-  cycle below. Neither `C7` nor `A7` was ever pushed to `origin`, so this
-  supersession is purely local -- but both are still preserved unamended,
-  never rewritten, per the same discipline as every other correction
-  round in this project.
+  cycle below. **Correction (Sol's review of `C8`/`A8`):** `C7`/`A7` were
+  not independently pushed as branch tips before `C8` was committed on
+  top of them -- but pushing `A8` (a descendant of `C8`, a descendant of
+  `A7`, a descendant of `C7`) made all three reachable on the remote
+  branch as superseded ancestors. They are therefore **not** "purely
+  local" or "never pushed to origin"; that was incorrect wording in this
+  entry's original form. Both are still preserved unamended, never
+  rewritten, per the same discipline as every other correction round in
+  this project.
 - Found while independently proving the frozen contract's own required
   step -- "the complete `C7 -> A7 -> synthetic-R` chain validates
   successfully before publishing the real `R`" -- using a throwaway,
@@ -886,19 +891,65 @@ findings: none
 - STOP — this is a bounded correction only. Do not author `R`, merge,
   create `M`/`Q`, begin another slice, or modify product/parser behavior.
 
+#### Correction round 2 (Sol review of C8/A8: two bounded issues)
+
+- **Supersedes candidate `C8` = `d23273c0addd30717046edc8dfe8b58ebca835b6`
+  and publication `A8` = `a056f77b8f949b020dcee2b21267e2b6b4fab2dd`.** The
+  receipt published there
+  (`docs/verification-receipts/d23273c0addd30717046edc8dfe8b58ebca835b6/
+  e917a12f-1b43-43ca-8323-62df0dff785a.json`) is **not reusable** and is
+  superseded by this correction round's own fresh candidate/publication
+  cycle below. `C8`/`A8` are preserved unamended, never rewritten; both
+  are reachable on the remote branch (pushed as ancestors of `A8`'s own
+  push), not merely local.
+- **Finding 1 (A→R boundary):** `check_review.py`'s prior fix (this
+  project's own "scope to the latest `## Iteration N` section" approach,
+  from the previous correction round) was still not precise enough.
+  Review and escalation metadata are now extracted and validated
+  *exclusively* from the exact appended suffix
+  (`handoff_at_r[len(handoff_at_a):]`), never by searching the whole
+  handoff file and never by searching "the latest iteration onward" --
+  neither of those weaker scopes can distinguish an already-existing
+  historical block from what `R` itself actually added.
+  `validate_a_to_r_transition` now computes and returns this suffix
+  (after confirming the pure-append invariant), and itself enforces:
+  the suffix introduces no new `## Iteration N` heading, and the suffix
+  contains exactly one `### Work review` section. `extract_review_
+  metadata_text`/`extract_escalation_blocks` are reverted to their
+  original simple form (extract from exactly the text given -- no
+  internal scoping of their own) since the caller (`validate_c_a_r_
+  chain`) now always passes this exact suffix, never the whole file.
+  New regressions prove, via genuine Git commits: a fabricated `##
+  Iteration N` heading appended between two review blocks is rejected
+  outright (the full-transition regression); an escalation block hidden
+  behind that same fabricated heading is rejected identically (the
+  analogous hidden-escalation proof); and a suffix with two `### Work
+  review` sections (no fake iteration needed) is also rejected.
+- **Finding 2 (handoff wording):** The previous correction round's own
+  entry incorrectly described `C7`/`A7` as "purely local" and "never
+  pushed to origin". Corrected in place (see that entry, above): `C7`/
+  `A7` were not independently pushed as branch tips before `C8`, but
+  pushing `A8` (a descendant of `C8`, a descendant of `A7`, a descendant
+  of `C7`) made all three reachable on the remote branch as superseded
+  ancestors.
+- Files changed (this correction only): `backend/scripts/check_review.py`
+  (edited); `backend/tests/test_check_review.py` (edited);
+  `docs/LLM_HANDOFF.md` (wording correction to the prior entry, plus this
+  entry). No production parser (`app/normalization/*`) touched; no
+  migration/model file touched.
+- Verification: `ruff format --check`/`ruff check`/`mypy` clean (158
+  source files, backend + `.claude/hooks`). Full pytest suite: **2643
+  passed**. All 34 mutation witnesses pass unmodified. `check_repo.py`
+  exits 0. `git diff --check` clean.
+- STOP — this is a bounded correction only. Do not author `R`, merge,
+  create `M`/`Q`, begin another slice, or modify product/parser behavior.
+
 ```workflow-metadata
 workflow_version: v3.2
-state: published
+state: pending
 slice_id: 2026-09-13-workflow-v3-2-activation-66202c2
 slice_kind: tooling
 risk_class: H
 base_sha: 66202c23facff6bd33d8f624e327cabdd40708b4
 declared_gate: final
-executed_gate: final
-candidate_sha: d23273c0addd30717046edc8dfe8b58ebca835b6
-receipt_id: e917a12f-1b43-43ca-8323-62df0dff785a
-receipt_path: docs/verification-receipts/d23273c0addd30717046edc8dfe8b58ebca835b6/e917a12f-1b43-43ca-8323-62df0dff785a.json
-full_suite_count: 2640
-focused_test_count: 473
-mutation_witness_count: 34
 ```

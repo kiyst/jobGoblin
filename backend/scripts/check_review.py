@@ -48,6 +48,7 @@ _REVIEW_METADATA_BLOCK_RE = re.compile(r"```workflow-review-metadata\n(.*?)\n```
 _ESCALATION_BLOCK_RE = re.compile(r"```workflow-escalation-metadata\n(.*?)\n```", re.DOTALL)
 _METADATA_BLOCK_RE = re.compile(r"```workflow-metadata\n.*?\n```", re.DOTALL)
 _ITERATION_RE = re.compile(r"^## Iteration \d+\s*$", re.MULTILINE)
+_WORK_REVIEW_HEADING_RE = re.compile(r"^### Work review\s*$", re.MULTILINE)
 
 _REQUIRED_REVIEW_FIELDS = (
     "schema_version",
@@ -180,22 +181,14 @@ def read_file_at_commit(commit: str, relative_path: str, *, repo_root: Path = RE
 # ---------------------------------------------------------------------------
 
 
-def _latest_iteration_text(handoff_text: str) -> str:
-    """Scopes to the newest `## Iteration N` section only -- mirrors
-    `check_handoff.py`'s own per-iteration scoping for its metadata-block
-    search. A historical review (or escalation) block from an earlier,
-    superseded iteration must never be confused with the current one; an
-    unscoped whole-file search would find both once a second iteration's
-    own `### Work review` exists alongside an earlier iteration's."""
-    matches = list(_ITERATION_RE.finditer(handoff_text))
-    if not matches:
-        raise ReviewValidationError("no '## Iteration N' heading found in docs/LLM_HANDOFF.md")
-    return handoff_text[matches[-1].start() :]
-
-
 def extract_review_metadata_text(handoff_text: str) -> str:
-    latest = _latest_iteration_text(handoff_text)
-    matches = list(_REVIEW_METADATA_BLOCK_RE.finditer(latest))
+    """Extracts from exactly the text given -- callers must scope this to
+    the genuine `A..R` appended suffix (see `validate_a_to_r_transition`,
+    which both enforces and returns that suffix), never the whole
+    handoff file or "the latest iteration onward". Neither of those
+    weaker scopes can distinguish an already-existing historical review
+    block from what `R` itself actually added."""
+    matches = list(_REVIEW_METADATA_BLOCK_RE.finditer(handoff_text))
     if not matches:
         raise ReviewValidationError("no 'workflow-review-metadata' block found")
     if len(matches) > 1:
@@ -204,8 +197,11 @@ def extract_review_metadata_text(handoff_text: str) -> str:
 
 
 def extract_escalation_blocks(handoff_text: str) -> list[dict[str, str]]:
-    latest = _latest_iteration_text(handoff_text)
-    return [ch.parse_metadata_fields(m.group(1)) for m in _ESCALATION_BLOCK_RE.finditer(latest)]
+    """Extracts from exactly the text given -- see `extract_review_
+    metadata_text`'s docstring; the same scoping requirement applies."""
+    return [
+        ch.parse_metadata_fields(m.group(1)) for m in _ESCALATION_BLOCK_RE.finditer(handoff_text)
+    ]
 
 
 def validate_review_metadata_structure(fields: dict[str, str], *, slice_kind: str) -> None:
@@ -536,7 +532,7 @@ def validate_c_a_r_chain(
     validate_c_to_a_transition(
         candidate_sha, publication_sha, handoff_at_c, handoff_at_a, repo_root=repo_root
     )
-    validate_a_to_r_transition(
+    appended_suffix = validate_a_to_r_transition(
         publication_sha, review_sha, handoff_at_a, handoff_at_r, repo_root=repo_root
     )
 
@@ -550,10 +546,14 @@ def validate_c_a_r_chain(
         )
     _require_base_sha_ancestor(published_fields["base_sha"], candidate_sha, repo_root=repo_root)
 
-    review_text = extract_review_metadata_text(handoff_at_r)
+    # Extraction is scoped to exactly the `A..R` appended suffix (never
+    # the whole handoff file, never "the latest iteration onward") -- a
+    # historical review/escalation block that already existed before `R`
+    # can never be confused with what `R` itself added.
+    review_text = extract_review_metadata_text(appended_suffix)
     review_fields = ch.parse_metadata_fields(review_text)
     validate_review_metadata_structure(review_fields, slice_kind=published_fields["slice_kind"])
-    for escalation_fields in extract_escalation_blocks(handoff_at_r):
+    for escalation_fields in extract_escalation_blocks(appended_suffix):
         validate_escalation_metadata_structure(escalation_fields)
 
     if review_fields["candidate_sha"] != candidate_sha:
@@ -700,12 +700,23 @@ def validate_a_to_r_transition(
     handoff_at_r: str,
     *,
     repo_root: Path = REPO_ROOT,
-) -> None:
+) -> str:
     """`A..R` may change only `docs/LLM_HANDOFF.md`, and only by
     *appending* the newest Work-review section (one `workflow-review-
     metadata` block plus zero or more `workflow-escalation-metadata`
     blocks) -- every previously existing byte, including every earlier
-    iteration's historical text, must remain exactly as it was."""
+    iteration's historical text, must remain exactly as it was.
+
+    Returns the exact appended suffix (`handoff_at_r[len(handoff_at_a):]`)
+    -- the *only* text review/escalation-block extraction is ever allowed
+    to search (see `extract_review_metadata_text`/`extract_escalation_
+    blocks`). Searching anything broader -- the whole file, or "the
+    latest `## Iteration N` section onward" -- can never distinguish an
+    already-existing historical block from what this transition actually
+    added. The suffix itself must introduce no new `## Iteration N`
+    heading (that would smuggle a fabricated section, including any
+    escalation block hidden inside it, past this check) and must contain
+    exactly one `### Work review` section."""
     lines = _name_status_lines(publication_sha, review_sha, repo_root)
     if lines != ["M\tdocs/LLM_HANDOFF.md"]:
         raise ReviewValidationError(f"A..R must change only docs/LLM_HANDOFF.md, got {lines}")
@@ -717,6 +728,19 @@ def validate_a_to_r_transition(
         )
     if handoff_at_r == handoff_at_a:
         raise ReviewValidationError("A..R added no new content to docs/LLM_HANDOFF.md")
+
+    suffix = handoff_at_r[len(handoff_at_a) :]
+    if _ITERATION_RE.search(suffix):
+        raise ReviewValidationError(
+            "A..R's appended suffix must not introduce a new '## Iteration N' heading"
+        )
+    work_review_matches = list(_WORK_REVIEW_HEADING_RE.finditer(suffix))
+    if len(work_review_matches) != 1:
+        raise ReviewValidationError(
+            "A..R's appended suffix must contain exactly one '### Work review' section, "
+            f"found {len(work_review_matches)}"
+        )
+    return suffix
 
 
 # ---------------------------------------------------------------------------
