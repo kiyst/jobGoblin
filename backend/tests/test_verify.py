@@ -15,6 +15,7 @@ every smaller unit it composes (command builders, step-execution functions,
 temp-directory safety guard) is tested directly and independently instead.
 """
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -438,68 +439,103 @@ def test_db_reachability_step_only_ever_receives_the_test_url_never_the_dev_url(
 
 
 # --------------------------------------------------------------------------
-# handoff_metadata_step — Workflow v3.1 pilot
+# handoff_metadata_step — Workflow v3.2 (schema v2, purely structural)
 # --------------------------------------------------------------------------
 
 
 def test_handoff_metadata_step_passes_when_validate_handoff_does_not_raise(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(verify.check_handoff, "validate_handoff", lambda **kwargs: None)
-    result = verify.handoff_metadata_step(docs_only=False, pytest_counts={}, focus_targets=[])
+    monkeypatch.setattr(verify.check_handoff, "validate_handoff", lambda: None)
+    result = verify.handoff_metadata_step()
     assert result.status is verify.StepStatus.PASS
 
 
 def test_handoff_metadata_step_fails_when_validate_handoff_raises(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def raising(**kwargs: object) -> None:
-        raise verify.check_handoff.HandoffValidationError("declared count does not match")
+    def raising() -> None:
+        raise verify.check_handoff.HandoffValidationError("malformed metadata block")
 
     monkeypatch.setattr(verify.check_handoff, "validate_handoff", raising)
-    result = verify.handoff_metadata_step(docs_only=False, pytest_counts={}, focus_targets=[])
+    result = verify.handoff_metadata_step()
     assert result.status is verify.StepStatus.FAIL
-    assert "declared count does not match" in result.detail
+    assert "malformed metadata block" in result.detail
 
 
-def test_handoff_metadata_step_passes_through_observed_counts_and_selector(
+# --------------------------------------------------------------------------
+# mutation_witnesses_step / mutation_witness_command — Workflow v3.2
+# --------------------------------------------------------------------------
+
+
+def test_mutation_witness_command_without_guard_runs_whole_registry() -> None:
+    command = verify.mutation_witness_command(None)
+    assert command == [sys.executable, "-m", "scripts.contract_mutation_witnesses"]
+
+
+def test_mutation_witness_command_with_guard_scopes_to_one_guard() -> None:
+    command = verify.mutation_witness_command("location/g01-alias-trailing-period")
+    assert command == [
+        sys.executable,
+        "-m",
+        "scripts.contract_mutation_witnesses",
+        "--guard",
+        "location/g01-alias-trailing-period",
+    ]
+
+
+def test_mutation_witnesses_step_all_guards_reports_aggregate_pass(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    captured: dict[str, object] = {}
+    def fake_runner(command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(command, 0, stdout="34 passed, 0 failed, out of 34\n")
 
-    def recording(**kwargs: object) -> None:
-        captured.update(kwargs)
-
-    monkeypatch.setattr(verify.check_handoff, "validate_handoff", recording)
-    verify.handoff_metadata_step(
-        docs_only=False,
-        pytest_counts={"full": {"passed": 12}, "focused": {"passed": 2}},
-        focus_targets=["tests/test_x.py::test_y"],
-    )
-    assert captured == {
-        "docs_only": False,
-        "actual_full_suite_count": 12,
-        "actual_focused_count": 2,
-        "actual_focus_selector": "tests/test_x.py::test_y",
-    }
+    result, counts, guard_refs_ran = verify.mutation_witnesses_step([], fake_runner)
+    assert result.status is verify.StepStatus.PASS
+    assert counts == {"passed": 34, "failed": 0}
+    assert guard_refs_ran == []
 
 
-def test_handoff_metadata_step_reports_unavailable_counts_as_none_not_zero(
+def test_mutation_witnesses_step_all_guards_reports_aggregate_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A pytest step whose summary line couldn't be parsed writes `None`
-    into the sink (see `run_pytest_step`'s own tests above) — this step must
-    forward that `None` unchanged, never coerce it to `0`."""
-    captured: dict[str, object] = {}
+    def fake_runner(command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            command, 1, stdout="PASS a\nFAIL b\n1 passed, 1 failed, out of 2\n"
+        )
 
-    def recording(**kwargs: object) -> None:
-        captured.update(kwargs)
+    result, counts, guard_refs_ran = verify.mutation_witnesses_step([], fake_runner)
+    assert result.status is verify.StepStatus.FAIL
+    assert counts == {"passed": 1, "failed": 1}
+    assert guard_refs_ran == ["a", "b"]
 
-    monkeypatch.setattr(verify.check_handoff, "validate_handoff", recording)
-    verify.handoff_metadata_step(docs_only=False, pytest_counts={"full": None}, focus_targets=[])
-    assert captured["actual_full_suite_count"] is None
-    assert captured["actual_focused_count"] is None
-    assert captured["actual_focus_selector"] is None
+
+def test_mutation_witnesses_step_per_guard_selection_invokes_once_per_guard() -> None:
+    calls: list[list[str]] = []
+
+    def fake_runner(command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        ref = command[-1]
+        return subprocess.CompletedProcess(command, 0, stdout=f"PASS {ref}\n")
+
+    result, counts, guard_refs_ran = verify.mutation_witnesses_step(["a/g1", "b/g2"], fake_runner)
+    assert result.status is verify.StepStatus.PASS
+    assert counts == {"passed": 2, "failed": 0}
+    assert len(calls) == 2
+    assert guard_refs_ran == ["a/g1", "b/g2"]
+
+
+def test_mutation_witnesses_step_per_guard_selection_reports_failed_guard() -> None:
+    def fake_runner(command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+        ref = command[-1]
+        if ref == "b/g2":
+            return subprocess.CompletedProcess(command, 1, stdout=f"FAIL {ref}: boom\n")
+        return subprocess.CompletedProcess(command, 0, stdout=f"PASS {ref}\n")
+
+    result, counts, guard_refs_ran = verify.mutation_witnesses_step(["a/g1", "b/g2"], fake_runner)
+    assert result.status is verify.StepStatus.FAIL
+    assert counts == {"passed": 1, "failed": 1}
+    assert guard_refs_ran == ["a/g1", "b/g2"]
 
 
 # --------------------------------------------------------------------------
@@ -604,10 +640,10 @@ def test_build_steps_with_focus_inserts_focused_pytest_before_full_suite() -> No
 
 
 def test_build_steps_docs_only_skips_database_and_pytest_steps() -> None:
-    """Workflow v3.1 pilot: `--docs-only` must skip the disposable-database
-    steps and both pytest steps entirely — never attempt to construct them,
-    since `_unused_runner`/`_unused_connectivity_check` would raise if
-    called — while still ending in the required handoff-metadata step."""
+    """`--docs-only` must skip the disposable-database steps and both
+    pytest steps entirely — never attempt to construct them, since
+    `_unused_runner`/`_unused_connectivity_check` would raise if called —
+    while still ending in the required handoff-metadata step."""
     steps = verify._build_steps(
         ["tests/test_x.py::test_y"],
         _DEV_URL,
@@ -627,53 +663,72 @@ def test_build_steps_docs_only_skips_database_and_pytest_steps() -> None:
     ]
 
 
-def test_build_steps_handoff_metadata_step_reflects_docs_only_and_observed_counts(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The trailing step's own closure must be wired to the same `docs_only`
-    flag and to a `pytest_counts` sink populated by the full/focused pytest
-    steps that ran earlier in the same `_build_steps` call — proven here by
-    running the whole step list through a fake runner and confirming the
-    handoff-metadata step sees real, non-placeholder counts."""
+def test_build_steps_gate_final_adds_mutation_witnesses_step_before_handoff() -> None:
+    steps = verify._build_steps(
+        [],
+        _DEV_URL,
+        _TEST_URL,
+        Path("/tmp/run-dir"),
+        gate="final",
+        runner=_unused_runner,
+        connectivity_check=_unused_connectivity_check,
+    )
+    names = [s.name for s in steps]
+    assert names[-2:] == ["contract mutation witnesses", "handoff metadata validation"]
 
-    def fake_runner(command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
-        joined = " ".join(command)
-        if "pytest" not in joined:
-            return _fake_completed_process(0)
-        return _fake_completed_process(0, stdout="3 passed in 0.10s")
 
-    def fake_validate_handoff(
-        *,
-        docs_only: bool,
-        actual_full_suite_count: int | None,
-        actual_focused_count: int | None,
-        actual_focus_selector: str | None,
-    ) -> None:
-        observed["docs_only"] = docs_only
-        observed["actual_full_suite_count"] = actual_full_suite_count
-        observed["actual_focused_count"] = actual_focused_count
-        observed["actual_focus_selector"] = actual_focus_selector
+def test_build_steps_without_gate_never_adds_mutation_witnesses_step() -> None:
+    steps = verify._build_steps(
+        [],
+        _DEV_URL,
+        _TEST_URL,
+        Path("/tmp/run-dir"),
+        runner=_unused_runner,
+        connectivity_check=_unused_connectivity_check,
+    )
+    assert "contract mutation witnesses" not in [s.name for s in steps]
 
-    observed: dict[str, object] = {}
-    monkeypatch.setattr(verify.check_handoff, "validate_handoff", fake_validate_handoff)
 
+def test_build_steps_gate_fast_omits_the_full_suite() -> None:
     steps = verify._build_steps(
         ["tests/test_x.py::test_y"],
         _DEV_URL,
         _TEST_URL,
         Path("/tmp/run-dir"),
-        runner=fake_runner,
-        connectivity_check=lambda url: None,
+        gate="fast",
+        runner=_unused_runner,
+        connectivity_check=_unused_connectivity_check,
     )
-    for step in steps:
-        step.run()
+    names = [s.name for s in steps]
+    assert "full pytest suite" not in names
+    assert "focused pytest" in names
+    assert "contract mutation witnesses" in names
 
-    assert observed == {
-        "docs_only": False,
-        "actual_full_suite_count": 3,
-        "actual_focused_count": 3,
-        "actual_focus_selector": "tests/test_x.py::test_y",
-    }
+
+def test_build_steps_gate_final_includes_the_full_suite() -> None:
+    steps = verify._build_steps(
+        [],
+        _DEV_URL,
+        _TEST_URL,
+        Path("/tmp/run-dir"),
+        gate="final",
+        runner=_unused_runner,
+        connectivity_check=_unused_connectivity_check,
+    )
+    assert "full pytest suite" in [s.name for s in steps]
+
+
+def test_build_steps_ungated_compat_profile_includes_the_full_suite() -> None:
+    steps = verify._build_steps(
+        [],
+        _DEV_URL,
+        _TEST_URL,
+        Path("/tmp/run-dir"),
+        gate=None,
+        runner=_unused_runner,
+        connectivity_check=_unused_connectivity_check,
+    )
+    assert "full pytest suite" in [s.name for s in steps]
 
 
 # --------------------------------------------------------------------------
@@ -993,22 +1048,57 @@ def test_parse_args_collects_multiple_focus_targets() -> None:
     assert args.focus == ["tests/test_a.py::test_x", "tests/test_b.py"]
 
 
-def test_parse_args_accepts_docs_only_alone() -> None:
-    args = verify._parse_args(["--level", "routine", "--docs-only"])
+def test_parse_args_accepts_docs_only_with_gate_docs() -> None:
+    args = verify._parse_args(["--level", "routine", "--docs-only", "--gate", "docs"])
     assert args.docs_only is True
+    assert args.gate == "docs"
     assert args.focus is None
 
 
 def test_parse_args_defaults_docs_only_to_false() -> None:
     args = verify._parse_args(["--level", "routine"])
     assert args.docs_only is False
+    assert args.gate is None
 
 
 def test_parse_args_rejects_docs_only_combined_with_focus() -> None:
     with pytest.raises(SystemExit):
         verify._parse_args(
-            ["--level", "routine", "--docs-only", "--focus", "tests/test_a.py::test_x"]
+            [
+                "--level",
+                "routine",
+                "--docs-only",
+                "--gate",
+                "docs",
+                "--focus",
+                "tests/test_a.py::test_x",
+            ]
         )
+
+
+def test_parse_args_rejects_docs_only_without_gate_docs() -> None:
+    with pytest.raises(SystemExit):
+        verify._parse_args(["--level", "routine", "--docs-only"])
+
+
+def test_parse_args_rejects_gate_docs_without_docs_only() -> None:
+    with pytest.raises(SystemExit):
+        verify._parse_args(["--level", "routine", "--gate", "docs"])
+
+
+def test_parse_args_accepts_gate_final() -> None:
+    args = verify._parse_args(["--level", "routine", "--gate", "final"])
+    assert args.gate == "final"
+
+
+def test_parse_args_accepts_witness_targets_with_gate_fast() -> None:
+    args = verify._parse_args(["--level", "routine", "--gate", "fast", "--witness", "a/g1", "b/g2"])
+    assert args.witness == ["a/g1", "b/g2"]
+
+
+def test_parse_args_accepts_emit_step_json() -> None:
+    args = verify._parse_args(["--level", "routine", "--emit-step-json", "/tmp/out.json"])
+    assert args.emit_step_json == "/tmp/out.json"
 
 
 # --------------------------------------------------------------------------
@@ -1051,3 +1141,204 @@ def test_print_summary_never_prints_raw_output_for_a_passing_step(
     verify._print_summary(results)
     output = capsys.readouterr().out
     assert "should not appear" not in output
+
+
+# --------------------------------------------------------------------------
+# --migration-required / --compat-v3.1 -- Workflow v3.2 corrections
+# --------------------------------------------------------------------------
+
+
+def test_parse_args_accepts_migration_required() -> None:
+    args = verify._parse_args(["--level", "routine", "--migration-required"])
+    assert args.migration_required is True
+
+
+def test_parse_args_defaults_migration_required_to_false() -> None:
+    args = verify._parse_args(["--level", "routine"])
+    assert args.migration_required is False
+
+
+def test_parse_args_accepts_compat_v3_1() -> None:
+    args = verify._parse_args(["--level", "routine", "--compat-v3.1"])
+    assert args.compat_v3_1 is True
+
+
+def test_parse_args_rejects_compat_v3_1_combined_with_gate() -> None:
+    with pytest.raises(SystemExit):
+        verify._parse_args(["--level", "routine", "--compat-v3.1", "--gate", "final"])
+
+
+def test_build_steps_migration_required_adds_migration_matrix_step() -> None:
+    steps = verify._build_steps(
+        [],
+        _DEV_URL,
+        _TEST_URL,
+        Path("/tmp/run-dir"),
+        gate="final",
+        migration_required=True,
+        runner=_unused_runner,
+        connectivity_check=_unused_connectivity_check,
+    )
+    names = [s.name for s in steps]
+    assert "migration matrix" in names
+    assert names.index("migration matrix") < names.index("handoff metadata validation")
+
+
+def test_build_steps_migration_not_required_omits_migration_matrix_step() -> None:
+    steps = verify._build_steps(
+        [],
+        _DEV_URL,
+        _TEST_URL,
+        Path("/tmp/run-dir"),
+        gate="final",
+        migration_required=False,
+        runner=_unused_runner,
+        connectivity_check=_unused_connectivity_check,
+    )
+    assert "migration matrix" not in [s.name for s in steps]
+
+
+def test_build_steps_docs_only_never_adds_migration_matrix_step_even_if_requested() -> None:
+    steps = verify._build_steps(
+        [],
+        _DEV_URL,
+        _TEST_URL,
+        Path("/tmp/run-dir"),
+        docs_only=True,
+        migration_required=True,
+        runner=_unused_runner,
+        connectivity_check=_unused_connectivity_check,
+    )
+    assert "migration matrix" not in [s.name for s in steps]
+
+
+def test_migration_matrix_step_passes_on_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _FakeResult:
+        detail = "4 steps completed"
+
+    async def _fake_run_full_matrix(dev_url: str, test_url: str, *, app_env: str) -> _FakeResult:
+        return _FakeResult()
+
+    import scripts.migration_matrix as mm
+
+    monkeypatch.setattr(mm, "run_full_matrix", _fake_run_full_matrix)
+    result = verify.migration_matrix_step(_DEV_URL, _TEST_URL)
+    assert result.status is verify.StepStatus.PASS
+    assert "4 steps" in result.detail
+
+
+def test_migration_matrix_step_fails_on_migration_matrix_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import scripts.migration_matrix as mm
+
+    async def _fake_raise(dev_url: str, test_url: str, *, app_env: str) -> None:
+        raise mm.MigrationMatrixError("simulated failure")
+
+    monkeypatch.setattr(mm, "run_full_matrix", _fake_raise)
+    result = verify.migration_matrix_step(_DEV_URL, _TEST_URL)
+    assert result.status is verify.StepStatus.FAIL
+    assert "simulated failure" in result.detail
+
+
+def test_write_step_json_records_profile(tmp_path: Path) -> None:
+    out = tmp_path / "steps.json"
+    verify._write_step_json(out, [], {}, [], profile="compat-v3.1")
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    assert payload["profile"] == "compat-v3.1"
+
+
+def test_write_step_json_defaults_migration_matrix_to_not_triggered(tmp_path: Path) -> None:
+    out = tmp_path / "steps.json"
+    verify._write_step_json(out, [], {}, [])
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    assert payload["migration_matrix"] == {"triggered": False}
+
+
+def test_write_step_json_records_full_migration_evidence(tmp_path: Path) -> None:
+    out = tmp_path / "steps.json"
+    evidence = {
+        "triggered": True,
+        "status": "PASS",
+        "dev_state_before": {"alembic_revision": "0017", "schema_fingerprint": "a" * 64},
+        "dev_state_after": {"alembic_revision": "0017", "schema_fingerprint": "a" * 64},
+        "postgresql_server_version": "PostgreSQL 16.0",
+        "fresh_database_created": True,
+        "fresh_database_cleaned_up": True,
+        "steps": ["existing-head upgrade"],
+    }
+    verify._write_step_json(out, [], {}, [], migration_evidence=evidence)
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    assert payload["migration_matrix"] == evidence
+
+
+def test_write_step_json_records_witness_guard_refs(tmp_path: Path) -> None:
+    out = tmp_path / "steps.json"
+    verify._write_step_json(
+        out,
+        [],
+        {"passed": 2, "failed": 0},
+        [],
+        witness_guard_refs=["b/g2", "a/g1"],
+    )
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    assert payload["mutation_witnesses"] == {
+        "status": "ran",
+        "guard_refs": ["a/g1", "b/g2"],
+        "passed": 2,
+        "failed": 0,
+    }
+
+
+def test_write_step_json_witness_ran_without_guard_refs_defaults_to_empty_list(
+    tmp_path: Path,
+) -> None:
+    out = tmp_path / "steps.json"
+    verify._write_step_json(out, [], {"passed": 1, "failed": 0}, [])
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    assert payload["mutation_witnesses"]["guard_refs"] == []
+
+
+def test_migration_matrix_step_populates_sink_on_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    import scripts.migration_matrix as mm
+
+    fake_state = mm.DevelopmentState(alembic_revision="0017", schema_fingerprint="b" * 64)
+
+    class _FakeResult:
+        detail = "7 steps completed"
+        dev_state_before = fake_state
+        dev_state_after = fake_state
+        postgresql_server_version = "PostgreSQL 16.0"
+        fresh_database_created = True
+        fresh_database_cleaned_up = True
+        steps = ["existing-head upgrade", "fresh base -> head upgrade"]
+
+    async def _fake_run_full_matrix(dev_url: str, test_url: str, *, app_env: str) -> _FakeResult:
+        return _FakeResult()
+
+    monkeypatch.setattr(mm, "run_full_matrix", _fake_run_full_matrix)
+    sink: dict[str, object] = {}
+    result = verify.migration_matrix_step(_DEV_URL, _TEST_URL, migration_sink=sink)
+
+    assert result.status is verify.StepStatus.PASS
+    assert sink["triggered"] is True
+    assert sink["status"] == "PASS"
+    assert sink["dev_state_before"] == {"alembic_revision": "0017", "schema_fingerprint": "b" * 64}
+    assert sink["postgresql_server_version"] == "PostgreSQL 16.0"
+    assert sink["steps"] == ["existing-head upgrade", "fresh base -> head upgrade"]
+
+
+def test_migration_matrix_step_populates_sink_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    import scripts.migration_matrix as mm
+
+    async def _fake_raise(dev_url: str, test_url: str, *, app_env: str) -> None:
+        raise mm.MigrationMatrixError("simulated failure")
+
+    monkeypatch.setattr(mm, "run_full_matrix", _fake_raise)
+    sink: dict[str, object] = {}
+    result = verify.migration_matrix_step(_DEV_URL, _TEST_URL, migration_sink=sink)
+
+    assert result.status is verify.StepStatus.FAIL
+    assert sink["triggered"] is True
+    assert sink["status"] == "FAIL"
+    assert "simulated failure" in str(sink["detail"])

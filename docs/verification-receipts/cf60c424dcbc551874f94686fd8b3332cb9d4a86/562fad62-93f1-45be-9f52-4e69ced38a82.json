@@ -1,0 +1,192 @@
+{
+  "schema_version": "1",
+  "receipt_id": "562fad62-93f1-45be-9f52-4e69ced38a82",
+  "slice_id": "2026-09-13-workflow-v3-2-activation-66202c2",
+  "risk_class": "H",
+  "base_sha": "66202c23facff6bd33d8f624e327cabdd40708b4",
+  "candidate_sha": "cf60c424dcbc551874f94686fd8b3332cb9d4a86",
+  "gate": "final",
+  "created_at": "2026-09-15T04:46:19Z",
+  "coordinator": {
+    "authoring_checkout_head_at_start": "cf60c424dcbc551874f94686fd8b3332cb9d4a86",
+    "worktree_initial_snapshot": {
+      "tracked_tree_sha": "5d426777a60189bf70ed8a8dc027eac4725613fe",
+      "untracked_present": false
+    },
+    "run_cache_redirect": {
+      "pytest_basetemp_redirected": true,
+      "ruff_cache_redirected": true,
+      "mypy_cache_redirected": true,
+      "pycache_redirected": true
+    },
+    "worktree_final_snapshot": {
+      "tracked_tree_sha": "5d426777a60189bf70ed8a8dc027eac4725613fe",
+      "untracked_present": false
+    },
+    "worktree_removed": true,
+    "worktree_leak_check": "no residual .git/worktrees entry, no residual directory",
+    "authoring_checkout_head_at_receipt": "cf60c424dcbc551874f94686fd8b3332cb9d4a86",
+    "authoring_checkout_clean_at_receipt": true
+  },
+  "verifier_hash": "736e2afaa1140840b90f004ceeb7c459f172156f62c53b2c73448fe1e4c77ba4",
+  "checker_hash": "905f3dec22485a1945e0ff64abf75e8fc03e59c88831a5ef4d56f582bec12514",
+  "dependency_and_config_inputs": [
+    {
+      "repo_relative_path": "backend/pyproject.toml",
+      "sha256": "60c7b1bcc8261a81a5ad715021bb6b9b22ab33ad0011463b1df738cd142b25c7"
+    }
+  ],
+  "environment_descriptor": {
+    "python_version": "3.12.13 (main, Aug  7 2026, 02:26:41) [MSC v.1944 64 bit (AMD64)]",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "postgresql_version": "PostgreSQL 16.15 (Debian 16.15-1.pgdg13+2) on x86_64-pc-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+    "installed_distributions_digest": "0eb7bd2db0986e634f7e56b622ec3274b5641317d72a82be14e1ff908306cc0a"
+  },
+  "steps": [
+    {
+      "name": "ruff format --check",
+      "status": "PASS",
+      "duration_seconds": 0.34399999998277053
+    },
+    {
+      "name": "ruff check",
+      "status": "PASS",
+      "duration_seconds": 0.1720000000204891
+    },
+    {
+      "name": "mypy",
+      "status": "PASS",
+      "duration_seconds": 37.35899999999674
+    },
+    {
+      "name": "check_repo.py",
+      "status": "PASS",
+      "duration_seconds": 1.922000000020489
+    },
+    {
+      "name": "git diff --check",
+      "status": "PASS",
+      "duration_seconds": 0.18699999997625127
+    },
+    {
+      "name": "disposable test-database URL validation",
+      "status": "PASS",
+      "duration_seconds": 0.0
+    },
+    {
+      "name": "test-database reachability preflight",
+      "status": "PASS",
+      "duration_seconds": 0.5320000000065193
+    },
+    {
+      "name": "focused pytest",
+      "status": "PASS",
+      "duration_seconds": 155.0
+    },
+    {
+      "name": "full pytest suite",
+      "status": "PASS",
+      "duration_seconds": 255.5779999999795
+    },
+    {
+      "name": "contract mutation witnesses",
+      "status": "PASS",
+      "duration_seconds": 0.43700000003445894
+    },
+    {
+      "name": "handoff metadata validation",
+      "status": "PASS",
+      "duration_seconds": 0.0
+    },
+    {
+      "name": "temporary-directory cleanup",
+      "status": "PASS",
+      "duration_seconds": 0.48499999998603016
+    }
+  ],
+  "full_suite": {
+    "status": "ran",
+    "count": 2637
+  },
+  "focused_tests": {
+    "status": "ran",
+    "selector": "tests/test_check_handoff.py tests/test_check_review.py tests/test_migration_matrix.py tests/test_verification_coordinator.py tests/test_verification_lock.py tests/test_verification_receipts.py tests/test_verification_scope.py tests/test_verification_worktree.py tests/test_verify.py",
+    "count": 470
+  },
+  "mutation_witnesses": {
+    "status": "ran",
+    "guard_refs": [
+      "experience/g01-attribution-frame",
+      "experience/g02-continuation-boundary",
+      "experience/g03-individual-number-redaction",
+      "experience/g04-positional-preference-suppression",
+      "experience/g05-internal-conflict-precedence",
+      "experience/g06-original-unicode-hyphen-disambiguation",
+      "experience/g08-title-leading-preference",
+      "experience/g09-cross-segment-qualifier-following",
+      "experience/g10-trailing-bound-marker",
+      "experience/g11-unsupported-prefix-poison",
+      "experience/g12-fraction-slash-normalization",
+      "experience/g13-unicode-dash-poison",
+      "experience/g14-multi-candidate-collection",
+      "experience/g15-title-segment-order-preservation",
+      "experience/g16-bidirectional-adjacency",
+      "experience/g17-composite-range-poison-decimal-fraction",
+      "experience/g18-description-label-value-scope-removed",
+      "experience/g19-title-label-value-whole-anchor",
+      "experience/g20-empty-segment-adjacency",
+      "experience/g21-composite-range-poison-negative",
+      "experience/g22-composite-poison-casefold",
+      "location/g01-alias-trailing-period",
+      "location/g02-state-zip-provenance",
+      "location/g03-region-whitespace-trim",
+      "location/g04-negation-standalone-word",
+      "location/g05-country-conflict-discarded-span",
+      "location/g06-ascii-only-casefold",
+      "location/g07-state-precedence-over-coordinator",
+      "location/g08-exact-state-token-grammar",
+      "salary/g01-covered-whitespace-class",
+      "salary/g02-label-boundary-strictness",
+      "salary/g03-currency-code-boundary-strictness",
+      "salary/g04-period-boundary-by-shape",
+      "salary/g05-up-to-narrowed-forms"
+    ],
+    "passed": 34,
+    "failed": 0
+  },
+  "affected_surface": {
+    "base_sha": "66202c23facff6bd33d8f624e327cabdd40708b4",
+    "computed_categories": [
+      "docs-only",
+      "generic-changed-test",
+      "handoff-transition",
+      "root-configuration",
+      "unmapped",
+      "workflow-governing-doc",
+      "workflow-hook",
+      "workflow-script"
+    ],
+    "required_contract_families": [],
+    "required_guard_refs": [],
+    "directly_executed_tests": [
+      "backend/tests/test_check_handoff.py",
+      "backend/tests/test_check_review.py",
+      "backend/tests/test_migration_matrix.py",
+      "backend/tests/test_verification_coordinator.py",
+      "backend/tests/test_verification_lock.py",
+      "backend/tests/test_verification_receipts.py",
+      "backend/tests/test_verification_scope.py",
+      "backend/tests/test_verification_worktree.py",
+      "backend/tests/test_verify.py"
+    ],
+    "not_applicable_reason": null
+  },
+  "migration_matrix": {
+    "triggered": false
+  },
+  "cleanup": {
+    "attempted": true,
+    "status": "PASS"
+  },
+  "approval_eligible": true
+}

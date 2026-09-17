@@ -248,7 +248,14 @@ If any condition is uncertain, Codex requests a correction instead. This rule ne
 permits Codex to change code, migrations, tests, dependency versions, or semantic
 documentation without explicit user authorization.
 
-## Workflow v3.1 pilot (three-slice trial)
+## Workflow v3.1 pilot (three-slice trial) — CLOSED, superseded by Workflow v3.2
+
+**This section is closed and historical.** The pilot's retrospective, corrected figures,
+and the decision to adopt Workflow v3.2 are recorded in
+`docs/DECISIONS/0008-workflow-v3.1-retrospective-and-v3.2-adoption.md`; the activation
+itself is recorded in `docs/DECISIONS/0009-workflow-v3.2-activation.md`. See the new
+"Workflow v3.2" section below, which is now the active mechanism. The narrative below is
+retained verbatim as the pilot's own record and is not maintained further.
 
 Status: the approved pilot proposal counts three **parser** slices as its measurement
 window: `classify_experience` (slice 1 of 3, merged) and `classify_salary` (slice 2 of 3,
@@ -394,6 +401,78 @@ slice existing); did `check_handoff.py` ever block a fabricated or stale count; 
 self-review pass meaningfully slow a slice without finding anything. The retrospective
 decides, per element, whether to keep it as standing process, narrow it, or drop it — v3.1
 is not retained by default merely because it shipped.
+
+## Workflow v3.2 (active)
+
+Status: active, adopted per ADR 0008's accepted principles and activated per ADR 0009
+(`docs/DECISIONS/0009-workflow-v3.2-activation.md`). Everything in this file not
+explicitly superseded below continues to apply — the Definition of Ready, risk classes,
+revision discipline, adversarial self-review, and the closed historical-pilot section
+above remain in force. This section adds the durable-evidence and gate mechanism ADR 0008
+deferred to a separately authorized slice.
+
+### Reviewer roles (ADR 0008 principles 3–4)
+
+Sol Medium is the mandatory primary reviewer for executable/parser work, including every
+Class H slice. Astra review is invoked only for: a user-authorized phase gate;
+identity/security/concurrency/destructive/live-provider risk; a disputed finding; or an
+explicitly scheduled equal-effort benchmark. An escalation review is additive context — it
+is recorded separately from the primary review and can never, by itself, satisfy the
+primary-review requirement for an `approved` verdict.
+
+### `--gate fast | final | docs` (`scripts/verify.py`)
+
+Orthogonal to `--level` (risk-class surface). `--gate` is mandatory on every receipt-
+eligible invocation:
+
+| Gate | Required execution | Approval eligibility |
+|---|---|---|
+| `fast` | Static/repository checks; DB safety when applicable; the affected-surface-computed focused tests/contract families/mutation guards (`scripts/verification_scope.py`) | Supports only an intermediate `changes_requested` review |
+| `final` | Everything in `fast`, plus the full suite, plus every currently active mutation guard, dynamically discovered (never a hardcoded count) | Required before any executable-slice `approved` verdict |
+| `docs` | Existing docs-only static/repository/metadata checks; no DB, pytest, or witnesses | May approve a genuinely docs-only slice only |
+
+`--docs-only` and `--gate docs` are bijective — either alone is a hard error.
+
+### Durable verification receipts (ADR 0008 principle 9)
+
+A receipt-eligible run (`--gate fast|final|docs`) is normally launched by
+`scripts/verification_coordinator.py`, never invoked directly against the mutable
+authoring checkout: it creates a disposable detached worktree at the candidate commit,
+runs verification inside it with every tool's cache redirected into the run directory,
+reconfirms the worktree's integrity snapshot is unchanged, removes the worktree,
+reconfirms the authoring checkout itself is unchanged, and only then atomically
+create-only-writes a receipt under `docs/verification-receipts/<candidate-sha>/
+<receipt-id>.json`. A receipt proves verification only — it never proves review approval
+or authorizes a merge. `scripts/check_review.py` validates the `C -> A -> R` chain (and,
+for a merge, `M`) against Git plumbing and the receipt itself, never against review prose
+alone.
+
+### Schema-v2 handoff metadata (`scripts/check_handoff.py`)
+
+The `workflow-metadata` block moves through exactly two states to avoid a self-referential
+commit SHA: `state: pending` (written in the candidate commit itself — `slice_id`,
+`slice_kind`, `risk_class`, `base_sha`, `declared_gate`) and `state: published` (the same
+block, transitioned by the direct child commit that adds the receipt — adds
+`executed_gate` (must equal `declared_gate`), `candidate_sha`, `receipt_id`,
+`receipt_path`). Counts live authoritatively in the receipt; if duplicated in the handoff,
+they are cross-validated exactly.
+
+### Contract-harness integration
+
+`scripts/contract_mutation_witnesses.py`'s existing single-guard CLI is unchanged; a
+`--gate final` run invokes it once per currently active guard (discovered dynamically via
+`tests.contracts.taxonomy.active_guards()`) and aggregates the results as its own step.
+
+### Stable IDs (ADR 0008 principle 8)
+
+Slices use `<date>-<slug>-<base-short-sha>`; findings use `<slice-id>/F###`. A
+`changes_requested` review requires at least one finding ID; an `approved` review requires
+an empty finding list.
+
+### User-only merge authority (unchanged)
+
+A receipt, an `approved` verdict, or any mechanically-satisfied gate never substitutes for
+the user's own merge authorization — unchanged from v3 and v3.1.
 
 ## Established conventions are defaults
 
