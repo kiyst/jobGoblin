@@ -170,6 +170,36 @@ async def test_acknowledgement_lost_after_create_is_still_cleaned_up(
 
 
 @pytest.mark.asyncio
+async def test_direct_target_verification_exception_still_cleans_up(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Distinct from the "wrong database name returned" case: here the
+    direct-target `SELECT current_database()` call itself *raises* (e.g. a
+    dropped connection) rather than returning an unexpected value --
+    `provision_fresh_database` must still clean up the database it
+    already owns before propagating."""
+    real_query_current_database = mm.query_current_database
+    created_name_holder: dict[str, str] = {}
+
+    async def _raise_on_fresh_target(url: str) -> str:
+        if "jobgoblin_test_verify_" in url:
+            from sqlalchemy.engine import make_url
+
+            created_name_holder["name"] = make_url(url).database or ""
+            raise ConnectionResetError("simulated direct-target connection drop")
+        return await real_query_current_database(url)
+
+    monkeypatch.setattr(mm, "query_current_database", _raise_on_fresh_target)
+
+    with pytest.raises(ConnectionResetError):
+        await mm.provision_fresh_database(_dev_url(), app_env="test")
+
+    admin_url = mm.derive_admin_url(db_safety.resolve_test_database_url(None))
+    assert created_name_holder["name"]
+    assert await mm.query_database_exists(admin_url, created_name_holder["name"]) is False
+
+
+@pytest.mark.asyncio
 async def test_failed_before_create_produces_no_database_and_no_cleanup() -> None:
     """A CREATE that fails with no side effect at all (e.g. a malformed
     name) must never be treated as owned, and cleanup must be a no-op."""
@@ -189,7 +219,14 @@ async def test_failed_before_create_produces_no_database_and_no_cleanup() -> Non
 @pytest.mark.asyncio
 async def test_capture_development_state_reads_real_database() -> None:
     state = await mm.capture_development_state(_dev_url())
-    assert state  # a real database name was returned
+    assert isinstance(state, mm.DevelopmentState)
+    # A real, already-migrated database: a genuine Alembic revision string
+    # (never the database name -- see finding 4) and a non-empty,
+    # deterministic schema fingerprint.
+    assert state.alembic_revision
+    assert len(state.schema_fingerprint) == 64  # sha256 hex
+    again = await mm.capture_development_state(_dev_url())
+    assert again == state  # deterministic for an unchanged schema
 
 
 @pytest.mark.asyncio
@@ -197,4 +234,266 @@ async def test_capture_development_state_fails_closed_when_unreachable() -> None
     with pytest.raises(mm.MigrationMatrixError, match="failing closed"):
         await mm.capture_development_state(
             "postgresql+asyncpg://nobody:nothing@127.0.0.1:1/does_not_exist"
+        )
+
+
+@pytest.mark.asyncio
+async def test_capture_development_state_handles_a_database_with_no_alembic_table() -> None:
+    """A fresh database (no `alembic_version` table yet) must still
+    produce a valid state -- `alembic_revision: None`, never a crash --
+    and the connection must remain usable afterward for the schema-
+    fingerprint query (proving the failed statement didn't poison the
+    connection's implicit per-statement transaction)."""
+    lifecycle = await mm.provision_fresh_database(_dev_url(), app_env="test")
+    try:
+        state = await mm.capture_development_state(lifecycle.target_url)
+        assert state.alembic_revision is None
+        assert len(state.schema_fingerprint) == 64
+    finally:
+        await mm.cleanup_fresh_database(lifecycle)
+
+
+# ---------------------------------------------------------------------------
+# schema_fingerprint's expanded migration-relevant surface (Sol's third
+# correction round, finding 4): columns (nullability/default), constraints
+# (including FK actions, via pg_get_constraintdef), and indexes -- each
+# proven, against a real disposable database, to change the fingerprint on
+# its own while the Alembic revision (absent here) stays unchanged.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_schema_fingerprint_changes_on_default_only_mutation() -> None:
+    lifecycle = await mm.provision_fresh_database(_dev_url(), app_env="test")
+    try:
+        conn = await asyncpg.connect(mm._to_asyncpg_dsn(lifecycle.target_url))
+        try:
+            await conn.execute("CREATE TABLE fp_probe (id integer, note text)")
+            before = await mm.capture_development_state(lifecycle.target_url)
+            await conn.execute("ALTER TABLE fp_probe ALTER COLUMN note SET DEFAULT 'x'")
+            after = await mm.capture_development_state(lifecycle.target_url)
+        finally:
+            await conn.close()
+        assert before.alembic_revision == after.alembic_revision
+        assert before.schema_fingerprint != after.schema_fingerprint
+    finally:
+        await mm.cleanup_fresh_database(lifecycle)
+
+
+@pytest.mark.asyncio
+async def test_schema_fingerprint_changes_on_nullability_only_mutation() -> None:
+    lifecycle = await mm.provision_fresh_database(_dev_url(), app_env="test")
+    try:
+        conn = await asyncpg.connect(mm._to_asyncpg_dsn(lifecycle.target_url))
+        try:
+            await conn.execute("CREATE TABLE fp_probe (id integer, note text)")
+            before = await mm.capture_development_state(lifecycle.target_url)
+            await conn.execute("ALTER TABLE fp_probe ALTER COLUMN note SET NOT NULL")
+            after = await mm.capture_development_state(lifecycle.target_url)
+        finally:
+            await conn.close()
+        assert before.alembic_revision == after.alembic_revision
+        assert before.schema_fingerprint != after.schema_fingerprint
+    finally:
+        await mm.cleanup_fresh_database(lifecycle)
+
+
+@pytest.mark.asyncio
+async def test_schema_fingerprint_changes_on_constraint_only_mutation() -> None:
+    lifecycle = await mm.provision_fresh_database(_dev_url(), app_env="test")
+    try:
+        conn = await asyncpg.connect(mm._to_asyncpg_dsn(lifecycle.target_url))
+        try:
+            await conn.execute("CREATE TABLE fp_probe (id integer, note text)")
+            before = await mm.capture_development_state(lifecycle.target_url)
+            await conn.execute(
+                "ALTER TABLE fp_probe ADD CONSTRAINT fp_probe_id_positive CHECK (id > 0)"
+            )
+            after = await mm.capture_development_state(lifecycle.target_url)
+        finally:
+            await conn.close()
+        assert before.alembic_revision == after.alembic_revision
+        assert before.schema_fingerprint != after.schema_fingerprint
+    finally:
+        await mm.cleanup_fresh_database(lifecycle)
+
+
+@pytest.mark.asyncio
+async def test_schema_fingerprint_changes_on_index_only_mutation() -> None:
+    lifecycle = await mm.provision_fresh_database(_dev_url(), app_env="test")
+    try:
+        conn = await asyncpg.connect(mm._to_asyncpg_dsn(lifecycle.target_url))
+        try:
+            await conn.execute("CREATE TABLE fp_probe (id integer, note text)")
+            before = await mm.capture_development_state(lifecycle.target_url)
+            await conn.execute("CREATE INDEX fp_probe_note_idx ON fp_probe (note)")
+            after = await mm.capture_development_state(lifecycle.target_url)
+        finally:
+            await conn.close()
+        assert before.alembic_revision == after.alembic_revision
+        assert before.schema_fingerprint != after.schema_fingerprint
+    finally:
+        await mm.cleanup_fresh_database(lifecycle)
+
+
+@pytest.mark.asyncio
+async def test_schema_fingerprint_changes_on_foreign_key_action_only_mutation() -> None:
+    """A FOREIGN KEY's own ON DELETE/ON UPDATE action is never visible in
+    column name/type/nullability/default alone -- only in the constraint's
+    own definition text (`pg_get_constraintdef`), which is what this
+    fingerprint now hashes."""
+    lifecycle = await mm.provision_fresh_database(_dev_url(), app_env="test")
+    try:
+        conn = await asyncpg.connect(mm._to_asyncpg_dsn(lifecycle.target_url))
+        try:
+            await conn.execute("CREATE TABLE fp_parent (id integer PRIMARY KEY)")
+            await conn.execute(
+                "CREATE TABLE fp_child (id integer, parent_id integer REFERENCES fp_parent(id))"
+            )
+            before = await mm.capture_development_state(lifecycle.target_url)
+            await conn.execute("ALTER TABLE fp_child DROP CONSTRAINT fp_child_parent_id_fkey")
+            await conn.execute(
+                "ALTER TABLE fp_child ADD CONSTRAINT fp_child_parent_id_fkey "
+                "FOREIGN KEY (parent_id) REFERENCES fp_parent(id) ON DELETE CASCADE"
+            )
+            after = await mm.capture_development_state(lifecycle.target_url)
+        finally:
+            await conn.close()
+        assert before.alembic_revision == after.alembic_revision
+        assert before.schema_fingerprint != after.schema_fingerprint
+    finally:
+        await mm.cleanup_fresh_database(lifecycle)
+
+
+@pytest.mark.asyncio
+async def test_schema_fingerprint_is_deterministic_across_repeated_reads() -> None:
+    lifecycle = await mm.provision_fresh_database(_dev_url(), app_env="test")
+    try:
+        conn = await asyncpg.connect(mm._to_asyncpg_dsn(lifecycle.target_url))
+        try:
+            await conn.execute("CREATE TABLE fp_probe (id integer, note text DEFAULT 'x')")
+            await conn.execute("CREATE INDEX fp_probe_note_idx ON fp_probe (note)")
+            await conn.execute(
+                "ALTER TABLE fp_probe ADD CONSTRAINT fp_probe_id_positive CHECK (id > 0)"
+            )
+        finally:
+            await conn.close()
+        first = await mm.capture_development_state(lifecycle.target_url)
+        second = await mm.capture_development_state(lifecycle.target_url)
+        assert first == second
+    finally:
+        await mm.cleanup_fresh_database(lifecycle)
+
+
+@pytest.mark.asyncio
+async def test_query_postgresql_server_version_is_a_real_distinct_string() -> None:
+    version = await mm.query_postgresql_server_version(_dev_url())
+    assert "PostgreSQL" in version
+    database_name = await mm.query_current_database(_dev_url())
+    assert version != database_name
+
+
+# ---------------------------------------------------------------------------
+# run_full_matrix -- the complete, integrated matrix (real Alembic + real DB)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_run_full_matrix_happy_path_real_alembic() -> None:
+    result = await mm.run_full_matrix(
+        _dev_url(), db_safety.resolve_test_database_url(None), app_env="test"
+    )
+    assert result.status == "PASS"
+    assert result.dev_state_before == result.dev_state_after
+    assert result.fresh_database_created is True
+    assert result.fresh_database_cleaned_up is True
+    assert "fresh base -> head upgrade" in result.steps
+    # left the shared disposable database back at head -- confirmed via a
+    # real `alembic check` immediately after, from this same test.
+    mm._run_alembic(mm.ALEMBIC_CHECK, db_safety.resolve_test_database_url(None))
+
+
+@pytest.mark.asyncio
+async def test_run_full_matrix_cleans_up_fresh_database_when_a_later_step_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Exception *after* the fresh database was genuinely created (during
+    the upgrade against it) must still result in cleanup -- proven here by
+    confirming the real database is gone afterward, not merely that no
+    exception escaped `cleanup_fresh_database` itself."""
+    real_run_alembic = mm._run_alembic
+    created_name_holder: dict[str, str] = {}
+
+    def _fail_on_fresh_target(args: list[str], database_url: str) -> None:
+        if args == mm.ALEMBIC_UPGRADE_HEAD and "jobgoblin_test_verify_" in database_url:
+            from sqlalchemy.engine import make_url
+
+            created_name_holder["name"] = make_url(database_url).database or ""
+            raise mm.MigrationMatrixError("simulated failure during fresh-target upgrade")
+        real_run_alembic(args, database_url)
+
+    monkeypatch.setattr(mm, "_run_alembic", _fail_on_fresh_target)
+
+    with pytest.raises(mm.MigrationMatrixError, match="simulated failure"):
+        await mm.run_full_matrix(
+            _dev_url(), db_safety.resolve_test_database_url(None), app_env="test"
+        )
+
+    admin_url = mm.derive_admin_url(db_safety.resolve_test_database_url(None))
+    assert created_name_holder["name"]
+    assert await mm.query_database_exists(admin_url, created_name_holder["name"]) is False
+
+
+@pytest.mark.asyncio
+async def test_run_full_matrix_raises_and_cleans_up_when_direct_target_validation_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Simulates the direct-target `SELECT current_database()` confirmation
+    failing inside `provision_fresh_database` (called from within
+    `run_full_matrix`) -- must propagate and must not leave the fresh
+    database behind."""
+    real_query_current_database = mm.query_current_database
+    created_name_holder: dict[str, str] = {}
+
+    async def _wrong_name(url: str) -> str:
+        actual = await real_query_current_database(url)
+        if "jobgoblin_test_verify_" in url:
+            created_name_holder["name"] = actual
+            return "not-the-right-database"
+        return actual
+
+    monkeypatch.setattr(mm, "query_current_database", _wrong_name)
+
+    with pytest.raises(mm.MigrationMatrixError, match="refusing to run migrations"):
+        await mm.run_full_matrix(
+            _dev_url(), db_safety.resolve_test_database_url(None), app_env="test"
+        )
+
+    admin_url = mm.derive_admin_url(db_safety.resolve_test_database_url(None))
+    assert created_name_holder["name"]
+    assert await mm.query_database_exists(admin_url, created_name_holder["name"]) is False
+
+
+@pytest.mark.asyncio
+async def test_run_full_matrix_fails_closed_if_development_state_changes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = {"n": 0}
+    real_capture = mm.capture_development_state
+
+    async def _flip_flop(url: str) -> mm.DevelopmentState:
+        calls["n"] += 1
+        real_value = await real_capture(url)
+        if calls["n"] == 1:
+            return real_value
+        return mm.DevelopmentState(
+            alembic_revision=real_value.alembic_revision,
+            schema_fingerprint=f"{real_value.schema_fingerprint}-mutated",
+        )
+
+    monkeypatch.setattr(mm, "capture_development_state", _flip_flop)
+
+    with pytest.raises(mm.MigrationMatrixError, match="state changed"):
+        await mm.run_full_matrix(
+            _dev_url(), db_safety.resolve_test_database_url(None), app_env="test"
         )

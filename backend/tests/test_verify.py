@@ -15,6 +15,7 @@ every smaller unit it composes (command builders, step-execution functions,
 temp-directory safety guard) is tested directly and independently instead.
 """
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -489,9 +490,10 @@ def test_mutation_witnesses_step_all_guards_reports_aggregate_pass(
     def fake_runner(command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(command, 0, stdout="34 passed, 0 failed, out of 34\n")
 
-    result, counts = verify.mutation_witnesses_step([], fake_runner)
+    result, counts, guard_refs_ran = verify.mutation_witnesses_step([], fake_runner)
     assert result.status is verify.StepStatus.PASS
     assert counts == {"passed": 34, "failed": 0}
+    assert guard_refs_ran == []
 
 
 def test_mutation_witnesses_step_all_guards_reports_aggregate_failure(
@@ -502,9 +504,10 @@ def test_mutation_witnesses_step_all_guards_reports_aggregate_failure(
             command, 1, stdout="PASS a\nFAIL b\n1 passed, 1 failed, out of 2\n"
         )
 
-    result, counts = verify.mutation_witnesses_step([], fake_runner)
+    result, counts, guard_refs_ran = verify.mutation_witnesses_step([], fake_runner)
     assert result.status is verify.StepStatus.FAIL
     assert counts == {"passed": 1, "failed": 1}
+    assert guard_refs_ran == ["a", "b"]
 
 
 def test_mutation_witnesses_step_per_guard_selection_invokes_once_per_guard() -> None:
@@ -515,10 +518,11 @@ def test_mutation_witnesses_step_per_guard_selection_invokes_once_per_guard() ->
         ref = command[-1]
         return subprocess.CompletedProcess(command, 0, stdout=f"PASS {ref}\n")
 
-    result, counts = verify.mutation_witnesses_step(["a/g1", "b/g2"], fake_runner)
+    result, counts, guard_refs_ran = verify.mutation_witnesses_step(["a/g1", "b/g2"], fake_runner)
     assert result.status is verify.StepStatus.PASS
     assert counts == {"passed": 2, "failed": 0}
     assert len(calls) == 2
+    assert guard_refs_ran == ["a/g1", "b/g2"]
 
 
 def test_mutation_witnesses_step_per_guard_selection_reports_failed_guard() -> None:
@@ -528,9 +532,10 @@ def test_mutation_witnesses_step_per_guard_selection_reports_failed_guard() -> N
             return subprocess.CompletedProcess(command, 1, stdout=f"FAIL {ref}: boom\n")
         return subprocess.CompletedProcess(command, 0, stdout=f"PASS {ref}\n")
 
-    result, counts = verify.mutation_witnesses_step(["a/g1", "b/g2"], fake_runner)
+    result, counts, guard_refs_ran = verify.mutation_witnesses_step(["a/g1", "b/g2"], fake_runner)
     assert result.status is verify.StepStatus.FAIL
     assert counts == {"passed": 1, "failed": 1}
+    assert guard_refs_ran == ["a/g1", "b/g2"]
 
 
 # --------------------------------------------------------------------------
@@ -682,6 +687,48 @@ def test_build_steps_without_gate_never_adds_mutation_witnesses_step() -> None:
         connectivity_check=_unused_connectivity_check,
     )
     assert "contract mutation witnesses" not in [s.name for s in steps]
+
+
+def test_build_steps_gate_fast_omits_the_full_suite() -> None:
+    steps = verify._build_steps(
+        ["tests/test_x.py::test_y"],
+        _DEV_URL,
+        _TEST_URL,
+        Path("/tmp/run-dir"),
+        gate="fast",
+        runner=_unused_runner,
+        connectivity_check=_unused_connectivity_check,
+    )
+    names = [s.name for s in steps]
+    assert "full pytest suite" not in names
+    assert "focused pytest" in names
+    assert "contract mutation witnesses" in names
+
+
+def test_build_steps_gate_final_includes_the_full_suite() -> None:
+    steps = verify._build_steps(
+        [],
+        _DEV_URL,
+        _TEST_URL,
+        Path("/tmp/run-dir"),
+        gate="final",
+        runner=_unused_runner,
+        connectivity_check=_unused_connectivity_check,
+    )
+    assert "full pytest suite" in [s.name for s in steps]
+
+
+def test_build_steps_ungated_compat_profile_includes_the_full_suite() -> None:
+    steps = verify._build_steps(
+        [],
+        _DEV_URL,
+        _TEST_URL,
+        Path("/tmp/run-dir"),
+        gate=None,
+        runner=_unused_runner,
+        connectivity_check=_unused_connectivity_check,
+    )
+    assert "full pytest suite" in [s.name for s in steps]
 
 
 # --------------------------------------------------------------------------
@@ -1094,3 +1141,204 @@ def test_print_summary_never_prints_raw_output_for_a_passing_step(
     verify._print_summary(results)
     output = capsys.readouterr().out
     assert "should not appear" not in output
+
+
+# --------------------------------------------------------------------------
+# --migration-required / --compat-v3.1 -- Workflow v3.2 corrections
+# --------------------------------------------------------------------------
+
+
+def test_parse_args_accepts_migration_required() -> None:
+    args = verify._parse_args(["--level", "routine", "--migration-required"])
+    assert args.migration_required is True
+
+
+def test_parse_args_defaults_migration_required_to_false() -> None:
+    args = verify._parse_args(["--level", "routine"])
+    assert args.migration_required is False
+
+
+def test_parse_args_accepts_compat_v3_1() -> None:
+    args = verify._parse_args(["--level", "routine", "--compat-v3.1"])
+    assert args.compat_v3_1 is True
+
+
+def test_parse_args_rejects_compat_v3_1_combined_with_gate() -> None:
+    with pytest.raises(SystemExit):
+        verify._parse_args(["--level", "routine", "--compat-v3.1", "--gate", "final"])
+
+
+def test_build_steps_migration_required_adds_migration_matrix_step() -> None:
+    steps = verify._build_steps(
+        [],
+        _DEV_URL,
+        _TEST_URL,
+        Path("/tmp/run-dir"),
+        gate="final",
+        migration_required=True,
+        runner=_unused_runner,
+        connectivity_check=_unused_connectivity_check,
+    )
+    names = [s.name for s in steps]
+    assert "migration matrix" in names
+    assert names.index("migration matrix") < names.index("handoff metadata validation")
+
+
+def test_build_steps_migration_not_required_omits_migration_matrix_step() -> None:
+    steps = verify._build_steps(
+        [],
+        _DEV_URL,
+        _TEST_URL,
+        Path("/tmp/run-dir"),
+        gate="final",
+        migration_required=False,
+        runner=_unused_runner,
+        connectivity_check=_unused_connectivity_check,
+    )
+    assert "migration matrix" not in [s.name for s in steps]
+
+
+def test_build_steps_docs_only_never_adds_migration_matrix_step_even_if_requested() -> None:
+    steps = verify._build_steps(
+        [],
+        _DEV_URL,
+        _TEST_URL,
+        Path("/tmp/run-dir"),
+        docs_only=True,
+        migration_required=True,
+        runner=_unused_runner,
+        connectivity_check=_unused_connectivity_check,
+    )
+    assert "migration matrix" not in [s.name for s in steps]
+
+
+def test_migration_matrix_step_passes_on_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _FakeResult:
+        detail = "4 steps completed"
+
+    async def _fake_run_full_matrix(dev_url: str, test_url: str, *, app_env: str) -> _FakeResult:
+        return _FakeResult()
+
+    import scripts.migration_matrix as mm
+
+    monkeypatch.setattr(mm, "run_full_matrix", _fake_run_full_matrix)
+    result = verify.migration_matrix_step(_DEV_URL, _TEST_URL)
+    assert result.status is verify.StepStatus.PASS
+    assert "4 steps" in result.detail
+
+
+def test_migration_matrix_step_fails_on_migration_matrix_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import scripts.migration_matrix as mm
+
+    async def _fake_raise(dev_url: str, test_url: str, *, app_env: str) -> None:
+        raise mm.MigrationMatrixError("simulated failure")
+
+    monkeypatch.setattr(mm, "run_full_matrix", _fake_raise)
+    result = verify.migration_matrix_step(_DEV_URL, _TEST_URL)
+    assert result.status is verify.StepStatus.FAIL
+    assert "simulated failure" in result.detail
+
+
+def test_write_step_json_records_profile(tmp_path: Path) -> None:
+    out = tmp_path / "steps.json"
+    verify._write_step_json(out, [], {}, [], profile="compat-v3.1")
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    assert payload["profile"] == "compat-v3.1"
+
+
+def test_write_step_json_defaults_migration_matrix_to_not_triggered(tmp_path: Path) -> None:
+    out = tmp_path / "steps.json"
+    verify._write_step_json(out, [], {}, [])
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    assert payload["migration_matrix"] == {"triggered": False}
+
+
+def test_write_step_json_records_full_migration_evidence(tmp_path: Path) -> None:
+    out = tmp_path / "steps.json"
+    evidence = {
+        "triggered": True,
+        "status": "PASS",
+        "dev_state_before": {"alembic_revision": "0017", "schema_fingerprint": "a" * 64},
+        "dev_state_after": {"alembic_revision": "0017", "schema_fingerprint": "a" * 64},
+        "postgresql_server_version": "PostgreSQL 16.0",
+        "fresh_database_created": True,
+        "fresh_database_cleaned_up": True,
+        "steps": ["existing-head upgrade"],
+    }
+    verify._write_step_json(out, [], {}, [], migration_evidence=evidence)
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    assert payload["migration_matrix"] == evidence
+
+
+def test_write_step_json_records_witness_guard_refs(tmp_path: Path) -> None:
+    out = tmp_path / "steps.json"
+    verify._write_step_json(
+        out,
+        [],
+        {"passed": 2, "failed": 0},
+        [],
+        witness_guard_refs=["b/g2", "a/g1"],
+    )
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    assert payload["mutation_witnesses"] == {
+        "status": "ran",
+        "guard_refs": ["a/g1", "b/g2"],
+        "passed": 2,
+        "failed": 0,
+    }
+
+
+def test_write_step_json_witness_ran_without_guard_refs_defaults_to_empty_list(
+    tmp_path: Path,
+) -> None:
+    out = tmp_path / "steps.json"
+    verify._write_step_json(out, [], {"passed": 1, "failed": 0}, [])
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    assert payload["mutation_witnesses"]["guard_refs"] == []
+
+
+def test_migration_matrix_step_populates_sink_on_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    import scripts.migration_matrix as mm
+
+    fake_state = mm.DevelopmentState(alembic_revision="0017", schema_fingerprint="b" * 64)
+
+    class _FakeResult:
+        detail = "7 steps completed"
+        dev_state_before = fake_state
+        dev_state_after = fake_state
+        postgresql_server_version = "PostgreSQL 16.0"
+        fresh_database_created = True
+        fresh_database_cleaned_up = True
+        steps = ["existing-head upgrade", "fresh base -> head upgrade"]
+
+    async def _fake_run_full_matrix(dev_url: str, test_url: str, *, app_env: str) -> _FakeResult:
+        return _FakeResult()
+
+    monkeypatch.setattr(mm, "run_full_matrix", _fake_run_full_matrix)
+    sink: dict[str, object] = {}
+    result = verify.migration_matrix_step(_DEV_URL, _TEST_URL, migration_sink=sink)
+
+    assert result.status is verify.StepStatus.PASS
+    assert sink["triggered"] is True
+    assert sink["status"] == "PASS"
+    assert sink["dev_state_before"] == {"alembic_revision": "0017", "schema_fingerprint": "b" * 64}
+    assert sink["postgresql_server_version"] == "PostgreSQL 16.0"
+    assert sink["steps"] == ["existing-head upgrade", "fresh base -> head upgrade"]
+
+
+def test_migration_matrix_step_populates_sink_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    import scripts.migration_matrix as mm
+
+    async def _fake_raise(dev_url: str, test_url: str, *, app_env: str) -> None:
+        raise mm.MigrationMatrixError("simulated failure")
+
+    monkeypatch.setattr(mm, "run_full_matrix", _fake_raise)
+    sink: dict[str, object] = {}
+    result = verify.migration_matrix_step(_DEV_URL, _TEST_URL, migration_sink=sink)
+
+    assert result.status is verify.StepStatus.FAIL
+    assert sink["triggered"] is True
+    assert sink["status"] == "FAIL"
+    assert "simulated failure" in str(sink["detail"])

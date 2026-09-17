@@ -75,10 +75,15 @@ def test_json_fixture_already_mapped_does_not_require_owner_mapping() -> None:
     assert c.category == "contract-record:location"
 
 
-def test_unmapped_python_path_is_marked_for_direct_execution() -> None:
+def test_unmapped_python_path_is_never_a_literal_pytest_focus_target() -> None:
+    """An unmapped path is not known to be a test file (and typically
+    isn't even under backend/tests/, which verify.py's own focus
+    validation requires) -- it must never be passed as a literal --focus
+    target; it forces --gate final instead, which already runs the full
+    suite unconditionally."""
     c = vs.classify_path("backend/app/some_new_unmapped_module.py")
     assert c.category == "unmapped"
-    assert c.directly_execute is True
+    assert c.directly_execute is False
 
 
 def test_non_normalized_path_is_rejected() -> None:
@@ -154,3 +159,57 @@ def test_forces_final_gate_for_unmapped_path() -> None:
 def test_does_not_force_final_gate_for_single_parser_change() -> None:
     classifications = vs.classify_all(["backend/app/normalization/salary.py"])
     assert vs.forces_final_gate(classifications) is False
+
+
+# ---------------------------------------------------------------------------
+# compute_required_coverage -- the single pre-execution source of truth
+# ---------------------------------------------------------------------------
+
+
+def test_compute_required_coverage_empty_diff_is_not_applicable() -> None:
+    coverage = vs.compute_required_coverage([])
+    assert coverage.not_applicable_reason == "no_changed_paths"
+    assert coverage.forces_final is False
+    assert coverage.required_focus_targets == frozenset()
+
+
+def test_compute_required_coverage_single_parser_change() -> None:
+    coverage = vs.compute_required_coverage(["backend/app/normalization/salary.py"])
+    assert coverage.forces_final is False
+    assert coverage.required_contract_families == frozenset({"salary"})
+    assert "backend/tests/contracts/test_salary_contract.py" in coverage.required_focus_targets
+    assert "backend/tests/contracts/test_harness_self.py" in coverage.required_focus_targets
+    assert all(ref.startswith("salary/") for ref in coverage.required_guard_refs)
+    assert len(coverage.required_guard_refs) == 5  # all 5 active salary guards
+    assert coverage.not_applicable_reason is None
+
+
+def test_compute_required_coverage_shared_harness_requires_all_three_families() -> None:
+    coverage = vs.compute_required_coverage(["backend/tests/contracts/taxonomy.py"])
+    assert coverage.required_contract_families == frozenset({"location", "salary", "experience"})
+    assert coverage.forces_final is True
+    assert len(coverage.required_guard_refs) == 34  # every active guard, all three parsers
+
+
+def test_compute_required_coverage_docs_only_diff_is_not_applicable() -> None:
+    coverage = vs.compute_required_coverage(["docs/ARCHITECTURE.md"])
+    assert coverage.not_applicable_reason == "docs_only_within_executable_slice"
+    assert coverage.forces_final is False
+
+
+def test_compute_required_coverage_workflow_hook_forces_final_never_a_focus_target() -> None:
+    """A workflow-hook path forces --gate final (which runs the full
+    suite unconditionally) but must never itself be passed as a literal
+    pytest --focus target -- it isn't under backend/tests/, and verify.py
+    would reject it outright."""
+    coverage = vs.compute_required_coverage([".claude/hooks/compact_checkpoint.py"])
+    assert coverage.forces_final is True
+    assert ".claude/hooks/compact_checkpoint.py" not in coverage.directly_executed_tests
+    assert ".claude/hooks/compact_checkpoint.py" not in coverage.required_focus_targets
+
+
+def test_compute_required_coverage_generic_test_change_is_directly_executed() -> None:
+    coverage = vs.compute_required_coverage(["backend/tests/test_verify.py"])
+    assert "backend/tests/test_verify.py" in coverage.required_focus_targets
+    assert "backend/tests/test_verify.py" in coverage.directly_executed_tests
+    assert coverage.required_contract_families == frozenset()

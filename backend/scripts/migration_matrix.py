@@ -14,20 +14,28 @@ this run can prove it created it.
 
 from __future__ import annotations
 
+import hashlib
+import os
+import subprocess
+import sys
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
 
 import asyncpg
 from sqlalchemy.engine import make_url
 
 from scripts.db_safety import (
     _LOCAL_DESTRUCTIVE_LIFECYCLE_HOSTS,
+    assert_is_disposable_test_database,
     assert_safe_for_local_destructive_lifecycle,
     redact_database_url,
     resolve_test_database_url,
 )
 
 _MAINTENANCE_DATABASE = "postgres"
+_BACKEND_DIR = Path(__file__).resolve().parent.parent
 
 # Deterministic, conservative repository-root-relative trigger paths (see
 # scripts/verification_scope.py's is_migration_trigger, the single source
@@ -103,6 +111,19 @@ async def query_current_database(url: str) -> str:
         await conn.close()
 
 
+async def query_postgresql_server_version(url: str) -> str:
+    """The real PostgreSQL server version string (`SELECT version()`) --
+    captured separately from, and never confused with, `current_database()`
+    (a prior version of this module mislabeled the latter as
+    `postgresql_version` in the environment descriptor)."""
+    conn = await asyncpg.connect(_to_asyncpg_dsn(url))
+    try:
+        value: str = await conn.fetchval("SELECT version()")
+        return value
+    finally:
+        await conn.close()
+
+
 async def query_database_exists(admin_url: str, database_name: str) -> bool:
     conn = await asyncpg.connect(_to_asyncpg_dsn(admin_url))
     try:
@@ -128,17 +149,93 @@ async def drop_database(admin_url: str, database_name: str) -> None:
         await conn.close()
 
 
-async def capture_development_state(development_url: str) -> str:
+@dataclass(frozen=True)
+class DevelopmentState:
+    """A meaningful snapshot of the development database's schema state --
+    the Alembic revision alone is not sufficient (two different schemas
+    could share a revision if migrations were edited after being applied
+    elsewhere), so this also fingerprints the actual column-level shape
+    of every table in the `public` schema."""
+
+    alembic_revision: str | None
+    schema_fingerprint: str
+
+
+async def _capture_schema_fingerprint(conn: Any) -> str:
+    """Hashes the full migration-relevant schema surface for `public` --
+    not just column name/type (a prior version of this fingerprint), which
+    left a constraint-only, index-only, or default/nullability-only change
+    invisible even though it genuinely changes what a migration must
+    reconcile. Three deterministically-ordered sections, sha256'd together:
+
+    - columns: name, type, nullability, *and* default;
+    - constraints: every `pg_constraint`'s own full definition text via
+      `pg_get_constraintdef` -- this single rendering already covers
+      PRIMARY KEY/UNIQUE/CHECK/FOREIGN KEY, *including* a FOREIGN KEY's
+      own ON DELETE/ON UPDATE action, so no separate confdeltype/
+      confupdtype lookup is needed;
+    - indexes: every `pg_indexes` entry's own full definition text.
+    """
+    columns = await conn.fetch(
+        "SELECT table_name, column_name, data_type, is_nullable, column_default "
+        "FROM information_schema.columns WHERE table_schema = 'public' "
+        "ORDER BY table_name, column_name"
+    )
+    constraints = await conn.fetch(
+        "SELECT conrelid::regclass::text AS table_name, conname, "
+        "pg_get_constraintdef(oid) AS definition FROM pg_constraint "
+        "WHERE connamespace = 'public'::regnamespace "
+        "ORDER BY conrelid::regclass::text, conname"
+    )
+    indexes = await conn.fetch(
+        "SELECT tablename, indexname, indexdef FROM pg_indexes "
+        "WHERE schemaname = 'public' ORDER BY tablename, indexname"
+    )
+    column_lines = [
+        f"{r['table_name']}.{r['column_name']}:{r['data_type']}:"
+        f"{r['is_nullable']}:{r['column_default'] or ''}"
+        for r in columns
+    ]
+    constraint_lines = [f"{r['table_name']}.{r['conname']}:{r['definition']}" for r in constraints]
+    index_lines = [f"{r['tablename']}.{r['indexname']}:{r['indexdef']}" for r in indexes]
+    payload = "\n".join(
+        [
+            "[columns]",
+            *column_lines,
+            "[constraints]",
+            *constraint_lines,
+            "[indexes]",
+            *index_lines,
+        ]
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+async def capture_development_state(development_url: str) -> DevelopmentState:
     """Fail-closed: an unreachable development database, or one whose
     state cannot be read, is never treated as a skip -- it blocks the
     entire migration-matrix run for a schema-changing candidate."""
     try:
-        return await query_current_database(development_url)
+        conn = await asyncpg.connect(_to_asyncpg_dsn(development_url))
     except Exception as exc:  # noqa: BLE001 -- re-raised as a hard failure, never swallowed
         raise MigrationMatrixError(
             f"development database state could not be read: {type(exc).__name__} -- "
             "failing closed, no receipt/post-merge evidence may be issued"
         ) from exc
+    try:
+        try:
+            revision = await conn.fetchval("SELECT version_num FROM alembic_version")
+        except asyncpg.PostgresError:
+            revision = None
+        fingerprint = await _capture_schema_fingerprint(conn)
+        return DevelopmentState(alembic_revision=revision, schema_fingerprint=fingerprint)
+    except Exception as exc:  # noqa: BLE001 -- re-raised as a hard failure, never swallowed
+        raise MigrationMatrixError(
+            f"development database state could not be read: {type(exc).__name__} -- "
+            "failing closed, no receipt/post-merge evidence may be issued"
+        ) from exc
+    finally:
+        await conn.close()
 
 
 def generate_fresh_database_name() -> str:
@@ -198,8 +295,17 @@ async def provision_fresh_database(development_url: str, app_env: str) -> FreshD
     # SELECT current_database() to equal the generated name, before any
     # Alembic command runs against it.
     if lifecycle.created_by_this_run:
-        resolved = await query_current_database(target_url)
+        # Unconditional cleanup guarantee: this run already owns the
+        # database it just created, so *any* failure past this point --
+        # whether the direct-target query raises outright, or it succeeds
+        # but returns the wrong name -- must never leave it behind.
+        try:
+            resolved = await query_current_database(target_url)
+        except Exception:
+            await cleanup_fresh_database(lifecycle)
+            raise
         if resolved != generated_name:
+            await cleanup_fresh_database(lifecycle)
             raise MigrationMatrixError(
                 f"direct connection to the created target resolved to {resolved!r}, "
                 f"expected {generated_name!r} -- refusing to run migrations against it"
@@ -219,3 +325,85 @@ async def cleanup_fresh_database(lifecycle: FreshDatabaseLifecycle) -> None:
         return
     await drop_database(lifecycle.admin_url, lifecycle.generated_name)
     lifecycle.cleaned_up = True
+
+
+def _run_alembic(args: list[str], database_url: str) -> None:
+    """Runs one Alembic command with the validated target passed only
+    through this one subprocess's own environment -- the parent process's
+    environment (`os.environ`) is read from but never mutated."""
+    env = {**os.environ, "DATABASE_URL": database_url}
+    proc = subprocess.run(
+        [sys.executable, *args], cwd=str(_BACKEND_DIR), env=env, capture_output=True, text=True
+    )
+    if proc.returncode != 0:
+        raise MigrationMatrixError(
+            f"alembic {' '.join(args[3:])} failed against "
+            f"{redact_database_url(database_url)}: {proc.stderr.strip()[-2000:]}"
+        )
+
+
+@dataclass
+class MatrixResult:
+    status: str  # "PASS" | "FAIL"
+    detail: str
+    dev_state_before: DevelopmentState | None = None
+    dev_state_after: DevelopmentState | None = None
+    postgresql_server_version: str | None = None
+    fresh_database_created: bool = False
+    fresh_database_cleaned_up: bool = False
+    steps: list[str] = field(default_factory=list)
+
+
+async def run_full_matrix(
+    development_url: str, existing_target_url: str, *, app_env: str
+) -> MatrixResult:
+    """The complete migration/schema-change verification matrix, run only
+    when a candidate's diff actually triggers it
+    (`verification_scope.is_migration_trigger`): existing-head upgrade,
+    downgrade/upgrade round trip, `alembic check`, and a fresh `base ->
+    head` run against a guarded, disposable database -- development
+    database state is captured before and after and must be identical, or
+    this raises (never returns a "FAIL" result silently; a raised
+    exception here always means no receipt may be issued). Cleanup of the
+    fresh database is unconditional, in `finally`."""
+    steps: list[str] = []
+    postgresql_server_version = await query_postgresql_server_version(development_url)
+    dev_before = await capture_development_state(development_url)
+    steps.append("development state captured (before)")
+
+    assert_is_disposable_test_database(existing_target_url, development_url)
+    _run_alembic(ALEMBIC_UPGRADE_HEAD, existing_target_url)
+    steps.append("existing-head upgrade")
+    _run_alembic(ALEMBIC_DOWNGRADE_ONE, existing_target_url)
+    steps.append("downgrade -1")
+    _run_alembic(ALEMBIC_UPGRADE_HEAD, existing_target_url)
+    steps.append("upgrade head (round trip restored)")
+    _run_alembic(ALEMBIC_CHECK, existing_target_url)
+    steps.append("alembic check")
+
+    lifecycle = await provision_fresh_database(development_url, app_env)
+    fresh_created = lifecycle.created_by_this_run
+    try:
+        _run_alembic(ALEMBIC_UPGRADE_HEAD, lifecycle.target_url)
+        steps.append("fresh base -> head upgrade")
+    finally:
+        await cleanup_fresh_database(lifecycle)
+
+    dev_after = await capture_development_state(development_url)
+    steps.append("development state captured (after)")
+    if dev_after != dev_before:
+        raise MigrationMatrixError(
+            "development database state changed during the migration matrix -- "
+            f"before={dev_before!r} after={dev_after!r}"
+        )
+
+    return MatrixResult(
+        status="PASS",
+        detail=f"{len(steps)} steps completed",
+        dev_state_before=dev_before,
+        dev_state_after=dev_after,
+        postgresql_server_version=postgresql_server_version,
+        fresh_database_created=fresh_created,
+        fresh_database_cleaned_up=lifecycle.cleaned_up,
+        steps=steps,
+    )

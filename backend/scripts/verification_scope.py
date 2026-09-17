@@ -194,7 +194,11 @@ def classify_path(path: str) -> Classification:
     if path in _SHARED_HARNESS_CORE_FILES:
         return Classification(path, "shared-harness-core")
     if path in _WORKFLOW_SCRIPT_FILES:
-        return Classification(path, "workflow-script", directly_execute=True)
+        # Forces --gate final (below) -- already covered by the full suite
+        # there, so this is never itself a literal pytest --focus target
+        # (it isn't a test file, and generally isn't even under
+        # backend/tests/, which verify.py's own focus validation requires).
+        return Classification(path, "workflow-script")
     if path in _ROOT_CONFIG_FILES:
         return Classification(path, "root-configuration")
     if path in _WORKFLOW_GOVERNING_DOC_FILES:
@@ -205,7 +209,8 @@ def classify_path(path: str) -> Classification:
         return Classification(path, "docs-only")
 
     if path.startswith(_HOOK_PREFIX):
-        return Classification(path, "workflow-hook", directly_execute=True)
+        # Also forces --gate final; not a pytest target (see workflow-script above).
+        return Classification(path, "workflow-hook")
     if path.startswith(_GENERIC_TEST_PREFIX):
         if path.endswith(".py"):
             return Classification(path, "generic-changed-test", directly_execute=True)
@@ -214,7 +219,12 @@ def classify_path(path: str) -> Classification:
             "owner mapping required before verification can proceed"
         )
 
-    return Classification(path, "unmapped", directly_execute=path.endswith(".py"))
+    # Never a literal pytest --focus target: an unmapped path is not known
+    # to be a test file at all (and typically isn't even under
+    # backend/tests/, which verify.py's own focus validation requires) --
+    # it forces --gate final (below) instead, which already runs the full
+    # suite unconditionally.
+    return Classification(path, "unmapped")
 
 
 def classify_all(paths: list[str]) -> list[Classification]:
@@ -257,3 +267,83 @@ def forces_final_gate(classifications: list[Classification]) -> bool:
         "unmapped",
     }
     return any(c.category in broad for c in classifications)
+
+
+_CONTRACT_TEST_FILES: dict[str, str] = {
+    "location": "backend/tests/contracts/test_location_contract.py",
+    "salary": "backend/tests/contracts/test_salary_contract.py",
+    "experience": "backend/tests/contracts/test_experience_contract.py",
+}
+_SHARED_HARNESS_TEST_FILES: frozenset[str] = frozenset(
+    {
+        "backend/tests/contracts/test_harness_self.py",
+        "backend/tests/contracts/test_harness_import_boundary.py",
+    }
+)
+
+
+@dataclass(frozen=True)
+class RequiredCoverage:
+    """The mandatory, base_sha..candidate_sha-derived verification scope --
+    computed once, before any verification step runs, and never narrowed by
+    a caller. A caller may only *add* focus targets or witness refs beyond
+    what this returns."""
+
+    forces_final: bool
+    required_contract_families: frozenset[str]
+    required_focus_targets: frozenset[str]
+    required_guard_refs: frozenset[str]
+    directly_executed_tests: frozenset[str]
+    not_applicable_reason: str | None
+
+
+def compute_required_coverage(changed_paths: list[str]) -> RequiredCoverage:
+    """The single source of truth for "what must run" -- both the
+    coordinator (to decide the actual `--focus`/`--witness` arguments it
+    passes to `verify.py`) and the receipt's own `affected_surface` field
+    are derived from calling this once, on the same input, so the receipt
+    can never silently diverge from what actually ran."""
+    if not changed_paths:
+        return RequiredCoverage(
+            forces_final=False,
+            required_contract_families=frozenset(),
+            required_focus_targets=frozenset(),
+            required_guard_refs=frozenset(),
+            directly_executed_tests=frozenset(),
+            not_applicable_reason="no_changed_paths",
+        )
+
+    classifications = classify_all(changed_paths)
+    families = required_contract_families(classifications)
+    forces_final = forces_final_gate(classifications)
+    directly_executed = frozenset(c.path for c in classifications if c.directly_execute)
+
+    focus_targets: set[str] = set(directly_executed)
+    for family in families:
+        focus_targets.add(_CONTRACT_TEST_FILES[family])
+    if families or any(c.category == "shared-harness-core" for c in classifications):
+        focus_targets.update(_SHARED_HARNESS_TEST_FILES)
+
+    guard_refs: frozenset[str] = frozenset()
+    if families:
+        from tests.contracts.taxonomy import active_guards
+
+        guard_refs = frozenset(
+            ref for ref, guard in active_guards().items() if guard.parser in families
+        )
+
+    docs_only_paths = {
+        c.path for c in classifications if c.category in ("docs-only", "handoff-transition")
+    }
+    not_applicable_reason: str | None = None
+    if len(docs_only_paths) == len(classifications):
+        not_applicable_reason = "docs_only_within_executable_slice"
+
+    return RequiredCoverage(
+        forces_final=forces_final,
+        required_contract_families=families,
+        required_focus_targets=frozenset(focus_targets),
+        required_guard_refs=guard_refs,
+        directly_executed_tests=directly_executed,
+        not_applicable_reason=not_applicable_reason,
+    )

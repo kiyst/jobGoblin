@@ -17,6 +17,7 @@ import json
 import os
 import platform
 import re
+import subprocess
 import sys
 import tempfile
 import uuid
@@ -26,7 +27,14 @@ from typing import Any
 
 _RECEIPT_ID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 _UTC_TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|\+00:00)$")
+# Duplicated from `check_handoff.py`'s own `_SLICE_ID_RE` -- intentionally,
+# not imported, since `check_handoff.py` already imports from this module
+# and importing back the other way would be circular. Kept in sync by hand;
+# both anchor the same frozen `<date>-<slug>-<base-short-sha>` format.
+_SLICE_ID_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-[a-z0-9]+(?:-[a-z0-9]+)*-[0-9a-f]{7,40}$")
+_SHA256_HEX_RE = re.compile(r"^[0-9a-f]{64}$")
 
+_SUPPORTED_SCHEMA_VERSION = "1"
 _GATES = frozenset({"fast", "final", "docs"})
 _STEP_STATUSES = frozenset({"PASS", "FAIL", "NOT_RUN"})
 
@@ -44,16 +52,26 @@ def generate_receipt_id() -> str:
     return str(uuid.uuid4())
 
 
-def validate_receipt_id(receipt_id: str) -> None:
-    if not _RECEIPT_ID_RE.match(receipt_id):
+def validate_receipt_id(receipt_id: Any) -> None:
+    if not isinstance(receipt_id, str) or not _RECEIPT_ID_RE.match(receipt_id):
         raise ReceiptError(
             f"receipt_id must be a canonical lowercase UUID4 (8-4-4-4-12 hyphenated hex), "
             f"got {receipt_id!r}"
         )
 
 
-def validate_utc_timestamp(value: str, *, field: str) -> None:
-    if not _UTC_TIMESTAMP_RE.match(value):
+def validate_slice_id(slice_id: Any) -> None:
+    if not isinstance(slice_id, str) or not _SLICE_ID_RE.match(slice_id):
+        raise ReceiptError(f"slice_id must match <date>-<slug>-<base-short-sha>, got {slice_id!r}")
+
+
+def validate_sha256_hex(value: Any, *, field: str) -> None:
+    if not isinstance(value, str) or not _SHA256_HEX_RE.match(value):
+        raise ReceiptError(f"{field!r} must be a 64-character lowercase hex sha256, got {value!r}")
+
+
+def validate_utc_timestamp(value: Any, *, field: str) -> None:
+    if not isinstance(value, str) or not _UTC_TIMESTAMP_RE.match(value):
         raise ReceiptError(
             f"{field!r} must be a fully-specified UTC ISO-8601 timestamp "
             f"(explicit Z or +00:00), got {value!r}"
@@ -87,23 +105,84 @@ def environment_descriptor(*, postgresql_version: str | None) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Canonical committed-blob hashing -- the single mechanism reused by receipt
+# generation (`verification_coordinator.py`), review-time recomputation
+# (`check_review.py`), and dependency/config input hashing, so all three can
+# never independently diverge. Reads the exact Git blob bytes for
+# `<commit_sha>:<repo_relative_path>` -- never a working-tree or fresh-
+# checkout read, which can differ from the committed bytes whenever a local
+# checkout filter (e.g. `core.autocrlf`) converts line endings on smudge.
+# Never text-decoded, never newline-normalized.
+# ---------------------------------------------------------------------------
+
+
+def blob_bytes_at_commit(commit_sha: str, repo_relative_path: str, *, repo_root: Path) -> bytes:
+    """The exact, canonical committed Git blob bytes for `<commit_sha>:
+    <repo_relative_path>`, read directly from the object database via
+    `git cat-file` -- unaffected by `core.autocrlf` or any other checkout-
+    time filter (those apply only to `checkout`/`add`, never to a direct
+    `cat-file`/`<rev>:<path>` object read). Fails closed for a missing
+    commit/path, a git failure, or an object that is not a genuine blob
+    (e.g. the path names a directory or submodule in that commit)."""
+    object_ref = f"{commit_sha}:{repo_relative_path}"
+    type_result = subprocess.run(
+        ["git", "-c", f"safe.directory={repo_root.as_posix()}", "cat-file", "-t", object_ref],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if type_result.returncode != 0:
+        raise ReceiptError(f"could not resolve {object_ref!r}: {type_result.stderr.strip()}")
+    object_type = type_result.stdout.strip()
+    if object_type != "blob":
+        raise ReceiptError(
+            f"{object_ref!r} is not a blob (found {object_type!r}), refusing to hash"
+        )
+
+    content_result = subprocess.run(
+        ["git", "-c", f"safe.directory={repo_root.as_posix()}", "cat-file", "-p", object_ref],
+        cwd=repo_root,
+        capture_output=True,
+        text=False,
+    )
+    if content_result.returncode != 0:
+        stderr = content_result.stderr.decode("utf-8", errors="replace").strip()
+        raise ReceiptError(f"could not read blob content for {object_ref!r}: {stderr}")
+    return content_result.stdout
+
+
+def committed_file_hash(commit_sha: str, repo_relative_path: str, *, repo_root: Path) -> str:
+    """sha256 hex digest of the exact committed blob bytes."""
+    return hashlib.sha256(
+        blob_bytes_at_commit(commit_sha, repo_relative_path, repo_root=repo_root)
+    ).hexdigest()
+
+
+# ---------------------------------------------------------------------------
 # Dependency/config input hashing -- explicit per-file array, never a
 # combined/opaque hash.
 # ---------------------------------------------------------------------------
 
 
 def dependency_and_config_inputs(
-    repo_root: Path, relative_paths: list[str]
+    commit_sha: str, relative_paths: list[str], *, repo_root: Path
 ) -> list[dict[str, str]]:
+    """Explicit per-file array of exact committed blob hashes at
+    `commit_sha` -- never a working-tree read. Fails closed on a
+    duplicate or malformed path."""
+    if len(set(relative_paths)) != len(relative_paths):
+        raise ReceiptError(f"duplicate dependency/config path(s) in {relative_paths!r}")
     entries = []
     for rel in sorted(relative_paths):
-        content = (repo_root / rel).read_bytes()
-        entries.append({"repo_relative_path": rel, "sha256": hashlib.sha256(content).hexdigest()})
+        if not rel or rel.startswith("/") or "\\" in rel or ".." in rel.split("/"):
+            raise ReceiptError(f"malformed dependency/config path: {rel!r}")
+        entries.append(
+            {
+                "repo_relative_path": rel,
+                "sha256": committed_file_hash(commit_sha, rel, repo_root=repo_root),
+            }
+        )
     return entries
-
-
-def file_hash(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 # ---------------------------------------------------------------------------
@@ -206,6 +285,223 @@ _REQUIRED_TOP_LEVEL = frozenset(
 )
 
 
+def _require_exact_keys(obj: Any, required: frozenset[str], *, context: str) -> dict[str, Any]:
+    if not isinstance(obj, dict):
+        raise ReceiptError(f"{context} must be an object, got {type(obj).__name__}")
+    unknown = set(obj) - required
+    if unknown:
+        raise ReceiptError(f"{context} declares unrecognized field(s): {sorted(unknown)}")
+    missing = required - set(obj)
+    if missing:
+        raise ReceiptError(f"{context} is missing required field(s): {sorted(missing)}")
+    return obj
+
+
+def _require_bool(obj: dict[str, Any], key: str, *, context: str) -> bool:
+    value = obj[key]
+    if not isinstance(value, bool):
+        raise ReceiptError(f"{context}.{key} must be a bool, got {type(value).__name__}")
+    return value
+
+
+def _require_str(obj: dict[str, Any], key: str, *, context: str) -> str:
+    value = obj[key]
+    if not isinstance(value, str):
+        raise ReceiptError(f"{context}.{key} must be a str, got {type(value).__name__}")
+    return value
+
+
+def _require_positive_int(obj: dict[str, Any], key: str, *, context: str) -> int:
+    value = obj[key]
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ReceiptError(f"{context}.{key} must be an int, got {type(value).__name__}")
+    return value
+
+
+def _require_str_list(obj: dict[str, Any], key: str, *, context: str) -> list[str]:
+    value = obj[key]
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise ReceiptError(f"{context}.{key} must be a list of strings")
+    return value
+
+
+_SNAPSHOT_KEYS = frozenset({"tracked_tree_sha", "untracked_present"})
+_RUN_CACHE_REDIRECT_KEYS = frozenset(
+    {
+        "pytest_basetemp_redirected",
+        "ruff_cache_redirected",
+        "mypy_cache_redirected",
+        "pycache_redirected",
+    }
+)
+_COORDINATOR_KEYS = frozenset(
+    {
+        "authoring_checkout_head_at_start",
+        "worktree_initial_snapshot",
+        "run_cache_redirect",
+        "worktree_final_snapshot",
+        "worktree_removed",
+        "worktree_leak_check",
+        "authoring_checkout_head_at_receipt",
+        "authoring_checkout_clean_at_receipt",
+    }
+)
+_STEP_KEYS = frozenset({"name", "status", "duration_seconds"})
+_DEPENDENCY_INPUT_KEYS = frozenset({"repo_relative_path", "sha256"})
+_ENV_DESCRIPTOR_KEYS = frozenset(
+    {"python_version", "platform", "postgresql_version", "installed_distributions_digest"}
+)
+_AFFECTED_SURFACE_KEYS = frozenset(
+    {
+        "base_sha",
+        "computed_categories",
+        "required_contract_families",
+        "required_guard_refs",
+        "directly_executed_tests",
+        "not_applicable_reason",
+    }
+)
+_CLEANUP_KEYS = frozenset({"attempted", "status"})
+_DEV_STATE_KEYS = frozenset({"alembic_revision", "schema_fingerprint"})
+_MIGRATION_NOT_TRIGGERED_KEYS = frozenset({"triggered"})
+_MIGRATION_TRIGGERED_KEYS = frozenset(
+    {
+        "triggered",
+        "status",
+        "dev_state_before",
+        "dev_state_after",
+        "postgresql_server_version",
+        "fresh_database_created",
+        "fresh_database_cleaned_up",
+        "steps",
+    }
+)
+
+# name -> the exact step this summary field's "ran" status must be backed
+# by, with status PASS -- a forged summary can never exist without a real,
+# passing step record behind it.
+_SUMMARY_TO_REQUIRED_STEP = {
+    "full_suite": "full pytest suite",
+    "focused_tests": "focused pytest",
+    "mutation_witnesses": "contract mutation witnesses",
+}
+
+
+def _validate_snapshot(obj: Any, *, context: str) -> None:
+    snap = _require_exact_keys(obj, _SNAPSHOT_KEYS, context=context)
+    _require_str(snap, "tracked_tree_sha", context=context)
+    _require_bool(snap, "untracked_present", context=context)
+
+
+def _validate_coordinator(obj: Any) -> dict[str, Any]:
+    coordinator = _require_exact_keys(obj, _COORDINATOR_KEYS, context="coordinator")
+    _require_str(coordinator, "authoring_checkout_head_at_start", context="coordinator")
+    _validate_snapshot(
+        coordinator["worktree_initial_snapshot"], context="coordinator.worktree_initial_snapshot"
+    )
+    _validate_snapshot(
+        coordinator["worktree_final_snapshot"], context="coordinator.worktree_final_snapshot"
+    )
+    run_cache = _require_exact_keys(
+        coordinator["run_cache_redirect"],
+        _RUN_CACHE_REDIRECT_KEYS,
+        context="coordinator.run_cache_redirect",
+    )
+    for key in _RUN_CACHE_REDIRECT_KEYS:
+        _require_bool(run_cache, key, context="coordinator.run_cache_redirect")
+    _require_bool(coordinator, "worktree_removed", context="coordinator")
+    _require_str(coordinator, "worktree_leak_check", context="coordinator")
+    _require_str(coordinator, "authoring_checkout_head_at_receipt", context="coordinator")
+    _require_bool(coordinator, "authoring_checkout_clean_at_receipt", context="coordinator")
+    return coordinator
+
+
+def _validate_steps(data: dict[str, Any]) -> list[dict[str, Any]]:
+    steps = data["steps"]
+    if not isinstance(steps, list):
+        raise ReceiptError("steps must be a list")
+    names_seen: list[str] = []
+    for step in steps:
+        _require_exact_keys(step, _STEP_KEYS, context="steps[]")
+        _require_str(step, "name", context="steps[]")
+        if step["status"] not in _STEP_STATUSES:
+            raise ReceiptError(f"invalid step status: {step!r}")
+        duration = step["duration_seconds"]
+        if isinstance(duration, bool) or not isinstance(duration, int | float):
+            raise ReceiptError(f"steps[].duration_seconds must be numeric, got {step!r}")
+        names_seen.append(step["name"])
+    duplicates = {name for name in names_seen if names_seen.count(name) > 1}
+    if duplicates:
+        raise ReceiptError(f"receipt declares duplicate step name(s): {sorted(duplicates)}")
+    return steps
+
+
+def _validate_ran_or_not_run_summary(
+    data: dict[str, Any],
+    field: str,
+    *,
+    ran_keys: frozenset[str],
+) -> None:
+    summary = data[field]
+    if not isinstance(summary, dict) or "status" not in summary:
+        raise ReceiptError(f"{field} must be an object with a 'status' field")
+    status = summary["status"]
+    if status == "not_run":
+        _require_exact_keys(summary, frozenset({"status"}), context=field)
+        return
+    if status != "ran":
+        raise ReceiptError(f"{field}.status must be 'not_run' or 'ran', got {status!r}")
+    _require_exact_keys(summary, ran_keys, context=field)
+
+    # Bind this "ran" summary to its corresponding step, PASS, exactly
+    # once -- a summary claiming a run happened can never exist without a
+    # real, passing step record behind it.
+    required_step_name = _SUMMARY_TO_REQUIRED_STEP[field]
+    matching = [s for s in data["steps"] if s["name"] == required_step_name]
+    if len(matching) != 1:
+        raise ReceiptError(
+            f"{field}.status is 'ran' but step {required_step_name!r} does not appear "
+            f"exactly once in steps (found {len(matching)})"
+        )
+    if matching[0]["status"] != "PASS":
+        raise ReceiptError(f"{field}.status is 'ran' but step {required_step_name!r} is not PASS")
+
+
+def _validate_migration_matrix(data: dict[str, Any]) -> None:
+    migration = data["migration_matrix"]
+    if not isinstance(migration, dict) or "triggered" not in migration:
+        raise ReceiptError("migration_matrix must be an object with a 'triggered' field")
+    triggered = migration["triggered"]
+    if not isinstance(triggered, bool):
+        raise ReceiptError("migration_matrix.triggered must be a bool")
+    if not triggered:
+        _require_exact_keys(migration, _MIGRATION_NOT_TRIGGERED_KEYS, context="migration_matrix")
+        return
+    _require_exact_keys(migration, _MIGRATION_TRIGGERED_KEYS, context="migration_matrix")
+    if migration["status"] not in ("PASS", "FAIL"):
+        raise ReceiptError("migration_matrix.status must be 'PASS' or 'FAIL'")
+    if migration["status"] == "PASS":
+        for dev_state_key in ("dev_state_before", "dev_state_after"):
+            dev_state = _require_exact_keys(
+                migration[dev_state_key],
+                _DEV_STATE_KEYS,
+                context=f"migration_matrix.{dev_state_key}",
+            )
+            if dev_state["alembic_revision"] is not None and not isinstance(
+                dev_state["alembic_revision"], str
+            ):
+                raise ReceiptError(
+                    f"migration_matrix.{dev_state_key}.alembic_revision must be a str or null"
+                )
+            _require_str(
+                dev_state, "schema_fingerprint", context=f"migration_matrix.{dev_state_key}"
+            )
+        _require_str(migration, "postgresql_server_version", context="migration_matrix")
+        _require_bool(migration, "fresh_database_created", context="migration_matrix")
+        _require_bool(migration, "fresh_database_cleaned_up", context="migration_matrix")
+        _require_str_list(migration, "steps", context="migration_matrix")
+
+
 def validate_receipt_schema(data: dict[str, Any]) -> None:
     unknown = set(data) - _REQUIRED_TOP_LEVEL
     if unknown:
@@ -214,6 +510,11 @@ def validate_receipt_schema(data: dict[str, Any]) -> None:
     if missing:
         raise ReceiptError(f"receipt is missing required field(s): {sorted(missing)}")
 
+    if data["schema_version"] != _SUPPORTED_SCHEMA_VERSION:
+        raise ReceiptError(
+            f"schema_version must be {_SUPPORTED_SCHEMA_VERSION!r}, got {data['schema_version']!r}"
+        )
+    validate_slice_id(data["slice_id"])
     validate_receipt_id(data["receipt_id"])
     if data["gate"] not in _GATES:
         raise ReceiptError(f"gate must be one of {sorted(_GATES)}, got {data['gate']!r}")
@@ -223,38 +524,294 @@ def validate_receipt_schema(data: dict[str, Any]) -> None:
 
     for sha_field in ("base_sha", "candidate_sha"):
         value = data[sha_field]
-        if not re.fullmatch(r"[0-9a-f]{40}", value):
+        if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{40}", value):
             raise ReceiptError(f"{sha_field!r} must be a full 40-hex commit SHA, got {value!r}")
 
-    for step in data["steps"]:
-        if step.get("status") not in _STEP_STATUSES:
-            raise ReceiptError(f"invalid step status: {step!r}")
+    validate_sha256_hex(data["verifier_hash"], field="verifier_hash")
+    validate_sha256_hex(data["checker_hash"], field="checker_hash")
+
+    dependency_inputs = data["dependency_and_config_inputs"]
+    if not isinstance(dependency_inputs, list):
+        raise ReceiptError("dependency_and_config_inputs must be a list")
+    for entry in dependency_inputs:
+        item = _require_exact_keys(
+            entry, _DEPENDENCY_INPUT_KEYS, context="dependency_and_config_inputs[]"
+        )
+        _require_str(item, "repo_relative_path", context="dependency_and_config_inputs[]")
+        validate_sha256_hex(item["sha256"], field="dependency_and_config_inputs[].sha256")
+
+    env_descriptor = _require_exact_keys(
+        data["environment_descriptor"], _ENV_DESCRIPTOR_KEYS, context="environment_descriptor"
+    )
+    _require_str(env_descriptor, "python_version", context="environment_descriptor")
+    _require_str(env_descriptor, "platform", context="environment_descriptor")
+    if env_descriptor["postgresql_version"] is not None and not isinstance(
+        env_descriptor["postgresql_version"], str
+    ):
+        raise ReceiptError("environment_descriptor.postgresql_version must be a str or null")
+    _require_str(env_descriptor, "installed_distributions_digest", context="environment_descriptor")
+
+    _validate_coordinator(data["coordinator"])
+    _validate_steps(data)
+    _validate_ran_or_not_run_summary(data, "full_suite", ran_keys=frozenset({"status", "count"}))
+    _validate_ran_or_not_run_summary(
+        data, "focused_tests", ran_keys=frozenset({"status", "selector", "count"})
+    )
+    _validate_ran_or_not_run_summary(
+        data,
+        "mutation_witnesses",
+        ran_keys=frozenset({"status", "guard_refs", "passed", "failed"}),
+    )
+    if data["full_suite"].get("status") == "ran":
+        _require_positive_int_allow_zero(data["full_suite"], "count", context="full_suite")
+    if data["focused_tests"].get("status") == "ran":
+        _require_str(data["focused_tests"], "selector", context="focused_tests")
+        _require_positive_int_allow_zero(data["focused_tests"], "count", context="focused_tests")
+    if data["mutation_witnesses"].get("status") == "ran":
+        _require_str_list(data["mutation_witnesses"], "guard_refs", context="mutation_witnesses")
+        _require_positive_int_allow_zero(
+            data["mutation_witnesses"], "passed", context="mutation_witnesses"
+        )
+        _require_positive_int_allow_zero(
+            data["mutation_witnesses"], "failed", context="mutation_witnesses"
+        )
+
+    affected_surface = _require_exact_keys(
+        data["affected_surface"], _AFFECTED_SURFACE_KEYS, context="affected_surface"
+    )
+    _require_str(affected_surface, "base_sha", context="affected_surface")
+    for list_key in (
+        "computed_categories",
+        "required_contract_families",
+        "required_guard_refs",
+        "directly_executed_tests",
+    ):
+        _require_str_list(affected_surface, list_key, context="affected_surface")
+    if affected_surface["not_applicable_reason"] is not None and not isinstance(
+        affected_surface["not_applicable_reason"], str
+    ):
+        raise ReceiptError("affected_surface.not_applicable_reason must be a str or null")
+
+    _validate_migration_matrix(data)
+
+    cleanup = _require_exact_keys(data["cleanup"], _CLEANUP_KEYS, context="cleanup")
+    _require_bool(cleanup, "attempted", context="cleanup")
+    if cleanup["status"] not in ("PASS", "FAIL"):
+        raise ReceiptError("cleanup.status must be 'PASS' or 'FAIL'")
 
     if not isinstance(data["approval_eligible"], bool):
         raise ReceiptError("approval_eligible must be a boolean")
 
 
+def _require_positive_int_allow_zero(obj: dict[str, Any], key: str, *, context: str) -> int:
+    value = obj[key]
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise ReceiptError(f"{context}.{key} must be a non-negative int, got {value!r}")
+    return value
+
+
+_ALWAYS_REQUIRED_STEP_NAMES = frozenset(
+    {"ruff format --check", "ruff check", "mypy", "check_repo.py", "git diff --check"}
+)
+_FINAL_EXECUTABLE_BASE_STEP_NAMES = _ALWAYS_REQUIRED_STEP_NAMES | frozenset(
+    {
+        "disposable test-database URL validation",
+        "test-database reachability preflight",
+        "full pytest suite",
+        "contract mutation witnesses",
+        "handoff metadata validation",
+        "temporary-directory cleanup",
+    }
+)
+_DOCS_STEP_NAMES = _ALWAYS_REQUIRED_STEP_NAMES | frozenset(
+    {"handoff metadata validation", "temporary-directory cleanup"}
+)
+
+
+def compute_applicable_final_step_names(
+    *, focused_tests_computed: bool, migration_triggered: bool
+) -> frozenset[str]:
+    """The exact step-name set an executable `final`-gate run (or the
+    always-full post-merge re-verification) must show, each present
+    exactly once with status PASS -- defined once here and reused by both
+    `compute_approval_eligible` (below) and `check_review.py`'s post-merge
+    artifact evidence check, so the two can never independently drift.
+    `focused_tests_computed`/`migration_triggered` are the only two
+    conditionally-applicable steps `verify.py` itself ever omits for an
+    executable run (`verify.py --gate final` never omits the DB/full-
+    suite/witness/handoff/cleanup steps unconditionally present below)."""
+    names = set(_FINAL_EXECUTABLE_BASE_STEP_NAMES)
+    if focused_tests_computed:
+        names.add("focused pytest")
+    if migration_triggered:
+        names.add("migration matrix")
+    return frozenset(names)
+
+
+def compute_applicable_docs_step_names() -> frozenset[str]:
+    """The exact, separate step-name set for a `docs`-gate run --
+    `verify.py --docs-only` genuinely skips the DB/full-suite/focused/
+    witness/migration steps entirely (reported nowhere, not even
+    `NOT_RUN`), so those must never be required here."""
+    return _DOCS_STEP_NAMES
+
+
+def _step_names_present_exactly_once_pass(data: dict[str, Any], names: frozenset[str]) -> bool:
+    """Every applicable step name must exist exactly once in `steps`,
+    with status PASS -- a receipt with an empty step list, one missing a
+    name, one declaring a name more than once, one where an applicable
+    step is present but `NOT_RUN`, or one where an applicable step's own
+    status is not PASS, can never be eligible, regardless of what its
+    other fields claim."""
+    for name in names:
+        matching = [s for s in data["steps"] if s["name"] == name]
+        if len(matching) != 1 or matching[0]["status"] != "PASS":
+            return False
+    return True
+
+
+def _migration_matrix_genuinely_passed(data: dict[str, Any]) -> bool:
+    """When `migration_matrix.triggered` is true, approval eligibility
+    requires: the `migration matrix` step exists exactly once with PASS
+    (checked by the caller via `_step_names_present_exactly_once_pass`,
+    reused here defensively); the matrix's own `status` is PASS; the
+    before/after `DevelopmentState` values are equal (a migration that
+    genuinely round-tripped leaves the schema exactly as it found it --
+    drift here means the matrix itself is untrustworthy even if it
+    reported PASS); and the fresh-database lifecycle was both created and
+    cleaned up. Untriggered is vacuously fine -- nothing to check."""
+    migration = data["migration_matrix"]
+    if not isinstance(migration, dict):
+        return False
+    if not migration.get("triggered"):
+        return True
+    if migration.get("status") != "PASS":
+        return False
+    matching = [s for s in data["steps"] if s.get("name") == "migration matrix"]
+    if len(matching) != 1 or matching[0].get("status") != "PASS":
+        return False
+    dev_before = migration.get("dev_state_before")
+    dev_after = migration.get("dev_state_after")
+    if not isinstance(dev_before, dict) or not isinstance(dev_after, dict):
+        return False
+    if dev_before != dev_after:
+        return False
+    if migration.get("fresh_database_created") is not True:
+        return False
+    if migration.get("fresh_database_cleaned_up") is not True:
+        return False
+    postgresql_version = migration.get("postgresql_server_version")
+    if not isinstance(postgresql_version, str) or not postgresql_version:
+        return False
+    steps_list = migration.get("steps")
+    return isinstance(steps_list, list) and bool(steps_list)
+
+
+def _full_suite_genuinely_ran(data: dict[str, Any]) -> bool:
+    full_suite = data["full_suite"]
+    if full_suite.get("status") != "ran":
+        return False
+    count = full_suite.get("count")
+    return isinstance(count, int) and not isinstance(count, bool) and count > 0
+
+
+def compute_active_guard_refs() -> frozenset[str]:
+    """The complete, dynamically discovered active-guard inventory --
+    resolved via whichever `tests.contracts.taxonomy` module is
+    importable in the *current* process. When this executes inside a
+    disposable worktree or detached-checkout subprocess at a specific
+    commit, that is the target commit's own copy (the same cwd-precedence
+    already relied on by `verification_scope.compute_required_coverage`),
+    never a hardcoded count and never a stale in-process copy."""
+    from tests.contracts.taxonomy import active_guards
+
+    return frozenset(active_guards().keys())
+
+
+def witnesses_match_complete_active_inventory(data: dict[str, Any]) -> bool:
+    """The single, shared complete-active-witness validation mechanism --
+    reused, unchanged, by `compute_approval_eligible` below (a receipt),
+    `check_review.py`'s pre-merge `C -> A -> R` cross-check, and its
+    post-merge artifact/Q evidence check, so the three can never
+    independently drift or retain a weaker positive-count-only path.
+    `data["mutation_witnesses"]` must be `status: ran`, with `guard_refs`
+    exactly equal to `compute_active_guard_refs()` -- never merely a
+    positive count, never merely a subset -- `passed == len(guard_refs)`,
+    and `failed == 0`."""
+    witnesses = data["mutation_witnesses"]
+    if not isinstance(witnesses, dict) or witnesses.get("status") != "ran":
+        return False
+    guard_refs = witnesses.get("guard_refs")
+    if not isinstance(guard_refs, list) or not all(isinstance(g, str) for g in guard_refs):
+        return False
+    recorded = frozenset(guard_refs)
+    if recorded != compute_active_guard_refs():
+        return False
+    passed = witnesses.get("passed")
+    failed = witnesses.get("failed")
+    if not (isinstance(passed, int) and isinstance(failed, int)):
+        return False
+    if isinstance(passed, bool) or isinstance(failed, bool):
+        return False
+    return passed == len(recorded) and failed == 0
+
+
 def compute_approval_eligible(data: dict[str, Any]) -> bool:
     """Recomputed from the receipt's own content -- never trusted as
     asserted. False for `fast`. True only for a successful executable
-    `final` (every step PASS/NOT_RUN as applicable, both worktree
-    snapshots equal, cleanup PASS). True for a successful `docs` gate run
-    on the same terms -- but a `docs`-gate receipt is only ever *merge*-
-    eligible when the paired handoff metadata separately declares
-    `slice_kind: docs` (checked by `check_review.py`, which has access to
-    both records; this receipt alone never knows the handoff's
-    `slice_kind`)."""
-    if data["cleanup"].get("status") != "PASS":
-        return False
-    coordinator = data["coordinator"]
-    if coordinator["worktree_initial_snapshot"] != coordinator["worktree_final_snapshot"]:
-        return False
-    if any(step["status"] == "FAIL" for step in data["steps"]):
+    `final` where: every applicable step for this run (static checks, DB
+    URL safety, DB reachability, focused tests when computed, full suite,
+    all witnesses, migration matrix when triggered, handoff validation,
+    and temporary-directory cleanup -- see `compute_applicable_final_
+    step_names`) is present exactly once with PASS; cleanup passed; both
+    worktree snapshots are identical and non-trivial; no step reports
+    FAIL; the full suite genuinely ran with a positive numeric count
+    (never `not_run`, never a non-numeric/boolean value); `mutation_
+    witnesses.guard_refs` exactly equals the complete, dynamically
+    discovered active-guard inventory (never merely a positive count,
+    never merely a subset -- see `witnesses_match_complete_active_
+    inventory`, the single shared mechanism also reused by `check_
+    review.py`'s pre-merge and post-merge witness validation); and, when
+    `migration_matrix.triggered` is true, its own evidence genuinely
+    passed (see `_migration_matrix_genuinely_passed`). A receipt with an empty step
+    list and every execution group left `not_run` is the degenerate case
+    this function must reject outright -- it satisfies no positive
+    requirement below. True for a successful `docs` gate run against its
+    own separate, smaller step set (`compute_applicable_docs_step_names`)
+    -- but a `docs`-gate receipt is only ever *merge*-eligible when the
+    paired handoff metadata separately declares `slice_kind: docs`
+    (checked by `check_review.py`, which has access to both records; this
+    receipt alone never knows the handoff's `slice_kind`)."""
+    if not data["steps"]:
         return False
 
     gate: str = data["gate"]
     if gate == "fast":
         return False
+    if gate == "docs":
+        required_names = compute_applicable_docs_step_names()
+    else:
+        required_names = compute_applicable_final_step_names(
+            focused_tests_computed=data["focused_tests"].get("status") == "ran",
+            migration_triggered=bool(data["migration_matrix"].get("triggered")),
+        )
+    if not _step_names_present_exactly_once_pass(data, required_names):
+        return False
+
+    if data["cleanup"].get("status") != "PASS":
+        return False
+    coordinator = data["coordinator"]
+    initial = coordinator["worktree_initial_snapshot"]
+    final = coordinator["worktree_final_snapshot"]
+    if initial != final:
+        return False
+    if not initial.get("tracked_tree_sha"):
+        return False
+    if any(step["status"] == "FAIL" for step in data["steps"]):
+        return False
+    if not _migration_matrix_genuinely_passed(data):
+        return False
+
     if gate == "final":
-        return True
-    return bool(gate == "docs")
+        return _full_suite_genuinely_ran(data) and witnesses_match_complete_active_inventory(data)
+    return True
