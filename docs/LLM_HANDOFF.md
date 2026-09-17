@@ -1051,3 +1051,44 @@ gate: final
 verdict: approved
 findings: none
 ```
+
+### Merge record
+
+- Date: 2026-09-17. Merged `tooling/workflow-v3.2-activation` at
+  approved, reviewed commit `a070ba974e321f360c0a36282bffabe700be617d`
+  (Sol's "Approved, no findings" verdict on `C10`/`A10`, above) into
+  `main` via `git merge --no-ff`. Merge commit:
+  `9649cba1deebdc73911790de3ccb2ac51fd483a6`. Pre-merge `main`/
+  `origin/main` tip (rollback boundary):
+  `66202c23facff6bd33d8f624e327cabdd40708b4`.
+- Pre-merge checks: confirmed the feature branch and its origin both sat
+  at `a070ba9`, and `main`/`origin/main` were both clean and
+  synchronized at `66202c23` before merging.
+- Post-merge verification, all run directly against merged `main`:
+  - `git diff --quiet a070ba9 HEAD` — zero content difference between
+    merged `main` and the approved feature-branch tip, confirmed.
+  - `git diff --check` — clean.
+  - `python -m scripts.check_repo` — clean.
+  - No migration/schema changes: `git diff --stat 66202c23..HEAD --
+    backend/alembic backend/migrations` and `git log --oneline
+    66202c23..HEAD -- backend/alembic backend/migrations` both empty.
+  - `python -m scripts.verify --level routine --gate final --focus
+    tests/test_check_handoff.py tests/test_check_review.py
+    tests/test_migration_matrix.py tests/test_verification_coordinator.py
+    tests/test_verification_lock.py tests/test_verification_receipts.py
+    tests/test_verification_scope.py tests/test_verification_worktree.py
+    tests/test_verify.py` — **all 12 checks PASS**, 480 focused /
+    2,647 full-suite tests passed.
+  - `python -m scripts.contract_mutation_witnesses` — **34 passed, 0
+    failed**, out of 34 active-guard witnesses.
+- Pushed: `main` pushed to `origin/main`
+  (`66202c23..9649cba1deebdc73911790de3ccb2ac51fd483a6`); both now
+  synchronized.
+- This merge activates Workflow v3.2's own tooling (schema-v2
+  `workflow-metadata`, verification receipts, `C -> A -> R` chain/merge
+  validation) as reusable machinery. It does **not** itself authorize
+  Slice 3 product/parser work, `Q` post-merge evidence generation, or
+  any other new slice — those remain separate authorizations.
+- STOP — report the synchronized final `main` SHA and stop. No `Q`
+  artifact, no Slice 3, no other Phase 3/4 parser, without separate
+  explicit user authorization.
