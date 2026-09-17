@@ -1019,3 +1019,35 @@ full_suite_count: 2647
 focused_test_count: 480
 mutation_witness_count: 34
 ```
+
+### Work review
+
+- Sol's re-review of `C10` = `c7933d072d2c7f92844ec3206863010ef13ff2ad`
+  and `A10` = `688216a8ea1e4da52cb026d2e075a2608c262953`: **Approved, no
+  findings.** The A→R suffix now rejects an appended second Work-done
+  section or `workflow-metadata` block while allowing ordinary review
+  prose and valid escalation metadata. Independent verification
+  performed: all 87 focused review tests passed; the `C10→A10`
+  publication shape, receipt validity, and hash cross-checks were
+  confirmed; `approval_eligible` was independently recomputed; `ruff`,
+  `check_repo.py`, and `git diff --check` passed; the branch is clean
+  and synchronized. The full 2,647-test suite and the 34 mutation
+  witnesses were not independently re-run; those results are taken from
+  Claude's receipt.
+
+```workflow-review-metadata
+schema_version: 2
+slice_id: 2026-09-13-workflow-v3-2-activation-66202c2
+risk_class: H
+reviewer: Sol
+reviewer_role: primary
+reviewer_model: Sol Medium
+reviewed_at: 2026-09-17T00:00:00Z
+candidate_sha: c7933d072d2c7f92844ec3206863010ef13ff2ad
+publication_commit_sha: 688216a8ea1e4da52cb026d2e075a2608c262953
+receipt_path: docs/verification-receipts/c7933d072d2c7f92844ec3206863010ef13ff2ad/c22ded07-a429-4154-a6ea-84c553758baa.json
+receipt_id: c22ded07-a429-4154-a6ea-84c553758baa
+gate: final
+verdict: approved
+findings: none
+```
