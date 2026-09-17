@@ -914,7 +914,7 @@ def test_a_to_r_transition_rejects_two_review_blocks_separated_by_a_fake_iterati
     _git(["commit", "-q", "-m", "malicious review extension"], car_repo)
     malicious_review_sha = _git(["rev-parse", "HEAD"], car_repo)
 
-    with pytest.raises(cr.ReviewValidationError, match="new '## Iteration N' heading"):
+    with pytest.raises(cr.ReviewValidationError, match="no heading beyond its sole"):
         cr.validate_a_to_r_transition(
             publication_sha,
             malicious_review_sha,
@@ -963,7 +963,7 @@ def test_a_to_r_transition_rejects_a_hidden_escalation_block_behind_a_fake_itera
     _git(["commit", "-q", "-m", "malicious escalation extension"], car_repo)
     malicious_review_sha = _git(["rev-parse", "HEAD"], car_repo)
 
-    with pytest.raises(cr.ReviewValidationError, match="new '## Iteration N' heading"):
+    with pytest.raises(cr.ReviewValidationError, match="no heading beyond its sole"):
         cr.validate_a_to_r_transition(
             publication_sha,
             malicious_review_sha,
@@ -1013,7 +1013,7 @@ def test_a_to_r_transition_rejects_a_suffix_with_two_work_review_sections(
     _git(["commit", "-q", "-m", "malicious second work-review section"], car_repo)
     malicious_review_sha = _git(["rev-parse", "HEAD"], car_repo)
 
-    with pytest.raises(cr.ReviewValidationError, match="exactly one '### Work review'"):
+    with pytest.raises(cr.ReviewValidationError, match="no heading beyond its sole"):
         cr.validate_a_to_r_transition(
             publication_sha,
             malicious_review_sha,
@@ -1021,6 +1021,180 @@ def test_a_to_r_transition_rejects_a_suffix_with_two_work_review_sections(
             cr.read_file_at_commit(malicious_review_sha, "docs/LLM_HANDOFF.md", repo_root=car_repo),
             repo_root=car_repo,
         )
+
+
+def test_full_chain_rejects_a_second_work_done_section_with_valid_metadata_after_review(
+    car_repo: Path,
+) -> None:
+    """The exact required full-chain regression (Sol's Medium finding): a
+    suffix pairing an otherwise-legitimate `### Work review` with an
+    appended second `### Work done` section containing *structurally
+    valid* workflow metadata must be rejected by `validate_a_to_r_
+    transition`, and therefore by both `validate_c_a_r_chain` and
+    `check_merge_eligibility` -- proving the closed review-only
+    transition can never be bypassed by an appended Work-done section
+    that `check_handoff.py` would otherwise treat as the new current
+    state."""
+    candidate_sha, publication_sha, review_sha, _ = _build_c_a_r(car_repo)
+    handoff_at_a = cr.read_file_at_commit(
+        publication_sha, "docs/LLM_HANDOFF.md", repo_root=car_repo
+    )
+    handoff_at_legit_r = cr.read_file_at_commit(
+        review_sha, "docs/LLM_HANDOFF.md", repo_root=car_repo
+    )
+
+    fake_metadata_fields = (
+        "workflow_version: v3.2\n"
+        "state: pending\n"
+        "slice_id: 2026-09-13-example-9999999\n"
+        "slice_kind: tooling\n"
+        "risk_class: H\n"
+        f"base_sha: {'9' * 40}\n"
+        "declared_gate: final\n"
+    )
+    # Prove the injected block is genuinely schema-valid on its own --
+    # this reproduction is rejected for violating the closed transition,
+    # never merely for being malformed.
+    cr.ch.validate_structure(cr.ch.parse_metadata_fields(fake_metadata_fields))
+
+    fake_addition = "\n### Work done\n\n```workflow-metadata\n" + fake_metadata_fields + "```\n"
+    _git(["checkout", "-q", publication_sha], car_repo)
+    (car_repo / "docs" / "LLM_HANDOFF.md").write_text(
+        handoff_at_legit_r + fake_addition, encoding="utf-8"
+    )
+    _git(["add", "-A"], car_repo)
+    _git(["commit", "-q", "-m", "malicious appended Work-done section"], car_repo)
+    malicious_review_sha = _git(["rev-parse", "HEAD"], car_repo)
+
+    with pytest.raises(cr.ReviewValidationError, match="no heading beyond its sole"):
+        cr.validate_a_to_r_transition(
+            publication_sha,
+            malicious_review_sha,
+            handoff_at_a,
+            cr.read_file_at_commit(malicious_review_sha, "docs/LLM_HANDOFF.md", repo_root=car_repo),
+            repo_root=car_repo,
+        )
+    with pytest.raises(cr.ReviewValidationError, match="no heading beyond its sole"):
+        cr.validate_c_a_r_chain(
+            candidate_sha, publication_sha, malicious_review_sha, repo_root=car_repo
+        )
+    with pytest.raises(cr.ReviewValidationError, match="no heading beyond its sole"):
+        cr.check_merge_eligibility(
+            candidate_sha, publication_sha, malicious_review_sha, repo_root=car_repo
+        )
+
+
+def test_a_to_r_transition_rejects_a_workflow_metadata_block_without_any_extra_heading(
+    car_repo: Path,
+) -> None:
+    """Even without any extra heading at all, a bare `workflow-metadata`
+    block appended anywhere in the suffix must be rejected -- that block
+    belongs exclusively to a `### Work done` section, which the suffix
+    may never introduce, heading or not."""
+    candidate_sha, publication_sha, review_sha, _ = _build_c_a_r(car_repo)
+    handoff_at_a = cr.read_file_at_commit(
+        publication_sha, "docs/LLM_HANDOFF.md", repo_root=car_repo
+    )
+    handoff_at_legit_r = cr.read_file_at_commit(
+        review_sha, "docs/LLM_HANDOFF.md", repo_root=car_repo
+    )
+    fake_addition = (
+        "\n```workflow-metadata\n"
+        "workflow_version: v3.2\n"
+        "state: pending\n"
+        "slice_id: 2026-09-13-example-abc9999\n"
+        "slice_kind: tooling\n"
+        "risk_class: H\n"
+        f"base_sha: {'9' * 40}\n"
+        "declared_gate: final\n"
+        "```\n"
+    )
+    _git(["checkout", "-q", review_sha], car_repo)
+    (car_repo / "docs" / "LLM_HANDOFF.md").write_text(
+        handoff_at_legit_r + fake_addition, encoding="utf-8"
+    )
+    _git(["add", "-A"], car_repo)
+    _git(["commit", "-q", "-m", "malicious bare metadata block"], car_repo)
+    malicious_review_sha = _git(["rev-parse", "HEAD"], car_repo)
+
+    with pytest.raises(cr.ReviewValidationError, match="must not contain a 'workflow-metadata'"):
+        cr.validate_a_to_r_transition(
+            publication_sha,
+            malicious_review_sha,
+            handoff_at_a,
+            cr.read_file_at_commit(malicious_review_sha, "docs/LLM_HANDOFF.md", repo_root=car_repo),
+            repo_root=car_repo,
+        )
+
+
+def test_a_to_r_transition_permits_ordinary_prose_beneath_the_work_review_heading(
+    car_repo: Path,
+) -> None:
+    """Positive control: ordinary prose beneath the sole `### Work
+    review` heading, before its review-metadata block, must not be
+    rejected."""
+    candidate_sha, publication_sha, review_sha, _ = _build_c_a_r(car_repo)
+    handoff_at_a = cr.read_file_at_commit(
+        publication_sha, "docs/LLM_HANDOFF.md", repo_root=car_repo
+    )
+    handoff_at_legit_r = cr.read_file_at_commit(
+        review_sha, "docs/LLM_HANDOFF.md", repo_root=car_repo
+    )
+    heading_and_blank = "\n### Work review\n\n"
+    legit_suffix = handoff_at_legit_r[len(handoff_at_a) :]
+    assert legit_suffix.startswith(heading_and_blank)
+    rest = legit_suffix[len(heading_and_blank) :]
+    new_suffix = (
+        heading_and_blank + "Sol's notes: this review genuinely re-ran the suite.\n\n" + rest
+    )
+
+    _git(["checkout", "-q", publication_sha], car_repo)
+    (car_repo / "docs" / "LLM_HANDOFF.md").write_text(handoff_at_a + new_suffix, encoding="utf-8")
+    _git(["add", "-A"], car_repo)
+    _git(["commit", "-q", "-m", "review with ordinary prose"], car_repo)
+    prose_review_sha = _git(["rev-parse", "HEAD"], car_repo)
+
+    fields = cr.validate_c_a_r_chain(
+        candidate_sha, publication_sha, prose_review_sha, repo_root=car_repo
+    )
+    assert fields["verdict"] == "approved"
+
+
+def test_a_to_r_transition_permits_a_validated_escalation_block_alongside_the_review(
+    car_repo: Path,
+) -> None:
+    """Positive control: a validated `workflow-escalation-metadata` block
+    appended alongside the sole review block must not be rejected by the
+    suffix-grammar checks."""
+    candidate_sha, publication_sha, review_sha, _ = _build_c_a_r(car_repo)
+    handoff_at_legit_r = cr.read_file_at_commit(
+        review_sha, "docs/LLM_HANDOFF.md", repo_root=car_repo
+    )
+    escalation_addition = (
+        "\n```workflow-escalation-metadata\n"
+        "schema_version: 2\n"
+        f"slice_id: 2026-09-13-example-{candidate_sha[:7]}\n"
+        "reviewer: Astra\n"
+        "reviewer_model: Astra\n"
+        "reviewed_at: 2026-09-16T00:00:00Z\n"
+        f"candidate_sha: {candidate_sha}\n"
+        "verdict: approved\n"
+        "findings: none\n"
+        "trigger: disputed_finding\n"
+        "```\n"
+    )
+    _git(["checkout", "-q", publication_sha], car_repo)
+    (car_repo / "docs" / "LLM_HANDOFF.md").write_text(
+        handoff_at_legit_r + escalation_addition, encoding="utf-8"
+    )
+    _git(["add", "-A"], car_repo)
+    _git(["commit", "-q", "-m", "review with a permitted escalation block"], car_repo)
+    escalation_review_sha = _git(["rev-parse", "HEAD"], car_repo)
+
+    fields = cr.validate_c_a_r_chain(
+        candidate_sha, publication_sha, escalation_review_sha, repo_root=car_repo
+    )
+    assert fields["verdict"] == "approved"
 
 
 # ---------------------------------------------------------------------------

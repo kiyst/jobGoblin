@@ -944,19 +944,71 @@ findings: none
 - STOP — this is a bounded correction only. Do not author `R`, merge,
   create `M`/`Q`, begin another slice, or modify product/parser behavior.
 
+#### Correction round 3 (Sol review of C9/A9: one bounded issue)
+
+- **Supersedes candidate `C9` = `5a3e18787b878d61035815bca0d31d2f04603e8a`
+  and publication `A9` = `033e935e7681db7e402b4f3e9790ae5de12eb50e`.** The
+  receipt published there
+  (`docs/verification-receipts/5a3e18787b878d61035815bca0d31d2f04603e8a/
+  7801c0b5-4993-4d24-8b8e-8a99142fa230.json`) is **not reusable** and is
+  superseded by this correction round's own fresh candidate/publication
+  cycle below. `C9`/`A9` are preserved unamended, never rewritten; both
+  are reachable on the remote branch (pushed as ancestors of `A9`'s own
+  push), not merely local.
+- **Finding (remaining Medium A→R boundary gap):** Sol's C9/A9 re-review
+  confirmed both prior findings closed, but found that the previous
+  round's suffix-shape check -- "the suffix introduces no new `##
+  Iteration N` heading, and contains exactly one `### Work review`
+  section" -- did not reject an appended **second** `### Work done`
+  heading carrying its own, independently schema-valid
+  `workflow-metadata` block, placed after an otherwise-legitimate
+  review. `check_merge_eligibility` incorrectly returned `approved` for
+  such a suffix, and `check_handoff.py` would then treat that appended
+  Work-done metadata as the current state -- violating the closed,
+  review-only `A -> R` transition.
+- Fix: hardened the exact appended-suffix grammar in `check_review.py`'s
+  `validate_a_to_r_transition`. New `_LEVEL_2_OR_3_HEADING_RE` locates
+  every level-2 (`## `) or level-3 (`### `) heading introduced by the
+  suffix. The suffix is now rejected unless: its first heading is
+  exactly its sole `### Work review`; no additional level-2 or level-3
+  heading follows (including a second `### Work done`); and no
+  `workflow-metadata` fenced block appears anywhere in the suffix (that
+  block belongs exclusively to a `### Work done` section, which the
+  suffix may never introduce). Ordinary prose beneath the sole `### Work
+  review` heading, and validated `workflow-escalation-metadata` blocks
+  alongside the review, remain permitted, exactly as before.
+- New regressions prove, via genuine Git commits and the full chain: the
+  required reproduction -- a suffix pairing a valid `### Work review`
+  with an appended second `### Work done` section containing
+  *structurally valid* `workflow-metadata` (independently confirmed
+  schema-valid via `check_handoff.validate_structure` before the
+  reproduction, so the rejection is proven to be about the closed
+  transition, not malformed content) -- is rejected by
+  `validate_a_to_r_transition`, `validate_c_a_r_chain`, **and**
+  `check_merge_eligibility` alike; a bare `workflow-metadata` block
+  appended with no heading at all is rejected identically; and two
+  neighboring positive controls confirm ordinary review prose beneath
+  the sole `### Work review` heading, and a validated escalation block
+  alongside the review, both still validate successfully end-to-end.
+- Files changed (this correction only): `backend/scripts/check_review.py`
+  (edited); `backend/tests/test_check_review.py` (edited);
+  `docs/LLM_HANDOFF.md` (this entry, plus resetting the metadata block
+  below to `state: pending` for the fresh `C10`/`A10` cycle). No
+  production parser (`app/normalization/*`) touched; no migration/model
+  file touched.
+- Verification: `ruff format --check`/`ruff check`/`mypy` clean (158
+  source files, backend + `.claude/hooks`). Full pytest suite: **2647
+  passed**. All 34 mutation witnesses pass unmodified. `check_repo.py`
+  exits 0. `git diff --check` clean.
+- STOP — this is a bounded correction only. Do not author `R`, merge,
+  create `M`/`Q`, begin another slice, or modify product/parser behavior.
+
 ```workflow-metadata
 workflow_version: v3.2
-state: published
+state: pending
 slice_id: 2026-09-13-workflow-v3-2-activation-66202c2
 slice_kind: tooling
 risk_class: H
 base_sha: 66202c23facff6bd33d8f624e327cabdd40708b4
 declared_gate: final
-executed_gate: final
-candidate_sha: 5a3e18787b878d61035815bca0d31d2f04603e8a
-receipt_id: 7801c0b5-4993-4d24-8b8e-8a99142fa230
-receipt_path: docs/verification-receipts/5a3e18787b878d61035815bca0d31d2f04603e8a/7801c0b5-4993-4d24-8b8e-8a99142fa230.json
-full_suite_count: 2643
-focused_test_count: 476
-mutation_witness_count: 34
 ```

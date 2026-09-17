@@ -47,8 +47,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 _REVIEW_METADATA_BLOCK_RE = re.compile(r"```workflow-review-metadata\n(.*?)\n```", re.DOTALL)
 _ESCALATION_BLOCK_RE = re.compile(r"```workflow-escalation-metadata\n(.*?)\n```", re.DOTALL)
 _METADATA_BLOCK_RE = re.compile(r"```workflow-metadata\n.*?\n```", re.DOTALL)
-_ITERATION_RE = re.compile(r"^## Iteration \d+\s*$", re.MULTILINE)
-_WORK_REVIEW_HEADING_RE = re.compile(r"^### Work review\s*$", re.MULTILINE)
+_LEVEL_2_OR_3_HEADING_RE = re.compile(r"^(?:## |### ).*$", re.MULTILINE)
+_WORK_REVIEW_HEADING = "### Work review"
 
 _REQUIRED_REVIEW_FIELDS = (
     "schema_version",
@@ -710,13 +710,23 @@ def validate_a_to_r_transition(
     Returns the exact appended suffix (`handoff_at_r[len(handoff_at_a):]`)
     -- the *only* text review/escalation-block extraction is ever allowed
     to search (see `extract_review_metadata_text`/`extract_escalation_
-    blocks`). Searching anything broader -- the whole file, or "the
-    latest `## Iteration N` section onward" -- can never distinguish an
+    blocks`). Searching anything broader -- the whole file, "the latest
+    `## Iteration N` section onward", or even just checking for a new
+    `## Iteration N` heading specifically -- can never distinguish an
     already-existing historical block from what this transition actually
-    added. The suffix itself must introduce no new `## Iteration N`
-    heading (that would smuggle a fabricated section, including any
-    escalation block hidden inside it, past this check) and must contain
-    exactly one `### Work review` section."""
+    added, and (the last of those) can still be bypassed by appending an
+    extra `### Work done` (or any other) heading instead of a fake
+    Iteration heading.
+
+    The closed grammar enforced here: the *first* heading the suffix
+    introduces must be its sole `### Work review` -- every other level-2
+    (`## `) or level-3 (`### `) heading in the suffix, including a second
+    `### Work done`, is rejected outright, and so is any `workflow-
+    metadata` block appearing anywhere in the suffix (that block belongs
+    exclusively to a `### Work done` section, which the suffix may never
+    contain). Ordinary prose beneath the sole `### Work review` heading,
+    and any number of validated `workflow-escalation-metadata` blocks, are
+    unaffected."""
     lines = _name_status_lines(publication_sha, review_sha, repo_root)
     if lines != ["M\tdocs/LLM_HANDOFF.md"]:
         raise ReviewValidationError(f"A..R must change only docs/LLM_HANDOFF.md, got {lines}")
@@ -730,15 +740,29 @@ def validate_a_to_r_transition(
         raise ReviewValidationError("A..R added no new content to docs/LLM_HANDOFF.md")
 
     suffix = handoff_at_r[len(handoff_at_a) :]
-    if _ITERATION_RE.search(suffix):
+
+    headings = list(_LEVEL_2_OR_3_HEADING_RE.finditer(suffix))
+    if not headings:
         raise ReviewValidationError(
-            "A..R's appended suffix must not introduce a new '## Iteration N' heading"
+            f"A..R's appended suffix must introduce a {_WORK_REVIEW_HEADING!r} heading"
         )
-    work_review_matches = list(_WORK_REVIEW_HEADING_RE.finditer(suffix))
-    if len(work_review_matches) != 1:
+    first_heading_text = headings[0].group(0).strip()
+    if first_heading_text != _WORK_REVIEW_HEADING:
         raise ReviewValidationError(
-            "A..R's appended suffix must contain exactly one '### Work review' section, "
-            f"found {len(work_review_matches)}"
+            f"A..R's appended suffix's first heading must be {_WORK_REVIEW_HEADING!r}, "
+            f"got {first_heading_text!r}"
+        )
+    if len(headings) > 1:
+        extra = [m.group(0).strip() for m in headings[1:]]
+        raise ReviewValidationError(
+            f"A..R's appended suffix must contain no heading beyond its sole "
+            f"{_WORK_REVIEW_HEADING!r} -- found additional heading(s) {extra!r}"
+        )
+    if _METADATA_BLOCK_RE.search(suffix):
+        raise ReviewValidationError(
+            "A..R's appended suffix must not contain a 'workflow-metadata' block -- that "
+            "belongs exclusively to a '### Work done' section, which the suffix may never "
+            "introduce"
         )
     return suffix
 
