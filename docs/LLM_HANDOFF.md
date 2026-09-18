@@ -98,452 +98,14 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-09-13, Claude Code (Sonnet 5). Risk class H (process/
-  security-relevant tooling — touches `.claude/hooks/*.py` and every
-  workflow-governing document/checker; "when uncertain, use the
-  higher-risk class"). Base `B` -> candidate `C`: `66202c23facff6bd33d8f
-  624e327cabdd40708b4` -> this commit; branch
-  `tooling/workflow-v3.2-activation`. Workflow v3.2 activation per the
-  frozen contract authorized across this session's proposal/amendment
-  rounds (see `docs/DECISIONS/0009-workflow-v3.2-activation.md`), which
-  supersedes and consolidates that entire negotiation into one accepted
-  design. `slice_kind: tooling`. `slice_id:
-  2026-09-13-workflow-v3-2-activation-66202c2`.
-- Outcome: new `backend/scripts/verification_worktree.py`,
-  `verification_receipts.py`, `verification_scope.py`,
-  `verification_coordinator.py`, `migration_matrix.py`, `check_review.py`
-  (+ their test files); schema-v2 rewrite of `check_handoff.py` (+
-  rewritten `test_check_handoff.py`); `verify.py` gains `--gate
-  {fast,final,docs}`, `--witness`, `--emit-step-json`, and a `contract
-  mutation witnesses` step; `.claude/hooks/compact_checkpoint.py`'s
-  `WORKFLOW_VERSION` -> `"v3.2"`; `CLAUDE.md`/`docs/LLM_WORKFLOW.md`
-  updated (v3.1 pilot section marked closed/historical, new "Workflow
-  v3.2" section added); new ADR 0009; `backend/pyproject.toml` gains a
-  narrow mypy override for `asyncpg` (no stubs, used directly by
-  `migration_matrix.py`).
-- Adversarial/implementation self-review found and fixed, before this
-  entry was written: (1) the generated fresh-database name must itself
-  contain `"test"` or the *existing* `assert_is_disposable_test_database`
-  guard rejects it for the wrong reason; (2) the derived admin
-  (`postgres`) connection must **not** be run through the full
-  `assert_safe_for_local_destructive_lifecycle` (its name correctly never
-  contains `"test"`) — split into a narrower host/production-only check
-  reusing `db_safety`'s own host allowlist, never a second copy; (3) a
-  `--docs-only`/`--gate` argparse bug accepted `--docs-only` with no
-  `--gate` at all; (4) `check_handoff.main()`'s use of mutable
-  module-level defaults as function defaults meant monkeypatching
-  `HANDOFF_PATH`/`REPO_ROOT` in tests silently had no effect — fixed by
-  referencing the module globals inside the function body. Each was
-  caught by a genuinely failing test, fixed, and re-verified.
-- Files changed (new): `backend/scripts/{verification_worktree,
-  verification_receipts,verification_scope,verification_coordinator,
-  migration_matrix,check_review}.py`;
-  `backend/tests/test_{verification_worktree,verification_receipts,
-  verification_scope,verification_coordinator,migration_matrix,
-  check_review}.py`; `docs/DECISIONS/0009-workflow-v3.2-activation.md`.
-  Rewritten: `backend/scripts/check_handoff.py`,
-  `backend/scripts/verify.py`, `backend/tests/test_check_handoff.py`,
-  `backend/tests/test_verify.py` (obsolete v3.1-pilot-schema tests
-  replaced, not merely patched). Edited: `.claude/hooks/
-  compact_checkpoint.py`, `CLAUDE.md`, `docs/LLM_WORKFLOW.md`,
-  `backend/pyproject.toml`, this handoff entry. No production parser
-  (`app/normalization/*`) touched; no migration/model file touched.
-- Verification: `ruff format --check`/`ruff check`/`mypy` all pass
-  (139 source files, backend + `.claude/hooks`). Full pytest suite:
-  **2431 passed** (up from 2323 — 108 new/replacing tests). All 34
-  mutation witnesses pass unmodified
-  (`python -m scripts.contract_mutation_witnesses`). `python -m
-  scripts.check_repo` exits 0.
-- Database-lifecycle evidence (real, against the local disposable
-  Postgres — never the development database beyond a read-only `SELECT
-  current_database()`/state check): `test_migration_matrix.py`'s 13
-  tests genuinely create and drop a real, uniquely-named disposable
-  database via a derived admin connection, cover production/remote-host/
-  pre-existing-name/failed-before-create/acknowledgement-lost-after-
-  create, and confirm a pre-existing database under a collided name is
-  never touched. `capture_development_state` fails closed (raises,
-  never skips) when the development database is unreachable or its
-  state can't be read.
-- Deviations/known limitations, as of the original candidate (superseded
-  below): (1) `check_review.py`'s merge/post-merge modes validated
-  parent shape and content identity but did not yet implement the
-  outer-launcher/subprocess-reexecution design or a full per-transition
-  byte-identical-historical-text diff validator. (2) `migration_matrix.py`
-  was implemented and tested but not yet wired into `verify.py`/the
-  coordinator as an executable step. (3) `--compat-v3.1` did not yet
-  exist as a distinct, named CLI mode.
-
-#### Correction round 1 (Sol review: Changes requested)
-
-- **Supersedes candidate `C` = `16ec8b35b58ece71a9f83c4cc380d97b424a01ed`
-  and publication `A` = `c1c2cc1b4f7e2dda5ea911afbd859086bc7f3d99`.** The
-  receipt published there
-  (`docs/verification-receipts/16ec8b35b58ece71a9f83c4cc380d97b424a01ed/
-  885fbb02-2bdf-49a8-a1ef-639e53b27df2.json`) is **not reusable** and is
-  superseded by this correction round's own fresh candidate/publication
-  cycle below. `C`/`A` themselves are left exactly as pushed, per Git
-  gates — never amended or rewritten.
-- Implements every required correction: `check_review.py` now has closed
-  primary/escalation review schemas, exact `C -> A -> R` cross-
-  references, byte-identical `C..A`/`A..R` transition validation (with
-  fault-injection tests for a smuggled edit, a historical-iteration
-  rewrite, and a second smuggled receipt), a distinct
-  `check_merge_eligibility` (record validity vs. merge eligibility),
-  explicit `Q` validation, an outer detached-checkout launcher that
-  re-executes the *target commit's own* `check_review.py` as a
-  subprocess (proven against this project's real editable-install
-  precedence, not merely asserted), and `validate_published` (full
-  post-merge re-derivation, never trusting the artifact's own claims).
-  `verification_receipts.compute_approval_eligible` now deep-validates
-  required step names, a genuinely positive numeric full-suite count,
-  and a genuinely positive numeric witness-passed count with zero
-  failures — the reproduced negative case (empty steps, every execution
-  group `not_run`) is a dedicated test and is correctly ineligible.
-  `verification_coordinator.py` now fetches `origin/main` and enforces
-  `base_sha == origin/main` plus ancestry plus `slice_id`-suffix
-  consistency *before* anything else runs; computes the
-  `base_sha..candidate_sha` diff and required coverage *before* creating
-  any worktree (`verification_scope.compute_required_coverage`); enforces
-  forced-final categories; safely removes only its own stale
-  `coordinator-*` scratch directories on startup; and wraps every stage
-  in `finally` so cache/worktree/run-directory cleanup is always
-  attempted and a cleanup failure blocks receipt emission. The migration
-  matrix (`migration_matrix.run_full_matrix`) is now a real `verify.py`
-  step (`--migration-required`), with fault-injection tests for a
-  failure after fresh-database creation and for direct-target-validation
-  failure (both proven to still clean up correctly — the latter exposed
-  and fixed a real gap where `provision_fresh_database` could leave a
-  database behind on that specific failure path). `verify.py` gains an
-  explicit, separately named `--compat-v3.1` flag.
-- Verification (this correction round): `ruff format --check`/
-  `ruff check`/`mypy` clean (139 source files). Full pytest suite:
-  **2480 passed**. All 34 mutation witnesses pass unmodified.
-  `check_repo.py` exits 0. `git diff --check` clean.
-- STOP — this is a bounded correction only. Do not author `R`, merge,
-  create `M`/`Q`, begin another slice, or modify product/parser behavior.
-
-#### Correction round 2 (Sol review: Changes requested)
-
-- **Supersedes candidate `C2` = `854be7c46de3d26592e145f6cdad23f9f7b5fc6b`
-  and publication `A2` = `c1f612fd50eb3291255d888ecdba03dce8cd8c5c`.** The
-  receipt published there
-  (`docs/verification-receipts/854be7c46de3d26592e145f6cdad23f9f7b5fc6b/
-  8dc185bf-1dc6-4798-a20e-fb1218fd1c03.json`) is **not reusable** and is
-  superseded by this correction round's own fresh candidate/publication
-  cycle below. `C2`/`A2` themselves are left exactly as pushed, per Git
-  gates — never amended or rewritten.
-- Implements every required correction from Sol's second review: (1)
-  `verification_receipts.py`'s receipt schema is now fully recursively
-  closed/typed — every nested object (`coordinator`, `steps[]`,
-  `full_suite`/`focused_tests`/`mutation_witnesses`, `migration_matrix`,
-  `cleanup`, `dependency_and_config_inputs[]`, `environment_descriptor`)
-  rejects an unrecognized field, duplicate step names are rejected, and a
-  "ran" suite/witness summary must bind to a corresponding step that
-  exists exactly once with status `PASS` — with dedicated regression
-  tests for an unrecognized field nested at every level and for the
-  binding failure itself. (2) `check_review.py` now parses and
-  structurally re-validates the *published* (`A`) `workflow-metadata`
-  block during `C -> A -> R` validation (reusing `check_handoff.py`'s own
-  validator), cross-checks `slice_id`/`risk_class`/`candidate_sha`/
-  `gate`/`receipt_id`/`receipt_path` against the review metadata,
-  requires the published `base_sha` to be a genuine ancestor of the
-  candidate, and cross-checks the receipt's own `slice_id`/`risk_class`/
-  `base_sha` against the published block. The Sol Medium primary-
-  reviewer requirement now triggers for every executable
-  (`parser`/`tooling`) slice, not only `risk_class: H`. A `gate: docs`
-  receipt is merge-eligible only when the bound published slice is
-  genuinely `slice_kind: docs`. (3) Post-merge artifact validation is now
-  deep: `_validate_post_merge_artifact_schema` reuses
-  `verification_receipts.py`'s own nested validators for
-  `coordinator`/`steps`/`full_suite`/`mutation_witnesses`/
-  `migration_matrix`/`cleanup`/`environment_descriptor`; a new
-  `_validate_post_merge_artifact_evidence` requires a genuinely positive
-  full-suite count, genuinely positive passing witnesses, no `FAIL`
-  step, passing cleanup, and (when triggered) a passing migration
-  matrix; `validate_published` now cross-checks the artifact's
-  `base_sha`/`slice_id`/`original_receipt_id`/`original_receipt_path`
-  against the independently recomputed chain, then re-reads and
-  re-validates the original receipt at `M` itself and cross-checks its
-  content against the artifact's claims. A new
-  `validate_m_to_q_transition` restricts `Q`'s optional handoff change to
-  a pure, at-most-once append, mirroring `validate_a_to_r_transition`.
-  (4) `migration_matrix.py` now captures a real `DevelopmentState`
-  (Alembic revision + a schema fingerprint over `information_schema.
-  columns`) before/after, and a real, distinct PostgreSQL server version
-  (`query_postgresql_server_version`); `provision_fresh_database`'s
-  direct-target verification now cleans up on a raised exception, not
-  only on a wrong-name return. (5) `verify.py --gate fast` now genuinely
-  omits the full suite (the `full pytest suite` step is only appended
-  when `gate != "fast"`); `--gate final` and the ungated compat profile
-  still always include it. (6) A new `verification_lock.py` provides a
-  cross-platform, genuinely non-blocking exclusive advisory file lock
-  (`msvcrt.locking` / `fcntl.flock`). `verification_coordinator.py` now
-  holds this lock for a run's entire lifetime and only removes a stale
-  `coordinator-*` scratch directory when it can itself acquire that
-  directory's lock (proving no live owner) — proven with a genuine
-  concurrent-subprocess regression test that a live run is never cleaned
-  up by another. The detached-review-launcher's cleanup
-  (`run_via_detached_checkout`) now fails closed on a worktree-teardown
-  failure and verifies no residual worktree/run directory remains,
-  instead of silently swallowing the error.
-- Real bug found and fixed while implementing finding (1) above (not
-  itself one of Sol's findings): the real `verify.py` never included
-  `guard_refs` in its `mutation_witnesses` step-JSON payload, so the
-  stricter, now-required schema binding would have made every real
-  receipt with `mutation_witnesses.status: "ran"` fail validation. Fixed
-  in `mutation_witnesses_step`/`_build_steps`/`_write_step_json` (the
-  whole-registry run's actual per-guard `PASS`/`FAIL` lines are now
-  parsed to populate it); proven by a fixture that previously omitted it
-  now failing until fixed.
-- Files changed: `backend/scripts/{check_review,migration_matrix,
-  verification_coordinator,verification_receipts,verify}.py` (edited);
-  `backend/scripts/verification_lock.py` (new);
-  `backend/tests/test_{check_review,migration_matrix,
-  verification_coordinator,verification_receipts,verify}.py` (edited);
-  `backend/tests/test_verification_lock.py` (new). No production parser
-  (`app/normalization/*`) touched; no migration/model file touched.
-- Verification (this correction round): `ruff format --check`/
-  `ruff check`/`mypy` clean (158 source files, backend + `.claude/hooks`).
-  Full pytest suite: **2531 passed**. All 34 mutation witnesses pass
-  unmodified. `check_repo.py` exits 0. `git diff --check` clean.
-- STOP — this is a bounded correction only. Do not author `R`, merge,
-  create `M`/`Q`, begin another slice, or modify product/parser behavior.
-
-#### Correction round 3 (Sol review: Changes requested)
-
-- **Supersedes candidate `C3` = `ca7e4233ba880fb8e25b6019a575caafef9829f6`
-  and publication `A3` = `081f6f7ddd9960524a999c662fa677aa1338886a`.** The
-  receipt published there
-  (`docs/verification-receipts/ca7e4233ba880fb8e25b6019a575caafef9829f6/
-  94b13ec0-9327-46fa-aff6-f228c92e9059.json`) is **not reusable** and is
-  superseded by this correction round's own fresh candidate/publication
-  cycle below. `C3`/`A3` themselves are left exactly as pushed, per Git
-  gates — never amended or rewritten.
-- Implements every required correction from Sol's third review: (1)
-  `check_review.py` now independently recomputes `B..C` affected-surface
-  coverage and migration triggering using this checkout's own
-  `verification_scope` module (never the reviewer's possibly-stale
-  in-process copy when run through the detached-checkout launcher), and
-  cross-checks the receipt's `affected_surface.computed_categories`/
-  `required_contract_families`/`required_guard_refs`/
-  `directly_executed_tests`, `migration_matrix.triggered`,
-  `focused_tests.selector` (superset of recomputed required focus
-  targets), and `mutation_witnesses.guard_refs` (superset of recomputed
-  required guard refs) against that recomputation. It also independently
-  recomputes `verifier_hash`/`checker_hash`/
-  `dependency_and_config_inputs` from a genuine disposable checkout at
-  `C` (never `git show`'s raw blob bytes, which this project's own
-  `core.autocrlf=true` proved would diverge from the coordinator's own
-  working-tree-based hash) and cross-checks them against the receipt.
-  The exact required regression — a candidate changing
-  `backend/migrations/versions/...` with the receipt claiming
-  `migration_matrix.triggered: false` — is now rejected by both
-  `validate_c_a_r_chain` and `check_merge_eligibility`. (2) The review
-  and escalation metadata schemas are now fully closed (unrecognized
-  fields rejected) and require an exact supported `schema_version`.
-  `verification_receipts.py`'s receipt schema now requires an exact
-  supported `schema_version`, a typed and format-valid `slice_id`
-  (matching `check_handoff.py`'s own `<date>-<slug>-<base-short-sha>`
-  format), full `sha256` hex format for `verifier_hash`/`checker_hash`/
-  `dependency_and_config_inputs[].sha256`, and every SHA/receipt-ID/
-  timestamp field now guards against a non-string JSON value before
-  regex-matching it (previously a crash, not a clean rejection). New
-  regressions cover a numeric `schema_version`/`slice_id` and a malformed
-  hash. (3) The post-merge artifact's evidence validation now requires
-  every applicable final-gate static-check step (`ruff format --check`,
-  `ruff check`, `mypy`, `check_repo.py`, `git diff --check`) to exist
-  exactly once with status `PASS` — an omitted step and a step present
-  but `NOT_RUN` are both rejected identically — and `validate_published`
-  now independently re-derives whether migration evidence was required
-  for the original slice diff and cross-checks it against the artifact's
-  own `migration_matrix.triggered`. (4) `DevelopmentState.schema_
-  fingerprint` now hashes the full migration-relevant schema surface for
-  `public`: every column's type, nullability, *and* default; every
-  constraint's full definition text (`pg_get_constraintdef`, which
-  already renders a FOREIGN KEY's own ON DELETE/ON UPDATE action into the
-  definition, so no separate lookup was needed); and every index's full
-  definition text — proven, against the real disposable Postgres, that a
-  default-only, nullability-only, constraint-only, index-only, or
-  FK-action-only mutation each independently changes the fingerprint
-  while the Alembic revision (absent in these fresh, migration-free
-  probe databases) stays unchanged.
-- Real bug found and fixed while implementing finding 1's hash
-  recomputation (not itself one of Sol's findings): the disposable test
-  fixture (`test_check_review.py`'s `car_repo`) had no `backend/scripts/
-  verify.py`/`check_handoff.py`/`pyproject.toml` files at all, and
-  `verification_worktree.py`'s module-level `REPO_ROOT` (fixed at import
-  time to the real project root) meant every worktree-creating call in
-  that test file needed the disposable repo monkeypatched in, not just
-  the two detached-checkout-launcher tests that already did so — fixed by
-  adding the stand-in files and moving the monkeypatch into the `car_repo`
-  fixture itself.
-- Files changed: `backend/scripts/{check_review,verification_receipts,
-  migration_matrix}.py` (edited); `backend/tests/test_{check_review,
-  verification_receipts,migration_matrix}.py` (edited). No production
-  parser (`app/normalization/*`) touched; no migration/model file
-  touched.
-- Verification (this correction round): `ruff format --check`/
-  `ruff check`/`mypy` clean (158 source files, backend + `.claude/hooks`).
-  Full pytest suite: **2579 passed**. All 34 mutation witnesses pass
-  unmodified. `check_repo.py` exits 0. `git diff --check` clean.
-- STOP — this is a bounded correction only. Do not author `R`, merge,
-  create `M`/`Q`, begin another slice, or modify product/parser behavior.
-
-#### Correction round 4 (Sol review: Changes requested)
-
-- **Supersedes candidate `C4` = `0ad2c4e594fed8a736863040fe934893169a5044`
-  and publication `A4` = `6271dc83027d307fbe3ad8563e791c2fbb2939e1`.** The
-  receipt published there
-  (`docs/verification-receipts/0ad2c4e594fed8a736863040fe934893169a5044/
-  d70b98e7-f70f-464e-ac51-0d6a1f3e9604.json`) is **not reusable** and is
-  superseded by this correction round's own fresh candidate/publication
-  cycle below. `C4`/`A4` themselves are left exactly as pushed, per Git
-  gates — never amended or rewritten.
-- Implements every required correction from Sol's fourth review: (1)
-  `check_review.py` now independently discovers the complete active
-  mutation-guard inventory for `gate: final` using this checkout's own
-  `tests.contracts.taxonomy` module (the target commit's own copy when
-  run through the detached-checkout launcher) and requires the receipt's
-  `mutation_witnesses.guard_refs` to equal that exact set, with
-  `passed == len(guard_refs)` and `failed == 0` — never merely a subset,
-  which remains the (weaker, diff-computed) requirement for `fast`. (2)
-  `verification_receipts.compute_approval_eligible` now requires, when
-  `migration_matrix.triggered` is true: the `migration matrix` step
-  exists exactly once with PASS; the matrix's own `status` is PASS;
-  before/after `DevelopmentState` values are equal (the development
-  database is only ever *read*, never migrated, by
-  `migration_matrix.run_full_matrix` — drift here means the matrix itself
-  is untrustworthy even if it reported PASS); the fresh-database
-  lifecycle was both created and cleaned up; and the remaining evidence
-  fields (`postgresql_server_version`, `steps`) are present and valid.
-  Untriggered remains vacuously fine. (3) A new `compute_applicable_
-  final_step_names`/`compute_applicable_docs_step_names` pair in
-  `verification_receipts.py` defines the exact, gate-specific applicable-
-  step-name matrix *once* — static checks, DB URL safety, DB reachability,
-  focused tests when computed, full suite, all witnesses, migration
-  matrix when triggered, handoff validation, and temporary-directory
-  cleanup for `final`; the separate, smaller static+handoff+cleanup set
-  for `docs` — and both `compute_approval_eligible` (receipt) and
-  `check_review.py`'s post-merge artifact evidence check
-  (`_require_post_merge_steps_present`) now reuse it, so the two can
-  never independently drift. Every applicable step must exist exactly
-  once with PASS; an omitted step and a step present but `NOT_RUN` are
-  both rejected identically. Post-merge migration-matrix evidence now
-  also reuses the same deep validation as finding (2), for the same
-  consistency reason.
-- Files changed: `backend/scripts/{check_review,verification_receipts}.py`
-  (edited); `backend/tests/test_{check_review,verification_receipts,
-  verification_coordinator}.py` (edited). No production parser
-  (`app/normalization/*`) touched; no migration/model file touched.
-- Verification (this correction round): `ruff format --check`/
-  `ruff check`/`mypy` clean (158 source files, backend + `.claude/hooks`).
-  Full pytest suite: **2619 passed**. All 34 mutation witnesses pass
-  unmodified. `check_repo.py` exits 0. `git diff --check` clean.
-- STOP — this is a bounded correction only. Do not author `R`, merge,
-  create `M`/`Q`, begin another slice, or modify product/parser behavior.
-
-#### Correction round 5 (Sol review: Changes requested)
-
-- **Supersedes candidate `C5` = `d3c2d74d794b320f4f9adca331e31cabb26b9d20`
-  and publication `A5` = `eae5d01e0bcdead422c58321970a8159fda5f7a1`.** The
-  receipt published there
-  (`docs/verification-receipts/d3c2d74d794b320f4f9adca331e31cabb26b9d20/
-  4e833d27-5d2f-407f-aa92-e0d877072436.json`) is **not reusable** and is
-  superseded by this correction round's own fresh candidate/publication
-  cycle below. `C5`/`A5` themselves are left exactly as pushed, per Git
-  gates — never amended or rewritten.
-- Implements the one remaining bounded finding: unifies witness-inventory
-  validation into a single shared mechanism, used identically in all
-  three places it previously existed independently. New
-  `verification_receipts.compute_active_guard_refs()` (the complete,
-  dynamically discovered active-guard inventory, resolved via whichever
-  `tests.contracts.taxonomy` module is importable in the current process
-  -- the target commit's own copy when run inside a disposable worktree
-  or detached-checkout subprocess) and `witnesses_match_complete_active_
-  inventory()` (the shared predicate: `mutation_witnesses.guard_refs`
-  must exactly equal that inventory, `passed == len(guard_refs)`,
-  `failed == 0` -- never a positive-count-only or subset-only path) are
-  now the *only* witness-completeness check anywhere in this codebase.
-  `compute_approval_eligible` uses it directly for a `final`-gate receipt
-  (replacing the old, weaker `_witnesses_genuinely_ran_and_passed`, which
-  is deleted, not merely superseded). `check_review.py`'s pre-merge
-  `C -> A -> R` cross-check and its post-merge artifact/Q evidence check
-  both now call the same shared predicate (via a new `_require_complete_
-  active_witness_inventory` helper that adds a detailed diff to the
-  raised error) instead of each independently re-deriving or weakening
-  the requirement — the post-merge path previously only required a
-  positive count with zero failures, never the complete inventory, which
-  is exactly the gap this round closes.
-- Files changed: `backend/scripts/{check_review,verification_receipts}.py`
-  (edited); `backend/tests/test_{check_review,verification_receipts,
-  verification_coordinator}.py` (edited). No production parser
-  (`app/normalization/*`) touched; no migration/model file touched.
-- Verification (this correction round): `ruff format --check`/
-  `ruff check`/`mypy` clean (158 source files, backend + `.claude/hooks`).
-  Full pytest suite: **2625 passed**. All 34 mutation witnesses pass
-  unmodified. `check_repo.py` exits 0. `git diff --check` clean.
-- STOP — this is a bounded correction only. Do not author `R`, merge,
-  create `M`/`Q`, begin another slice, or modify product/parser behavior.
-
-```workflow-metadata
-workflow_version: v3.2
-state: published
-slice_id: 2026-09-13-workflow-v3-2-activation-66202c2
-slice_kind: tooling
-risk_class: H
-base_sha: 66202c23facff6bd33d8f624e327cabdd40708b4
-declared_gate: final
-executed_gate: final
-candidate_sha: 332947196d028b9a46a52aa3c44e51028d5f7e0c
-receipt_id: 08c77b12-634a-42ee-a24d-199076baf438
-receipt_path: docs/verification-receipts/332947196d028b9a46a52aa3c44e51028d5f7e0c/08c77b12-634a-42ee-a24d-199076baf438.json
-full_suite_count: 2625
-focused_test_count: 458
-mutation_witness_count: 34
-```
-
-### Work review
-
-- Sol's final re-review of `C6` = `332947196d028b9a46a52aa3c44e51028d5f7e0c`
-  and `A6` = `4ee69a96981c01b12bce1ad3ce7706ff34b5a149`: **Approved, no
-  findings.** Independent verification performed: all 458 focused
-  tooling tests passed; the genuine receipt validates and recomputes
-  `approval_eligible: true`; the exact 1-of-34 receipt and post-merge
-  reproductions are now rejected; migration and applicable-step
-  enforcement remain closed; `git diff --check` and repository
-  cleanliness passed. The reported 2,625-test full suite was not
-  independently repeated.
-
-```workflow-review-metadata
-schema_version: 2
-slice_id: 2026-09-13-workflow-v3-2-activation-66202c2
-risk_class: H
-reviewer: Sol
-reviewer_role: primary
-reviewer_model: Sol Medium
-reviewed_at: 2026-09-15T00:00:00Z
-candidate_sha: 332947196d028b9a46a52aa3c44e51028d5f7e0c
-publication_commit_sha: 4ee69a96981c01b12bce1ad3ce7706ff34b5a149
-receipt_path: docs/verification-receipts/332947196d028b9a46a52aa3c44e51028d5f7e0c/08c77b12-634a-42ee-a24d-199076baf438.json
-receipt_id: 08c77b12-634a-42ee-a24d-199076baf438
-gate: final
-verdict: approved
-findings: none
-```
-
----
-
-## Iteration 2
-
-### Work done
-
 - Date/agent: 2026-09-15, Claude Code (Sonnet 5). Risk class H (same
-  process/security-relevant tooling as Iteration 1). Base `B` -> candidate
+  process/security-relevant tooling as the original activation candidate
+  work, C1-C6). Base `B` -> candidate
   `C7`: `66202c23facff6bd33d8f624e327cabdd40708b4` -> this commit; branch
   `tooling/workflow-v3.2-activation` (continued). `slice_kind: tooling`.
   `slice_id: 2026-09-13-workflow-v3-2-activation-66202c2` (unchanged --
   same base, same underlying activation slice).
-- **Supersedes Iteration 1's review record.** Sol approved `C6` =
+- **Supersedes the original activation review record.** Sol approved `C6` =
   `332947196d028b9a46a52aa3c44e51028d5f7e0c` / `A6` =
   `4ee69a96981c01b12bce1ad3ce7706ff34b5a149`, with `R` =
   `0c42aae891a24181f871df56e52b732322fd1d0e` recording that verdict.
@@ -596,8 +158,8 @@ findings: none
   blob does not; and a real coordinator-generated receipt's hashes agree
   with `check_review.py`'s independent recomputation even after the
   authoring checkout is subsequently mutated on disk.
-- Deviations/known limitations: none beyond the superseded Iteration 1
-  review record noted above.
+- Deviations/known limitations: none beyond the superseded original
+  activation review record noted above.
 
 #### Correction round 1 (own follow-on finding, before Sol re-review)
 
@@ -625,12 +187,12 @@ findings: none
   `workflow-review-metadata`/`workflow-escalation-metadata` block,
   instead of scoping to the newest `## Iteration N` section the way
   `check_handoff.py`'s own metadata-block search already does. Once
-  Iteration 1's real `R` (recording Sol's approval of `C6`/`A6`,
+  the original activation `R` (recording Sol's approval of `C6`/`A6`,
   preserved unchanged) and this iteration's own review block coexist in
   the same file, that unscoped search finds both and raises "more than
   one block found" -- this is not merely a test artifact: it would also
-  have broken the real `R` for this iteration once authored, since
-  Iteration 1's historical block never goes away.
+  have broken the real `R` for this iteration once authored, since that
+  historical block never goes away.
 - Fix: new `_latest_iteration_text` scopes to the text from the newest
   `## Iteration N` heading onward (mirroring `check_handoff.py`'s own
   per-iteration scoping); both `extract_review_metadata_text` and
@@ -865,7 +427,7 @@ findings: none
 
 ---
 
-## Iteration 3
+## Iteration 2
 
 ### Work done
 
@@ -1086,3 +648,170 @@ findings: none
 - STOP — report the synchronized final `main` SHA and stop. No Slice 3,
   no other Phase 3/4 parser, no other new slice, without separate
   explicit user authorization.
+
+---
+
+## Iteration 3
+
+### Work done
+
+- Date/agent: 2026-09-18, Claude Code (Sonnet 5). Risk class **H**
+  (deliberately, not the R this project's own review discipline might
+  default to for a pure-function, no-DB/network slice: ambiguous-alias
+  false matches are Phase 3's own named primary risk — "confidently
+  storing false facts from ambiguous text" — and this is novel,
+  foundational infrastructure two future parsers depend on for
+  correctness, not a "repeated established pattern"). Base `B` ->
+  candidate `C`: `21dee74bae122bc634c77d3d0c55d03be128b716` -> this
+  commit; new branch `phase-3/skill-taxonomy-foundation`, cut from a
+  freshly verified clean `main` (`main` == `origin/main`, `check_repo.py`
+  clean, `git diff --check` clean). `slice_kind: parser`. `slice_id:
+  2026-09-18-skill-taxonomy-foundation-21dee74`. Implements the
+  three-round-negotiated, user-approved skill-taxonomy-foundation
+  proposal and its amendments.
+- **Schema, grammar, and typed result** (`backend/app/normalization/
+  taxonomy.py`, `backend/app/taxonomy/skills.yaml`): `skills.yaml` has
+  exactly two top-level keys (`schema_version: 1`, `entries`); each entry
+  has exactly three keys (`canonical_id`, `display_name`, `aliases`).
+  `canonical_id` reuses `app.schemas.identifiers.is_canonical_slug()`
+  verbatim — the same grammar already enforced on every `provider`/
+  `source` column — never a new regex. `TaxonomyLookupResult` is a new,
+  dedicated type (`status: TaxonomyLookupStatus` paired with
+  `entry: TaxonomyEntry | None`, invariant-enforced in `__post_init__`
+  exactly like `NormalizationResult`'s own value/provenance invariant,
+  two static factories as the only construction path) — deliberately
+  not a reuse of `NormalizationResult`/`Provenance`, since taxonomy-
+  resolution success is orthogonal to a parser's own input-provenance
+  trust level.
+- **YAML safety**: no YAML library existed in this repo before this
+  slice (confirmed by direct search). Adds `PyYAML==6.0.3` (pinned
+  exactly like the existing `idna==3.19` precedent) to
+  `backend/pyproject.toml`, plus a `yaml.*` mypy override (PyYAML ships
+  no type stubs, same treatment as the existing `asyncpg.*` override).
+  `yaml.safe_load` alone does not reject a duplicate YAML mapping key
+  (silent last-write-wins) — `_StrictYamlLoader(yaml.SafeLoader)`
+  overrides `construct_mapping` to raise instead, mirroring this
+  project's own `verification_receipts._StrictDecoder` (JSON) duplicate-
+  key rejection.
+- **Lookup normalization** (precisely defined, not borrowed): checked
+  `location.py`/`salary.py` directly rather than assume a shared
+  convention — they share only NFKC-normalize + strip the project's
+  `_WHITESPACE` set before diverging into field-specific casing
+  (location/salary each uppercase some fields, lowercase others, per
+  field). This taxonomy defines its own rule:
+  NFKC-normalize -> strip `_WHITESPACE` -> collapse repeated internal
+  whitespace -> lowercase-fold. Punctuation (`+`, `#`, `.`, `-`) is
+  preserved literally (`c` vs `c++` vs `c#` must stay distinct).
+  Whitespace adjacent to punctuation is not reconciled — a stated
+  limitation, not an oversight.
+- **Collision rejection**: both `canonical_id` and every alias become
+  lookup keys, inserted into one flat global `normalized_key -> entry`
+  index. Any collision — cross-entry, or two of the same entry's own
+  keys (including an alias equal to its own entry's `canonical_id`) —
+  is rejected at load time, no first/last-wins. A load-time check also
+  requires `normalize(display_name)` be reachable via the entry's own
+  `canonical_id` or an alias (rejecting an entry unreachable by its own
+  display name).
+- **Frozen seed** (15 entries, explicitly reduced from an earlier
+  ~40-60 estimate to keep this a genuine foundation slice, not a
+  vocabulary attempt): `python`, `javascript`(`js`), `typescript`(`ts`),
+  `java`, `cpp`(`c++`,`cplusplus`), `csharp`(`c#`,`c-sharp`), `c`,
+  `golang`(`go`), `rlang`(`r`), `postgresql`(`postgres`), `mysql`,
+  `mongodb`(`mongo`), `kubernetes`(`k8s`), `docker`, `node.js`
+  (`node`,`nodejs`). Every alias individually justified (see the
+  slice's proposal record for the full rationale table); ambiguous
+  near-misses deliberately excluded or kept unaliased (`c`/`cpp`/
+  `csharp` never alias to each other; `java`/`javascript` never alias to
+  each other; `postgres` included but `psql` deliberately excluded, since
+  that names the CLI client, not the database skill).
+- **Exact-match only, by design**: `TaxonomyIndex.lookup()` never
+  tokenizes or scans a larger string — proven by a dedicated test
+  feeding a full sentence and asserting `UNKNOWN`, alongside the same
+  token resolving correctly on its own. No free-text scanning, no
+  skill classifier, implemented in this slice.
+- **Unblocks skill, not title**: a future `classify_skill` parser calls
+  this lookup per already-segmented token and wraps results in its own
+  `NormalizationResult[list[str]]`. Title is **not** unblocked — job
+  titles are free-form multi-word phrases needing a different, likely
+  hierarchical taxonomy schema, their own seed-sourcing rule, and a
+  phrase/segment-extraction normalization approach; only the general
+  pattern (versioned, duplicate-rejecting, schema-validated YAML with a
+  typed unknown result) is a reusable template, never this schema or
+  data directly.
+- **Documentation corrections, kept bounded to exactly the identified
+  stale passages**: `docs/ROADMAP.md`'s Phase 3 status text incorrectly
+  claimed the location classifier was "not merged, not complete" —
+  independently verified via `git log`/`git show` that it merged at
+  `a32b5cc` (approval `c1a5235`) and is a genuine ancestor of `main`;
+  corrected, and this slice's own status recorded alongside it.
+  `docs/ARCHITECTURE.md`'s identical duplicate of the same stale claim
+  (it explicitly deferred to ROADMAP and inherited the staleness) is
+  also corrected; `taxonomy.py`/`skills.yaml` marked implemented
+  (candidate/publication stage); `titles.py`/`skills.py`/`titles.yaml`/
+  `industries.yaml`/`aliases.yaml` explicitly left as still-planned, not
+  touched further.
+- **Adversarial self-review** (fresh subagent; DB/ORM/concurrency
+  questions from `LLM_WORKFLOW.md`'s twelve-question pass explicitly
+  marked not-applicable, confirmed by the import-boundary test and by
+  direct inspection of this module's import list). No Critical/High
+  findings. One Medium finding fixed: `TaxonomyIndex`'s "immutable"
+  claim was asserted but not enforced — `@dataclass(frozen=True)` only
+  blocks rebinding the `_by_normalized_key` attribute, never in-place
+  mutation of the `dict` it pointed to (reproduced: assigning into the
+  dict directly silently corrupted a lookup). Fixed: `__post_init__` now
+  defensively copies the caller's mapping into a `MappingProxyType`, so
+  neither the constructor's caller nor any other holder of a reference
+  can mutate the index post-construction — proven by two new regressions
+  (direct in-place assignment now raises `TypeError`; mutating the
+  caller's own source dict after construction no longer affects the
+  index, proving a copy was made, not merely a wrap). One Low finding
+  fixed: a blank-after-whitespace-strip alias lacked a dedicated test
+  (behavior was already correct — added the missing regression). One
+  Low/informational finding (an NBSP-only `display_name` is still
+  correctly rejected, just under the "not reachable" message rather than
+  "blank") left as-is — fails closed either way, a message-clarity nit
+  only.
+- Files changed: `backend/app/normalization/taxonomy.py` (new);
+  `backend/app/taxonomy/skills.yaml` (new); `backend/tests/
+  test_normalization_taxonomy.py` (new, 63 tests); `backend/tests/
+  fixtures/taxonomy/*.yaml` (new, 12 fixtures: 11 fault-injection, 1
+  positive control);
+  `backend/pyproject.toml` (edited — `PyYAML==6.0.3` pin, `yaml.*` mypy
+  override); `docs/ROADMAP.md`, `docs/ARCHITECTURE.md` (edited, bounded
+  stale-passage corrections only); `docs/LLM_HANDOFF.md` (this entry,
+  plus the two-iteration rotation below). No production parser other
+  than this new module touched; no migration/model/service/API file
+  touched; no database lifecycle operation performed; no provider
+  contact of any kind.
+- **Two-iteration rotation applied**: the oldest iteration (the original
+  v3.2 activation candidate/review cycle, C1-C6) is deleted; its two
+  remaining internal cross-references from the newer iteration (which
+  had read "Iteration 1" as a pointer to it) were first rewritten as
+  self-contained prose naming the actual work directly, so they do not
+  dangle after deletion. The former Iteration 2 (the C7-C10 correction
+  saga, merge record, and post-merge-evidence-status note) and
+  Iteration 3 (the Q-producer slice's Work done/review/merge
+  record/`Q` publication) are renumbered to Iteration 1 and Iteration 2
+  respectively; this entry becomes the new Iteration 3.
+- Verification: `ruff format --check`/`ruff check`/`mypy` clean (161
+  source files, backend + `.claude/hooks`). Full pytest suite: **2726
+  passed** (2663 + 63 new). `check_repo.py` exits 0. `git diff --check`
+  clean.
+- Deviations/known limitations: none beyond what the proposal itself
+  already disclosed (a small, explicitly non-exhaustive 15-entry seed;
+  the Go/R exact-match positive controls are documented as not
+  guaranteeing a future classifier's word-boundary safety), plus the
+  informational display-name-blank-message nit noted above.
+- STOP — this is a bounded parser-foundation slice only. Do not author
+  `R`, merge, create `Q`, or begin any title-parser work without
+  separate explicit user authorization.
+
+```workflow-metadata
+workflow_version: v3.2
+state: pending
+slice_id: 2026-09-18-skill-taxonomy-foundation-21dee74
+slice_kind: parser
+risk_class: H
+base_sha: 21dee74bae122bc634c77d3d0c55d03be128b716
+declared_gate: final
+```

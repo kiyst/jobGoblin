@@ -1,0 +1,5 @@
+schema_version: 1
+entries:
+  - canonical_id: Alpha
+    display_name: Alpha
+    aliases: []
