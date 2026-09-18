@@ -447,6 +447,73 @@ or authorizes a merge. `scripts/check_review.py` validates the `C -> A -> R` cha
 for a merge, `M`) against Git plumbing and the receipt itself, never against review prose
 alone.
 
+### Post-merge (`Q`) evidence producer
+
+`scripts/verification_coordinator.run_post_merge_verification` is the analogous outer
+coordinator for `Q`'s post-merge evidence artifact: it verifies the *merged* tree at `M`
+(never a pre-merge candidate), always full/final, and derives every field it records
+(`base_sha`, `slice_id`, the original receipt reference) from `scripts/check_review.
+validate_c_a_r_chain`'s own independently re-validated chain — never from caller-supplied
+input, so nothing external can redirect or skip the migration check. It shares the receipt
+producer's worktree/lock/cache-cleanup lifecycle under its own `post-merge-coordinator-`
+run-directory prefix, and, unlike a receipt, writes nothing at all on a failed verification
+or cleanup failure rather than a durable-but-ineligible artifact — `Q`'s only meaning is
+structural (`scripts/check_review.validate_q` checks for its committed existence), so
+nothing resembling evidence may ever reach disk unless the run genuinely passed.
+
+### Project policy: `Q` is the next mainline commit after `M`
+
+`check_review.validate_q` itself does not require any particular position — it only checks
+that the supplied `Q` SHA's sole parent is `M`; a conforming `Q` can equally be a sibling
+commit on another branch, authored well after `M`, alongside other unrelated commits
+elsewhere. Making `Q` the next commit on `main`'s own mainline after `M` is this project's
+own chosen policy, not something the validator enforces or assumes.
+
+**Precondition, checked before merge authorization, not after.** For every future slice,
+before the user authorizes merging to `main`, one of the following must already be in
+place:
+
+- a reviewed, tested `Q`-artifact producer (`scripts/verification_coordinator.run_post_
+  merge_verification`, implemented and tested in the `tooling/workflow-v3.2-post-merge-
+  q-producer` slice, becomes exactly this once it is itself reviewed and merged); or
+- a separately approved, exact manual evidence-capture procedure on record, specifying at
+  minimum: verification isolated against `M`'s own tree in a disposable worktree (never the
+  mutable authoring checkout); every required step's output genuinely captured, not
+  summarized or copied from an earlier run; the same before/after worktree-integrity
+  snapshot and cleanup discipline `verification_coordinator.py` already applies for
+  receipts; deterministic construction of the artifact JSON from that captured output
+  against the schema `check_review._validate_post_merge_artifact_schema`/`_validate_post_
+  merge_artifact_evidence` enforce; and a passing `check_review.validate_published` run
+  against the complete chain *before* the `Q` commit is published.
+
+Merge authorization is withheld until one of these exists for the slice being merged. This
+closes the gap that produced the `M = 9649cba` exception (see ADR 0009's bootstrap-exception
+addendum), which was itself only possible because no such precondition existed yet — that
+exception is one-time and does not authorize repeating it.
+
+**Mainline shape once merge proceeds.** The commit immediately following `M` on `main`'s
+mainline must be `Q` itself — never a merge-record-only commit. In one commit, `Q` adds both
+the schema-valid post-merge artifact (status `A`, under `docs/post-merge/`) and the
+append-only merge-record prose to `docs/LLM_HANDOFF.md` (status `M`, pure append) — exactly
+what `check_review.validate_q`/`validate_m_to_q_transition` already permit together in a
+single transition. `Q` may still have sibling commits on other branches; the policy only
+constrains `main`'s own mainline between `M` and `Q`.
+
+**Fail-closed on post-merge failure.** If, after `M` is created, post-merge verification
+fails or the assembled `Q` artifact fails `validate_q`/`validate_published`, stop immediately
+at `M`. Do not publish a merge-record-only commit as a substitute, and do not report or
+imply that the `C -> A -> R -> M -> Q` publication chain is complete. Report the failure and
+the exact state of `main` at `M`, and seek explicit user resolution before any further commit
+lands on `main`'s mainline.
+
+**Release sequence.** After separate user merge authorization: create `M` locally (not yet
+pushed); run the `Q` producer against `M` and, on success, commit `Q` as described above
+(still not pushed); run `check_review.validate_published` against the complete local chain;
+immediately before pushing, call `verification_coordinator.confirm_main_unchanged` to
+re-fetch `origin/main` and confirm it still equals the pre-merge tip — if it has moved, stop
+without pushing rather than racing the remote; only then push `M` and `Q` together in one
+ref update, so `origin/main` never shows `M` without `Q` immediately following it.
+
 ### Schema-v2 handoff metadata (`scripts/check_handoff.py`)
 
 The `workflow-metadata` block moves through exactly two states to avoid a self-referential

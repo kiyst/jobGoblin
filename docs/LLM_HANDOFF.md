@@ -98,245 +98,6 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-09-13, Claude Code (Sonnet 5). Risk class R
-  (unchanged). Base -> ending commit: `d8c2c09` -> this commit; same
-  branch `tooling/workflow-v3.2-slice2-contract-harness`. Bounded
-  correction pass applying Sol's five re-review findings against the
-  frozen Slice 2 implementation, relayed as text (no separate `###
-  Work review` commit exists on this branch or its origin prior to
-  this one). Scope held exactly to the harness's own files, per the
-  correction's explicit boundary — no production parser, workflow-
-  version consumer, or Slice 3 file touched.
-- Five findings addressed:
-  1. **Import boundary strengthened for equivalent forms/aliases** —
-     `test_harness_import_boundary.py`'s detectors now catch `from app
-     import normalization` (an equivalent whole-module bind, not just
-     `import app.normalization`) and alias-resolved dynamic calls (e.g.
-     `from importlib import import_module as load; load(...)`), via a
-     new import-alias map that resolves any locally-bound name back to
-     its canonical dotted origin before checking it against the banned
-     set. Two new isolated synthetic regressions added.
-  2. **Expected-output validation made genuinely parser/field-
-     discriminated** — replaced the generic "str or int" check with
-     `schema.OUTPUT_FIELD_TYPES` (location's four fields: `str`;
-     salary/experience numeric bounds: `int`; salary currency/period:
-     `str`), enforced in `loader._load_expected_output`. `bool` is
-     still rejected outright before the field-specific check runs
-     (Python's `bool` is an `int` subclass). `None` is still accepted
-     only paired with `unavailable` provenance (unchanged, `ExpectedField`'s
-     own invariant).
-  3. **Record traceability enforced**: a record_id's slug must start
-     with its own `parser` name; a base record's record_id/transform
-     must be `variant-base`/`transform-none`; a generated record must
-     never use `variant-base` (reserved, so record_id alone signals
-     kind); a base record's `historical_defect_ref` must equal its
-     guard inventory entry's; and (in `collect_all`, requiring the
-     full three-file set) a generated record's `base_record_id` must
-     resolve to an actual **base** record (never another generated
-     record) sharing its parser, guard_ref, `original_input`, and
-     `target` exactly.
-  4. **`contract_mutation_witnesses.py` now loads records through the
-     fail-closed loader** (`tests.contracts.loader.collect_all`),
-     never raw `json.loads`. Before running any witness, it now
-     requires: the registry's declared record exists in the loaded
-     set; it is that guard's designated primary witness; its
-     parser/guard_ref agree with the registry entry; and the
-     registry's own `input_` is byte-for-byte identical to the
-     record's `expected_transformed_input`. The restored-output
-     assertion now compares against the loaded record's own
-     `expected_output` directly, not a second raw JSON read.
-  5. **Experience-adapter docstring corrected**: it previously implied
-     the non-target field is always `None`; corrected to state that a
-     record may deliberately populate both `title` and `description`
-     together for a cross-source witness (e.g.
-     `experience/g05-internal-conflict-precedence`, whose own record
-     does exactly this), with `target.input_field` naming the field
-     the guard's mechanism most centrally concerns, not "the only
-     non-null one."
-- Finding 5's docstring edit changed `adapters/experience.py`'s own
-  file bytes, which correctly triggered a `STALE adapter fingerprint`
-  failure for all 21 experience guards on the next witness run
-  (confirming the staleness check, corrected in Iteration 1, genuinely
-  fires on a real, intentional change). Recomputed and re-froze only
-  `_FROZEN_ADAPTER_FP["experience"]` (`03c559ec88386dc7` ->
-  `dfa142423607a5a3`); every other frozen fingerprint (both other
-  adapters, all three parser sources, all 34 records) is byte-identical
-  to Iteration 1's baseline, confirmed by recomputing all of them fresh
-  and diffing.
-- Direct fault-injection tests added for every accepted-invalid case
-  above: 2 new import-boundary synthetic regressions (finding 1); 5 new
-  loader tests covering wrong-type values for each parser/field
-  combination plus a bool-still-rejected control (finding 2); 9 new
-  loader tests covering the parser-prefix mismatch, base-transform/
-  variant misuse, generated-variant-base masquerade, historical_defect_ref
-  disagreement, generated-record chaining to a non-base record, and
-  generated-record original_input/target mismatches (finding 3); 6 new
-  tests exercising `_check_record_matches_registry_entry` directly
-  (missing record, non-primary witness, guard/parser/input mismatches,
-  and the real matching case) (finding 4).
-- Files changed: `backend/scripts/contract_mutation_witnesses.py`,
-  `backend/tests/contracts/adapters/experience.py`,
-  `backend/tests/contracts/loader.py`,
-  `backend/tests/contracts/mutation_registry.py` (frozen adapter
-  fingerprint re-freeze only),
-  `backend/tests/contracts/schema.py`,
-  `backend/tests/contracts/test_harness_import_boundary.py`,
-  `backend/tests/contracts/test_harness_self.py`, this handoff entry.
-  No production parser, existing fixture, existing parser test,
-  verifier, workflow document, hook, metadata validator, dependency
-  file, or other version-bearing consumer touched. The corrected
-  35-historical/34-active/1-superseded inventory is unchanged (asserted
-  fresh at import time, confirmed).
-- Mutation-witness acceptance run: `python -m
-  scripts.contract_mutation_witnesses` — **34 passed, 0 failed**
-  (re-run after the adapter-fingerprint re-freeze above).
-- Verification: `ruff format --check`/`ruff check`/`mypy` all pass.
-  `python -m scripts.check_repo` exits 0. Genuine external `python -m
-  scripts.verify --level routine --focus
-  tests/contracts/test_location_contract.py
-  tests/contracts/test_salary_contract.py
-  tests/contracts/test_experience_contract.py
-  tests/contracts/test_harness_self.py
-  tests/contracts/test_harness_import_boundary.py` — all 11 steps PASS:
-  **123 focused / 2316 full-suite tests** (both counts grew by exactly
-  21, matching the 21 new fault-injection/regression tests added across
-  the two test files).
-- **Follow-up bounded correction (same commit lineage, still Iteration
-  2 — Sol independently reproduced this before any review was recorded
-  against the entry above, so it is folded in here rather than forcing
-  a premature ledger rotation that would delete Iteration 1's still-
-  unreviewed original Work done)**: `_dynamic_bypass_calls` (added by
-  finding 1 above) only handled an `ast.Attribute` whose immediate
-  `.value` was an `ast.Name` — a nested chain two or more levels deep
-  (`importlib.util.spec_from_file_location`, or the same via `import
-  importlib as il; il.util.spec_from_file_location(...)`) fell through
-  entirely, yielding zero findings despite being named in
-  `_BANNED_DOTTED_CALLS` and the function's own docstring. Fixed by
-  replacing the one-level handling with a recursive `_dotted_path`
-  reconstruction of the complete attribute chain, canonicalizing only
-  the chain's root through the alias map
-  (`_canonicalize_dotted_path`), then comparing the resulting full
-  path against the closed banned-call set — never broadened into a
-  general analyzer. Both exact reproductions and two positive controls
-  (an unrelated two-level chain `os.path.join`, and an unrelated
-  three-level chain with no import statement at all) added as isolated
-  synthetic regressions. This touched only
-  `test_harness_import_boundary.py` (a test file, not a source/adapter/
-  record file), so no fingerprint re-freeze was needed or performed —
-  confirmed by all 34 mutation witnesses passing unmodified. Genuine
-  external `python -m scripts.verify --level routine --focus` (same
-  five-file selector as above) re-run after this fix: all 11 steps
-  PASS, **127 focused / 2320 full-suite tests** (both grew by exactly
-  4, matching the 4 new synthetic regressions/positive controls added)
-  — superseded by the second follow-up below, which is now the final,
-  current count.
-- **Second follow-up bounded correction (same reasoning as the first:
-  folded into this still-unreviewed Iteration 2 rather than rotating)**:
-  `_build_alias_map`'s `ast.Import` branch mapped a plain dotted
-  import's bound name to the *complete* imported path even without an
-  `as` clause — `import importlib.util` binds only the name
-  `importlib` (referring to the top-level package itself; `.util` is
-  reached by ordinary attribute access), but the prior code mapped
-  `alias_map["importlib"]` to `"importlib.util"`, so canonicalizing
-  `importlib.util.spec_from_file_location` produced the wrong, doubled
-  path `importlib.util.util.spec_from_file_location` and the banned
-  call escaped detection — also making the function's own docstring
-  claim about `import importlib.util` false. Fixed: without `as`, the
-  bound root now canonicalizes to itself; only `import a.b.c as d`
-  binds `d` to the complete dotted path. Added the exact `import
-  importlib.util` reproduction as an isolated regression, a direct
-  test of `_build_alias_map`'s corrected binding for that exact
-  statement, and a direct canonicalization-level test proving `import
-  os.path` canonicalizes `os.path.join` to exactly `os.path.join` (not
-  `os.path.path.join`) — the latter is a genuine proof, not merely an
-  absence-of-finding assertion, since the pre-fix doubled path for
-  `os.path` also happened not to be in the banned set, so the existing
-  higher-level positive-control test for it had passed even under the
-  bug. Touched only `test_harness_import_boundary.py` again — no
-  fingerprint re-freeze needed, confirmed by all 34 mutation witnesses
-  passing unmodified. Genuine external `python -m scripts.verify
-  --level routine --focus` (same five-file selector) re-run after this
-  fix: all 11 steps PASS, **130 focused / 2323 full-suite tests** (both
-  grew by exactly 3, matching the 3 new tests added) — this is the
-  final, current count.
-- Deviations/known limitations: unchanged from Iteration 1's disclosed
-  limitations. No new limitations introduced — this pass only tightens
-  validation and traceability; no behavior change to any of the 34
-  primary-witness records' own expected outputs.
-- STOP — this is still Slice 2 only, now corrected. Do not implement
-  Slice 3, touch any production parser/fixture/existing test, or begin
-  another Phase 3/4 parser. Do not merge without separate explicit user
-  authorization.
-
-```workflow-metadata
-workflow_version: v3.1-pilot
-slice_kind: tooling
-verification_level: routine
-focused_test_selector: tests/contracts/test_location_contract.py tests/contracts/test_salary_contract.py tests/contracts/test_experience_contract.py tests/contracts/test_harness_self.py tests/contracts/test_harness_import_boundary.py
-focused_test_count: 130
-full_suite_count: 2323
-```
-
-### Work review
-
-- Date/reviewer: 2026-09-13, Codex/Sol. Reviewed commit: `379f69b` on
-  `tooling/workflow-v3.2-slice2-contract-harness` (the final of three
-  bounded corrections folded into this Iteration 2 entry — Sol's five
-  re-review findings, the nested-attribute-chain fix, and this
-  `ast.Import` binding-semantics fix).
-- Verdict: **Approved. No findings.**
-- Independent verification performed: ran the 130 focused contract
-  tests, all 34 mutation witnesses, `check_repo.py`, and `git diff
-  --check` — all passed. The reported 2,323-test full-suite result was
-  **not independently repeated**.
-- Next action: awaiting the user's separate authorization before any
-  merge, Workflow v3.2 activation, Slice 3 work, or another parser.
-- STOP — no merge, no Workflow v3.2 activation, no Slice 3, no other
-  Phase 3/4 parser, without explicit user authorization.
-
-### Merge record
-
-- Date: 2026-09-13. Merged `tooling/workflow-v3.2-slice2-contract-harness`
-  at approved, reviewed commit `96917b2` (Codex/Sol "Approved. No
-  findings." verdict above) into `main` via `git merge --no-ff`. Merge
-  commit: `fe82659a072f93050aaf77c7ee29d2543200d978`. Pre-merge `main`/
-  `origin/main` tip (rollback boundary): `d28bf03533b110b030061a6e22c76217d9bf001b`.
-- Pre-merge checks: confirmed the feature branch and its origin both sat
-  at `96917b2`, and `main`/`origin/main` were both clean and synchronized
-  at `d28bf03` before merging.
-- Post-merge verification, all run directly against merged `main`:
-  - `git diff --quiet 96917b2 main` — zero content difference between
-    merged `main` and the approved feature-branch tip, confirmed.
-  - `git diff --check` — clean.
-  - `python -m scripts.check_repo` — clean.
-  - No migration/schema changes: `git diff --stat d28bf03 main --
-    backend/alembic backend/migrations` and `git log --oneline
-    d28bf03..main -- backend/alembic backend/migrations` both empty.
-  - `python -m scripts.verify --level routine --focus
-    tests/contracts/test_location_contract.py
-    tests/contracts/test_salary_contract.py
-    tests/contracts/test_experience_contract.py
-    tests/contracts/test_harness_self.py
-    tests/contracts/test_harness_import_boundary.py` — **all 11 checks
-    PASS**, 130 focused / 2323 full-suite tests passed.
-  - `python -m scripts.contract_mutation_witnesses` — **34 passed, 0
-    failed**, out of 34 active-guard witnesses (`experience/g07` remains
-    correctly excluded as superseded).
-- Pushed: `main` pushed to `origin/main` (`d28bf03..fe82659`); both now
-  synchronized at `fe82659a072f93050aaf77c7ee29d2543200d978`.
-- Workflow v3.1 remains the sole active workflow. Workflow v3.2 is not
-  activated by this merge. Slice 3 and any other parser remain
-  unauthorized.
-- STOP — report the synchronized final `main` SHA and stop. No Workflow
-  v3.2 activation, no Slice 3, no other Phase 3/4 parser, without
-  separate explicit user authorization.
-
----
-
-## Iteration 2
-
-### Work done
-
 - Date/agent: 2026-09-13, Claude Code (Sonnet 5). Risk class H (process/
   security-relevant tooling — touches `.claude/hooks/*.py` and every
   workflow-governing document/checker; "when uncertain, use the
@@ -772,17 +533,17 @@ findings: none
 
 ---
 
-## Iteration 3
+## Iteration 2
 
 ### Work done
 
 - Date/agent: 2026-09-15, Claude Code (Sonnet 5). Risk class H (same
-  process/security-relevant tooling as Iteration 2). Base `B` -> candidate
+  process/security-relevant tooling as Iteration 1). Base `B` -> candidate
   `C7`: `66202c23facff6bd33d8f624e327cabdd40708b4` -> this commit; branch
   `tooling/workflow-v3.2-activation` (continued). `slice_kind: tooling`.
   `slice_id: 2026-09-13-workflow-v3-2-activation-66202c2` (unchanged --
   same base, same underlying activation slice).
-- **Supersedes Iteration 2's review record.** Sol approved `C6` =
+- **Supersedes Iteration 1's review record.** Sol approved `C6` =
   `332947196d028b9a46a52aa3c44e51028d5f7e0c` / `A6` =
   `4ee69a96981c01b12bce1ad3ce7706ff34b5a149`, with `R` =
   `0c42aae891a24181f871df56e52b732322fd1d0e` recording that verdict.
@@ -835,7 +596,7 @@ findings: none
   blob does not; and a real coordinator-generated receipt's hashes agree
   with `check_review.py`'s independent recomputation even after the
   authoring checkout is subsequently mutated on disk.
-- Deviations/known limitations: none beyond the superseded Iteration 2
+- Deviations/known limitations: none beyond the superseded Iteration 1
   review record noted above.
 
 #### Correction round 1 (own follow-on finding, before Sol re-review)
@@ -864,12 +625,12 @@ findings: none
   `workflow-review-metadata`/`workflow-escalation-metadata` block,
   instead of scoping to the newest `## Iteration N` section the way
   `check_handoff.py`'s own metadata-block search already does. Once
-  Iteration 2's real `R` (recording Sol's approval of `C6`/`A6`,
+  Iteration 1's real `R` (recording Sol's approval of `C6`/`A6`,
   preserved unchanged) and this iteration's own review block coexist in
   the same file, that unscoped search finds both and raises "more than
   one block found" -- this is not merely a test artifact: it would also
   have broken the real `R` for this iteration once authored, since
-  Iteration 2's historical block never goes away.
+  Iteration 1's historical block never goes away.
 - Fix: new `_latest_iteration_text` scopes to the text from the newest
   `## Iteration N` heading onward (mirroring `check_handoff.py`'s own
   per-iteration scoping); both `extract_review_metadata_text` and
@@ -1092,3 +853,195 @@ findings: none
 - STOP — report the synchronized final `main` SHA and stop. No `Q`
   artifact, no Slice 3, no other Phase 3/4 parser, without separate
   explicit user authorization.
+- **Post-merge evidence status:** no `Q` exists for this merge; see ADR
+  0009's "Post-merge evidence: one-time bootstrap exception for
+  M = 9649cba" for the full record. `validate_published` will fail for
+  this `(C10, A10, R, M)` tuple unless a conforming `Q` is later
+  authorized and published. The post-merge verification above (zero
+  content diff, clean statics, 12/12 canonical-verifier checks, 34/34
+  mutation witnesses) was genuinely run and reported here; it can be
+  rerun against `M`'s tree for equivalent fresh evidence, but the
+  original run's own output was not captured as a durable artifact.
+
+---
+
+## Iteration 3
+
+### Work done
+
+- Date/agent: 2026-09-18, Claude Code (Sonnet 5). Risk class H
+  (process/security-relevant tooling, same category as every prior
+  Workflow v3.2 tooling slice). Base `B` -> candidate `C`:
+  `27a2a5e2cf81b2e347d1fa19012822fe1f0b6198` -> this commit; new branch
+  `tooling/workflow-v3.2-post-merge-q-producer`, cut from `main` after a
+  freshly verified clean checkout (`main` == `origin/main`, `check_repo.py`
+  clean, `git diff --check` clean). `slice_kind: tooling`.
+  `slice_id: 2026-09-18-post-merge-q-producer-27a2a5e`. Implements the
+  bounded, proposal-reviewed "post-merge `Q`-evidence producer" slice:
+  Workflow v3.2's `C -> A -> R -> M -> Q` chain had a validator for `Q`
+  (`check_review.validate_q`/`validate_published`) but no producer at
+  all until this slice.
+- **Producer:** `verification_coordinator.run_post_merge_verification`,
+  taking a new `PostMergeEligibleRequest` (only the five chain commit
+  SHAs -- `candidate_sha`, `publication_sha`, `review_sha`, `merge_sha`,
+  `expected_first_parent` -- no `base_sha`/`slice_id`/receipt-reference
+  field for a caller to forge). Every one of those values is instead
+  derived from `check_review.validate_c_a_r_chain`'s own independently
+  re-validated chain output, before any worktree is created. The
+  migration trigger is computed over that same chain-derived
+  `base_sha..candidate_sha` range -- never a caller-supplied range and
+  never `base_sha..merge_sha` -- so nothing external can suppress a
+  genuine migration requirement. Verification runs in a disposable
+  detached worktree at `M` (always full/final, never gated or
+  focus-narrowed), reusing the receipt producer's own worktree/lock/
+  cache-cleanup lifecycle under its own `post-merge-coordinator-`
+  run-directory prefix. Emission is explicitly fail-closed: a failed
+  verification run, a cleanup failure, or an artifact that would fail
+  its own self-validation (`check_review._validate_post_merge_artifact_
+  schema`/`_validate_post_merge_artifact_evidence`, called before the
+  write) all produce *no file at all* -- a deliberate divergence from
+  the existing receipt producer, which does write a receipt marked
+  `approval_eligible: false` on a failed run. The function only ever
+  writes the artifact file; committing `Q` (bundling that file with the
+  append-only merge-record edit to the handoff, per the mainline-`Q`-
+  next policy in `LLM_WORKFLOW.md`) remains a separate step.
+- **Cleanup-prefix fix:** `cleanup_stale_coordinator_dirs` is now
+  parameterized (`prefix: str = "coordinator-"`), restricted to a closed
+  set of exactly two known prefixes (`"coordinator-"`,
+  `"post-merge-coordinator-"`); an unrecognized prefix (including an
+  empty string, which would otherwise match every directory) is rejected
+  before any directory is ever scanned.
+- **Release-sequence guard:** new `confirm_main_unchanged(expected_sha)`
+  re-fetches `origin/main` and refuses if it no longer equals
+  `expected_sha` -- run immediately before pushing a locally-prepared
+  `M`/`Q` together, so a remote that advanced in the meantime is caught
+  before the push rather than raced against.
+- **Adversarial self-review** (fresh subagent, full twelve-question
+  pass; see `LLM_WORKFLOW.md`'s "Adversarial implementer self-review"):
+  no Critical/High findings. Confirmed clean, with concrete evidence:
+  the stage-1/2 pre-flight (`validate_c_a_r_chain`/`validate_merge`)
+  genuinely runs before any worktree is created on every path; every
+  raise point between the worktree stage and the artifact write is an
+  unguarded `raise` with no exception-swallowing; `base_sha` is assigned
+  exactly once, from the chain-derived `published_base_sha`, with no
+  other path into the migration decision; the prefix-rejection in
+  `cleanup_stale_coordinator_dirs` is the function's literal first
+  statement; there is no TOCTOU window since `A`/`R` content is read
+  from immutable commit objects and `M`'s worktree is independently
+  snapshotted before/after. Three Medium findings (test-rigor gaps, not
+  implementation defects) were fixed in response: two rejection tests
+  now also assert a worktree-creation guard (proving *when* rejection
+  happens, not just *that* it does, since `.verify-tmp` absence alone
+  couldn't distinguish "never created" from "created and cleaned up");
+  the success and verify-invocation-failure tests now assert
+  `.verify-tmp` is clean (empty or absent) directly, since it is
+  gitignored and `git status` is blind to it; and a new regression
+  (`test_post_merge_verification_writes_no_artifact_when_self_
+  validation_fails`) proves the artifact's own self-validation gate --
+  not just the `returncode`/`all_passed` check -- independently blocks
+  emission, using a stand-in `verify.py` that mis-reports `all_passed:
+  true` while silently omitting a required step. Three Low findings
+  were reviewed and accepted as pre-existing, informational, and out of
+  this slice's bounded scope (see Deviations below), not fixed here.
+- **Documentation (the three proposal-approved addenda):** `docs/
+  DECISIONS/0009-workflow-v3.2-activation.md` gains "Post-merge
+  evidence: one-time bootstrap exception for M = 9649cba" (the corrected
+  explanation: a conforming `Q` remains constructible on a sibling
+  branch at any time, since Git places no limit on a commit's children
+  -- what is actually foreclosed is only `main`'s own already-pushed
+  linear continuation from `M`; the reason is procedural, not technical,
+  since `M`'s own tree already contained the `Q` tooling; the
+  preserved evidence is reported and rerunnable, not "independently
+  reproducible from Git") and "Post-merge (`Q`) evidence producer"
+  (describing this slice's implementation). `docs/LLM_WORKFLOW.md` gains
+  "Post-merge (`Q`) evidence producer" and "Project policy: `Q` is the
+  next mainline commit after `M`" (explicitly framed as this project's
+  own policy choice, not a `validate_q` requirement; a precondition --
+  an approved producer or evidence-capture procedure must exist *before*
+  merge authorization, not after; the mainline-shape rule; a fail-closed
+  stop-at-`M` rule if post-merge verification or `Q` validation ever
+  fails; and the release sequence tying `confirm_main_unchanged` into
+  the push step). This handoff gains the "Post-merge evidence status"
+  pointer note on the prior Merge record entry (above) and this Work
+  done entry itself.
+- Files changed: `backend/scripts/verification_coordinator.py` (edited);
+  `backend/tests/test_verification_coordinator_post_merge.py` (new, 16
+  tests); `docs/DECISIONS/0009-workflow-v3.2-activation.md` (edited);
+  `docs/LLM_WORKFLOW.md` (edited); `docs/LLM_HANDOFF.md` (this entry,
+  the prior entry's pointer note, and the two-iteration rotation below).
+  No production parser (`app/normalization/*`), model, migration, or
+  live-provider file touched; no database lifecycle operation performed.
+- **Two-iteration rotation applied**: the oldest iteration (the Slice 2
+  contract-harness bounded-correction pass, already merged) is deleted;
+  the former Iteration 2 (the original v3.2 activation candidate/review
+  cycle) and Iteration 3 (the C7-C10 correction saga plus the merge
+  record) are renumbered to Iteration 1 and Iteration 2 respectively,
+  with every in-prose cross-reference to the renumbered iteration
+  updated to match; this entry becomes the new Iteration 3.
+- Verification: `ruff format --check`/`ruff check`/`mypy` clean (159
+  source files, backend + `.claude/hooks`). Full pytest suite: **2663
+  passed**. All 34 mutation witnesses pass unmodified. `check_repo.py`
+  exits 0. `git diff --check` clean.
+- Deviations/known limitations (all reviewed, accepted, non-blocking):
+  (1) on a worktree-removal failure, cleanup still deletes the physical
+  worktree directory without `git worktree remove`/`prune`, which can
+  leave a dangling `.git/worktrees/<id>` metadata entry -- inherited,
+  byte-identical behavior from the existing `run_receipt_eligible_
+  verification`, not introduced or changed by this slice; (2)
+  `cleanup_stale_coordinator_dirs` cannot detect or repair that kind of
+  leak, since it only scans `COORDINATOR_RUN_ROOT`, never `git worktree
+  list` -- same shared, pre-existing limitation; (3) no dedup/lock scopes
+  a given `merge_sha` itself, so two concurrent producer runs against the
+  same `M` could both succeed and coexist as separate untracked artifact
+  files under `docs/post-merge/<merge_sha>/` -- harmless in practice,
+  since `validate_q` requires exactly one *committed* artifact addition,
+  and the actual choice of which artifact becomes `Q` is made at commit
+  time, not by the producer.
+- STOP — this is a bounded tooling slice only. Do not author `R`, merge,
+  create a real `M`/`Q` for this slice or retroactively for `M =
+  9649cba`, begin another slice, rebase, or force-push.
+
+```workflow-metadata
+workflow_version: v3.2
+state: published
+slice_id: 2026-09-18-post-merge-q-producer-27a2a5e
+slice_kind: tooling
+risk_class: H
+base_sha: 27a2a5e2cf81b2e347d1fa19012822fe1f0b6198
+declared_gate: final
+executed_gate: final
+candidate_sha: 3397e1d37a558b9e714c5970ed66f4d98989e7b6
+receipt_id: a78ee96c-ee63-4e70-9269-4d8f52874371
+receipt_path: docs/verification-receipts/3397e1d37a558b9e714c5970ed66f4d98989e7b6/a78ee96c-ee63-4e70-9269-4d8f52874371.json
+full_suite_count: 2663
+focused_test_count: 16
+mutation_witness_count: 34
+```
+
+### Work review
+
+- Sol's review of `C` = `3397e1d37a558b9e714c5970ed66f4d98989e7b6` and
+  `A` = `a7f53f80366de4699fe152c399c752cf05fe7f9e`: **Approved, no
+  executable findings.** Independent verification performed: ran all 16
+  new post-merge-`Q`-producer tests; validated the committed `C..A`
+  transition and receipt (`approval_eligible` recomputes to `true`);
+  confirmed `check_repo.py` and `git diff --check` pass; confirmed the
+  branch is clean and synchronized. The full 2,663-test suite was not
+  independently re-run.
+
+```workflow-review-metadata
+schema_version: 2
+slice_id: 2026-09-18-post-merge-q-producer-27a2a5e
+risk_class: H
+reviewer: Sol
+reviewer_role: primary
+reviewer_model: Sol Medium
+reviewed_at: 2026-09-18T00:00:00Z
+candidate_sha: 3397e1d37a558b9e714c5970ed66f4d98989e7b6
+publication_commit_sha: a7f53f80366de4699fe152c399c752cf05fe7f9e
+receipt_path: docs/verification-receipts/3397e1d37a558b9e714c5970ed66f4d98989e7b6/a78ee96c-ee63-4e70-9269-4d8f52874371.json
+receipt_id: a78ee96c-ee63-4e70-9269-4d8f52874371
+gate: final
+verdict: approved
+findings: none
+```
