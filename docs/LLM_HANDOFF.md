@@ -1003,10 +1003,17 @@ findings: none
 
 ```workflow-metadata
 workflow_version: v3.2
-state: pending
+state: published
 slice_id: 2026-09-18-post-merge-q-producer-27a2a5e
 slice_kind: tooling
 risk_class: H
 base_sha: 27a2a5e2cf81b2e347d1fa19012822fe1f0b6198
 declared_gate: final
+executed_gate: final
+candidate_sha: 3397e1d37a558b9e714c5970ed66f4d98989e7b6
+receipt_id: a78ee96c-ee63-4e70-9269-4d8f52874371
+receipt_path: docs/verification-receipts/3397e1d37a558b9e714c5970ed66f4d98989e7b6/a78ee96c-ee63-4e70-9269-4d8f52874371.json
+full_suite_count: 2663
+focused_test_count: 16
+mutation_witness_count: 34
 ```
