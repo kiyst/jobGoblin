@@ -838,10 +838,17 @@ findings: none
 
 ```workflow-metadata
 workflow_version: v3.2
-state: pending
+state: published
 slice_id: 2026-09-18-skill-taxonomy-foundation-21dee74
 slice_kind: tooling
 risk_class: H
 base_sha: 21dee74bae122bc634c77d3d0c55d03be128b716
 declared_gate: final
+executed_gate: final
+candidate_sha: 138f68d8aee7931662877c9971e85ecd51ffa0c9
+receipt_id: d4b54862-f2f1-425e-b12b-5636653259db
+receipt_path: docs/verification-receipts/138f68d8aee7931662877c9971e85ecd51ffa0c9/d4b54862-f2f1-425e-b12b-5636653259db.json
+full_suite_count: 2730
+focused_test_count: 129
+mutation_witness_count: 34
 ```
