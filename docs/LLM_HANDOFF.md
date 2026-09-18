@@ -1045,3 +1045,44 @@ gate: final
 verdict: approved
 findings: none
 ```
+
+### Merge record
+
+- Date: 2026-09-18. Merged `tooling/workflow-v3.2-post-merge-q-producer`
+  at approved, reviewed commit `2635ffc608c20526c3ee7e5e12c7411c003ad5f5`
+  (Sol's "Approved, no executable findings" verdict on `C`/`A`, above)
+  into `main` via `git merge --no-ff`. Merge commit:
+  `c33accdadd54fab756e8f4aef5be6a86123e148b`. Pre-merge `main`/
+  `origin/main` tip (rollback boundary):
+  `27a2a5e2cf81b2e347d1fa19012822fe1f0b6198`.
+- Pre-merge checks: confirmed the feature branch and its origin both sat
+  at `2635ffc`, and `main`/`origin/main` were both clean and
+  synchronized at `27a2a5e` before merging.
+- **This is the first merge to follow the documented `M -> Q` release
+  sequence** (`LLM_WORKFLOW.md`'s "Project policy: `Q` is the next
+  mainline commit after `M`"): `M` was created locally, not pushed;
+  `verification_coordinator.run_post_merge_verification` was run
+  against `M` in a disposable detached worktree (always full/final);
+  its resulting artifact
+  (`docs/post-merge/c33accdadd54fab756e8f4aef5be6a86123e148b/
+  d1accc51-726b-4011-a41a-d24e4e12baaa.json`) reported all 11 steps
+  PASS, 2,663 full-suite tests, 34/34 mutation witnesses, and an
+  identical tracked-tree SHA before and after (zero content drift); this
+  commit (`Q`) bundles that artifact addition with this merge-record
+  append, as the single commit immediately following `M` on `main`'s
+  mainline — never a merge-record-only commit.
+- Post-merge verification, all run directly against merged `main`
+  (independent of the `Q` producer's own run above):
+  - `git diff --quiet 2635ffc HEAD` — zero content difference between
+    merged `main` and the approved feature-branch tip, confirmed.
+  - `git diff --check` — clean.
+  - `python -m scripts.check_repo` — clean.
+  - No migration/schema changes: `git diff --stat 27a2a5e..HEAD --
+    backend/alembic backend/migrations` and `git log --oneline
+    27a2a5e..HEAD -- backend/alembic backend/migrations` both empty.
+  - `check_review.validate_published(C, A, R, M, Q)` — **succeeds**,
+    returning the independently re-validated artifact, confirming the
+    complete `C -> A -> R -> M -> Q` chain.
+- STOP — report the synchronized final `main` SHA and stop. No Slice 3,
+  no other Phase 3/4 parser, no other new slice, without separate
+  explicit user authorization.
