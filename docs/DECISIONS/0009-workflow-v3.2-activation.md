@@ -116,3 +116,85 @@ never a precedent for skipping schema validation on any later slice.
   undocumented; `migration_matrix.run_full_matrix` is exercised by real, passing
   fault-injection tests but is still not triggered by this slice's own candidate diff,
   since this tooling slice touches no migration/model path.
+
+## Post-merge evidence: one-time bootstrap exception for M = 9649cba
+
+`M = 9649cba1deebdc73911790de3ccb2ac51fd483a6` (the merge of
+`tooling/workflow-v3.2-activation` into `main`) has no `Q`. `main`'s existing direct child
+of `M`, `27a2a5e2cf81b2e347d1fa19012822fe1f0b6198` (the merge-record commit), adds no
+post-merge artifact and therefore fails `check_review.validate_q(M, 27a2a5e)`:
+`ReviewValidationError: M..Q must add exactly one post-merge artifact (status A), got []` —
+independently confirmed by direct invocation. `check_review.validate_published(C10, A10, R,
+M, *)` will fail unless a conforming sibling `Q` is later authorized and published; the gap
+is absent-for-now, not impossible — `M` can still take a `Q`-shaped direct child on a
+separate branch at any time (Git places no limit on how many direct children a commit can
+have).
+
+This is accepted as a one-time bootstrap exception, not a precedent. The reason is
+procedural, not technical: `M`'s own merged tree already contains the `validate_q`/
+`validate_published` tooling (this merge is what introduced it to `main`), so nothing
+prevented authoring a conforming `Q` immediately after `M`. What happened instead is that
+the agent stopped as instructed after the merge, then authored the merge-record commit as
+the next, expected step — before the `Q` requirement was checked against Git. That
+merge-record commit occupies the position `validate_q` would otherwise have checked, and
+undoing that would mean rewriting a published commit, which this project does not do.
+
+The underlying verification checks are not lost, but they are reported, not independently
+reproducible from Git. `docs/LLM_HANDOFF.md`'s "Merge record" entry for this merge (dated
+2026-09-17) reports: zero content diff between merged `main` and `R`, `git diff --check`
+clean, `check_repo.py` clean, no migration/schema changes, and a canonical-verifier run of
+all 12 checks PASS (480 focused / 2,647 full-suite tests, 34/34 mutation witnesses) run
+directly against `M`'s own tree before the merge-record commit existed. Git preserves that
+prose report and the merge itself, but not the original run's own output (step timings,
+environment descriptor, receipt-shaped JSON) — that was never captured as a durable
+artifact. The same checks can be rerun against `M`'s tree at any time to obtain equivalent
+(not identical) fresh evidence.
+
+Consequence: any future automated check that requires `validate_published` to succeed for
+this exact slice will fail until a conforming `Q` is authored and published for it, which is
+not currently planned. Nothing in this codebase today makes that call a required gate. This
+entry is the record of why the gap exists and that it was a deliberate, reviewed
+exception — not an oversight to silently work around, and not a precedent: it does not
+authorize repeating this pattern for any future slice. See "Project policy: `Q` is the next
+mainline commit after `M`" in `LLM_WORKFLOW.md`, which requires an approved `Q` producer or
+evidence-capture procedure *before* merge authorization for every future slice, and requires
+stopping at `M` — never publishing a merge-record-only commit — if post-merge verification
+or `Q` validation fails.
+
+## Post-merge (`Q`) evidence producer
+
+Implemented in this slice (`tooling/workflow-v3.2-post-merge-q-producer`):
+`verification_coordinator.run_post_merge_verification`, alongside a new
+`PostMergeEligibleRequest` dataclass carrying only the five chain commit SHAs (`candidate_
+sha`, `publication_sha`, `review_sha`, `merge_sha`, `expected_first_parent`) — no
+`base_sha`/`slice_id`/receipt-reference field exists for a caller to forge. Every one of
+those values is instead derived from `check_review.validate_c_a_r_chain`'s own independently
+re-validated chain output before any worktree is created. The migration trigger is computed
+over that same chain-derived `base_sha..candidate_sha` range — never a caller-supplied range
+and never `base_sha..merge_sha` — so a forged or omitted value can never suppress a genuine
+migration requirement. Verification runs in a disposable detached worktree at `M` (always
+full/final, never gated or focus-narrowed), reusing the receipt producer's own worktree/
+lock/cache-cleanup lifecycle under its own `post-merge-coordinator-` run-directory prefix
+(`cleanup_stale_coordinator_dirs` is now parameterized by prefix and rejects any prefix
+outside the two known ones, before ever scanning a directory). Emission is explicitly
+fail-closed: a failed verification run, a cleanup failure, or an artifact that would fail
+its own self-validation all produce *no file at all* — never a durable-but-ineligible
+artifact, since `Q`'s only meaning is structural (its committed existence is what `validate_
+q` checks) and a failed run must never be mistaken for evidence. The function only ever
+writes the artifact file; committing `Q` (bundling that file with the append-only
+merge-record edit to the handoff, per the mainline-`Q`-next policy below) remains a separate
+step. A small `confirm_main_unchanged` guard supports the release sequence: re-fetch
+`origin/main` immediately before pushing a locally-prepared `M`/`Q` together, refusing to
+push if the remote advanced in the meantime.
+
+Proven by genuine disposable-Git-repository tests (`tests/test_verification_coordinator_
+post_merge.py`): a real local `C -> A -> R -> M -> Q` chain passes `check_review.
+validate_published` end to end; a failed verification run and a worktree-removal (cleanup)
+failure both write no artifact; incorrect `M` parentage and a malformed committed `A`
+receipt (both a schema-invalid variant and a schema-valid-but-cross-referenced-wrong
+variant) are all rejected before any worktree is created; a candidate genuinely touching a
+migration-trigger path drives `--migration-required` from the chain-derived base, with a
+negative control for an unrelated candidate; the two cleanup-prefix scopes never cross, an
+unknown prefix is rejected before any directory scan, and an actively-locked directory of
+either prefix is left alone; and the release-sequence guard both passes when the remote is
+unchanged and rejects when a genuine second push advances it.
