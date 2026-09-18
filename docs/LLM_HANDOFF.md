@@ -780,9 +780,28 @@ findings: none
   correctly rejected, just under the "not reachable" message rather than
   "blank") left as-is — fails closed either way, a message-clarity nit
   only.
+- **Real gap found by the tooling's own fail-closed design, not a review
+  finding**: `verification_scope.classify_path` correctly refused to
+  classify the 12 new non-Python YAML fixture files under
+  `backend/tests/fixtures/taxonomy/` (`OwnerMappingRequiredError` —
+  "no declared exact rule"), exactly as it's designed to for any
+  unmapped non-`.py` path under `backend/tests/`. A new directory
+  prefix was not an option (the two existing prefix rules must stay
+  disjoint); added a new exact-path map, `_TAXONOMY_FIXTURE_FILES`
+  (all 12 files -> `"test-fixture:skill-taxonomy"`), wired into the
+  same validation/lookup path `_RECORD_FILES` already uses. Confirmed
+  this new category never spuriously requires contract-family/guard
+  coverage (`required_contract_families` only recognizes `parser`/
+  `adapter`/`contract-record` kinds against location/salary/
+  experience). 4 new regressions added, including a complete-inventory
+  check (every file actually present in the fixtures directory, not
+  just samples).
 - Files changed: `backend/app/normalization/taxonomy.py` (new);
   `backend/app/taxonomy/skills.yaml` (new); `backend/tests/
-  test_normalization_taxonomy.py` (new, 63 tests); `backend/tests/
+  test_normalization_taxonomy.py` (new, 63 tests);
+  `backend/scripts/verification_scope.py`,
+  `backend/tests/test_verification_scope.py` (edited, 4 new tests —
+  see the fixture-classification gap above); `backend/tests/
   fixtures/taxonomy/*.yaml` (new, 12 fixtures: 11 fault-injection, 1
   positive control);
   `backend/pyproject.toml` (edited — `PyYAML==6.0.3` pin, `yaml.*` mypy
@@ -803,9 +822,11 @@ findings: none
   record/`Q` publication) are renumbered to Iteration 1 and Iteration 2
   respectively; this entry becomes the new Iteration 3.
 - Verification: `ruff format --check`/`ruff check`/`mypy` clean (161
-  source files, backend + `.claude/hooks`). Full pytest suite: **2726
-  passed** (2663 + 63 new). `check_repo.py` exits 0. `git diff --check`
-  clean.
+  source files, backend + `.claude/hooks`). Full pytest suite: **2730
+  passed** (2663 + 63 taxonomy + 4 scope). All 34 mutation witnesses
+  pass unmodified. `check_repo.py` exits 0. `git diff --check` clean.
+  Genuine external `python -m scripts.verify --level routine
+  --compat-v3.1`: all 10 checks PASS.
 - Deviations/known limitations: none beyond what the proposal itself
   already disclosed (a small, explicitly non-exhaustive 15-entry seed;
   the Go/R exact-match positive controls are documented as not
