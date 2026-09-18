@@ -665,7 +665,16 @@ findings: none
   candidate `C`: `21dee74bae122bc634c77d3d0c55d03be128b716` -> this
   commit; new branch `phase-3/skill-taxonomy-foundation`, cut from a
   freshly verified clean `main` (`main` == `origin/main`, `check_repo.py`
-  clean, `git diff --check` clean). `slice_kind: parser`. `slice_id:
+  clean, `git diff --check` clean). `slice_kind: tooling` (not `parser`:
+  `check_handoff.py` requires `slice_kind: parser` to declare a
+  `fixture_path`/`fixture_count` pointing at a single JSON-array
+  regression corpus, the classic classifier-fixture pattern the six
+  merged parsers each use — this slice is deliberately not itself a
+  classifier, so that shape doesn't fit; its own fault-injection
+  fixtures are individual YAML files exercised via `pytest.mark.
+  parametrize`, not one JSON corpus. The future `classify_skill` parser
+  that consumes this taxonomy is the correct place for `slice_kind:
+  parser` and a real fixture corpus). `slice_id:
   2026-09-18-skill-taxonomy-foundation-21dee74`. Implements the
   three-round-negotiated, user-approved skill-taxonomy-foundation
   proposal and its amendments.
@@ -810,7 +819,7 @@ findings: none
 workflow_version: v3.2
 state: pending
 slice_id: 2026-09-18-skill-taxonomy-foundation-21dee74
-slice_kind: parser
+slice_kind: tooling
 risk_class: H
 base_sha: 21dee74bae122bc634c77d3d0c55d03be128b716
 declared_gate: final
