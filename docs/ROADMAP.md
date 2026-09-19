@@ -469,22 +469,34 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   external lookups, no taxonomy — all Phase 4+ or explicitly out-of-scope concerns.
   All six Phase 3 classifier parsers (remote, employment, seniority, experience, salary,
   location) are now merged into `main` — this is still not a Phase 3 completion claim.
-  Title and skill parsers have not been started.
+  Title parser has not been started.
   A seventh slice, the **skill-taxonomy foundation** (Class H; risk classified high
   because ambiguous-alias false matches are Phase 3's own named primary risk, and this
   is novel infrastructure two future parsers depend on, not a "repeated established
-  pattern"), is implemented on `phase-3/skill-taxonomy-foundation` — **candidate/
-  publication stage, not yet reviewed, not merged.** `app/taxonomy/skills.yaml` (a
-  versioned, schema-closed, duplicate-key-rejecting YAML file) and
-  `app/normalization/taxonomy.py` (the loader, canonical-ID grammar reusing
+  pattern"), is **merged into `main` at `1876f7e2168d90e36a1fb46f039cd5969fe49d6c`.**
+  `app/taxonomy/skills.yaml` (a versioned, schema-closed, duplicate-key-rejecting YAML
+  file) and `app/normalization/taxonomy.py` (the loader, canonical-ID grammar reusing
   `app/schemas/identifiers.py::is_canonical_slug()`, and an exact-match-only lookup
   returning a typed `TaxonomyLookupResult`, never a bare `None`) together resolve a raw
   skill string to a canonical entry. Deliberately does not scan free text and does not
-  implement a skill classifier — this slice unblocks a future `classify_skill` parser
-  only. Title normalization is **not** unblocked: job titles are free-form multi-word
-  phrases needing their own, likely hierarchical taxonomy schema, entirely unstarted.
-  Seeded with 15 explicitly reviewed, non-exhaustive entries (see the slice's own
-  proposal record for the frozen table and each alias's rationale).
+  implement a skill classifier — that slice unblocked a future `classify_skill`-style
+  parser only. Title normalization is **not** unblocked: job titles are free-form
+  multi-word phrases needing their own, likely hierarchical taxonomy schema, entirely
+  unstarted. Seeded with 15 explicitly reviewed, non-exhaustive entries (see the slice's
+  own proposal record for the frozen table and each alias's rationale).
+  An eighth slice, the **skill classifier** (Class H, same primary-risk reasoning as the
+  taxonomy foundation above), consumes that taxonomy: `app/normalization/skills.py`'s
+  `classify_skills(title, description, *, taxonomy)` returns a deduplicated,
+  canonical-ID-ascending-sorted `list[SkillMatch]` — never a single value, since a
+  posting can name several distinct skills. Exact-match taxonomy lookup only, no
+  free-text scanning inside the taxonomy itself; this module supplies its own
+  segmentation. The ambiguous aliases `c`/`r`/`go`/`node` (which collide with ordinary
+  English words) require additional structural evidence — a standalone list position,
+  a narrow title-only role-noun adjacency for `c`/`r`/`go`, or (in `description`) an
+  explicit, closed skill-list anchor (`skills:`, `languages:`, `technologies:`,
+  `tech stack:`) plus a bounded list region — never punctuation structure alone.
+  Implemented on `phase-3/skill-classifier` — **candidate/publication stage, not yet
+  reviewed, not merged.**
 - **Phase 4: two bounded read-only prework proofs merged into `main`; the production
   `AtsScrapersProvider` adapter is not started and Phase 4 is not complete.** The
   Greenhouse live ATS canary (`phase-4/greenhouse-canary`, merged at `64a3534`) and the

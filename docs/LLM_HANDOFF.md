@@ -98,339 +98,6 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-09-15, Claude Code (Sonnet 5). Risk class H (same
-  process/security-relevant tooling as the original activation candidate
-  work, C1-C6). Base `B` -> candidate
-  `C7`: `66202c23facff6bd33d8f624e327cabdd40708b4` -> this commit; branch
-  `tooling/workflow-v3.2-activation` (continued). `slice_kind: tooling`.
-  `slice_id: 2026-09-13-workflow-v3-2-activation-66202c2` (unchanged --
-  same base, same underlying activation slice).
-- **Supersedes the original activation review record.** Sol approved `C6` =
-  `332947196d028b9a46a52aa3c44e51028d5f7e0c` / `A6` =
-  `4ee69a96981c01b12bce1ad3ce7706ff34b5a149`, with `R` =
-  `0c42aae891a24181f871df56e52b732322fd1d0e` recording that verdict.
-  Immediately after, independently running the full `check_review.
-  validate_c_a_r_chain(C6, A6, R)` (and therefore `check_merge_
-  eligibility`) for the first time -- Sol's own approval was necessarily
-  based on direct receipt/repo inspection, since `R` did not yet exist
-  when they reviewed -- surfaced a genuine failure: the receipt's
-  `checker_hash` for `backend/scripts/check_handoff.py` did not match
-  what `check_review.py`'s own hash cross-check recomputed. Root cause:
-  that cross-check hashed a *fresh detached-worktree checkout* of the
-  file, while the coordinator that produced the receipt hashes the
-  *authoring checkout's on-disk bytes* directly -- and that file
-  currently carries LF-only line endings in the long-lived authoring
-  checkout (never freshly re-checked-out under this project's
-  `core.autocrlf=true`), while a fresh worktree checkout smudges it to
-  CRLF, so the two hashes diverge. This is a latent defect in `check_
-  review.py`'s own tooling, not a problem with `C6`/`A6`'s actual content
-  -- `R`'s own structure, the `A6..R` append-only diff, and the review-
-  metadata cross-check all independently passed. Per explicit user
-  instruction: `C6`/`A6`/`R` are preserved exactly as pushed, never
-  amended or rewritten, but this cycle's review record is **not treated
-  as valid merge-eligible approval** -- a fresh `C7`/`A7` cycle (this
-  iteration) is required, with a new `R` to be authored only after a
-  fresh Sol re-review.
-- Fix: defines one canonical, platform-independent hashing mechanism,
-  reused identically everywhere a file's content is hashed for receipt
-  purposes. New `verification_receipts.blob_bytes_at_commit`/
-  `committed_file_hash` read the exact committed Git blob bytes for
-  `<commit_sha>:<repo_relative_path>` directly from the object database
-  via `git cat-file` -- never a working-tree or fresh-checkout read,
-  which can differ from the committed bytes whenever a local checkout
-  filter (`core.autocrlf`) converts line endings on smudge. Never text-
-  decoded, never newline-normalized. Fails closed for a missing commit/
-  path, a git failure, or a non-blob object. `dependency_and_config_
-  inputs` is rewritten on top of it (now takes `commit_sha` instead of a
-  working-tree `repo_root` read) and fails closed on a duplicate or
-  malformed path. `verification_coordinator._file_hash_at` and `check_
-  review.py`'s `_cross_check_recorded_hashes` (the worktree-spinning-up
-  `_recompute_hashes_at_candidate` is deleted entirely, no longer needed)
-  both now call this single mechanism, so receipt generation and review-
-  time recomputation can never independently diverge again.
-- Verification: `ruff format --check`/`ruff check`/`mypy` clean (158
-  source files, backend + `.claude/hooks`). Full pytest suite: **2637
-  passed**. All 34 mutation witnesses pass unmodified. `check_repo.py`
-  exits 0. `git diff --check` clean. New regressions prove: an LF
-  authoring-checkout hash and a genuinely CRLF-smudged fresh-worktree
-  hash for the same commit are identical; changing committed content
-  changes the hash; mutating working-tree bytes without changing the Git
-  blob does not; and a real coordinator-generated receipt's hashes agree
-  with `check_review.py`'s independent recomputation even after the
-  authoring checkout is subsequently mutated on disk.
-- Deviations/known limitations: none beyond the superseded original
-  activation review record noted above.
-
-#### Correction round 1 (own follow-on finding, before Sol re-review)
-
-- **Supersedes candidate `C7` = `cf60c424dcbc551874f94686fd8b3332cb9d4a86`
-  and publication `A7` = `f215fe8031eab8da4a48c5410de5cd0afdf1d6f4`.** The
-  receipt published there
-  (`docs/verification-receipts/cf60c424dcbc551874f94686fd8b3332cb9d4a86/
-  562fad62-93f1-45be-9f52-4e69ced38a82.json`) is **not reusable** and is
-  superseded by this correction round's own fresh candidate/publication
-  cycle below. **Correction (Sol's review of `C8`/`A8`):** `C7`/`A7` were
-  not independently pushed as branch tips before `C8` was committed on
-  top of them -- but pushing `A8` (a descendant of `C8`, a descendant of
-  `A7`, a descendant of `C7`) made all three reachable on the remote
-  branch as superseded ancestors. They are therefore **not** "purely
-  local" or "never pushed to origin"; that was incorrect wording in this
-  entry's original form. Both are still preserved unamended, never
-  rewritten, per the same discipline as every other correction round in
-  this project.
-- Found while independently proving the frozen contract's own required
-  step -- "the complete `C7 -> A7 -> synthetic-R` chain validates
-  successfully before publishing the real `R`" -- using a throwaway,
-  never-pushed synthetic `R` in a disposable worktree (deleted
-  immediately after). `check_review.extract_review_metadata_text` (and
-  `extract_escalation_blocks`) scanned the *entire* handoff file for a
-  `workflow-review-metadata`/`workflow-escalation-metadata` block,
-  instead of scoping to the newest `## Iteration N` section the way
-  `check_handoff.py`'s own metadata-block search already does. Once
-  the original activation `R` (recording Sol's approval of `C6`/`A6`,
-  preserved unchanged) and this iteration's own review block coexist in
-  the same file, that unscoped search finds both and raises "more than
-  one block found" -- this is not merely a test artifact: it would also
-  have broken the real `R` for this iteration once authored, since that
-  historical block never goes away.
-- Fix: new `_latest_iteration_text` scopes to the text from the newest
-  `## Iteration N` heading onward (mirroring `check_handoff.py`'s own
-  per-iteration scoping); both `extract_review_metadata_text` and
-  `extract_escalation_blocks` now search within that scope only. New
-  regressions prove: extraction correctly returns the latest iteration's
-  own block when an earlier iteration's historical block coexists (never
-  raising "more than one" for two blocks in two different iterations);
-  escalation-block extraction is scoped identically; and two genuine
-  blocks within the *same* latest iteration are still correctly rejected
-  as "more than one".
-- Files changed (this correction only): `backend/scripts/check_review.py`
-  (edited); `backend/tests/test_check_review.py` (edited). No production
-  parser (`app/normalization/*`) touched; no migration/model file
-  touched.
-- Verification: `ruff format --check`/`ruff check`/`mypy` clean (158
-  source files, backend + `.claude/hooks`). Full pytest suite: **2640
-  passed**. All 34 mutation witnesses pass unmodified. `check_repo.py`
-  exits 0. `git diff --check` clean.
-- STOP — this is a bounded correction only. Do not author `R`, merge,
-  create `M`/`Q`, begin another slice, or modify product/parser behavior.
-
-#### Correction round 2 (Sol review of C8/A8: two bounded issues)
-
-- **Supersedes candidate `C8` = `d23273c0addd30717046edc8dfe8b58ebca835b6`
-  and publication `A8` = `a056f77b8f949b020dcee2b21267e2b6b4fab2dd`.** The
-  receipt published there
-  (`docs/verification-receipts/d23273c0addd30717046edc8dfe8b58ebca835b6/
-  e917a12f-1b43-43ca-8323-62df0dff785a.json`) is **not reusable** and is
-  superseded by this correction round's own fresh candidate/publication
-  cycle below. `C8`/`A8` are preserved unamended, never rewritten; both
-  are reachable on the remote branch (pushed as ancestors of `A8`'s own
-  push), not merely local.
-- **Finding 1 (A→R boundary):** `check_review.py`'s prior fix (this
-  project's own "scope to the latest `## Iteration N` section" approach,
-  from the previous correction round) was still not precise enough.
-  Review and escalation metadata are now extracted and validated
-  *exclusively* from the exact appended suffix
-  (`handoff_at_r[len(handoff_at_a):]`), never by searching the whole
-  handoff file and never by searching "the latest iteration onward" --
-  neither of those weaker scopes can distinguish an already-existing
-  historical block from what `R` itself actually added.
-  `validate_a_to_r_transition` now computes and returns this suffix
-  (after confirming the pure-append invariant), and itself enforces:
-  the suffix introduces no new `## Iteration N` heading, and the suffix
-  contains exactly one `### Work review` section. `extract_review_
-  metadata_text`/`extract_escalation_blocks` are reverted to their
-  original simple form (extract from exactly the text given -- no
-  internal scoping of their own) since the caller (`validate_c_a_r_
-  chain`) now always passes this exact suffix, never the whole file.
-  New regressions prove, via genuine Git commits: a fabricated `##
-  Iteration N` heading appended between two review blocks is rejected
-  outright (the full-transition regression); an escalation block hidden
-  behind that same fabricated heading is rejected identically (the
-  analogous hidden-escalation proof); and a suffix with two `### Work
-  review` sections (no fake iteration needed) is also rejected.
-- **Finding 2 (handoff wording):** The previous correction round's own
-  entry incorrectly described `C7`/`A7` as "purely local" and "never
-  pushed to origin". Corrected in place (see that entry, above): `C7`/
-  `A7` were not independently pushed as branch tips before `C8`, but
-  pushing `A8` (a descendant of `C8`, a descendant of `A7`, a descendant
-  of `C7`) made all three reachable on the remote branch as superseded
-  ancestors.
-- Files changed (this correction only): `backend/scripts/check_review.py`
-  (edited); `backend/tests/test_check_review.py` (edited);
-  `docs/LLM_HANDOFF.md` (wording correction to the prior entry, plus this
-  entry). No production parser (`app/normalization/*`) touched; no
-  migration/model file touched.
-- Verification: `ruff format --check`/`ruff check`/`mypy` clean (158
-  source files, backend + `.claude/hooks`). Full pytest suite: **2643
-  passed**. All 34 mutation witnesses pass unmodified. `check_repo.py`
-  exits 0. `git diff --check` clean.
-- STOP — this is a bounded correction only. Do not author `R`, merge,
-  create `M`/`Q`, begin another slice, or modify product/parser behavior.
-
-#### Correction round 3 (Sol review of C9/A9: one bounded issue)
-
-- **Supersedes candidate `C9` = `5a3e18787b878d61035815bca0d31d2f04603e8a`
-  and publication `A9` = `033e935e7681db7e402b4f3e9790ae5de12eb50e`.** The
-  receipt published there
-  (`docs/verification-receipts/5a3e18787b878d61035815bca0d31d2f04603e8a/
-  7801c0b5-4993-4d24-8b8e-8a99142fa230.json`) is **not reusable** and is
-  superseded by this correction round's own fresh candidate/publication
-  cycle below. `C9`/`A9` are preserved unamended, never rewritten; both
-  are reachable on the remote branch (pushed as ancestors of `A9`'s own
-  push), not merely local.
-- **Finding (remaining Medium A→R boundary gap):** Sol's C9/A9 re-review
-  confirmed both prior findings closed, but found that the previous
-  round's suffix-shape check -- "the suffix introduces no new `##
-  Iteration N` heading, and contains exactly one `### Work review`
-  section" -- did not reject an appended **second** `### Work done`
-  heading carrying its own, independently schema-valid
-  `workflow-metadata` block, placed after an otherwise-legitimate
-  review. `check_merge_eligibility` incorrectly returned `approved` for
-  such a suffix, and `check_handoff.py` would then treat that appended
-  Work-done metadata as the current state -- violating the closed,
-  review-only `A -> R` transition.
-- Fix: hardened the exact appended-suffix grammar in `check_review.py`'s
-  `validate_a_to_r_transition`. New `_LEVEL_2_OR_3_HEADING_RE` locates
-  every level-2 (`## `) or level-3 (`### `) heading introduced by the
-  suffix. The suffix is now rejected unless: its first heading is
-  exactly its sole `### Work review`; no additional level-2 or level-3
-  heading follows (including a second `### Work done`); and no
-  `workflow-metadata` fenced block appears anywhere in the suffix (that
-  block belongs exclusively to a `### Work done` section, which the
-  suffix may never introduce). Ordinary prose beneath the sole `### Work
-  review` heading, and validated `workflow-escalation-metadata` blocks
-  alongside the review, remain permitted, exactly as before.
-- New regressions prove, via genuine Git commits and the full chain: the
-  required reproduction -- a suffix pairing a valid `### Work review`
-  with an appended second `### Work done` section containing
-  *structurally valid* `workflow-metadata` (independently confirmed
-  schema-valid via `check_handoff.validate_structure` before the
-  reproduction, so the rejection is proven to be about the closed
-  transition, not malformed content) -- is rejected by
-  `validate_a_to_r_transition`, `validate_c_a_r_chain`, **and**
-  `check_merge_eligibility` alike; a bare `workflow-metadata` block
-  appended with no heading at all is rejected identically; and two
-  neighboring positive controls confirm ordinary review prose beneath
-  the sole `### Work review` heading, and a validated escalation block
-  alongside the review, both still validate successfully end-to-end.
-- Files changed (this correction only): `backend/scripts/check_review.py`
-  (edited); `backend/tests/test_check_review.py` (edited);
-  `docs/LLM_HANDOFF.md` (this entry, plus resetting the metadata block
-  below to `state: pending` for the fresh `C10`/`A10` cycle). No
-  production parser (`app/normalization/*`) touched; no migration/model
-  file touched.
-- Verification: `ruff format --check`/`ruff check`/`mypy` clean (158
-  source files, backend + `.claude/hooks`). Full pytest suite: **2647
-  passed**. All 34 mutation witnesses pass unmodified. `check_repo.py`
-  exits 0. `git diff --check` clean.
-- STOP — this is a bounded correction only. Do not author `R`, merge,
-  create `M`/`Q`, begin another slice, or modify product/parser behavior.
-
-```workflow-metadata
-workflow_version: v3.2
-state: published
-slice_id: 2026-09-13-workflow-v3-2-activation-66202c2
-slice_kind: tooling
-risk_class: H
-base_sha: 66202c23facff6bd33d8f624e327cabdd40708b4
-declared_gate: final
-executed_gate: final
-candidate_sha: c7933d072d2c7f92844ec3206863010ef13ff2ad
-receipt_id: c22ded07-a429-4154-a6ea-84c553758baa
-receipt_path: docs/verification-receipts/c7933d072d2c7f92844ec3206863010ef13ff2ad/c22ded07-a429-4154-a6ea-84c553758baa.json
-full_suite_count: 2647
-focused_test_count: 480
-mutation_witness_count: 34
-```
-
-### Work review
-
-- Sol's re-review of `C10` = `c7933d072d2c7f92844ec3206863010ef13ff2ad`
-  and `A10` = `688216a8ea1e4da52cb026d2e075a2608c262953`: **Approved, no
-  findings.** The A→R suffix now rejects an appended second Work-done
-  section or `workflow-metadata` block while allowing ordinary review
-  prose and valid escalation metadata. Independent verification
-  performed: all 87 focused review tests passed; the `C10→A10`
-  publication shape, receipt validity, and hash cross-checks were
-  confirmed; `approval_eligible` was independently recomputed; `ruff`,
-  `check_repo.py`, and `git diff --check` passed; the branch is clean
-  and synchronized. The full 2,647-test suite and the 34 mutation
-  witnesses were not independently re-run; those results are taken from
-  Claude's receipt.
-
-```workflow-review-metadata
-schema_version: 2
-slice_id: 2026-09-13-workflow-v3-2-activation-66202c2
-risk_class: H
-reviewer: Sol
-reviewer_role: primary
-reviewer_model: Sol Medium
-reviewed_at: 2026-09-17T00:00:00Z
-candidate_sha: c7933d072d2c7f92844ec3206863010ef13ff2ad
-publication_commit_sha: 688216a8ea1e4da52cb026d2e075a2608c262953
-receipt_path: docs/verification-receipts/c7933d072d2c7f92844ec3206863010ef13ff2ad/c22ded07-a429-4154-a6ea-84c553758baa.json
-receipt_id: c22ded07-a429-4154-a6ea-84c553758baa
-gate: final
-verdict: approved
-findings: none
-```
-
-### Merge record
-
-- Date: 2026-09-17. Merged `tooling/workflow-v3.2-activation` at
-  approved, reviewed commit `a070ba974e321f360c0a36282bffabe700be617d`
-  (Sol's "Approved, no findings" verdict on `C10`/`A10`, above) into
-  `main` via `git merge --no-ff`. Merge commit:
-  `9649cba1deebdc73911790de3ccb2ac51fd483a6`. Pre-merge `main`/
-  `origin/main` tip (rollback boundary):
-  `66202c23facff6bd33d8f624e327cabdd40708b4`.
-- Pre-merge checks: confirmed the feature branch and its origin both sat
-  at `a070ba9`, and `main`/`origin/main` were both clean and
-  synchronized at `66202c23` before merging.
-- Post-merge verification, all run directly against merged `main`:
-  - `git diff --quiet a070ba9 HEAD` — zero content difference between
-    merged `main` and the approved feature-branch tip, confirmed.
-  - `git diff --check` — clean.
-  - `python -m scripts.check_repo` — clean.
-  - No migration/schema changes: `git diff --stat 66202c23..HEAD --
-    backend/alembic backend/migrations` and `git log --oneline
-    66202c23..HEAD -- backend/alembic backend/migrations` both empty.
-  - `python -m scripts.verify --level routine --gate final --focus
-    tests/test_check_handoff.py tests/test_check_review.py
-    tests/test_migration_matrix.py tests/test_verification_coordinator.py
-    tests/test_verification_lock.py tests/test_verification_receipts.py
-    tests/test_verification_scope.py tests/test_verification_worktree.py
-    tests/test_verify.py` — **all 12 checks PASS**, 480 focused /
-    2,647 full-suite tests passed.
-  - `python -m scripts.contract_mutation_witnesses` — **34 passed, 0
-    failed**, out of 34 active-guard witnesses.
-- Pushed: `main` pushed to `origin/main`
-  (`66202c23..9649cba1deebdc73911790de3ccb2ac51fd483a6`); both now
-  synchronized.
-- This merge activates Workflow v3.2's own tooling (schema-v2
-  `workflow-metadata`, verification receipts, `C -> A -> R` chain/merge
-  validation) as reusable machinery. It does **not** itself authorize
-  Slice 3 product/parser work, `Q` post-merge evidence generation, or
-  any other new slice — those remain separate authorizations.
-- STOP — report the synchronized final `main` SHA and stop. No `Q`
-  artifact, no Slice 3, no other Phase 3/4 parser, without separate
-  explicit user authorization.
-- **Post-merge evidence status:** no `Q` exists for this merge; see ADR
-  0009's "Post-merge evidence: one-time bootstrap exception for
-  M = 9649cba" for the full record. `validate_published` will fail for
-  this `(C10, A10, R, M)` tuple unless a conforming `Q` is later
-  authorized and published. The post-merge verification above (zero
-  content diff, clean statics, 12/12 canonical-verifier checks, 34/34
-  mutation witnesses) was genuinely run and reported here; it can be
-  rerun against `M`'s tree for equivalent fresh evidence, but the
-  original run's own output was not captured as a durable artifact.
-
----
-
-## Iteration 2
-
-### Work done
-
 - Date/agent: 2026-09-18, Claude Code (Sonnet 5). Risk class H
   (process/security-relevant tooling, same category as every prior
   Workflow v3.2 tooling slice). Base `B` -> candidate `C`:
@@ -651,7 +318,7 @@ findings: none
 
 ---
 
-## Iteration 3
+## Iteration 2
 
 ### Work done
 
@@ -1024,3 +691,134 @@ findings: none
 - STOP — report the synchronized final `main` SHA and stop. No skill
   classifier, no title-parser work, no other new slice, without
   separate explicit user authorization.
+
+---
+
+## Iteration 3
+
+### Work done
+
+- Date/agent: 2026-09-19, Claude Code (Sonnet 5). Risk class **H** (same
+  primary-risk reasoning as the taxonomy-foundation slice: ambiguous-alias
+  false matches are Phase 3's own named risk, and this is the first
+  classifier consuming that taxonomy). Base `B` -> candidate `C`:
+  `d0159a4cc0faf9fb13f30ea814fa2e6c204570bb` -> this commit; new branch
+  `phase-3/skill-classifier`, cut from a freshly verified clean `main`
+  (`main` == `origin/main`, both at `d0159a4`). `slice_kind: parser` (unlike
+  the taxonomy foundation: this slice owns a genuine single JSON-array
+  fixture corpus, the classic classifier-fixture shape). `slice_id:
+  2026-09-19-skill-classifier-d0159a4`. Implements the four-round-negotiated,
+  user-approved `classify_skills` proposal and its amendments in full.
+- **Classifier** (`backend/app/normalization/skills.py`):
+  `classify_skills(title, description, *, taxonomy) -> list[SkillMatch]`.
+  One shared segment/token grammar (`[,;|:/]` then
+  `[^\s()\[\]{}"&]+`, hyphen/`+`/`#`/`.` preserved); a single-vs-doubled
+  trailing-punctuation rule (`.`/`!`/`?`); the ambiguous keys `c`/`r`/`go`/
+  `node` require standalone-in-segment (title) or a narrow role-noun
+  adjacency for `c`/`r`/`go` only (title), or an explicit anchor-bounded
+  region (description) — never punctuation structure alone. The
+  description anchor grammar (`skills:`/`languages:`/`technologies:`/
+  `tech stack:`) is ASCII-literal and covered-whitespace-exact (no `\s`,
+  no `re.IGNORECASE`, no `.lower()`), valid only at start-of-field,
+  start-of-line, or immediately after a genuine sentence terminator; a
+  region's end is a terminator's own `Pattern.end()` (Python's exclusive
+  slice convention), inclusive of the whole punctuation run, so the
+  existing single-vs-doubled rule remains the only thing deciding
+  match/no-match once a token is extracted. `SkillMatch.__post_init__`
+  revalidates `canonical_id` against `is_canonical_slug()` and
+  `display_name` against this module's own covered-whitespace class,
+  never a bare truthiness check; `provenance` must be a genuine
+  `Provenance` member. Every error message is fixed and categorical.
+  Exact-match taxonomy lookup only — no taxonomy growth, no persistence,
+  no `parser_version`.
+- **Fixtures and tests**: `backend/tests/fixtures/normalization/
+  skill_cases.json` (61 cases, each isolating one mechanism — tokenizer
+  boundaries, the `node`/`c`/`r`/`go` ambiguity rule, the title
+  role-noun-adjacency rule and its three counterexamples, terminal
+  punctuation and its malformed-run negatives, the anchor grammar's three
+  start conditions and two Unicode no-break-space negatives (before and
+  after the colon — see the adversarial finding below), region
+  termination at a genuine sentence boundary, cross-field dedup/provenance
+  escalation); honestly labeled `synthetic_representative`/
+  `synthetic_adversarial`, never `sanitized_capture`.
+  `backend/tests/test_normalization_skills.py` (76 tests): the fixture
+  corpus, origin-honesty, determinism, sort/dedup invariants, `SkillMatch`
+  unit-level invariant tests (non-slug `canonical_id`, whitespace-only/
+  covered-whitespace-only/empty `display_name`, non-enum `provenance`,
+  and a check that no invariant-violation message ever contains the
+  offending input text), and the AST import-boundary allow-list.
+- **Disclosed, necessary deviation** (found by actually running
+  `verification_scope.classify_path` against the new fixture path, not by
+  code review): `backend/tests/fixtures/normalization/skill_cases.json`
+  is a non-`.py` path under `backend/tests/` with no exact rule, so it
+  raised `OwnerMappingRequiredError` exactly like the taxonomy
+  foundation's own YAML fixtures once did. Fixed the same way: added one
+  exact-path entry, `_SKILL_FIXTURE_FILES`, to
+  `backend/scripts/verification_scope.py` (never a new directory prefix),
+  classifying it as `test-fixture:skill-classifier` — deliberately not a
+  `contract-record` kind, since this fixture has no contract-harness
+  guard/family involvement. Three new regression tests added to
+  `backend/tests/test_verification_scope.py` mirroring the existing
+  taxonomy-fixture ones. This was not part of the approved file list;
+  flagging it here rather than treating it as silently in scope.
+- **Adversarial self-review finding, fixed before this commit**: an
+  independent adversarial-review pass (read-only, against the working
+  tree before this candidate existed) found that the description
+  anchor's post-colon whitespace group (`[\t\n\r ]*`, zero-or-more, with
+  no mandatory literal after it) never actually rejected a non-covered
+  whitespace lookalike sitting immediately after the colon — unlike
+  every other whitespace span in the anchor grammar, which is always
+  followed by a mandatory literal a lookalike can't satisfy. Concretely,
+  `"Skills: Go"` (a no-break space right after the colon) produced a
+  `golang` match, because the un-consumed no-break space was left as the
+  first character of the region text, where the region's own ordinary
+  Unicode-`\s`-aware tokenizer still treated it as a token separator —
+  silently rescuing the ambiguous key the anchor grammar exists to gate.
+  This directly contradicted the module's own docstring, which explicitly
+  claimed this case was already rejected. Fixed by adding
+  `_has_uncovered_whitespace_immediately_after` and an explicit rejection
+  check in `_anchor_regions` for exactly this case; added fixture
+  `description_nbsp_lookalike_after_colon_rejected` as the regression.
+  Everything else the review checked (region/terminator index arithmetic,
+  overlapping anchors, the ASCII casefold table, punctuation-stripping
+  edge cases, exception safety on empty/very-long input, and hand
+  re-derivation of the trickier fixture cases) held up with no further
+  findings.
+- **Two-iteration rotation applied**: the oldest iteration (the original
+  v3.2 activation candidate/review cycle, C1–C6) is deleted; the former
+  Iteration 2 (the post-merge `Q`-producer slice) and Iteration 3 (the
+  skill-taxonomy-foundation slice) are renumbered to Iteration 1 and
+  Iteration 2 respectively; this entry becomes the new Iteration 3.
+- Files changed: `backend/app/normalization/skills.py` (new);
+  `backend/tests/fixtures/normalization/skill_cases.json` (new, 61
+  cases); `backend/tests/test_normalization_skills.py` (new, 76 tests);
+  `backend/scripts/verification_scope.py`,
+  `backend/tests/test_verification_scope.py` (edited, 3 new tests (one
+  new parametrized case plus two new functions) — see the disclosed
+  deviation above); `docs/ROADMAP.md` (edited: corrected
+  the stale "skill-taxonomy foundation ... not yet merged" passage to
+  record its actual merge SHA, and added this slice's own status
+  paragraph); `docs/LLM_HANDOFF.md` (this entry, plus the two-iteration
+  rotation above). No taxonomy file, migration, model, service, API, or
+  live-provider file touched; no database lifecycle operation performed;
+  no provider contact of any kind. `docs/ARCHITECTURE.md` intentionally
+  not touched — its `skills.py` filename entry already matches this
+  slice exactly; a separate, genuinely stale passage there (the
+  taxonomy-foundation's own tree entries still say "candidate/publication
+  stage, not yet merged") was noticed but is out of this slice's
+  authorized two-document scope, so it is disclosed here rather than
+  silently fixed.
+- Verification: pending — see the workflow-metadata block below and the
+  publication (`A`) entry that will follow it.
+
+```workflow-metadata
+workflow_version: v3.2
+state: pending
+slice_id: 2026-09-19-skill-classifier-d0159a4
+slice_kind: parser
+risk_class: H
+base_sha: d0159a4cc0faf9fb13f30ea814fa2e6c204570bb
+declared_gate: final
+fixture_path: backend/tests/fixtures/normalization/skill_cases.json
+fixture_count: 61
+```

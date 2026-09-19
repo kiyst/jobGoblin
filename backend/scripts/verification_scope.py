@@ -76,6 +76,13 @@ _TAXONOMY_FIXTURE_FILES: dict[str, str] = {
     )
 }
 
+# The skill-classifier slice's own JSON regression corpus -- not a
+# contract-record (no contract-harness guard/family involvement, same
+# reasoning as `_TAXONOMY_FIXTURE_FILES` above).
+_SKILL_FIXTURE_FILES: dict[str, str] = {
+    "backend/tests/fixtures/normalization/skill_cases.json": "test-fixture:skill-classifier",
+}
+
 _SHARED_HARNESS_CORE_FILES: frozenset[str] = frozenset(
     {
         "backend/tests/contracts/taxonomy.py",
@@ -162,6 +169,7 @@ def _validate_configuration() -> None:
         _ADAPTER_FILES,
         _RECORD_FILES,
         _TAXONOMY_FIXTURE_FILES,
+        _SKILL_FIXTURE_FILES,
     ]
     exact_sets: list[frozenset[str]] = [
         _SHARED_HARNESS_CORE_FILES,
@@ -219,7 +227,13 @@ def _normalize(path: str) -> str:
 def classify_path(path: str) -> Classification:
     path = _normalize(path)
 
-    for exact_map in (_PARSER_FILES, _ADAPTER_FILES, _RECORD_FILES, _TAXONOMY_FIXTURE_FILES):
+    for exact_map in (
+        _PARSER_FILES,
+        _ADAPTER_FILES,
+        _RECORD_FILES,
+        _TAXONOMY_FIXTURE_FILES,
+        _SKILL_FIXTURE_FILES,
+    ):
         if path in exact_map:
             return Classification(path, exact_map[path])
     if path in _SHARED_HARNESS_CORE_FILES:

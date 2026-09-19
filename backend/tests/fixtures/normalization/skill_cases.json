@@ -1,0 +1,541 @@
+[
+  {
+    "id": "title_bare_python_whole_title",
+    "origin": "synthetic_representative",
+    "title": "Python",
+    "description": null,
+    "expected_matches": [{"canonical_id": "python", "display_name": "Python", "provenance": "inferred"}],
+    "note": "Unambiguous key matches the whole title unconditionally."
+  },
+  {
+    "id": "title_go_developer_role_noun_adjacency",
+    "origin": "synthetic_representative",
+    "title": "Go Developer",
+    "description": null,
+    "expected_matches": [{"canonical_id": "golang", "display_name": "Go", "provenance": "inferred"}],
+    "note": "Title-adjacency rule: 'go' immediately followed by 'developer'."
+  },
+  {
+    "id": "title_r_developer_role_noun_adjacency",
+    "origin": "synthetic_representative",
+    "title": "R Developer",
+    "description": null,
+    "expected_matches": [{"canonical_id": "rlang", "display_name": "R", "provenance": "inferred"}],
+    "note": "Title-adjacency rule applied to 'r'."
+  },
+  {
+    "id": "title_c_developer_role_noun_adjacency",
+    "origin": "synthetic_representative",
+    "title": "C Developer",
+    "description": null,
+    "expected_matches": [{"canonical_id": "c", "display_name": "C", "provenance": "inferred"}],
+    "note": "Title-adjacency rule applied to 'c'."
+  },
+  {
+    "id": "title_node_developer_no_shortcut",
+    "origin": "synthetic_adversarial",
+    "title": "Node Developer",
+    "description": null,
+    "expected_matches": [],
+    "note": "Bare 'node' gets no title-adjacency shortcut -- only c/r/go are eligible."
+  },
+  {
+    "id": "title_nodejs_developer_matches_unconditionally",
+    "origin": "synthetic_representative",
+    "title": "Node.js Developer",
+    "description": null,
+    "expected_matches": [{"canonical_id": "node.js", "display_name": "Node.js", "provenance": "inferred"}],
+    "note": "The unambiguous key 'node.js' matches regardless of any rule, unlike bare 'node'."
+  },
+  {
+    "id": "title_go_to_market_developer_counterexample",
+    "origin": "synthetic_adversarial",
+    "title": "Go To Market Developer",
+    "description": null,
+    "expected_matches": [],
+    "note": "'go' is followed by 'to', not 'developer' -- adjacency rule requires exact adjacency."
+  },
+  {
+    "id": "title_r_and_d_developer_counterexample",
+    "origin": "synthetic_adversarial",
+    "title": "R&D Developer",
+    "description": null,
+    "expected_matches": [],
+    "note": "Ampersand is a token delimiter, not a segment delimiter: 'r' and 'd' share one segment, so 'r' is neither standalone nor adjacent to 'developer'."
+  },
+  {
+    "id": "title_c_level_developer_counterexample",
+    "origin": "synthetic_adversarial",
+    "title": "C-Level Developer",
+    "description": null,
+    "expected_matches": [],
+    "note": "Hyphen preservation keeps 'c-level' as one token, which is not the ambiguous key 'c'."
+  },
+  {
+    "id": "title_comma_standalone_ambiguous_keys",
+    "origin": "synthetic_representative",
+    "title": "Python, Go",
+    "description": null,
+    "expected_matches": [
+      {"canonical_id": "golang", "display_name": "Go", "provenance": "inferred"},
+      {"canonical_id": "python", "display_name": "Python", "provenance": "inferred"}
+    ],
+    "note": "Titles authorize an ambiguous key via plain standalone-in-segment too, no anchor needed there."
+  },
+  {
+    "id": "title_cpp_internal_punctuation",
+    "origin": "synthetic_representative",
+    "title": "C++ Developer",
+    "description": null,
+    "expected_matches": [{"canonical_id": "cpp", "display_name": "C++", "provenance": "inferred"}],
+    "note": "Internal punctuation ('+') is preserved by the tokenizer."
+  },
+  {
+    "id": "title_csharp_hash_variant",
+    "origin": "synthetic_representative",
+    "title": "C# Engineer",
+    "description": null,
+    "expected_matches": [{"canonical_id": "csharp", "display_name": "C#", "provenance": "inferred"}],
+    "note": "Internal punctuation ('#') is preserved by the tokenizer."
+  },
+  {
+    "id": "description_terminal_period_python",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "I know Python.",
+    "expected_matches": [{"canonical_id": "python", "display_name": "Python", "provenance": "parsed_description"}],
+    "note": "Single trailing period is stripped before lookup."
+  },
+  {
+    "id": "description_terminal_exclamation_python",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "I love Python!",
+    "expected_matches": [{"canonical_id": "python", "display_name": "Python", "provenance": "parsed_description"}],
+    "note": "Single trailing exclamation mark is stripped before lookup."
+  },
+  {
+    "id": "description_terminal_question_python",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "Do you know Python?",
+    "expected_matches": [{"canonical_id": "python", "display_name": "Python", "provenance": "parsed_description"}],
+    "note": "Single trailing question mark is stripped before lookup."
+  },
+  {
+    "id": "description_terminal_period_nodejs",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "We use Node.js.",
+    "expected_matches": [{"canonical_id": "node.js", "display_name": "Node.js", "provenance": "parsed_description"}],
+    "note": "The trailing sentence period is stripped; the internal period in 'Node.js' is untouched because it is not the last character."
+  },
+  {
+    "id": "description_malformed_double_exclamation",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "This role needs Python!!",
+    "expected_matches": [],
+    "note": "A doubled trailing punctuation run is never stripped -- 'python!!' does not match 'python'."
+  },
+  {
+    "id": "description_malformed_mixed_punctuation",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "Do they know Python?!",
+    "expected_matches": [],
+    "note": "A mixed doubled run ('?!') is also never stripped."
+  },
+  {
+    "id": "description_malformed_double_period_nodejs",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "We might use Node.js.. still deciding.",
+    "expected_matches": [],
+    "note": "'Node.js..' ends in a doubled run and is left unstripped, so it fails to match 'node.js'."
+  },
+  {
+    "id": "description_cpp_internal_punctuation",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "Experience with C++ is required.",
+    "expected_matches": [{"canonical_id": "cpp", "display_name": "C++", "provenance": "parsed_description"}],
+    "note": "Internal punctuation preserved in description prose."
+  },
+  {
+    "id": "description_csharp_and_hyphen_variant_dedup",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "C# and C-Sharp are the same language.",
+    "expected_matches": [{"canonical_id": "csharp", "display_name": "C#", "provenance": "parsed_description"}],
+    "note": "Two differently-punctuated alias forms of the same entry in one sentence dedupe to a single match."
+  },
+  {
+    "id": "description_hyphen_not_falsely_split",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "We want a well-versed Python engineer.",
+    "expected_matches": [{"canonical_id": "python", "display_name": "Python", "provenance": "parsed_description"}],
+    "note": "Hyphen preservation keeps 'well-versed' as one non-matching token; it never fragments into a false match."
+  },
+  {
+    "id": "description_comma_number_no_false_positive",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "Team of 1,000 employees.",
+    "expected_matches": [],
+    "note": "Comma-splitting a number produces no false match."
+  },
+  {
+    "id": "description_semicolon_prose_no_false_positive",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "Builds finish in seconds; deploys are automatic.",
+    "expected_matches": [],
+    "note": "Semicolon-splitting ordinary prose produces no false match."
+  },
+  {
+    "id": "description_pipe_prose_no_false_positive",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "A 9 | 5 schedule is standard.",
+    "expected_matches": [],
+    "note": "Pipe-splitting ordinary prose produces no false match."
+  },
+  {
+    "id": "description_slash_prose_no_false_positive",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "We support a tech/ops rotation.",
+    "expected_matches": [],
+    "note": "Slash-splitting ordinary prose produces no false match."
+  },
+  {
+    "id": "description_ampersand_rd_no_false_positive",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "Our R&D team is growing.",
+    "expected_matches": [],
+    "note": "Ampersand keeps 'r' and 'd' in one segment, so 'r' is never standalone; no anchor is present either."
+  },
+  {
+    "id": "description_ampersand_does_not_block_unambiguous",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "We use C++ & Python daily.",
+    "expected_matches": [
+      {"canonical_id": "cpp", "display_name": "C++", "provenance": "parsed_description"},
+      {"canonical_id": "python", "display_name": "Python", "provenance": "parsed_description"}
+    ],
+    "note": "Ampersand never blocks matching for unambiguous keys."
+  },
+  {
+    "id": "description_go_prose_no_anchor",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "Go, see the deployment for details.",
+    "expected_matches": [],
+    "note": "No skill-list anchor is present, so the standalone comma segment alone does not authorize 'go'."
+  },
+  {
+    "id": "description_node_colon_not_an_anchor",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "node: healthy",
+    "expected_matches": [],
+    "note": "'node' is not in the closed anchor-label set, so 'node:' is not an anchor."
+  },
+  {
+    "id": "description_slash_path_no_anchor",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "Check /cluster/node/status for details.",
+    "expected_matches": [],
+    "note": "No anchor is present anywhere in this text."
+  },
+  {
+    "id": "description_comma_standalone_no_anchor",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "During the demo, press C, then continue.",
+    "expected_matches": [],
+    "note": "'C' stands alone in its comma segment but no anchor is present, so it is still dropped."
+  },
+  {
+    "id": "description_bare_node_suppressed_no_anchor",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "Each node stores data before syncing.",
+    "expected_matches": [],
+    "note": "Bare 'node' in ordinary prose, no anchor, no standalone segment -- dropped."
+  },
+  {
+    "id": "description_nodejs_matches_unrestricted_in_prose",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "We build services using Node.js and Express.",
+    "expected_matches": [{"canonical_id": "node.js", "display_name": "Node.js", "provenance": "parsed_description"}],
+    "note": "The unambiguous key 'node.js' matches anywhere, even embedded in ordinary prose with no anchor."
+  },
+  {
+    "id": "description_soft_skills_not_an_anchor",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "Soft skills: communication, Go",
+    "expected_matches": [],
+    "note": "'skills' here begins mid-phrase (after 'Soft '), not at any of the three valid anchor-start positions."
+  },
+  {
+    "id": "description_pipe_ambiguous_without_anchor_dropped",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "Python | Django | Go",
+    "expected_matches": [{"canonical_id": "python", "display_name": "Python", "provenance": "parsed_description"}],
+    "note": "No anchor present: 'Go' is standalone in its pipe segment but is still dropped; 'Python' matches regardless."
+  },
+  {
+    "id": "description_semicolon_ambiguous_without_anchor_dropped",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "Python; Java; Go",
+    "expected_matches": [
+      {"canonical_id": "java", "display_name": "Java", "provenance": "parsed_description"},
+      {"canonical_id": "python", "display_name": "Python", "provenance": "parsed_description"}
+    ],
+    "note": "No anchor present: 'Go' is dropped even though standalone in its semicolon segment."
+  },
+  {
+    "id": "description_slash_ambiguous_without_anchor_dropped",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "Node/Express backend without further detail.",
+    "expected_matches": [],
+    "note": "No anchor present: bare 'Node' is dropped even though standalone in its slash segment."
+  },
+  {
+    "id": "description_anchor_skills_basic",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "Skills: Python, Go, Node",
+    "expected_matches": [
+      {"canonical_id": "golang", "display_name": "Go", "provenance": "parsed_description"},
+      {"canonical_id": "node.js", "display_name": "Node.js", "provenance": "parsed_description"},
+      {"canonical_id": "python", "display_name": "Python", "provenance": "parsed_description"}
+    ],
+    "note": "The 'skills:' anchor rescues both ambiguous keys, each standalone in its own comma segment."
+  },
+  {
+    "id": "description_anchor_languages",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "Languages: R, Java",
+    "expected_matches": [
+      {"canonical_id": "java", "display_name": "Java", "provenance": "parsed_description"},
+      {"canonical_id": "rlang", "display_name": "R", "provenance": "parsed_description"}
+    ],
+    "note": "The 'languages:' anchor rescues 'R'."
+  },
+  {
+    "id": "description_anchor_tech_stack",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "Tech stack: C, Python",
+    "expected_matches": [
+      {"canonical_id": "c", "display_name": "C", "provenance": "parsed_description"},
+      {"canonical_id": "python", "display_name": "Python", "provenance": "parsed_description"}
+    ],
+    "note": "The two-word 'tech stack:' anchor label, with covered whitespace between its words."
+  },
+  {
+    "id": "description_anchor_technologies_nodejs",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "Technologies: Node.js, React",
+    "expected_matches": [{"canonical_id": "node.js", "display_name": "Node.js", "provenance": "parsed_description"}],
+    "note": "The 'technologies:' anchor label; 'React' is not in the seed taxonomy."
+  },
+  {
+    "id": "description_anchor_pipe_ambiguous_with_anchor_matches",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "Skills: Python | Django | Go",
+    "expected_matches": [
+      {"canonical_id": "golang", "display_name": "Go", "provenance": "parsed_description"},
+      {"canonical_id": "python", "display_name": "Python", "provenance": "parsed_description"}
+    ],
+    "note": "Contrasts description_pipe_ambiguous_without_anchor_dropped -- the anchor is the only difference, and it rescues 'Go'."
+  },
+  {
+    "id": "description_anchor_semicolon_ambiguous_with_anchor_matches",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "Skills: Python; Java; Go",
+    "expected_matches": [
+      {"canonical_id": "golang", "display_name": "Go", "provenance": "parsed_description"},
+      {"canonical_id": "java", "display_name": "Java", "provenance": "parsed_description"},
+      {"canonical_id": "python", "display_name": "Python", "provenance": "parsed_description"}
+    ],
+    "note": "Contrasts description_semicolon_ambiguous_without_anchor_dropped."
+  },
+  {
+    "id": "description_anchor_slash_ambiguous_with_anchor_matches",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "Tech stack: Node/Express",
+    "expected_matches": [{"canonical_id": "node.js", "display_name": "Node.js", "provenance": "parsed_description"}],
+    "note": "Contrasts description_slash_ambiguous_without_anchor_dropped."
+  },
+  {
+    "id": "description_region_terminates_at_period",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "Skills: Python, Django. Go outside for a walk.",
+    "expected_matches": [{"canonical_id": "python", "display_name": "Python", "provenance": "parsed_description"}],
+    "note": "The region ends at the genuine terminator after 'Django.'; 'Go' afterward is outside the region and is dropped."
+  },
+  {
+    "id": "description_multiple_anchors_independent_regions",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "Skills: Python. Languages: Go",
+    "expected_matches": [
+      {"canonical_id": "golang", "display_name": "Go", "provenance": "parsed_description"},
+      {"canonical_id": "python", "display_name": "Python", "provenance": "parsed_description"}
+    ],
+    "note": "Two independent anchors, each opening its own region."
+  },
+  {
+    "id": "description_nodejs_terminator_not_confused_by_internal_period",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "Skills: Node.js. Languages: Go",
+    "expected_matches": [
+      {"canonical_id": "golang", "display_name": "Go", "provenance": "parsed_description"},
+      {"canonical_id": "node.js", "display_name": "Node.js", "provenance": "parsed_description"}
+    ],
+    "note": "The internal period in 'Node.js' is never a terminator (not followed by whitespace); the real terminator is the period after 'js', which correctly ends the first region."
+  },
+  {
+    "id": "description_doubled_terminator_rejected_in_region",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "Skills: Python!!",
+    "expected_matches": [],
+    "note": "The doubled '!!' both ends the region (any-length run followed by end-of-input) and survives into the token, where the single-vs-doubled rule rejects it."
+  },
+  {
+    "id": "description_start_of_line_anchor",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "Role summary here\nSkills: Python, Go",
+    "expected_matches": [
+      {"canonical_id": "golang", "display_name": "Go", "provenance": "parsed_description"},
+      {"canonical_id": "python", "display_name": "Python", "provenance": "parsed_description"}
+    ],
+    "note": "Isolates the start-of-line anchor condition: no period precedes the newline."
+  },
+  {
+    "id": "description_sentence_boundary_anchor",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "We are hiring. Skills: Python, Go",
+    "expected_matches": [
+      {"canonical_id": "golang", "display_name": "Go", "provenance": "parsed_description"},
+      {"canonical_id": "python", "display_name": "Python", "provenance": "parsed_description"}
+    ],
+    "note": "Isolates the sentence-boundary anchor condition: not start-of-field, not start-of-line."
+  },
+  {
+    "id": "description_start_of_field_anchor",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "Skills: Python, Go",
+    "expected_matches": [
+      {"canonical_id": "golang", "display_name": "Go", "provenance": "parsed_description"},
+      {"canonical_id": "python", "display_name": "Python", "provenance": "parsed_description"}
+    ],
+    "note": "Isolates the start-of-field anchor condition."
+  },
+  {
+    "id": "description_nbsp_lookalike_breaks_anchor",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "Skills : Python, Go",
+    "expected_matches": [{"canonical_id": "python", "display_name": "Python", "provenance": "parsed_description"}],
+    "note": "A no-break space before the colon is outside the covered-whitespace class, so 'Skills :' is not recognized as an anchor; 'Go' is dropped, but 'Python' still matches via the unrestricted whole-text pass."
+  },
+  {
+    "id": "description_nbsp_lookalike_after_colon_rejected",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "Skills: Go",
+    "expected_matches": [],
+    "note": "A no-break space immediately after the colon is also outside the covered-whitespace class and is explicitly rejected (not merely left unconsumed), closing the case where the ordinary Unicode-\\s-aware tokenizer would otherwise still treat it as a separator and rescue 'Go'."
+  },
+  {
+    "id": "cross_field_dedup_escalates_provenance",
+    "origin": "synthetic_representative",
+    "title": "Python Developer",
+    "description": "Must know Python and Django.",
+    "expected_matches": [{"canonical_id": "python", "display_name": "Python", "provenance": "parsed_description"}],
+    "note": "Title and description agree on 'python'; description provenance wins, deduplicated to one match."
+  },
+  {
+    "id": "cross_field_distinct_skills_mixed_provenance",
+    "origin": "synthetic_representative",
+    "title": "Go Developer",
+    "description": "Also comfortable with Java.",
+    "expected_matches": [
+      {"canonical_id": "golang", "display_name": "Go", "provenance": "inferred"},
+      {"canonical_id": "java", "display_name": "Java", "provenance": "parsed_description"}
+    ],
+    "note": "Provenance is decided per matched skill, not once for the whole result."
+  },
+  {
+    "id": "unrelated_description_empty_result",
+    "origin": "synthetic_representative",
+    "title": "Warehouse Associate",
+    "description": "Must be a great communicator.",
+    "expected_matches": [],
+    "note": "No taxonomy entry appears anywhere in either field."
+  },
+  {
+    "id": "none_inputs_empty_result",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": null,
+    "expected_matches": [],
+    "note": "Both fields absent yields an empty list, never an error."
+  },
+  {
+    "id": "substring_no_leak",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "Check out postgresqlrocks.com for more info.",
+    "expected_matches": [],
+    "note": "Exact-match-only taxonomy lookup: a substring occurrence of 'postgresql' inside a longer token never matches."
+  },
+  {
+    "id": "java_javascript_cooccurrence",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "Comfortable with java and javascript.",
+    "expected_matches": [
+      {"canonical_id": "java", "display_name": "Java", "provenance": "parsed_description"},
+      {"canonical_id": "javascript", "display_name": "JavaScript", "provenance": "parsed_description"}
+    ],
+    "note": "Two distinct entries with a shared prefix both match independently."
+  },
+  {
+    "id": "case_insensitivity_end_to_end",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "Skills: PYTHON, JavaScript, Node.JS",
+    "expected_matches": [
+      {"canonical_id": "javascript", "display_name": "JavaScript", "provenance": "parsed_description"},
+      {"canonical_id": "node.js", "display_name": "Node.js", "provenance": "parsed_description"},
+      {"canonical_id": "python", "display_name": "Python", "provenance": "parsed_description"}
+    ],
+    "note": "Taxonomy lookup's own case-folding handles this; unrelated to the anchor grammar's separate ASCII-exact casefold."
+  }
+]
