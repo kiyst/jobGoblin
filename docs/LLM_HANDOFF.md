@@ -836,19 +836,99 @@ findings: none
   `R`, merge, create `Q`, or begin any title-parser work without
   separate explicit user authorization.
 
+#### Correction round 1 (Sol review of C/A: 4 bounded findings)
+
+- **Supersedes candidate `C` = `138f68d8aee7931662877c9971e85ecd51ffa0c9`
+  and publication `A` = `639f9b4f99635f8de0458be49e0122dc939c7fa2`.** The
+  receipt published there
+  (`docs/verification-receipts/138f68d8aee7931662877c9971e85ecd51ffa0c9/
+  d4b54862-f2f1-425e-b12b-5636653259db.json`) is **not reusable** and is
+  superseded by this correction round's own fresh candidate/publication
+  cycle below. `C`/`A` are preserved unamended, never rewritten.
+- **Finding 1 (strict `schema_version`)**: `bool` is an `int` subclass
+  and `True == 1` in Python — the prior `!= _SUPPORTED_SCHEMA_VERSION`
+  comparison silently accepted `schema_version: true`. Fixed:
+  `load_taxonomy` now explicitly rejects any `schema_version` that is
+  not a genuine, non-`bool` `int` equal to `1`, mirroring this
+  project's own `verification_receipts._require_positive_int`. New
+  fixture `schema_version_boolean_true.yaml` + regression proves it.
+- **Finding 2 (`_StrictYamlLoader` unhashable-key safety)**: YAML's
+  explicit `? ... : ...` syntax permits a non-scalar (sequence/mapping)
+  mapping key, which is unhashable — `key in seen` would previously
+  raise a raw `TypeError`, escaping this module's own closed
+  `TaxonomyValidationError`. Fixed: the membership check is now wrapped
+  in `try/except TypeError`, re-raising as `TaxonomyValidationError`.
+  New fixture `sequence_mapping_key.yaml` + regression proves it.
+- **Finding 3 (fixture-inventory test didn't discover anything)**:
+  `test_every_taxonomy_fixture_file_is_mapped_never_owner_mapping_
+  required` only iterated the already-declared `verification_scope.
+  _TAXONOMY_FIXTURE_FILES` dict's own keys — it could never have caught
+  a fixture file added to disk but never added to that dict (or vice
+  versa). Fixed: it now genuinely enumerates `backend/tests/fixtures/
+  taxonomy/*.yaml` on disk and asserts exact-set equality against the
+  dict's keys, not merely that the dict's own declared entries resolve.
+  `_TAXONOMY_FIXTURE_FILES` is updated to include the two new fixtures
+  from findings 1/2, which this stricter test now requires.
+- **Finding 4 (honest deviation reconciliation, not a "no deviations"
+  claim)**:
+  - `PyYAML==6.0.3` vs. the proposal's approved `6.0.2`: this was a
+    real, unflagged deviation, not a necessary one — `6.0.2` is still
+    published and installs cleanly on this exact Python 3.12/Windows
+    environment (`pip install PyYAML==6.0.2` succeeds via a prebuilt
+    wheel, verified). The original implementation simply pinned
+    whatever was already present in the `.venv` rather than the
+    literal approved version. **Corrected**: downgraded to
+    `PyYAML==6.0.2` in `backend/pyproject.toml`, matching the approved
+    proposal exactly; the full taxonomy suite re-passes under it.
+  - `slice_kind: tooling` vs. the proposal's `parser`: this remains a
+    genuine, deliberate deviation from the proposal's literal text, but
+    one this correction round judges **necessary, not avoidable**, and
+    is surfacing explicitly rather than deciding silently: `check_
+    handoff.py`'s schema requires `slice_kind: parser` to declare a
+    `fixture_path`/`fixture_count` pointing at exactly one JSON-array
+    regression corpus — the classic classifier input/expected-output
+    pattern the six merged parsers each use. This slice's own fixtures
+    are deliberately individual malformed-YAML fault-injection files
+    (proving loader validation, not classifier behavior), not one JSON
+    corpus, and the proposal itself repeatedly emphasized this slice is
+    *not* a classifier. Satisfying `parser`'s schema requirement would
+    mean either fabricating a `fixture_path` that misrepresents what
+    this slice actually is, or restructuring its real fixtures into an
+    artificial JSON-array shape solely to satisfy the label — both
+    changes to the approved contract's substance, not bookkeeping. This
+    was already applied as its own separate commit
+    (`0f22516`) with the same reasoning recorded in its own commit
+    message; restated here in full per this correction's explicit
+    request rather than left implicit. If Sol judges this
+    classification itself still requires the user's separate
+    authorization (as opposed to a self-directed correction, the way
+    the two earlier self-found tooling defects in this project's
+    history were always escalated before being folded into scope),
+    that should be raised as its own finding rather than assumed
+    settled by this entry.
+- Files changed (this correction only):
+  `backend/app/normalization/taxonomy.py`,
+  `backend/scripts/verification_scope.py`,
+  `backend/tests/test_normalization_taxonomy.py`,
+  `backend/tests/test_verification_scope.py`,
+  `backend/pyproject.toml` (all edited); `backend/tests/fixtures/
+  taxonomy/{schema_version_boolean_true,sequence_mapping_key}.yaml`
+  (new). No skill classifier, no title-parser work, no other production
+  file touched.
+- Verification (this correction round): `ruff format --check`/
+  `ruff check`/`mypy` clean (161 source files, backend + `.claude/
+  hooks`). Full pytest suite: **2732 passed** (2730 + 2 new). All 34
+  mutation witnesses pass unmodified. `check_repo.py` exits 0.
+  `git diff --check` clean.
+- STOP — this is a bounded correction only. Do not author `R`, merge,
+  create `Q`, implement the skill classifier, or begin title work.
+
 ```workflow-metadata
 workflow_version: v3.2
-state: published
+state: pending
 slice_id: 2026-09-18-skill-taxonomy-foundation-21dee74
 slice_kind: tooling
 risk_class: H
 base_sha: 21dee74bae122bc634c77d3d0c55d03be128b716
 declared_gate: final
-executed_gate: final
-candidate_sha: 138f68d8aee7931662877c9971e85ecd51ffa0c9
-receipt_id: d4b54862-f2f1-425e-b12b-5636653259db
-receipt_path: docs/verification-receipts/138f68d8aee7931662877c9971e85ecd51ffa0c9/d4b54862-f2f1-425e-b12b-5636653259db.json
-full_suite_count: 2730
-focused_test_count: 129
-mutation_witness_count: 34
 ```

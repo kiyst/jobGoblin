@@ -71,6 +71,8 @@ _TAXONOMY_FIXTURE_FILES: dict[str, str] = {
         "unreachable_display_name",
         "valid_minimal",
         "wrong_schema_version",
+        "schema_version_boolean_true",
+        "sequence_mapping_key",
     )
 }
 

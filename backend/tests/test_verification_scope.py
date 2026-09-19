@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from scripts import verification_scope as vs
+
+_TAXONOMY_FIXTURES_DIR = Path(__file__).parent / "fixtures" / "taxonomy"
 
 
 def test_direct_child_test_file_classified_as_generic_changed_test() -> None:
@@ -84,10 +88,19 @@ def test_json_fixture_already_mapped_does_not_require_owner_mapping() -> None:
 
 
 def test_every_taxonomy_fixture_file_is_mapped_never_owner_mapping_required() -> None:
-    """Complete inventory, never a subset: every file actually present in
-    `backend/tests/fixtures/taxonomy/` must be covered by
-    `_TAXONOMY_FIXTURE_FILES`, not just a couple of samples."""
-    for path in vs._TAXONOMY_FIXTURE_FILES:
+    """Complete inventory, never a subset -- genuinely discovers every
+    file actually present on disk under `backend/tests/fixtures/
+    taxonomy/` and asserts exact equality with `_TAXONOMY_FIXTURE_FILES`'
+    own keys, so an added-but-not-mapped (or removed-but-still-mapped)
+    fixture file fails this test, not merely the samples this test
+    happens to check by name."""
+    actual_paths = {
+        f"backend/tests/fixtures/taxonomy/{entry.name}"
+        for entry in _TAXONOMY_FIXTURES_DIR.iterdir()
+        if entry.is_file() and entry.suffix == ".yaml"
+    }
+    assert actual_paths == set(vs._TAXONOMY_FIXTURE_FILES)
+    for path in actual_paths:
         assert vs.classify_path(path).category == "test-fixture:skill-taxonomy"
 
 

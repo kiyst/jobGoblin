@@ -54,6 +54,16 @@ def test_duplicate_yaml_mapping_key_is_rejected() -> None:
         tx.load_taxonomy(_FIXTURES / "duplicate_yaml_key.yaml")
 
 
+def test_sequence_mapping_key_is_rejected_as_taxonomy_error_not_raw_type_error() -> None:
+    """YAML's explicit `? ... : ...` syntax permits a non-scalar
+    (sequence/mapping) mapping key, which is unhashable -- `key in seen`/
+    `seen.add(key)` would otherwise raise a bare `TypeError` straight out
+    of `_StrictYamlLoader.construct_mapping`, escaping this module's own
+    closed exception type. Must surface as `TaxonomyValidationError`."""
+    with pytest.raises(tx.TaxonomyValidationError, match="unhashable"):
+        tx.load_taxonomy(_FIXTURES / "sequence_mapping_key.yaml")
+
+
 def test_valid_minimal_taxonomy_loads_and_resolves() -> None:
     index = tx.load_taxonomy(_FIXTURES / "valid_minimal.yaml")
     result = index.lookup("Alpha")
@@ -116,6 +126,14 @@ def test_blank_after_strip_alias_is_rejected(tmp_path: Path) -> None:
 def test_wrong_schema_version_is_rejected() -> None:
     with pytest.raises(tx.TaxonomyValidationError, match="schema_version must be"):
         tx.load_taxonomy(_FIXTURES / "wrong_schema_version.yaml")
+
+
+def test_boolean_schema_version_is_rejected_not_silently_accepted_as_one() -> None:
+    """`bool` is an `int` subclass and `True == 1` in Python -- a bare
+    `!=` comparison (or a plain `isinstance(x, int)` check) would
+    silently accept `schema_version: true`. Must be rejected outright."""
+    with pytest.raises(tx.TaxonomyValidationError, match="schema_version must be the int"):
+        tx.load_taxonomy(_FIXTURES / "schema_version_boolean_true.yaml")
 
 
 def test_unknown_top_level_field_is_rejected() -> None:

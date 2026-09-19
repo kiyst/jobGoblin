@@ -64,13 +64,28 @@ class _StrictYamlLoader(yaml.SafeLoader):
     alone silently keeps the last value (last-write-wins) for a
     duplicate key -- exactly the class of defect this project's own
     `verification_receipts._StrictDecoder` (JSON) already guards against
-    for every other versioned artifact (receipts, workflow metadata)."""
+    for every other versioned artifact (receipts, workflow metadata).
+
+    YAML also permits a non-scalar (sequence/mapping) mapping key via its
+    explicit `? ... : ...` syntax -- unhashable, so `key in seen`/`seen.
+    add(key)` below would otherwise raise a raw `TypeError` straight out
+    of this method, escaping this module's own closed exception type.
+    Caught and re-raised as `TaxonomyValidationError` instead, so every
+    caller only ever needs to catch the one exception type this module
+    promises."""
 
     def construct_mapping(self, node: yaml.MappingNode, deep: bool = False) -> dict[Any, Any]:
         seen: set[Any] = set()
         for key_node, _value_node in node.value:
             key = self.construct_object(key_node, deep=deep)
-            if key in seen:
+            try:
+                is_duplicate = key in seen
+            except TypeError as exc:
+                raise TaxonomyValidationError(
+                    f"YAML mapping key must be a hashable scalar, got unhashable "
+                    f"{type(key).__name__}: {key!r}"
+                ) from exc
+            if is_duplicate:
                 raise TaxonomyValidationError(f"duplicate YAML mapping key {key!r}")
             seen.add(key)
         return cast(dict[Any, Any], super().construct_mapping(node, deep=deep))
@@ -215,9 +230,18 @@ def load_taxonomy(path: Path) -> TaxonomyIndex:
         raise TaxonomyValidationError(f"missing required top-level field(s): {sorted(missing_top)}")
 
     schema_version = raw["schema_version"]
-    if schema_version != _SUPPORTED_SCHEMA_VERSION:
+    # `bool` is an `int` subclass and `True == 1`/`False == 0` in Python --
+    # an `isinstance(x, int)` check alone (or a bare `!=` comparison, as
+    # this checked before) would silently accept `schema_version: true`.
+    # Rejected outright, before the equality check, exactly like this
+    # project's own `verification_receipts._require_positive_int`.
+    if (
+        not isinstance(schema_version, int)
+        or isinstance(schema_version, bool)
+        or schema_version != _SUPPORTED_SCHEMA_VERSION
+    ):
         raise TaxonomyValidationError(
-            f"schema_version must be {_SUPPORTED_SCHEMA_VERSION!r}, got {schema_version!r}"
+            f"schema_version must be the int {_SUPPORTED_SCHEMA_VERSION!r}, got {schema_version!r}"
         )
 
     entries_raw = _require_type(raw["entries"], list, context="'entries'")

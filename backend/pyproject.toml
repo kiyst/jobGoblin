@@ -26,7 +26,7 @@ dependencies = [
     # duplicate mapping keys (silent last-wins) -- the loader wraps a
     # custom `SafeLoader` subclass to fail closed on that instead of
     # relying on this dependency's own default behavior.
-    "PyYAML==6.0.3",
+    "PyYAML==6.0.2",
 ]
 
 [project.optional-dependencies]
