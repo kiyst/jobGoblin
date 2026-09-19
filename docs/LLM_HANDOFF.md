@@ -808,29 +808,8 @@ findings: none
   stage, not yet merged") was noticed but is out of this slice's
   authorized two-document scope, so it is disclosed here rather than
   silently fixed.
-- Verification: genuine `verification_coordinator.run_receipt_eligible_
-  verification` run against `C` (`109a3070375be1b8a412abc3dbbbbc76dc379290`)
-  in a disposable detached worktree. All 12 steps PASS: `ruff format
-  --check`, `ruff check`, `mypy` (163 source files), `check_repo.py`,
-  `git diff --check`, DB URL validation, DB reachability, focused pytest
-  (`tests/test_normalization_skills.py tests/test_verification_scope.py`,
-  145 passed), full pytest suite (**2811 passed**), 34 mutation
-  witnesses (34 passed, 0 failed — all pre-existing experience/location/
-  salary guards, none of this module's own since it has no contract-
-  harness guard family), handoff metadata validation, cleanup. Receipt
-  `769a9115-2e13-4c92-abfe-6c37a92e26e9`, `approval_eligible: true`.
-  A first attempt at this same coordinator call failed with the full
-  pytest suite step genuinely `FAIL`ing (blocking the mutation-witnesses
-  step as `NOT RUN`, which correctly refused receipt emission — no
-  receipt is possible on any step failure). Diagnosed by running
-  `scripts.verify` directly against two fresh, separate disposable
-  worktrees at the same candidate SHA (once with no `--focus`, once
-  replicating the coordinator's exact computed `--focus` targets) —
-  both passed cleanly, 2811/2811, matching this project's own prior
-  "transient first-run failure, clean fresh-process retry" pattern
-  (the taxonomy-foundation slice's Pydantic `MemoryError` precedent).
-  The retry that produced this receipt is a fresh, independent run, not
-  a rerun of the failed attempt's own state.
+- Verification: pending — see the workflow-metadata block below and the
+  publication (`A`) entry that will follow it.
 
 ```workflow-metadata
 workflow_version: v3.2
