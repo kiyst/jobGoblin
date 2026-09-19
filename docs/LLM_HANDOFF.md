@@ -98,606 +98,6 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-09-18, Claude Code (Sonnet 5). Risk class H
-  (process/security-relevant tooling, same category as every prior
-  Workflow v3.2 tooling slice). Base `B` -> candidate `C`:
-  `27a2a5e2cf81b2e347d1fa19012822fe1f0b6198` -> this commit; new branch
-  `tooling/workflow-v3.2-post-merge-q-producer`, cut from `main` after a
-  freshly verified clean checkout (`main` == `origin/main`, `check_repo.py`
-  clean, `git diff --check` clean). `slice_kind: tooling`.
-  `slice_id: 2026-09-18-post-merge-q-producer-27a2a5e`. Implements the
-  bounded, proposal-reviewed "post-merge `Q`-evidence producer" slice:
-  Workflow v3.2's `C -> A -> R -> M -> Q` chain had a validator for `Q`
-  (`check_review.validate_q`/`validate_published`) but no producer at
-  all until this slice.
-- **Producer:** `verification_coordinator.run_post_merge_verification`,
-  taking a new `PostMergeEligibleRequest` (only the five chain commit
-  SHAs -- `candidate_sha`, `publication_sha`, `review_sha`, `merge_sha`,
-  `expected_first_parent` -- no `base_sha`/`slice_id`/receipt-reference
-  field for a caller to forge). Every one of those values is instead
-  derived from `check_review.validate_c_a_r_chain`'s own independently
-  re-validated chain output, before any worktree is created. The
-  migration trigger is computed over that same chain-derived
-  `base_sha..candidate_sha` range -- never a caller-supplied range and
-  never `base_sha..merge_sha` -- so nothing external can suppress a
-  genuine migration requirement. Verification runs in a disposable
-  detached worktree at `M` (always full/final, never gated or
-  focus-narrowed), reusing the receipt producer's own worktree/lock/
-  cache-cleanup lifecycle under its own `post-merge-coordinator-`
-  run-directory prefix. Emission is explicitly fail-closed: a failed
-  verification run, a cleanup failure, or an artifact that would fail
-  its own self-validation (`check_review._validate_post_merge_artifact_
-  schema`/`_validate_post_merge_artifact_evidence`, called before the
-  write) all produce *no file at all* -- a deliberate divergence from
-  the existing receipt producer, which does write a receipt marked
-  `approval_eligible: false` on a failed run. The function only ever
-  writes the artifact file; committing `Q` (bundling that file with the
-  append-only merge-record edit to the handoff, per the mainline-`Q`-
-  next policy in `LLM_WORKFLOW.md`) remains a separate step.
-- **Cleanup-prefix fix:** `cleanup_stale_coordinator_dirs` is now
-  parameterized (`prefix: str = "coordinator-"`), restricted to a closed
-  set of exactly two known prefixes (`"coordinator-"`,
-  `"post-merge-coordinator-"`); an unrecognized prefix (including an
-  empty string, which would otherwise match every directory) is rejected
-  before any directory is ever scanned.
-- **Release-sequence guard:** new `confirm_main_unchanged(expected_sha)`
-  re-fetches `origin/main` and refuses if it no longer equals
-  `expected_sha` -- run immediately before pushing a locally-prepared
-  `M`/`Q` together, so a remote that advanced in the meantime is caught
-  before the push rather than raced against.
-- **Adversarial self-review** (fresh subagent, full twelve-question
-  pass; see `LLM_WORKFLOW.md`'s "Adversarial implementer self-review"):
-  no Critical/High findings. Confirmed clean, with concrete evidence:
-  the stage-1/2 pre-flight (`validate_c_a_r_chain`/`validate_merge`)
-  genuinely runs before any worktree is created on every path; every
-  raise point between the worktree stage and the artifact write is an
-  unguarded `raise` with no exception-swallowing; `base_sha` is assigned
-  exactly once, from the chain-derived `published_base_sha`, with no
-  other path into the migration decision; the prefix-rejection in
-  `cleanup_stale_coordinator_dirs` is the function's literal first
-  statement; there is no TOCTOU window since `A`/`R` content is read
-  from immutable commit objects and `M`'s worktree is independently
-  snapshotted before/after. Three Medium findings (test-rigor gaps, not
-  implementation defects) were fixed in response: two rejection tests
-  now also assert a worktree-creation guard (proving *when* rejection
-  happens, not just *that* it does, since `.verify-tmp` absence alone
-  couldn't distinguish "never created" from "created and cleaned up");
-  the success and verify-invocation-failure tests now assert
-  `.verify-tmp` is clean (empty or absent) directly, since it is
-  gitignored and `git status` is blind to it; and a new regression
-  (`test_post_merge_verification_writes_no_artifact_when_self_
-  validation_fails`) proves the artifact's own self-validation gate --
-  not just the `returncode`/`all_passed` check -- independently blocks
-  emission, using a stand-in `verify.py` that mis-reports `all_passed:
-  true` while silently omitting a required step. Three Low findings
-  were reviewed and accepted as pre-existing, informational, and out of
-  this slice's bounded scope (see Deviations below), not fixed here.
-- **Documentation (the three proposal-approved addenda):** `docs/
-  DECISIONS/0009-workflow-v3.2-activation.md` gains "Post-merge
-  evidence: one-time bootstrap exception for M = 9649cba" (the corrected
-  explanation: a conforming `Q` remains constructible on a sibling
-  branch at any time, since Git places no limit on a commit's children
-  -- what is actually foreclosed is only `main`'s own already-pushed
-  linear continuation from `M`; the reason is procedural, not technical,
-  since `M`'s own tree already contained the `Q` tooling; the
-  preserved evidence is reported and rerunnable, not "independently
-  reproducible from Git") and "Post-merge (`Q`) evidence producer"
-  (describing this slice's implementation). `docs/LLM_WORKFLOW.md` gains
-  "Post-merge (`Q`) evidence producer" and "Project policy: `Q` is the
-  next mainline commit after `M`" (explicitly framed as this project's
-  own policy choice, not a `validate_q` requirement; a precondition --
-  an approved producer or evidence-capture procedure must exist *before*
-  merge authorization, not after; the mainline-shape rule; a fail-closed
-  stop-at-`M` rule if post-merge verification or `Q` validation ever
-  fails; and the release sequence tying `confirm_main_unchanged` into
-  the push step). This handoff gains the "Post-merge evidence status"
-  pointer note on the prior Merge record entry (above) and this Work
-  done entry itself.
-- Files changed: `backend/scripts/verification_coordinator.py` (edited);
-  `backend/tests/test_verification_coordinator_post_merge.py` (new, 16
-  tests); `docs/DECISIONS/0009-workflow-v3.2-activation.md` (edited);
-  `docs/LLM_WORKFLOW.md` (edited); `docs/LLM_HANDOFF.md` (this entry,
-  the prior entry's pointer note, and the two-iteration rotation below).
-  No production parser (`app/normalization/*`), model, migration, or
-  live-provider file touched; no database lifecycle operation performed.
-- **Two-iteration rotation applied**: the oldest iteration (the Slice 2
-  contract-harness bounded-correction pass, already merged) is deleted;
-  the former Iteration 2 (the original v3.2 activation candidate/review
-  cycle) and Iteration 3 (the C7-C10 correction saga plus the merge
-  record) are renumbered to Iteration 1 and Iteration 2 respectively,
-  with every in-prose cross-reference to the renumbered iteration
-  updated to match; this entry becomes the new Iteration 3.
-- Verification: `ruff format --check`/`ruff check`/`mypy` clean (159
-  source files, backend + `.claude/hooks`). Full pytest suite: **2663
-  passed**. All 34 mutation witnesses pass unmodified. `check_repo.py`
-  exits 0. `git diff --check` clean.
-- Deviations/known limitations (all reviewed, accepted, non-blocking):
-  (1) on a worktree-removal failure, cleanup still deletes the physical
-  worktree directory without `git worktree remove`/`prune`, which can
-  leave a dangling `.git/worktrees/<id>` metadata entry -- inherited,
-  byte-identical behavior from the existing `run_receipt_eligible_
-  verification`, not introduced or changed by this slice; (2)
-  `cleanup_stale_coordinator_dirs` cannot detect or repair that kind of
-  leak, since it only scans `COORDINATOR_RUN_ROOT`, never `git worktree
-  list` -- same shared, pre-existing limitation; (3) no dedup/lock scopes
-  a given `merge_sha` itself, so two concurrent producer runs against the
-  same `M` could both succeed and coexist as separate untracked artifact
-  files under `docs/post-merge/<merge_sha>/` -- harmless in practice,
-  since `validate_q` requires exactly one *committed* artifact addition,
-  and the actual choice of which artifact becomes `Q` is made at commit
-  time, not by the producer.
-- STOP — this is a bounded tooling slice only. Do not author `R`, merge,
-  create a real `M`/`Q` for this slice or retroactively for `M =
-  9649cba`, begin another slice, rebase, or force-push.
-
-```workflow-metadata
-workflow_version: v3.2
-state: published
-slice_id: 2026-09-18-post-merge-q-producer-27a2a5e
-slice_kind: tooling
-risk_class: H
-base_sha: 27a2a5e2cf81b2e347d1fa19012822fe1f0b6198
-declared_gate: final
-executed_gate: final
-candidate_sha: 3397e1d37a558b9e714c5970ed66f4d98989e7b6
-receipt_id: a78ee96c-ee63-4e70-9269-4d8f52874371
-receipt_path: docs/verification-receipts/3397e1d37a558b9e714c5970ed66f4d98989e7b6/a78ee96c-ee63-4e70-9269-4d8f52874371.json
-full_suite_count: 2663
-focused_test_count: 16
-mutation_witness_count: 34
-```
-
-### Work review
-
-- Sol's review of `C` = `3397e1d37a558b9e714c5970ed66f4d98989e7b6` and
-  `A` = `a7f53f80366de4699fe152c399c752cf05fe7f9e`: **Approved, no
-  executable findings.** Independent verification performed: ran all 16
-  new post-merge-`Q`-producer tests; validated the committed `C..A`
-  transition and receipt (`approval_eligible` recomputes to `true`);
-  confirmed `check_repo.py` and `git diff --check` pass; confirmed the
-  branch is clean and synchronized. The full 2,663-test suite was not
-  independently re-run.
-
-```workflow-review-metadata
-schema_version: 2
-slice_id: 2026-09-18-post-merge-q-producer-27a2a5e
-risk_class: H
-reviewer: Sol
-reviewer_role: primary
-reviewer_model: Sol Medium
-reviewed_at: 2026-09-18T00:00:00Z
-candidate_sha: 3397e1d37a558b9e714c5970ed66f4d98989e7b6
-publication_commit_sha: a7f53f80366de4699fe152c399c752cf05fe7f9e
-receipt_path: docs/verification-receipts/3397e1d37a558b9e714c5970ed66f4d98989e7b6/a78ee96c-ee63-4e70-9269-4d8f52874371.json
-receipt_id: a78ee96c-ee63-4e70-9269-4d8f52874371
-gate: final
-verdict: approved
-findings: none
-```
-
-### Merge record
-
-- Date: 2026-09-18. Merged `tooling/workflow-v3.2-post-merge-q-producer`
-  at approved, reviewed commit `2635ffc608c20526c3ee7e5e12c7411c003ad5f5`
-  (Sol's "Approved, no executable findings" verdict on `C`/`A`, above)
-  into `main` via `git merge --no-ff`. Merge commit:
-  `c33accdadd54fab756e8f4aef5be6a86123e148b`. Pre-merge `main`/
-  `origin/main` tip (rollback boundary):
-  `27a2a5e2cf81b2e347d1fa19012822fe1f0b6198`.
-- Pre-merge checks: confirmed the feature branch and its origin both sat
-  at `2635ffc`, and `main`/`origin/main` were both clean and
-  synchronized at `27a2a5e` before merging.
-- **This is the first merge to follow the documented `M -> Q` release
-  sequence** (`LLM_WORKFLOW.md`'s "Project policy: `Q` is the next
-  mainline commit after `M`"): `M` was created locally, not pushed;
-  `verification_coordinator.run_post_merge_verification` was run
-  against `M` in a disposable detached worktree (always full/final);
-  its resulting artifact
-  (`docs/post-merge/c33accdadd54fab756e8f4aef5be6a86123e148b/
-  d1accc51-726b-4011-a41a-d24e4e12baaa.json`) reported all 11 steps
-  PASS, 2,663 full-suite tests, 34/34 mutation witnesses, and an
-  identical tracked-tree SHA before and after (zero content drift); this
-  commit (`Q`) bundles that artifact addition with this merge-record
-  append, as the single commit immediately following `M` on `main`'s
-  mainline — never a merge-record-only commit.
-- Post-merge verification, all run directly against merged `main`
-  (independent of the `Q` producer's own run above):
-  - `git diff --quiet 2635ffc HEAD` — zero content difference between
-    merged `main` and the approved feature-branch tip, confirmed.
-  - `git diff --check` — clean.
-  - `python -m scripts.check_repo` — clean.
-  - No migration/schema changes: `git diff --stat 27a2a5e..HEAD --
-    backend/alembic backend/migrations` and `git log --oneline
-    27a2a5e..HEAD -- backend/alembic backend/migrations` both empty.
-  - `check_review.validate_published(C, A, R, M, Q)` — **succeeds**,
-    returning the independently re-validated artifact, confirming the
-    complete `C -> A -> R -> M -> Q` chain.
-- STOP — report the synchronized final `main` SHA and stop. No Slice 3,
-  no other Phase 3/4 parser, no other new slice, without separate
-  explicit user authorization.
-
----
-
-## Iteration 2
-
-### Work done
-
-- Date/agent: 2026-09-18, Claude Code (Sonnet 5). Risk class **H**
-  (deliberately, not the R this project's own review discipline might
-  default to for a pure-function, no-DB/network slice: ambiguous-alias
-  false matches are Phase 3's own named primary risk — "confidently
-  storing false facts from ambiguous text" — and this is novel,
-  foundational infrastructure two future parsers depend on for
-  correctness, not a "repeated established pattern"). Base `B` ->
-  candidate `C`: `21dee74bae122bc634c77d3d0c55d03be128b716` -> this
-  commit; new branch `phase-3/skill-taxonomy-foundation`, cut from a
-  freshly verified clean `main` (`main` == `origin/main`, `check_repo.py`
-  clean, `git diff --check` clean). `slice_kind: tooling` (not `parser`:
-  `check_handoff.py` requires `slice_kind: parser` to declare a
-  `fixture_path`/`fixture_count` pointing at a single JSON-array
-  regression corpus, the classic classifier-fixture pattern the six
-  merged parsers each use — this slice is deliberately not itself a
-  classifier, so that shape doesn't fit; its own fault-injection
-  fixtures are individual YAML files exercised via `pytest.mark.
-  parametrize`, not one JSON corpus. The future `classify_skill` parser
-  that consumes this taxonomy is the correct place for `slice_kind:
-  parser` and a real fixture corpus). `slice_id:
-  2026-09-18-skill-taxonomy-foundation-21dee74`. Implements the
-  three-round-negotiated, user-approved skill-taxonomy-foundation
-  proposal and its amendments.
-- **Schema, grammar, and typed result** (`backend/app/normalization/
-  taxonomy.py`, `backend/app/taxonomy/skills.yaml`): `skills.yaml` has
-  exactly two top-level keys (`schema_version: 1`, `entries`); each entry
-  has exactly three keys (`canonical_id`, `display_name`, `aliases`).
-  `canonical_id` reuses `app.schemas.identifiers.is_canonical_slug()`
-  verbatim — the same grammar already enforced on every `provider`/
-  `source` column — never a new regex. `TaxonomyLookupResult` is a new,
-  dedicated type (`status: TaxonomyLookupStatus` paired with
-  `entry: TaxonomyEntry | None`, invariant-enforced in `__post_init__`
-  exactly like `NormalizationResult`'s own value/provenance invariant,
-  two static factories as the only construction path) — deliberately
-  not a reuse of `NormalizationResult`/`Provenance`, since taxonomy-
-  resolution success is orthogonal to a parser's own input-provenance
-  trust level.
-- **YAML safety**: no YAML library existed in this repo before this
-  slice (confirmed by direct search). Adds `PyYAML==6.0.3` (pinned
-  exactly like the existing `idna==3.19` precedent) to
-  `backend/pyproject.toml`, plus a `yaml.*` mypy override (PyYAML ships
-  no type stubs, same treatment as the existing `asyncpg.*` override).
-  `yaml.safe_load` alone does not reject a duplicate YAML mapping key
-  (silent last-write-wins) — `_StrictYamlLoader(yaml.SafeLoader)`
-  overrides `construct_mapping` to raise instead, mirroring this
-  project's own `verification_receipts._StrictDecoder` (JSON) duplicate-
-  key rejection.
-- **Lookup normalization** (precisely defined, not borrowed): checked
-  `location.py`/`salary.py` directly rather than assume a shared
-  convention — they share only NFKC-normalize + strip the project's
-  `_WHITESPACE` set before diverging into field-specific casing
-  (location/salary each uppercase some fields, lowercase others, per
-  field). This taxonomy defines its own rule:
-  NFKC-normalize -> strip `_WHITESPACE` -> collapse repeated internal
-  whitespace -> lowercase-fold. Punctuation (`+`, `#`, `.`, `-`) is
-  preserved literally (`c` vs `c++` vs `c#` must stay distinct).
-  Whitespace adjacent to punctuation is not reconciled — a stated
-  limitation, not an oversight.
-- **Collision rejection**: both `canonical_id` and every alias become
-  lookup keys, inserted into one flat global `normalized_key -> entry`
-  index. Any collision — cross-entry, or two of the same entry's own
-  keys (including an alias equal to its own entry's `canonical_id`) —
-  is rejected at load time, no first/last-wins. A load-time check also
-  requires `normalize(display_name)` be reachable via the entry's own
-  `canonical_id` or an alias (rejecting an entry unreachable by its own
-  display name).
-- **Frozen seed** (15 entries, explicitly reduced from an earlier
-  ~40-60 estimate to keep this a genuine foundation slice, not a
-  vocabulary attempt): `python`, `javascript`(`js`), `typescript`(`ts`),
-  `java`, `cpp`(`c++`,`cplusplus`), `csharp`(`c#`,`c-sharp`), `c`,
-  `golang`(`go`), `rlang`(`r`), `postgresql`(`postgres`), `mysql`,
-  `mongodb`(`mongo`), `kubernetes`(`k8s`), `docker`, `node.js`
-  (`node`,`nodejs`). Every alias individually justified (see the
-  slice's proposal record for the full rationale table); ambiguous
-  near-misses deliberately excluded or kept unaliased (`c`/`cpp`/
-  `csharp` never alias to each other; `java`/`javascript` never alias to
-  each other; `postgres` included but `psql` deliberately excluded, since
-  that names the CLI client, not the database skill).
-- **Exact-match only, by design**: `TaxonomyIndex.lookup()` never
-  tokenizes or scans a larger string — proven by a dedicated test
-  feeding a full sentence and asserting `UNKNOWN`, alongside the same
-  token resolving correctly on its own. No free-text scanning, no
-  skill classifier, implemented in this slice.
-- **Unblocks skill, not title**: a future `classify_skill` parser calls
-  this lookup per already-segmented token and wraps results in its own
-  `NormalizationResult[list[str]]`. Title is **not** unblocked — job
-  titles are free-form multi-word phrases needing a different, likely
-  hierarchical taxonomy schema, their own seed-sourcing rule, and a
-  phrase/segment-extraction normalization approach; only the general
-  pattern (versioned, duplicate-rejecting, schema-validated YAML with a
-  typed unknown result) is a reusable template, never this schema or
-  data directly.
-- **Documentation corrections, kept bounded to exactly the identified
-  stale passages**: `docs/ROADMAP.md`'s Phase 3 status text incorrectly
-  claimed the location classifier was "not merged, not complete" —
-  independently verified via `git log`/`git show` that it merged at
-  `a32b5cc` (approval `c1a5235`) and is a genuine ancestor of `main`;
-  corrected, and this slice's own status recorded alongside it.
-  `docs/ARCHITECTURE.md`'s identical duplicate of the same stale claim
-  (it explicitly deferred to ROADMAP and inherited the staleness) is
-  also corrected; `taxonomy.py`/`skills.yaml` marked implemented
-  (candidate/publication stage); `titles.py`/`skills.py`/`titles.yaml`/
-  `industries.yaml`/`aliases.yaml` explicitly left as still-planned, not
-  touched further.
-- **Adversarial self-review** (fresh subagent; DB/ORM/concurrency
-  questions from `LLM_WORKFLOW.md`'s twelve-question pass explicitly
-  marked not-applicable, confirmed by the import-boundary test and by
-  direct inspection of this module's import list). No Critical/High
-  findings. One Medium finding fixed: `TaxonomyIndex`'s "immutable"
-  claim was asserted but not enforced — `@dataclass(frozen=True)` only
-  blocks rebinding the `_by_normalized_key` attribute, never in-place
-  mutation of the `dict` it pointed to (reproduced: assigning into the
-  dict directly silently corrupted a lookup). Fixed: `__post_init__` now
-  defensively copies the caller's mapping into a `MappingProxyType`, so
-  neither the constructor's caller nor any other holder of a reference
-  can mutate the index post-construction — proven by two new regressions
-  (direct in-place assignment now raises `TypeError`; mutating the
-  caller's own source dict after construction no longer affects the
-  index, proving a copy was made, not merely a wrap). One Low finding
-  fixed: a blank-after-whitespace-strip alias lacked a dedicated test
-  (behavior was already correct — added the missing regression). One
-  Low/informational finding (an NBSP-only `display_name` is still
-  correctly rejected, just under the "not reachable" message rather than
-  "blank") left as-is — fails closed either way, a message-clarity nit
-  only.
-- **Real gap found by the tooling's own fail-closed design, not a review
-  finding**: `verification_scope.classify_path` correctly refused to
-  classify the 12 new non-Python YAML fixture files under
-  `backend/tests/fixtures/taxonomy/` (`OwnerMappingRequiredError` —
-  "no declared exact rule"), exactly as it's designed to for any
-  unmapped non-`.py` path under `backend/tests/`. A new directory
-  prefix was not an option (the two existing prefix rules must stay
-  disjoint); added a new exact-path map, `_TAXONOMY_FIXTURE_FILES`
-  (all 12 files -> `"test-fixture:skill-taxonomy"`), wired into the
-  same validation/lookup path `_RECORD_FILES` already uses. Confirmed
-  this new category never spuriously requires contract-family/guard
-  coverage (`required_contract_families` only recognizes `parser`/
-  `adapter`/`contract-record` kinds against location/salary/
-  experience). 4 new regressions added, including a complete-inventory
-  check (every file actually present in the fixtures directory, not
-  just samples).
-- Files changed: `backend/app/normalization/taxonomy.py` (new);
-  `backend/app/taxonomy/skills.yaml` (new); `backend/tests/
-  test_normalization_taxonomy.py` (new, 63 tests);
-  `backend/scripts/verification_scope.py`,
-  `backend/tests/test_verification_scope.py` (edited, 4 new tests —
-  see the fixture-classification gap above); `backend/tests/
-  fixtures/taxonomy/*.yaml` (new, 12 fixtures: 11 fault-injection, 1
-  positive control);
-  `backend/pyproject.toml` (edited — `PyYAML==6.0.3` pin, `yaml.*` mypy
-  override); `docs/ROADMAP.md`, `docs/ARCHITECTURE.md` (edited, bounded
-  stale-passage corrections only); `docs/LLM_HANDOFF.md` (this entry,
-  plus the two-iteration rotation below). No production parser other
-  than this new module touched; no migration/model/service/API file
-  touched; no database lifecycle operation performed; no provider
-  contact of any kind.
-- **Two-iteration rotation applied**: the oldest iteration (the original
-  v3.2 activation candidate/review cycle, C1-C6) is deleted; its two
-  remaining internal cross-references from the newer iteration (which
-  had read "Iteration 1" as a pointer to it) were first rewritten as
-  self-contained prose naming the actual work directly, so they do not
-  dangle after deletion. The former Iteration 2 (the C7-C10 correction
-  saga, merge record, and post-merge-evidence-status note) and
-  Iteration 3 (the Q-producer slice's Work done/review/merge
-  record/`Q` publication) are renumbered to Iteration 1 and Iteration 2
-  respectively; this entry becomes the new Iteration 3.
-- Verification: `ruff format --check`/`ruff check`/`mypy` clean (161
-  source files, backend + `.claude/hooks`). Full pytest suite: **2730
-  passed** (2663 + 63 taxonomy + 4 scope). All 34 mutation witnesses
-  pass unmodified. `check_repo.py` exits 0. `git diff --check` clean.
-  Genuine external `python -m scripts.verify --level routine
-  --compat-v3.1`: all 10 checks PASS.
-- Deviations/known limitations: none beyond what the proposal itself
-  already disclosed (a small, explicitly non-exhaustive 15-entry seed;
-  the Go/R exact-match positive controls are documented as not
-  guaranteeing a future classifier's word-boundary safety), plus the
-  informational display-name-blank-message nit noted above.
-- STOP — this is a bounded parser-foundation slice only. Do not author
-  `R`, merge, create `Q`, or begin any title-parser work without
-  separate explicit user authorization.
-
-#### Correction round 1 (Sol review of C/A: 4 bounded findings)
-
-- **Supersedes candidate `C` = `138f68d8aee7931662877c9971e85ecd51ffa0c9`
-  and publication `A` = `639f9b4f99635f8de0458be49e0122dc939c7fa2`.** The
-  receipt published there
-  (`docs/verification-receipts/138f68d8aee7931662877c9971e85ecd51ffa0c9/
-  d4b54862-f2f1-425e-b12b-5636653259db.json`) is **not reusable** and is
-  superseded by this correction round's own fresh candidate/publication
-  cycle below. `C`/`A` are preserved unamended, never rewritten.
-- **Finding 1 (strict `schema_version`)**: `bool` is an `int` subclass
-  and `True == 1` in Python — the prior `!= _SUPPORTED_SCHEMA_VERSION`
-  comparison silently accepted `schema_version: true`. Fixed:
-  `load_taxonomy` now explicitly rejects any `schema_version` that is
-  not a genuine, non-`bool` `int` equal to `1`, mirroring this
-  project's own `verification_receipts._require_positive_int`. New
-  fixture `schema_version_boolean_true.yaml` + regression proves it.
-- **Finding 2 (`_StrictYamlLoader` unhashable-key safety)**: YAML's
-  explicit `? ... : ...` syntax permits a non-scalar (sequence/mapping)
-  mapping key, which is unhashable — `key in seen` would previously
-  raise a raw `TypeError`, escaping this module's own closed
-  `TaxonomyValidationError`. Fixed: the membership check is now wrapped
-  in `try/except TypeError`, re-raising as `TaxonomyValidationError`.
-  New fixture `sequence_mapping_key.yaml` + regression proves it.
-- **Finding 3 (fixture-inventory test didn't discover anything)**:
-  `test_every_taxonomy_fixture_file_is_mapped_never_owner_mapping_
-  required` only iterated the already-declared `verification_scope.
-  _TAXONOMY_FIXTURE_FILES` dict's own keys — it could never have caught
-  a fixture file added to disk but never added to that dict (or vice
-  versa). Fixed: it now genuinely enumerates `backend/tests/fixtures/
-  taxonomy/*.yaml` on disk and asserts exact-set equality against the
-  dict's keys, not merely that the dict's own declared entries resolve.
-  `_TAXONOMY_FIXTURE_FILES` is updated to include the two new fixtures
-  from findings 1/2, which this stricter test now requires.
-- **Finding 4 (honest deviation reconciliation, not a "no deviations"
-  claim)**:
-  - `PyYAML==6.0.3` vs. the proposal's approved `6.0.2`: this was a
-    real, unflagged deviation, not a necessary one — `6.0.2` is still
-    published and installs cleanly on this exact Python 3.12/Windows
-    environment (`pip install PyYAML==6.0.2` succeeds via a prebuilt
-    wheel, verified). The original implementation simply pinned
-    whatever was already present in the `.venv` rather than the
-    literal approved version. **Corrected**: downgraded to
-    `PyYAML==6.0.2` in `backend/pyproject.toml`, matching the approved
-    proposal exactly; the full taxonomy suite re-passes under it.
-  - `slice_kind: tooling` vs. the proposal's `parser`: this remains a
-    genuine, deliberate deviation from the proposal's literal text, but
-    one this correction round judges **necessary, not avoidable**, and
-    is surfacing explicitly rather than deciding silently: `check_
-    handoff.py`'s schema requires `slice_kind: parser` to declare a
-    `fixture_path`/`fixture_count` pointing at exactly one JSON-array
-    regression corpus — the classic classifier input/expected-output
-    pattern the six merged parsers each use. This slice's own fixtures
-    are deliberately individual malformed-YAML fault-injection files
-    (proving loader validation, not classifier behavior), not one JSON
-    corpus, and the proposal itself repeatedly emphasized this slice is
-    *not* a classifier. Satisfying `parser`'s schema requirement would
-    mean either fabricating a `fixture_path` that misrepresents what
-    this slice actually is, or restructuring its real fixtures into an
-    artificial JSON-array shape solely to satisfy the label — both
-    changes to the approved contract's substance, not bookkeeping. This
-    was already applied as its own separate commit
-    (`0f22516`) with the same reasoning recorded in its own commit
-    message; restated here in full per this correction's explicit
-    request rather than left implicit. If Sol judges this
-    classification itself still requires the user's separate
-    authorization (as opposed to a self-directed correction, the way
-    the two earlier self-found tooling defects in this project's
-    history were always escalated before being folded into scope),
-    that should be raised as its own finding rather than assumed
-    settled by this entry.
-- Files changed (this correction only):
-  `backend/app/normalization/taxonomy.py`,
-  `backend/scripts/verification_scope.py`,
-  `backend/tests/test_normalization_taxonomy.py`,
-  `backend/tests/test_verification_scope.py`,
-  `backend/pyproject.toml` (all edited); `backend/tests/fixtures/
-  taxonomy/{schema_version_boolean_true,sequence_mapping_key}.yaml`
-  (new). No skill classifier, no title-parser work, no other production
-  file touched.
-- Verification (this correction round): `ruff format --check`/
-  `ruff check`/`mypy` clean (161 source files, backend + `.claude/
-  hooks`). Full pytest suite: **2732 passed** (2730 + 2 new). All 34
-  mutation witnesses pass unmodified. `check_repo.py` exits 0.
-  `git diff --check` clean.
-- STOP — this is a bounded correction only. Do not author `R`, merge,
-  create `Q`, implement the skill classifier, or begin title work.
-
-```workflow-metadata
-workflow_version: v3.2
-state: published
-slice_id: 2026-09-18-skill-taxonomy-foundation-21dee74
-slice_kind: tooling
-risk_class: H
-base_sha: 21dee74bae122bc634c77d3d0c55d03be128b716
-declared_gate: final
-executed_gate: final
-candidate_sha: c08e89d3fe073ac34cada82e52df3710cb9e2c3d
-receipt_id: 2231dafb-4057-4b1b-9c86-f51780a18907
-receipt_path: docs/verification-receipts/c08e89d3fe073ac34cada82e52df3710cb9e2c3d/2231dafb-4057-4b1b-9c86-f51780a18907.json
-full_suite_count: 2732
-focused_test_count: 131
-mutation_witness_count: 34
-```
-
-### Work review
-
-- Sol's review of `C2` = `c08e89d3fe073ac34cada82e52df3710cb9e2c3d` and
-  `A2` = `f652b5d1fd32fabaeaccc80fa6aa83891c32e4cb`: **Approved, no
-  executable findings.** Independent verification performed: confirmed
-  all three bounded corrections (strict `schema_version`,
-  `_StrictYamlLoader` unhashable-key handling, the genuinely-discovering
-  fixture-inventory test) are closed; ran 131 focused tests, passing;
-  validated the `C2..A2` transition and receipt; recomputed
-  `approval_eligible: true`; confirmed `check_repo.py` and
-  `git diff --check` pass. Sol accepts `slice_kind: tooling` as the
-  appropriate, necessary deviation from the proposal's `parser` label —
-  this is executable taxonomy-foundation infrastructure, not a
-  classifier with the JSON-array fixture corpus `slice_kind: parser`
-  requires; risk class `H` and the `final` gate remain unchanged. The
-  full 2,732-test suite and the 34 mutation witnesses were not
-  independently re-run. Disclosed: the first focused-test launch hit a
-  transient Pydantic startup `MemoryError`; a fresh-process retry passed
-  131/131, and that retry's result is what this verdict relies on.
-
-```workflow-review-metadata
-schema_version: 2
-slice_id: 2026-09-18-skill-taxonomy-foundation-21dee74
-risk_class: H
-reviewer: Sol
-reviewer_role: primary
-reviewer_model: Sol Medium
-reviewed_at: 2026-09-19T00:00:00Z
-candidate_sha: c08e89d3fe073ac34cada82e52df3710cb9e2c3d
-publication_commit_sha: f652b5d1fd32fabaeaccc80fa6aa83891c32e4cb
-receipt_path: docs/verification-receipts/c08e89d3fe073ac34cada82e52df3710cb9e2c3d/2231dafb-4057-4b1b-9c86-f51780a18907.json
-receipt_id: 2231dafb-4057-4b1b-9c86-f51780a18907
-gate: final
-verdict: approved
-findings: none
-```
-
-### Merge record
-
-- Date: 2026-09-19. Merged `phase-3/skill-taxonomy-foundation` at
-  approved, reviewed commit `ab6d27d300e81e76049d54623c3efea12bebebb4`
-  (Sol's "Approved, no executable findings" verdict on `C2`/`A2`,
-  above) into `main` via `git merge --no-ff`. Merge commit:
-  `1876f7e2168d90e36a1fb46f039cd5969fe49d6c`. Pre-merge `main`/
-  `origin/main` tip (rollback boundary):
-  `21dee74bae122bc634c77d3d0c55d03be128b716`.
-- Pre-merge checks: confirmed the feature branch and its origin both sat
-  at `ab6d27d`, and `main`/`origin/main` were both clean and
-  synchronized at `21dee74` before merging; re-confirmed
-  `check_merge_eligibility(C2, A2, R)` still returned `approved`
-  immediately beforehand.
-- Followed the documented `M -> Q` release sequence
-  (`LLM_WORKFLOW.md`'s "Project policy: `Q` is the next mainline commit
-  after `M`"): `M` was created locally, not pushed; zero content
-  difference between `M` and `R` confirmed
-  (`git diff --quiet ab6d27d HEAD`);
-  `verification_coordinator.run_post_merge_verification` was run
-  against `M` in a disposable detached worktree (always full/final);
-  its artifact
-  (`docs/post-merge/1876f7e2168d90e36a1fb46f039cd5969fe49d6c/
-  73f4500a-f122-4b0b-9019-75a631a40289.json`) reported all 11 steps
-  PASS, 2,732 full-suite tests, 34/34 mutation witnesses, and an
-  identical tracked-tree SHA before and after; this commit (`Q`)
-  bundles that artifact addition with this merge-record append, as the
-  single commit immediately following `M` on `main`'s mainline — never
-  a merge-record-only commit.
-- Post-merge verification, all run directly against merged `main`
-  (independent of the `Q` producer's own run above):
-  - `git diff --quiet ab6d27d HEAD` — zero content difference between
-    merged `main` and the approved feature-branch tip, confirmed.
-  - `git diff --check` — clean.
-  - `python -m scripts.check_repo` — clean.
-  - No migration/schema changes: `git diff --stat 21dee74..HEAD --
-    backend/alembic backend/migrations` and `git log --oneline
-    21dee74..HEAD -- backend/alembic backend/migrations` both empty.
-  - `check_review.validate_published(C2, A2, R, M, Q)` — **succeeds**,
-    returning the independently re-validated artifact, confirming the
-    complete `C2 -> A2 -> R -> M -> Q` chain.
-  - `verification_coordinator.confirm_main_unchanged` — run immediately
-    before push, confirmed `origin/main` still equaled the pre-merge
-    tip.
-- STOP — report the synchronized final `main` SHA and stop. No skill
-  classifier, no title-parser work, no other new slice, without
-  separate explicit user authorization.
-
----
-
-## Iteration 3
-
-### Work done
-
 - Date/agent: 2026-09-19, Claude Code (Sonnet 5). Risk class **H** (same
   primary-risk reasoning as the taxonomy-foundation slice: ambiguous-alias
   false matches are Phase 3's own named risk, and this is the first
@@ -828,4 +228,148 @@ fixture_count: 61
 full_suite_count: 2811
 focused_test_count: 145
 mutation_witness_count: 34
+```
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-09-19, Claude Code (Sonnet 5). Risk class **H**
+  (same slice, same primary-risk reasoning as Iteration 1). Base `B`
+  (unchanged for this slice's whole correction lifetime) ->
+  candidate `C2`: `d0159a4cc0faf9fb13f30ea814fa2e6c204570bb` -> this
+  commit; same branch `phase-3/skill-classifier`, on top of the existing
+  pushed tip `17f6f24`. `slice_id: 2026-09-19-skill-classifier-d0159a4`
+  (unchanged — same slice, a correction cycle within it, matching the
+  skill-taxonomy-foundation slice's own C1/C2 precedent). Addresses
+  Sol's review of `C = 109a307` and claimed `A = 17f6f24`, both of which
+  remain unamended, still pushed, still present in history exactly as
+  they were.
+- **Bug fix, Sol's finding**: `_next_genuine_terminator_end` scanned
+  forward for the first punctuation run whose *following* character was
+  in this module's covered-whitespace class (`\t`/`\n`/`\r`/space) or
+  end-of-string, and — critically — **skipped past** any punctuation run
+  that failed that check, continuing to scan for a *later* one instead
+  of stopping. A punctuation run followed by any other Unicode
+  whitespace (a no-break space, a vertical tab, a form feed, an em
+  space, ...) therefore never ended the region at all; the scan kept
+  going, and if no strictly-covered terminator existed later in the
+  text, the region silently extended all the way to end-of-string —
+  crossing an unrelated clause boundary and wrongly authorizing a
+  standalone ambiguous key found there. Confirmed exactly as reported:
+  `"Skills: Python. When ready, Go"` returned `golang`;
+  `"Skills: Python. See details, Node"` returned `node.js`.
+  **Fix**: split the single `_is_genuine_terminator_end` helper into two
+  deliberately asymmetric forms. `_is_covered_terminator_boundary`
+  (strict — covered whitespace or end-of-string only) is now used
+  *exclusively* by `_sentence_boundary_start_positions`, governing where
+  an anchor may *begin* — unchanged, since granting a new anchor must
+  stay hard to trigger. `_is_region_ending_boundary` (liberal — *any*
+  Unicode whitespace character, via `str.isspace()`, or end-of-string)
+  is now used by `_next_genuine_terminator_end`, governing where a
+  region *ends* — widened, fail-closed: a region also grants extra
+  permission, so a punctuation run followed by anything whitespace-like
+  must stop the region right there rather than risk extending across
+  unrelated text looking for a stricter match. No other grammar changed:
+  unambiguous whole-text matching, the title role-noun-adjacency rule,
+  and the anchor-start mechanism itself are all untouched.
+- **Regressions and mutation-proving**: added `backend/tests/fixtures/
+  normalization/skill_cases.json` cases
+  `description_nbsp_after_terminator_ends_region_go` and `..._node` (the
+  two exact reported inputs, both now correctly returning only
+  `python`), `description_ascii_space_after_terminator_ends_region_control`
+  (the same shape with an ordinary space, proving the already-correct
+  covered-whitespace case is unaffected), and
+  `description_vertical_tab_after_terminator_ends_region` /
+  `..._form_feed_after_terminator_ends_region` (proving the fix
+  generalizes beyond the no-break space specifically). Fixture corpus is
+  now 66 cases (61 + 5). Added direct unit-level tests in
+  `backend/tests/test_normalization_skills.py` against the two boundary
+  helpers themselves (`_is_covered_terminator_boundary`,
+  `_is_region_ending_boundary`), parametrized over covered whitespace,
+  four non-covered whitespace variants, a non-whitespace letter, and a
+  bare punctuation character, plus a test proving the liberal form
+  accepts a strict superset of what the strict form accepts (never a
+  narrower, inconsistent widening) — 104 tests total (76 + 28).
+- **Adversarial self-review finding, fixed before this commit**: an
+  independent adversarial-review pass (read-only, including live
+  monkeypatch-based reverts of the fix and direct execution against the
+  real taxonomy, not just static reasoning) confirmed the fix genuinely
+  generalizes across a wide range of Unicode whitespace categories
+  (no-break space, vertical tab, form feed, em/en space, line/paragraph
+  separator, narrow no-break space, NEL, ideographic space, C0
+  separators), confirmed no regression across the 61 pre-existing
+  fixture cases (provably, since covered whitespace is a strict subset
+  of `str.isspace()`, so the liberal boundary can only end a region at
+  the same position or earlier, never later), confirmed the two new
+  unit tests are not vacuous (reverting `_is_region_ending_boundary` to
+  the old strict form makes them, and 4 of the 5 new fixture cases,
+  genuinely fail), and confirmed no analogous bug on the anchor-start
+  side. It found one real defect: the module docstring's "terminator"
+  definition still described only the strict, covered-whitespace-only
+  rule, which after this fix is accurate for anchor-*start* eligibility
+  only, not for region-*ending* -- silently understating the fix to a
+  future reader relying on the docstring as the grammar spec. Fixed by
+  splitting the docstring's single "terminator" definition into the same
+  two named, asymmetric concepts the code now uses. Also noted, not
+  fixed here (identical before and after this diff, so out of this
+  correction's bounded scope): Unicode format characters (zero-width
+  space, BOM, the Mongolian vowel separator) are category `Cf`, not
+  whitespace, so `str.isspace()` is `False` for them and they still do
+  not end a region either way -- a pre-existing residual gap in the same
+  threat family, not introduced or worsened by this correction.
+- **Old receipt/publication cycle superseded, non-reusable**: receipt
+  `769a9115-2e13-4c92-abfe-6c37a92e26e9` (for `candidate_sha: 109a307`)
+  verified code containing the bug above and is superseded by this
+  correction — it must not be cited as current evidence for this slice
+  going forward. It remains on disk unmodified (receipts are
+  durable/create-only, never deleted or edited) purely as an immutable
+  historical record of what that specific candidate actually contained.
+- **`17f6f24` structurally could not serve as `A`**: `check_review.
+  validate_c_to_a_transition(C=109a307, A=17f6f24, ...)` passed, because
+  that validator only diffs file *content* between the two named commits
+  — it never inspects git parentage. But `17f6f24`'s sole parent is
+  `85ce56a` (the mistaken commit that first published the receipt with
+  an out-of-scope prose expansion), not `109a307` directly. `A` must be
+  `C`'s own direct, single-parent child — a content-only diff passing is
+  necessary but not sufficient. This is disclosed here rather than
+  silently relied upon; `109a307`, `85ce56a`, and `17f6f24` are all
+  preserved unamended in history as the record of how this was found and
+  worked around, but `17f6f24` is not treated as a valid `A` for
+  anything going forward. `C2`/`A2` (this correction) will have their
+  own genuine, directly-verified single-parent relationship, checked
+  explicitly before this correction is reported complete.
+- **Handoff ledger corrected to the documented at-most-two-iteration
+  rule**: the ledger had drifted to a rolling three-iteration pattern
+  across several prior slices (each rotation kept the two newest of
+  three instead of collapsing to two), never itself flagged before now.
+  Corrected in this same commit: the two older, unrelated iterations
+  (the post-merge `Q`-producer slice and the skill-taxonomy-foundation
+  slice) are removed entirely; the skill-classifier implementation entry
+  (this slice's own `C`/`A` record, previously "Iteration 3") is
+  renumbered to Iteration 1, unchanged in content; this correction
+  becomes Iteration 2.
+- Files changed: `backend/app/normalization/skills.py` (edited — the
+  boundary-helper fix only); `backend/tests/fixtures/normalization/
+  skill_cases.json` (edited, +5 cases); `backend/tests/
+  test_normalization_skills.py` (edited, +28 tests); `docs/LLM_HANDOFF.md`
+  (this entry, plus the iteration-count correction above). No taxonomy
+  file, migration, model, service, API, or live-provider file touched;
+  no realistic-corpus work; no title-parser work; no workflow-policy
+  file touched; no database lifecycle operation performed.
+- Verification: pending — see the workflow-metadata block below and the
+  publication (`A2`) entry that will follow it.
+
+```workflow-metadata
+workflow_version: v3.2
+state: pending
+slice_id: 2026-09-19-skill-classifier-d0159a4
+slice_kind: parser
+risk_class: H
+base_sha: d0159a4cc0faf9fb13f30ea814fa2e6c204570bb
+declared_gate: final
+fixture_path: backend/tests/fixtures/normalization/skill_cases.json
+fixture_count: 66
 ```

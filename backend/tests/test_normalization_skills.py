@@ -5,7 +5,12 @@ from typing import Any, cast
 
 import pytest
 
-from app.normalization.skills import SkillMatch, classify_skills
+from app.normalization.skills import (
+    SkillMatch,
+    _is_covered_terminator_boundary,
+    _is_region_ending_boundary,
+    classify_skills,
+)
 from app.normalization.taxonomy import DEFAULT_SKILLS_TAXONOMY_PATH, TaxonomyIndex, load_taxonomy
 from app.normalization.types import Provenance
 
@@ -69,6 +74,79 @@ def test_classify_skills_result_has_no_duplicate_canonical_ids() -> None:
         result = classify_skills(case["title"], case["description"], taxonomy=_TAXONOMY)
         ids = [match.canonical_id for match in result]
         assert len(ids) == len(set(ids)), case["note"]
+
+
+# ---------------------------------------------------------------------------
+# Region-ending vs. anchor-start boundary helpers -- unit-level, direct
+# coverage of the corrected mechanism (Sol's finding: a punctuation run
+# followed by non-covered Unicode whitespace must still end an anchored
+# region, fail-closed, rather than being skipped as "not genuine" and
+# letting the region extend across the clause boundary). These two
+# helpers are deliberately asymmetric: anchor-start stays strict
+# (covered-whitespace-only, since creating an anchor grants extra
+# permission and must stay hard to trigger), while region-ending is
+# liberal (any Unicode whitespace, since a region also grants extra
+# permission and must be hard to accidentally over-extend).
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    ("char", "expected"),
+    [
+        ("\t", True),
+        ("\n", True),
+        ("\r", True),
+        (" ", True),
+        ("\u00a0", False),  # no-break space
+        ("\u000b", False),  # vertical tab
+        ("\u000c", False),  # form feed
+        ("\u2003", False),  # em space
+        ("j", False),
+        (".", False),
+    ],
+)
+def test_is_covered_terminator_boundary_is_strict(char: str, expected: bool) -> None:
+    text = f".{char}rest"
+    assert _is_covered_terminator_boundary(text, 1) is expected
+
+
+def test_is_covered_terminator_boundary_true_at_end_of_string() -> None:
+    assert _is_covered_terminator_boundary(".", 1) is True
+
+
+@pytest.mark.parametrize(
+    ("char", "expected"),
+    [
+        ("\t", True),
+        ("\n", True),
+        ("\r", True),
+        (" ", True),
+        ("\u00a0", True),  # no-break space -- the corrected case
+        ("\u000b", True),  # vertical tab
+        ("\u000c", True),  # form feed
+        ("\u2003", True),  # em space
+        ("j", False),
+        (".", False),
+    ],
+)
+def test_is_region_ending_boundary_is_liberal(char: str, expected: bool) -> None:
+    text = f".{char}rest"
+    assert _is_region_ending_boundary(text, 1) is expected
+
+
+def test_is_region_ending_boundary_true_at_end_of_string() -> None:
+    assert _is_region_ending_boundary(".", 1) is True
+
+
+def test_region_ending_boundary_is_strictly_more_permissive_than_anchor_start() -> None:
+    """Every character the strict (anchor-start) form accepts, the liberal
+    (region-ending) form must also accept -- proving the widening is
+    additive, never a narrowing that could reintroduce a different gap."""
+    probe_chars = ["\t", "\n", "\r", " ", "\u00a0", "\u000b", "\u000c", "\u2003", "j", "."]
+    for char in probe_chars:
+        text = f".{char}rest"
+        if _is_covered_terminator_boundary(text, 1):
+            assert _is_region_ending_boundary(
+                text, 1
+            ), f"{char!r} is accepted by the strict form but rejected by the liberal one"
 
 
 # ---------------------------------------------------------------------------

@@ -473,6 +473,46 @@
     "note": "A no-break space immediately after the colon is also outside the covered-whitespace class and is explicitly rejected (not merely left unconsumed), closing the case where the ordinary Unicode-\\s-aware tokenizer would otherwise still treat it as a separator and rescue 'Go'."
   },
   {
+    "id": "description_nbsp_after_terminator_ends_region_go",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "Skills: Python. When ready, Go",
+    "expected_matches": [{"canonical_id": "python", "display_name": "Python", "provenance": "parsed_description"}],
+    "note": "Correction regression (Sol's finding): a punctuation run followed by a no-break space must still end the region, exactly like ASCII space would -- not be skipped as 'not genuine', which previously let the region extend across the clause boundary and wrongly rescue standalone 'Go'."
+  },
+  {
+    "id": "description_nbsp_after_terminator_ends_region_node",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "Skills: Python. See details, Node",
+    "expected_matches": [{"canonical_id": "python", "display_name": "Python", "provenance": "parsed_description"}],
+    "note": "Correction regression (Sol's finding): same mechanism as description_nbsp_after_terminator_ends_region_go, isolated against bare 'Node' resolving to the node.js entry instead of 'Go' resolving to golang."
+  },
+  {
+    "id": "description_ascii_space_after_terminator_ends_region_control",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "Skills: Python. When ready, Go",
+    "expected_matches": [{"canonical_id": "python", "display_name": "Python", "provenance": "parsed_description"}],
+    "note": "Positive control neighboring the two NBSP regressions above: an ordinary ASCII space after the period still ends the region exactly where it always did, proving the fix did not change the already-correct covered-whitespace case."
+  },
+  {
+    "id": "description_vertical_tab_after_terminator_ends_region",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "Skills: Python.\u000bWhen ready, Go",
+    "expected_matches": [{"canonical_id": "python", "display_name": "Python", "provenance": "parsed_description"}],
+    "note": "A vertical tab (plain ASCII whitespace, but outside this module's own covered-whitespace class) after the period must also end the region, proving the fix is not narrowly special-cased to the no-break space alone."
+  },
+  {
+    "id": "description_form_feed_after_terminator_ends_region",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "Skills: Python.\u000cSee details, Node",
+    "expected_matches": [{"canonical_id": "python", "display_name": "Python", "provenance": "parsed_description"}],
+    "note": "A form feed after the period must also end the region, for the same reason as the vertical-tab case."
+  },
+  {
     "id": "cross_field_dedup_escalates_provenance",
     "origin": "synthetic_representative",
     "title": "Python Developer",

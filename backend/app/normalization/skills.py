@@ -105,27 +105,43 @@ produces an accidental anchor.
 
 A label match is a valid **anchor** only if it begins at one of three
 positions: index 0 (start-of-field), immediately after a `\n`
-(start-of-line), or immediately after a genuine **terminator**'s
-trailing whitespace (a sentence boundary). This closes the
+(start-of-line), or immediately after a punctuation run that is a
+**covered terminator** -- a complete run of `.`/`!`/`?` immediately
+followed by covered whitespace (a sentence boundary). This closes the
 `"Soft skills:"` gap -- `"skills"` there begins mid-phrase, satisfying
 none of the three, so it is not an anchor at all (the ambiguous key in
 that sentence is still dropped, though any *unambiguous* key elsewhere in
 the same text is unaffected and still matches via the ordinary
-whole-text pass below).
+whole-text pass below). Creating an anchor grants extra permission, so
+this stays deliberately strict: a punctuation run followed by some other
+Unicode whitespace character (a no-break space, a vertical tab, ...) is
+*not* a covered terminator and never starts a new anchor-eligible
+position -- `_is_covered_terminator_boundary`.
 
-A **terminator** is a complete run of `.`/`!`/`?` immediately followed by
-covered whitespace, or by end-of-input. Critically, the lone `.` inside
-`"Node.js"` is never a terminator -- it is followed by `j`, not
-whitespace or end-of-input -- so an anchored region never ends there.
+The **region** bound to an anchor ends at the first **region-ending
+terminator** found after it: a complete run of `.`/`!`/`?` immediately
+followed by *any* Unicode whitespace character (not just this module's
+covered set) or by end-of-input -- `_is_region_ending_boundary`. This is
+deliberately more liberal than a covered terminator, and deliberately
+fail-closed in the opposite direction from anchor creation: a region
+also grants extra permission, so when a punctuation run is followed by
+something whitespace-like but outside the covered set, the region must
+still stop there rather than skip past it and keep scanning for a
+stricter match later in the text -- extending across an unrelated clause
+and wrongly authorizing whatever ambiguous key happens to sit in it
+(`"Skills: Python. When ready, Go"` must never leak `golang`).
+Critically, the lone `.` inside `"Node.js"` is never a region-ending
+terminator either way -- it is followed by `j`, neither covered nor any
+other whitespace -- so an anchored region never ends there.
 
-The **region** bound to an anchor runs from the anchor's own match end
-(Python's ordinary exclusive-slice convention -- `region_end` is always
-a `Pattern.end()` value, and the slice `text[anchor_end:region_end]`
-already includes the complete terminator run) to the first genuine
-terminator found afterward, or to end-of-input if none exists. The
-terminator run is deliberately *not* trimmed out of the region text --
-it is handed to tokenization unchanged, so the existing single-vs-
-doubled trailing-punctuation rule above remains the only thing deciding
+The region runs from the anchor's own match end (Python's ordinary
+exclusive-slice convention -- `region_end` is always a `Pattern.end()`
+value, and the slice `text[anchor_end:region_end]` already includes the
+complete terminator run) to the region-ending terminator's own match
+end, or to end-of-input if none exists. The terminator run is
+deliberately *not* trimmed out of the region text -- it is handed to
+tokenization unchanged, so the existing single-vs-doubled
+trailing-punctuation rule above remains the only thing deciding
 match/no-match. This is why `"Skills: Python!!"` still correctly
 produces no match (the doubled `"!!"` survives into the token) and why
 `"Skills: Node.js. Languages: Go"` correctly yields both
@@ -303,15 +319,36 @@ def _extract_title_matches(text: str | None, taxonomy: TaxonomyIndex) -> dict[st
     return matches
 
 
-def _is_genuine_terminator_end(text: str, end: int) -> bool:
+def _is_covered_terminator_boundary(text: str, end: int) -> bool:
+    """Strict form: a terminator is only eligible to *start a new anchor*
+    (via `_sentence_boundary_start_positions`) when it is followed
+    specifically by this module's own covered-whitespace class, or by
+    end-of-string. Deliberately never widened -- an anchor grants extra
+    permission (authorizing ambiguous keys), so creating one must stay
+    hard to trigger by accident or lookalike."""
     return end == len(text) or text[end] in _COVERED_WHITESPACE
+
+
+def _is_region_ending_boundary(text: str, end: int) -> bool:
+    """Liberal form: a terminator ends an anchored *region* (via
+    `_next_genuine_terminator_end`) when it is followed by end-of-string
+    or by *any* Unicode whitespace character, not just this module's
+    covered set. This is the fail-closed direction: a region grants
+    extra permission too (authorizing ambiguous keys inside it), so when
+    a punctuation run is followed by something whitespace-like but
+    outside the covered set (a no-break space, a vertical tab, ...), the
+    region must still stop there rather than skip past it and keep
+    scanning for the next *strictly* covered terminator -- which would
+    silently extend the region across an unrelated clause and rescue an
+    ambiguous key that was never meant to be in scope."""
+    return end == len(text) or text[end].isspace()
 
 
 def _sentence_boundary_start_positions(text: str) -> frozenset[int]:
     starts: set[int] = set()
     for match in _TERMINATOR_RUN_RE.finditer(text):
         end = match.end()
-        if not _is_genuine_terminator_end(text, end):
+        if not _is_covered_terminator_boundary(text, end):
             continue
         if end == len(text):
             continue
@@ -324,7 +361,7 @@ def _sentence_boundary_start_positions(text: str) -> frozenset[int]:
 
 def _next_genuine_terminator_end(text: str, start: int) -> int:
     for match in _TERMINATOR_RUN_RE.finditer(text, start):
-        if _is_genuine_terminator_end(text, match.end()):
+        if _is_region_ending_boundary(text, match.end()):
             return match.end()
     return len(text)
 
