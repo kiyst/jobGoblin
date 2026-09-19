@@ -19,6 +19,14 @@ dependencies = [
     # mishandles some inputs UTS #46 accepts. BSD-3-Clause license. Remove if
     # normalize_domain() is ever rewritten without IDNA/UTS46 conversion.
     "idna==3.19",
+    # Direct dependency (not just transitively installed) --
+    # app/normalization/taxonomy.py's YAML taxonomy loader
+    # (backend/app/taxonomy/skills.yaml) needs a real YAML parser; the
+    # stdlib has none. MIT license. `yaml.safe_load` alone does not reject
+    # duplicate mapping keys (silent last-wins) -- the loader wraps a
+    # custom `SafeLoader` subclass to fail closed on that instead of
+    # relying on this dependency's own default behavior.
+    "PyYAML==6.0.2",
 ]
 
 [project.optional-dependencies]
@@ -67,6 +75,12 @@ strict_equality = true
 # outside SQLAlchemy's ORM layer.
 [[tool.mypy.overrides]]
 module = "asyncpg.*"
+ignore_missing_imports = true
+
+# PyYAML ships no py.typed marker/stubs. Used directly by
+# app/normalization/taxonomy.py's YAML taxonomy loader.
+[[tool.mypy.overrides]]
+module = "yaml.*"
 ignore_missing_imports = true
 
 [tool.pydantic-mypy]

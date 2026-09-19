@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from scripts import verification_scope as vs
+
+_TAXONOMY_FIXTURES_DIR = Path(__file__).parent / "fixtures" / "taxonomy"
 
 
 def test_direct_child_test_file_classified_as_generic_changed_test() -> None:
@@ -29,6 +33,14 @@ def test_nested_test_file_classified_as_generic_changed_test() -> None:
         ("backend/tests/contracts/records/location.json", "contract-record:location"),
         ("backend/tests/contracts/records/salary.json", "contract-record:salary"),
         ("backend/tests/contracts/records/experience.json", "contract-record:experience"),
+        (
+            "backend/tests/fixtures/taxonomy/valid_minimal.yaml",
+            "test-fixture:skill-taxonomy",
+        ),
+        (
+            "backend/tests/fixtures/taxonomy/duplicate_canonical_id.yaml",
+            "test-fixture:skill-taxonomy",
+        ),
         ("backend/tests/contracts/taxonomy.py", "shared-harness-core"),
         ("backend/tests/contracts/transforms.py", "shared-harness-core"),
         ("backend/tests/contracts/mutation_registry.py", "shared-harness-core"),
@@ -73,6 +85,28 @@ def test_json_fixture_already_mapped_does_not_require_owner_mapping() -> None:
     # exact rule must resolve to that rule, never to OwnerMappingRequiredError.
     c = vs.classify_path("backend/tests/contracts/records/location.json")
     assert c.category == "contract-record:location"
+
+
+def test_every_taxonomy_fixture_file_is_mapped_never_owner_mapping_required() -> None:
+    """Complete inventory, never a subset -- genuinely discovers every
+    file actually present on disk under `backend/tests/fixtures/
+    taxonomy/` and asserts exact equality with `_TAXONOMY_FIXTURE_FILES`'
+    own keys, so an added-but-not-mapped (or removed-but-still-mapped)
+    fixture file fails this test, not merely the samples this test
+    happens to check by name."""
+    actual_paths = {
+        f"backend/tests/fixtures/taxonomy/{entry.name}"
+        for entry in _TAXONOMY_FIXTURES_DIR.iterdir()
+        if entry.is_file() and entry.suffix == ".yaml"
+    }
+    assert actual_paths == set(vs._TAXONOMY_FIXTURE_FILES)
+    for path in actual_paths:
+        assert vs.classify_path(path).category == "test-fixture:skill-taxonomy"
+
+
+def test_taxonomy_fixture_category_never_requires_contract_family_coverage() -> None:
+    classifications = [vs.classify_path(path) for path in vs._TAXONOMY_FIXTURE_FILES]
+    assert vs.required_contract_families(classifications) == frozenset()
 
 
 def test_unmapped_python_path_is_never_a_literal_pytest_focus_target() -> None:

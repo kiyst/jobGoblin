@@ -50,6 +50,32 @@ _RECORD_FILES: dict[str, str] = {
     "backend/tests/contracts/records/experience.json": "contract-record:experience",
 }
 
+# The skill-taxonomy-foundation slice's own non-Python fault-injection/
+# positive-control fixtures -- not a contract-record (no contract-harness
+# guard/family involvement; `required_contract_families` only recognizes
+# `parser`/`adapter`/`contract-record` kinds against location/salary/
+# experience, so this deliberately distinct "test-fixture" kind never
+# spuriously requires any of that coverage).
+_TAXONOMY_FIXTURE_FILES: dict[str, str] = {
+    f"backend/tests/fixtures/taxonomy/{name}.yaml": "test-fixture:skill-taxonomy"
+    for name in (
+        "alias_collides_with_other_canonical_id",
+        "alias_equals_own_canonical_id",
+        "duplicate_alias_cross_entry",
+        "duplicate_alias_within_entry",
+        "duplicate_canonical_id",
+        "duplicate_yaml_key",
+        "invalid_canonical_id_slug",
+        "unknown_entry_field",
+        "unknown_top_level_field",
+        "unreachable_display_name",
+        "valid_minimal",
+        "wrong_schema_version",
+        "schema_version_boolean_true",
+        "sequence_mapping_key",
+    )
+}
+
 _SHARED_HARNESS_CORE_FILES: frozenset[str] = frozenset(
     {
         "backend/tests/contracts/taxonomy.py",
@@ -131,7 +157,12 @@ class ScopeConfigurationError(Exception):
 
 
 def _validate_configuration() -> None:
-    exact_maps: list[dict[str, str]] = [_PARSER_FILES, _ADAPTER_FILES, _RECORD_FILES]
+    exact_maps: list[dict[str, str]] = [
+        _PARSER_FILES,
+        _ADAPTER_FILES,
+        _RECORD_FILES,
+        _TAXONOMY_FIXTURE_FILES,
+    ]
     exact_sets: list[frozenset[str]] = [
         _SHARED_HARNESS_CORE_FILES,
         _WORKFLOW_SCRIPT_FILES,
@@ -188,7 +219,7 @@ def _normalize(path: str) -> str:
 def classify_path(path: str) -> Classification:
     path = _normalize(path)
 
-    for exact_map in (_PARSER_FILES, _ADAPTER_FILES, _RECORD_FILES):
+    for exact_map in (_PARSER_FILES, _ADAPTER_FILES, _RECORD_FILES, _TAXONOMY_FIXTURE_FILES):
         if path in exact_map:
             return Classification(path, exact_map[path])
     if path in _SHARED_HARNESS_CORE_FILES:

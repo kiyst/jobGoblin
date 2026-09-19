@@ -274,16 +274,21 @@ jobGoblin/
 │   │   │   └── persistence.py          # the ONLY module issuing Job/JobOccurrence SQLAlchemy writes
 │   │   │
 │   │   ├── normalization/
-│   │   │   ├── titles.py
-│   │   │   ├── skills.py
+│   │   │   ├── titles.py               # planned — title classifier, not started; needs its own
+│   │   │   │                            # (likely hierarchical) taxonomy design, not this slice's
+│   │   │   ├── skills.py               # planned — skill classifier, not started; unblocked by
+│   │   │   │                            # taxonomy.py below, but not itself implemented yet
+│   │   │   ├── taxonomy.py             # skill-taxonomy loader/lookup (Phase 3, skill-taxonomy-
+│   │   │   │                            # foundation slice) — candidate/publication stage, not yet
+│   │   │   │                            # merged (see docs/ROADMAP.md); exact-match only, no
+│   │   │   │                            # free-text scanning, no classifier of its own
 │   │   │   ├── salary.py                # base-pay classifier (Phase 3, fifth parser slice) —
 │   │   │   │                            # merged into main (see docs/ROADMAP.md)
 │   │   │   ├── experience.py            # years-of-experience range classifier (Phase 3, fourth
 │   │   │   │                            # parser slice) — merged into main (see docs/ROADMAP.md)
 │   │   │   ├── location.py              # location-geography classifier (Phase 3, sixth parser
-│   │   │   │                            # slice, Workflow v3.1 pilot slice 3 of 3) — implemented
-│   │   │   │                            # on phase-3/location-classifier, frozen for blind
-│   │   │   │                            # Sol/Astra review, not merged (see docs/ROADMAP.md)
+│   │   │   │                            # slice, Workflow v3.1 pilot slice 3 of 3) — merged into
+│   │   │   │                            # main (see docs/ROADMAP.md)
 │   │   │   ├── employment.py
 │   │   │   ├── seniority.py
 │   │   │   ├── remote.py               # remote/hybrid/onsite classifier (Phase 3, first parser slice)
@@ -292,13 +297,18 @@ jobGoblin/
 │   │   │   └── url.py                  # canonical URL normalization (ADR 0004)
 │   │   │
 │   │   ├── taxonomy/
-│   │   │   ├── skills.yaml
+│   │   │   ├── skills.yaml              # skill-taxonomy-foundation slice — 15 seed entries,
+│   │   │   │                            # candidate/publication stage, not yet merged (see
+│   │   │   │                            # docs/ROADMAP.md); loaded/validated by
+│   │   │   │                            # normalization/taxonomy.py above
 │   │   │   ├── titles.yaml
 │   │   │   ├── industries.yaml
 │   │   │   ├── seniority.yaml           # planned future enrichment — normalization/seniority.py's
 │   │   │   │                            # Phase 3 v1 slice is code-defined (small closed vocabulary,
 │   │   │   │                            # no taxonomy file), not blocked on this file existing
-│   │   │   └── aliases.yaml
+│   │   │   └── aliases.yaml             # planned — not needed by the skill-taxonomy-foundation
+│   │   │                                # slice, which embeds aliases per-entry in skills.yaml
+│   │   │                                # itself instead
 │   │   │
 │   │   ├── matching/
 │   │   │   ├── scorer.py

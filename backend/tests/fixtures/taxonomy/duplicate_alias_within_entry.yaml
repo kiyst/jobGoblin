@@ -1,0 +1,5 @@
+schema_version: 1
+entries:
+  - canonical_id: alpha
+    display_name: Alpha
+    aliases: [alt, Alt]
