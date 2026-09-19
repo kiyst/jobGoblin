@@ -513,6 +513,54 @@
     "note": "A form feed after the period must also end the region, for the same reason as the vertical-tab case."
   },
   {
+    "id": "description_zwsp_after_terminator_ends_region",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "Skills: Python.\u200bWhen ready, Go",
+    "expected_matches": [],
+    "note": "Correction regression (Sol's re-review): a zero-width space (Unicode category Cf, not whitespace) after the period must also end the region, closing the gap left by the prior fix which only widened to str.isspace() characters. Python does not match here either, because the invisible format character glues 'Python.' and 'When' into one unmatched token in the ordinary whole-text pass -- a separate, pre-existing tokenizer property unrelated to and unaffected by this region-boundary fix."
+  },
+  {
+    "id": "description_bom_after_terminator_ends_region",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "Skills: Python.\ufeffSee details, Node",
+    "expected_matches": [],
+    "note": "Same mechanism as description_zwsp_after_terminator_ends_region, using the BOM/zero-width no-break space, isolated against bare 'Node' resolving to the node.js entry."
+  },
+  {
+    "id": "description_mongolian_vowel_separator_after_terminator_ends_region",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "Skills: Python.\u180eWhen ready, Go",
+    "expected_matches": [],
+    "note": "Same mechanism, using the Mongolian vowel separator -- a third, unrelated Cf format character, proving the fix is category-based, not special-cased to one specific code point."
+  },
+  {
+    "id": "description_format_char_does_not_create_anchor",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "Done.\u200bSkills: Go",
+    "expected_matches": [],
+    "note": "Positive control: a format character must never make a new position eligible to start an anchor, only to end an existing region. 'Done.' followed by a zero-width space is not a covered terminator, so 'Skills' here begins mid-phrase, not at a valid anchor-start position -- no region exists, and 'Go' is dropped for that reason, not because the region-ending mechanism did anything here."
+  },
+  {
+    "id": "description_letter_after_period_is_non_terminating",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "Skills: e.g.Python, Go",
+    "expected_matches": [{"canonical_id": "golang", "display_name": "Go", "provenance": "parsed_description"}],
+    "note": "Positive control: a punctuation run followed by an ordinary letter ('.' before 'g', then '.' before 'P') is never a region-ending terminator, so the region stays open through 'e.g.Python' and 'Go' -- found standalone in its own comma segment further along -- is still correctly authorized."
+  },
+  {
+    "id": "description_digit_after_period_is_non_terminating",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "Skills: v1.2Python, Go",
+    "expected_matches": [{"canonical_id": "golang", "display_name": "Go", "provenance": "parsed_description"}],
+    "note": "Same positive control as description_letter_after_period_is_non_terminating, using a digit ('.' before '2') instead of a letter."
+  },
+  {
     "id": "cross_field_dedup_escalates_provenance",
     "origin": "synthetic_representative",
     "title": "Python Developer",

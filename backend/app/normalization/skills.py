@@ -116,23 +116,34 @@ whole-text pass below). Creating an anchor grants extra permission, so
 this stays deliberately strict: a punctuation run followed by some other
 Unicode whitespace character (a no-break space, a vertical tab, ...) is
 *not* a covered terminator and never starts a new anchor-eligible
-position -- `_is_covered_terminator_boundary`.
+position -- `_is_covered_terminator_boundary`, and a Unicode **format**
+character (`unicodedata.category(char) == "Cf"` -- zero-width space, the
+BOM/zero-width no-break space, the Mongolian vowel separator, ...) never
+starts one either, for the same reason.
 
 The **region** bound to an anchor ends at the first **region-ending
 terminator** found after it: a complete run of `.`/`!`/`?` immediately
 followed by *any* Unicode whitespace character (not just this module's
-covered set) or by end-of-input -- `_is_region_ending_boundary`. This is
-deliberately more liberal than a covered terminator, and deliberately
-fail-closed in the opposite direction from anchor creation: a region
-also grants extra permission, so when a punctuation run is followed by
-something whitespace-like but outside the covered set, the region must
-still stop there rather than skip past it and keep scanning for a
-stricter match later in the text -- extending across an unrelated clause
-and wrongly authorizing whatever ambiguous key happens to sit in it
-(`"Skills: Python. When ready, Go"` must never leak `golang`).
-Critically, the lone `.` inside `"Node.js"` is never a region-ending
-terminator either way -- it is followed by `j`, neither covered nor any
-other whitespace -- so an anchored region never ends there.
+covered set), by a Unicode format character (category `Cf`), or by
+end-of-input -- `_is_region_ending_boundary`. This is deliberately more
+liberal than a covered terminator, and deliberately fail-closed in the
+opposite direction from anchor creation: a region also grants extra
+permission, so when a punctuation run is followed by something
+whitespace-like or an invisible format character but outside the
+covered set, the region must still stop there rather than skip past it
+and keep scanning for a stricter match later in the text -- extending
+across an unrelated clause and wrongly authorizing whatever ambiguous
+key happens to sit in it (`"Skills: Python. When ready, Go"`
+and `"Skills: Python.​When ready, Go"` must never leak
+`golang`). Format-character eligibility is checked *only* for ending a
+region, never for starting one -- the same strict/liberal asymmetry as
+covered vs. non-covered whitespace above. A punctuation run followed by
+an ordinary letter or digit (`"e.g.Python, Go"`, `"v1.2Python, Go"`) is
+never a region-ending terminator either way -- the region simply stays
+open and keeps scanning. Critically, the lone `.` inside `"Node.js"` is
+never a region-ending terminator either -- it is followed by `j`,
+neither whitespace, format, nor end-of-input -- so an anchored region
+never ends there.
 
 The region runs from the anchor's own match end (Python's ordinary
 exclusive-slice convention -- `region_end` is always a `Pattern.end()`
@@ -174,6 +185,7 @@ segment rule beyond what was reviewed and approved.
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 
 from app.normalization.taxonomy import (
@@ -331,17 +343,26 @@ def _is_covered_terminator_boundary(text: str, end: int) -> bool:
 
 def _is_region_ending_boundary(text: str, end: int) -> bool:
     """Liberal form: a terminator ends an anchored *region* (via
-    `_next_genuine_terminator_end`) when it is followed by end-of-string
-    or by *any* Unicode whitespace character, not just this module's
-    covered set. This is the fail-closed direction: a region grants
-    extra permission too (authorizing ambiguous keys inside it), so when
-    a punctuation run is followed by something whitespace-like but
-    outside the covered set (a no-break space, a vertical tab, ...), the
-    region must still stop there rather than skip past it and keep
-    scanning for the next *strictly* covered terminator -- which would
-    silently extend the region across an unrelated clause and rescue an
-    ambiguous key that was never meant to be in scope."""
-    return end == len(text) or text[end].isspace()
+    `_next_genuine_terminator_end`) when it is followed by end-of-string,
+    by *any* Unicode whitespace character, or by a Unicode **format**
+    character (`unicodedata.category(char) == "Cf"` -- zero-width space,
+    the BOM/zero-width no-break space, the Mongolian vowel separator,
+    ...), not just this module's covered whitespace set. This is the
+    fail-closed direction: a region grants extra permission too
+    (authorizing ambiguous keys inside it), so when a punctuation run is
+    followed by something whitespace-like *or* an invisible format
+    character, the region must still stop there rather than skip past it
+    and keep scanning for the next *strictly* covered terminator --
+    which would silently extend the region across an unrelated clause
+    and rescue an ambiguous key that was never meant to be in scope.
+    Format characters are checked *only* here, never in
+    `_is_covered_terminator_boundary` -- they must never make a new
+    position eligible to *start* an anchor, only eligible to *end* one
+    that already exists."""
+    if end == len(text):
+        return True
+    char = text[end]
+    return char.isspace() or unicodedata.category(char) == "Cf"
 
 
 def _sentence_boundary_start_positions(text: str) -> frozenset[int]:

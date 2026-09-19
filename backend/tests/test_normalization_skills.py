@@ -99,11 +99,18 @@ def test_classify_skills_result_has_no_duplicate_canonical_ids() -> None:
         ("\u000b", False),  # vertical tab
         ("\u000c", False),  # form feed
         ("\u2003", False),  # em space
+        ("\u200b", False),  # zero-width space (category Cf)
+        ("\ufeff", False),  # BOM / zero-width no-break space (category Cf)
+        ("\u180e", False),  # Mongolian vowel separator (category Cf)
         ("j", False),
+        ("5", False),
         (".", False),
     ],
 )
 def test_is_covered_terminator_boundary_is_strict(char: str, expected: bool) -> None:
+    """Format characters (category Cf) must never make a position eligible
+    to *start* a new anchor -- only `_is_region_ending_boundary` (below)
+    is widened for them."""
     text = f".{char}rest"
     assert _is_covered_terminator_boundary(text, 1) is expected
 
@@ -119,15 +126,22 @@ def test_is_covered_terminator_boundary_true_at_end_of_string() -> None:
         ("\n", True),
         ("\r", True),
         (" ", True),
-        ("\u00a0", True),  # no-break space -- the corrected case
+        ("\u00a0", True),  # no-break space
         ("\u000b", True),  # vertical tab
         ("\u000c", True),  # form feed
         ("\u2003", True),  # em space
+        ("\u200b", True),  # zero-width space (category Cf) -- this correction
+        ("\ufeff", True),  # BOM / zero-width no-break space (category Cf)
+        ("\u180e", True),  # Mongolian vowel separator (category Cf)
         ("j", False),
+        ("5", False),
         (".", False),
     ],
 )
 def test_is_region_ending_boundary_is_liberal(char: str, expected: bool) -> None:
+    """Any Unicode whitespace character, and any Unicode format character
+    (category Cf), ends a region -- an ordinary letter, digit, or bare
+    punctuation character never does."""
     text = f".{char}rest"
     assert _is_region_ending_boundary(text, 1) is expected
 
@@ -140,13 +154,47 @@ def test_region_ending_boundary_is_strictly_more_permissive_than_anchor_start() 
     """Every character the strict (anchor-start) form accepts, the liberal
     (region-ending) form must also accept -- proving the widening is
     additive, never a narrowing that could reintroduce a different gap."""
-    probe_chars = ["\t", "\n", "\r", " ", "\u00a0", "\u000b", "\u000c", "\u2003", "j", "."]
+    probe_chars = [
+        "\t",
+        "\n",
+        "\r",
+        " ",
+        "\u00a0",
+        "\u000b",
+        "\u000c",
+        "\u2003",
+        "\u200b",
+        "\ufeff",
+        "\u180e",
+        "j",
+        "5",
+        ".",
+    ]
     for char in probe_chars:
         text = f".{char}rest"
         if _is_covered_terminator_boundary(text, 1):
             assert _is_region_ending_boundary(
                 text, 1
             ), f"{char!r} is accepted by the strict form but rejected by the liberal one"
+
+
+def test_region_ending_boundary_node_dot_js_internal_period_is_non_terminating() -> None:
+    """Direct, isolated proof that the internal period in 'Node.js' is
+    never a region-ending boundary either way -- it is followed by 'j',
+    neither whitespace, format, nor end-of-input."""
+    text = "Node.js"
+    period_end = text.index(".") + 1
+    assert text[period_end] == "j"
+    assert _is_region_ending_boundary(text, period_end) is False
+    assert _is_covered_terminator_boundary(text, period_end) is False
+
+
+def test_region_ending_boundary_ordinary_letter_and_digit_are_non_terminating() -> None:
+    """Direct, isolated proof that a punctuation run followed by an
+    ordinary letter or digit never ends a region, matching the
+    fixture-level positive controls."""
+    assert _is_region_ending_boundary("e.g.Python", 2) is False  # '.' before 'g'
+    assert _is_region_ending_boundary("v1.2Python", 3) is False  # '.' before '2'
 
 
 # ---------------------------------------------------------------------------
@@ -220,6 +268,7 @@ _ALLOWED_IMPORTS: dict[str, frozenset[str]] = {
         {
             "__future__",
             "re",
+            "unicodedata",
             "dataclasses",
             "app.normalization.taxonomy",
             "app.normalization.types",

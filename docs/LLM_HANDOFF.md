@@ -98,144 +98,6 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-09-19, Claude Code (Sonnet 5). Risk class **H** (same
-  primary-risk reasoning as the taxonomy-foundation slice: ambiguous-alias
-  false matches are Phase 3's own named risk, and this is the first
-  classifier consuming that taxonomy). Base `B` -> candidate `C`:
-  `d0159a4cc0faf9fb13f30ea814fa2e6c204570bb` -> this commit; new branch
-  `phase-3/skill-classifier`, cut from a freshly verified clean `main`
-  (`main` == `origin/main`, both at `d0159a4`). `slice_kind: parser` (unlike
-  the taxonomy foundation: this slice owns a genuine single JSON-array
-  fixture corpus, the classic classifier-fixture shape). `slice_id:
-  2026-09-19-skill-classifier-d0159a4`. Implements the four-round-negotiated,
-  user-approved `classify_skills` proposal and its amendments in full.
-- **Classifier** (`backend/app/normalization/skills.py`):
-  `classify_skills(title, description, *, taxonomy) -> list[SkillMatch]`.
-  One shared segment/token grammar (`[,;|:/]` then
-  `[^\s()\[\]{}"&]+`, hyphen/`+`/`#`/`.` preserved); a single-vs-doubled
-  trailing-punctuation rule (`.`/`!`/`?`); the ambiguous keys `c`/`r`/`go`/
-  `node` require standalone-in-segment (title) or a narrow role-noun
-  adjacency for `c`/`r`/`go` only (title), or an explicit anchor-bounded
-  region (description) — never punctuation structure alone. The
-  description anchor grammar (`skills:`/`languages:`/`technologies:`/
-  `tech stack:`) is ASCII-literal and covered-whitespace-exact (no `\s`,
-  no `re.IGNORECASE`, no `.lower()`), valid only at start-of-field,
-  start-of-line, or immediately after a genuine sentence terminator; a
-  region's end is a terminator's own `Pattern.end()` (Python's exclusive
-  slice convention), inclusive of the whole punctuation run, so the
-  existing single-vs-doubled rule remains the only thing deciding
-  match/no-match once a token is extracted. `SkillMatch.__post_init__`
-  revalidates `canonical_id` against `is_canonical_slug()` and
-  `display_name` against this module's own covered-whitespace class,
-  never a bare truthiness check; `provenance` must be a genuine
-  `Provenance` member. Every error message is fixed and categorical.
-  Exact-match taxonomy lookup only — no taxonomy growth, no persistence,
-  no `parser_version`.
-- **Fixtures and tests**: `backend/tests/fixtures/normalization/
-  skill_cases.json` (61 cases, each isolating one mechanism — tokenizer
-  boundaries, the `node`/`c`/`r`/`go` ambiguity rule, the title
-  role-noun-adjacency rule and its three counterexamples, terminal
-  punctuation and its malformed-run negatives, the anchor grammar's three
-  start conditions and two Unicode no-break-space negatives (before and
-  after the colon — see the adversarial finding below), region
-  termination at a genuine sentence boundary, cross-field dedup/provenance
-  escalation); honestly labeled `synthetic_representative`/
-  `synthetic_adversarial`, never `sanitized_capture`.
-  `backend/tests/test_normalization_skills.py` (76 tests): the fixture
-  corpus, origin-honesty, determinism, sort/dedup invariants, `SkillMatch`
-  unit-level invariant tests (non-slug `canonical_id`, whitespace-only/
-  covered-whitespace-only/empty `display_name`, non-enum `provenance`,
-  and a check that no invariant-violation message ever contains the
-  offending input text), and the AST import-boundary allow-list.
-- **Disclosed, necessary deviation** (found by actually running
-  `verification_scope.classify_path` against the new fixture path, not by
-  code review): `backend/tests/fixtures/normalization/skill_cases.json`
-  is a non-`.py` path under `backend/tests/` with no exact rule, so it
-  raised `OwnerMappingRequiredError` exactly like the taxonomy
-  foundation's own YAML fixtures once did. Fixed the same way: added one
-  exact-path entry, `_SKILL_FIXTURE_FILES`, to
-  `backend/scripts/verification_scope.py` (never a new directory prefix),
-  classifying it as `test-fixture:skill-classifier` — deliberately not a
-  `contract-record` kind, since this fixture has no contract-harness
-  guard/family involvement. Three new regression tests added to
-  `backend/tests/test_verification_scope.py` mirroring the existing
-  taxonomy-fixture ones. This was not part of the approved file list;
-  flagging it here rather than treating it as silently in scope.
-- **Adversarial self-review finding, fixed before this commit**: an
-  independent adversarial-review pass (read-only, against the working
-  tree before this candidate existed) found that the description
-  anchor's post-colon whitespace group (`[\t\n\r ]*`, zero-or-more, with
-  no mandatory literal after it) never actually rejected a non-covered
-  whitespace lookalike sitting immediately after the colon — unlike
-  every other whitespace span in the anchor grammar, which is always
-  followed by a mandatory literal a lookalike can't satisfy. Concretely,
-  `"Skills: Go"` (a no-break space right after the colon) produced a
-  `golang` match, because the un-consumed no-break space was left as the
-  first character of the region text, where the region's own ordinary
-  Unicode-`\s`-aware tokenizer still treated it as a token separator —
-  silently rescuing the ambiguous key the anchor grammar exists to gate.
-  This directly contradicted the module's own docstring, which explicitly
-  claimed this case was already rejected. Fixed by adding
-  `_has_uncovered_whitespace_immediately_after` and an explicit rejection
-  check in `_anchor_regions` for exactly this case; added fixture
-  `description_nbsp_lookalike_after_colon_rejected` as the regression.
-  Everything else the review checked (region/terminator index arithmetic,
-  overlapping anchors, the ASCII casefold table, punctuation-stripping
-  edge cases, exception safety on empty/very-long input, and hand
-  re-derivation of the trickier fixture cases) held up with no further
-  findings.
-- **Two-iteration rotation applied**: the oldest iteration (the original
-  v3.2 activation candidate/review cycle, C1–C6) is deleted; the former
-  Iteration 2 (the post-merge `Q`-producer slice) and Iteration 3 (the
-  skill-taxonomy-foundation slice) are renumbered to Iteration 1 and
-  Iteration 2 respectively; this entry becomes the new Iteration 3.
-- Files changed: `backend/app/normalization/skills.py` (new);
-  `backend/tests/fixtures/normalization/skill_cases.json` (new, 61
-  cases); `backend/tests/test_normalization_skills.py` (new, 76 tests);
-  `backend/scripts/verification_scope.py`,
-  `backend/tests/test_verification_scope.py` (edited, 3 new tests (one
-  new parametrized case plus two new functions) — see the disclosed
-  deviation above); `docs/ROADMAP.md` (edited: corrected
-  the stale "skill-taxonomy foundation ... not yet merged" passage to
-  record its actual merge SHA, and added this slice's own status
-  paragraph); `docs/LLM_HANDOFF.md` (this entry, plus the two-iteration
-  rotation above). No taxonomy file, migration, model, service, API, or
-  live-provider file touched; no database lifecycle operation performed;
-  no provider contact of any kind. `docs/ARCHITECTURE.md` intentionally
-  not touched — its `skills.py` filename entry already matches this
-  slice exactly; a separate, genuinely stale passage there (the
-  taxonomy-foundation's own tree entries still say "candidate/publication
-  stage, not yet merged") was noticed but is out of this slice's
-  authorized two-document scope, so it is disclosed here rather than
-  silently fixed.
-- Verification: pending — see the workflow-metadata block below and the
-  publication (`A`) entry that will follow it.
-
-```workflow-metadata
-workflow_version: v3.2
-state: published
-slice_id: 2026-09-19-skill-classifier-d0159a4
-slice_kind: parser
-risk_class: H
-base_sha: d0159a4cc0faf9fb13f30ea814fa2e6c204570bb
-declared_gate: final
-executed_gate: final
-candidate_sha: 109a3070375be1b8a412abc3dbbbbc76dc379290
-receipt_id: 769a9115-2e13-4c92-abfe-6c37a92e26e9
-receipt_path: docs/verification-receipts/109a3070375be1b8a412abc3dbbbbc76dc379290/769a9115-2e13-4c92-abfe-6c37a92e26e9.json
-fixture_path: backend/tests/fixtures/normalization/skill_cases.json
-fixture_count: 61
-full_suite_count: 2811
-focused_test_count: 145
-mutation_witness_count: 34
-```
-
----
-
-## Iteration 2
-
-### Work done
-
 - Date/agent: 2026-09-19, Claude Code (Sonnet 5). Risk class **H**
   (same slice, same primary-risk reasoning as Iteration 1). Base `B`
   (unchanged for this slice's whole correction lifetime) ->
@@ -379,4 +241,111 @@ fixture_count: 66
 full_suite_count: 2839
 focused_test_count: 173
 mutation_witness_count: 34
+```
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-09-19, Claude Code (Sonnet 5). Risk class **H** (same
+  slice, same primary-risk reasoning as Iteration 1). Base `B` (unchanged
+  for this slice's whole correction lifetime) -> candidate `C3`:
+  `d0159a4cc0faf9fb13f30ea814fa2e6c204570bb` -> this commit; same branch
+  `phase-3/skill-classifier`, on top of the existing pushed tip
+  `449e00c`. `slice_id: 2026-09-19-skill-classifier-d0159a4` (unchanged).
+  Addresses Sol's re-review of `C2 = e867450` and `A2 = 449e00c`, both of
+  which remain unamended, still pushed, still present in history exactly
+  as they were; the `C2`/`A2` receipt cycle is superseded and
+  non-reusable as of this entry.
+- **Remaining bug, Sol's re-review finding**: the prior correction
+  widened `_is_region_ending_boundary` to accept any `str.isspace()`
+  character, but three Unicode **format** characters (category `Cf` --
+  zero-width space `U+200B`, the BOM/zero-width no-break space
+  `U+FEFF`, the Mongolian vowel separator `U+180E`) are *not* whitespace
+  by `str.isspace()`, so a punctuation run followed by one of them still
+  fell through to the same "skip past it and keep scanning" defect the
+  prior fix closed for whitespace. Confirmed exactly as reported:
+  `"Skills: Python.​When ready, Go"` returned `golang`;
+  `"Skills: Python.﻿See details, Node"` returned `node.js`;
+  `"Skills: Python.᠎When ready, Go"` returned `golang`. **Fix**:
+  `_is_region_ending_boundary` now also accepts
+  `unicodedata.category(char) == "Cf"`, in addition to `str.isspace()`
+  and end-of-string. `_is_covered_terminator_boundary` (anchor-start
+  eligibility) is untouched -- a format character still never creates a
+  new anchor, only ends an existing region, preserving the same
+  strict/liberal asymmetry as the whitespace case. `unicodedata` is now
+  imported by `app/normalization/skills.py`; its own exact
+  import-allow-list test is updated accordingly.
+- **Regressions and mutation-proving**: added `backend/tests/fixtures/
+  normalization/skill_cases.json` cases
+  `description_zwsp_after_terminator_ends_region`,
+  `description_bom_after_terminator_ends_region`, and
+  `description_mongolian_vowel_separator_after_terminator_ends_region`
+  (the three exact reported inputs), plus positive controls
+  `description_format_char_does_not_create_anchor` (a format character
+  after a period never makes a new anchor-start position),
+  `description_letter_after_period_is_non_terminating`, and
+  `description_digit_after_period_is_non_terminating` (an ordinary
+  letter or digit after a period never ends a region either). Fixture
+  corpus is now 72 cases (66 + 6). Added direct unit-level tests
+  extending `test_is_covered_terminator_boundary_is_strict` and
+  `test_is_region_ending_boundary_is_liberal` with the three `Cf`
+  characters plus a bare digit, and two new isolated tests proving the
+  `Node.js` internal period and a letter/digit-following period are
+  non-terminating at the predicate level directly, independent of the
+  fixture corpus -- 120 tests total (104 + 16). **Mutation-proved**:
+  temporarily reverted `_is_region_ending_boundary` to the pre-`Cf` form
+  (`str.isspace()` only, no `unicodedata` check) in the real source and
+  reran the full focused suite -- exactly 6 tests failed (the 3 exact
+  fixture regressions and the 3 corresponding `Cf` unit-test
+  parametrizations), 114 still passed; restored the fix and reran to
+  confirm 120/120 pass again. The regression set is genuinely
+  load-bearing, not vacuous.
+- **Adversarial self-review finding, fixed before this commit**: while
+  applying this correction, found that the module docstring's "terminator"
+  paragraph (edited by the prior correction) still described only the
+  strict/liberal whitespace asymmetry and did not mention format
+  characters at all, understating the grammar this fix now implements.
+  Corrected in the same commit to name the `Cf` category explicitly for
+  region-ending, restate that format-character eligibility is anchor-end
+  only, and add the letter/digit non-terminating examples. While editing
+  that paragraph, also found and fixed one stray raw no-break-space byte
+  left embedded directly in a docstring example by an earlier round's
+  edit tooling (an editing-tool artifact, not a grammar defect) --
+  replaced with a proper ` ` escape in source; no behavior changed,
+  confirmed by the full suite before and after. Left unchanged: an
+  identical-looking stray raw character in this same file's *own*
+  historical prose (Iteration 1's "Confirmed exactly as reported" quote)
+  -- that is a factual quoting inaccuracy in a past iteration's narrative,
+  not a live code or grammar defect, and out of this correction's bounded
+  scope; noted here rather than silently touched.
+- Files changed: `backend/app/normalization/skills.py` (edited -- the
+  `Cf`-category fix, the `unicodedata` import, and the docstring
+  correction); `backend/tests/fixtures/normalization/skill_cases.json`
+  (edited, +6 cases); `backend/tests/test_normalization_skills.py`
+  (edited, +16 tests, +1 import-allow-list entry); `docs/LLM_HANDOFF.md`
+  (this entry, plus the iteration rotation below). No taxonomy file,
+  migration, model, service, API, or live-provider file touched; no
+  realistic-corpus work; no title-parser work; no workflow-policy file
+  touched; no database lifecycle operation performed.
+- **Two-iteration rotation applied**: the oldest iteration (the original
+  skill-classifier implementation's `C`/`A` record) is deleted; the
+  former Iteration 2 (the Unicode-whitespace region-boundary correction,
+  `C2`/`A2`) is renumbered to Iteration 1, unchanged in content; this
+  correction becomes Iteration 2.
+- Verification: pending — see the workflow-metadata block below and the
+  publication (`A3`) entry that will follow it.
+
+```workflow-metadata
+workflow_version: v3.2
+state: pending
+slice_id: 2026-09-19-skill-classifier-d0159a4
+slice_kind: parser
+risk_class: H
+base_sha: d0159a4cc0faf9fb13f30ea814fa2e6c204570bb
+declared_gate: final
+fixture_path: backend/tests/fixtures/normalization/skill_cases.json
+fixture_count: 72
 ```
