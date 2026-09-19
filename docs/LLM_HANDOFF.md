@@ -976,3 +976,51 @@ gate: final
 verdict: approved
 findings: none
 ```
+
+### Merge record
+
+- Date: 2026-09-19. Merged `phase-3/skill-taxonomy-foundation` at
+  approved, reviewed commit `ab6d27d300e81e76049d54623c3efea12bebebb4`
+  (Sol's "Approved, no executable findings" verdict on `C2`/`A2`,
+  above) into `main` via `git merge --no-ff`. Merge commit:
+  `1876f7e2168d90e36a1fb46f039cd5969fe49d6c`. Pre-merge `main`/
+  `origin/main` tip (rollback boundary):
+  `21dee74bae122bc634c77d3d0c55d03be128b716`.
+- Pre-merge checks: confirmed the feature branch and its origin both sat
+  at `ab6d27d`, and `main`/`origin/main` were both clean and
+  synchronized at `21dee74` before merging; re-confirmed
+  `check_merge_eligibility(C2, A2, R)` still returned `approved`
+  immediately beforehand.
+- Followed the documented `M -> Q` release sequence
+  (`LLM_WORKFLOW.md`'s "Project policy: `Q` is the next mainline commit
+  after `M`"): `M` was created locally, not pushed; zero content
+  difference between `M` and `R` confirmed
+  (`git diff --quiet ab6d27d HEAD`);
+  `verification_coordinator.run_post_merge_verification` was run
+  against `M` in a disposable detached worktree (always full/final);
+  its artifact
+  (`docs/post-merge/1876f7e2168d90e36a1fb46f039cd5969fe49d6c/
+  73f4500a-f122-4b0b-9019-75a631a40289.json`) reported all 11 steps
+  PASS, 2,732 full-suite tests, 34/34 mutation witnesses, and an
+  identical tracked-tree SHA before and after; this commit (`Q`)
+  bundles that artifact addition with this merge-record append, as the
+  single commit immediately following `M` on `main`'s mainline — never
+  a merge-record-only commit.
+- Post-merge verification, all run directly against merged `main`
+  (independent of the `Q` producer's own run above):
+  - `git diff --quiet ab6d27d HEAD` — zero content difference between
+    merged `main` and the approved feature-branch tip, confirmed.
+  - `git diff --check` — clean.
+  - `python -m scripts.check_repo` — clean.
+  - No migration/schema changes: `git diff --stat 21dee74..HEAD --
+    backend/alembic backend/migrations` and `git log --oneline
+    21dee74..HEAD -- backend/alembic backend/migrations` both empty.
+  - `check_review.validate_published(C2, A2, R, M, Q)` — **succeeds**,
+    returning the independently re-validated artifact, confirming the
+    complete `C2 -> A2 -> R -> M -> Q` chain.
+  - `verification_coordinator.confirm_main_unchanged` — run immediately
+    before push, confirmed `origin/main` still equaled the pre-merge
+    tip.
+- STOP — report the synchronized final `main` SHA and stop. No skill
+  classifier, no title-parser work, no other new slice, without
+  separate explicit user authorization.
