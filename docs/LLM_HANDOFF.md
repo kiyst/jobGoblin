@@ -364,12 +364,19 @@ mutation_witness_count: 34
 
 ```workflow-metadata
 workflow_version: v3.2
-state: pending
+state: published
 slice_id: 2026-09-19-skill-classifier-d0159a4
 slice_kind: parser
 risk_class: H
 base_sha: d0159a4cc0faf9fb13f30ea814fa2e6c204570bb
 declared_gate: final
+executed_gate: final
+candidate_sha: e867450a12d63fd961cfe691cb1e84cf406a292e
+receipt_id: 9e01075f-5141-4137-9d1d-870fb2811550
+receipt_path: docs/verification-receipts/e867450a12d63fd961cfe691cb1e84cf406a292e/9e01075f-5141-4137-9d1d-870fb2811550.json
 fixture_path: backend/tests/fixtures/normalization/skill_cases.json
 fixture_count: 66
+full_suite_count: 2839
+focused_test_count: 173
+mutation_witness_count: 34
 ```
