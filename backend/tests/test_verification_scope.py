@@ -45,6 +45,10 @@ def test_nested_test_file_classified_as_generic_changed_test() -> None:
             "backend/tests/fixtures/normalization/skill_cases.json",
             "test-fixture:skill-classifier",
         ),
+        (
+            "backend/tests/fixtures/evaluation/phase3_realistic_corpus.json",
+            "test-fixture:phase3-evaluation",
+        ),
         ("backend/tests/contracts/taxonomy.py", "shared-harness-core"),
         ("backend/tests/contracts/transforms.py", "shared-harness-core"),
         ("backend/tests/contracts/mutation_registry.py", "shared-harness-core"),
@@ -120,6 +124,16 @@ def test_skill_fixture_file_is_mapped_never_owner_mapping_required() -> None:
 
 def test_skill_fixture_category_never_requires_contract_family_coverage() -> None:
     classifications = [vs.classify_path(path) for path in vs._SKILL_FIXTURE_FILES]
+    assert vs.required_contract_families(classifications) == frozenset()
+
+
+def test_evaluation_fixture_file_is_mapped_never_owner_mapping_required() -> None:
+    for path in vs._EVALUATION_FIXTURE_FILES:
+        assert vs.classify_path(path).category == "test-fixture:phase3-evaluation"
+
+
+def test_evaluation_fixture_category_never_requires_contract_family_coverage() -> None:
+    classifications = [vs.classify_path(path) for path in vs._EVALUATION_FIXTURE_FILES]
     assert vs.required_contract_families(classifications) == frozenset()
 
 

@@ -98,157 +98,6 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-09-19, Claude Code (Sonnet 5). Risk class **H**
-  (same slice, same primary-risk reasoning as Iteration 1). Base `B`
-  (unchanged for this slice's whole correction lifetime) ->
-  candidate `C2`: `d0159a4cc0faf9fb13f30ea814fa2e6c204570bb` -> this
-  commit; same branch `phase-3/skill-classifier`, on top of the existing
-  pushed tip `17f6f24`. `slice_id: 2026-09-19-skill-classifier-d0159a4`
-  (unchanged — same slice, a correction cycle within it, matching the
-  skill-taxonomy-foundation slice's own C1/C2 precedent). Addresses
-  Sol's review of `C = 109a307` and claimed `A = 17f6f24`, both of which
-  remain unamended, still pushed, still present in history exactly as
-  they were.
-- **Bug fix, Sol's finding**: `_next_genuine_terminator_end` scanned
-  forward for the first punctuation run whose *following* character was
-  in this module's covered-whitespace class (`\t`/`\n`/`\r`/space) or
-  end-of-string, and — critically — **skipped past** any punctuation run
-  that failed that check, continuing to scan for a *later* one instead
-  of stopping. A punctuation run followed by any other Unicode
-  whitespace (a no-break space, a vertical tab, a form feed, an em
-  space, ...) therefore never ended the region at all; the scan kept
-  going, and if no strictly-covered terminator existed later in the
-  text, the region silently extended all the way to end-of-string —
-  crossing an unrelated clause boundary and wrongly authorizing a
-  standalone ambiguous key found there. Confirmed exactly as reported:
-  `"Skills: Python. When ready, Go"` returned `golang`;
-  `"Skills: Python. See details, Node"` returned `node.js`.
-  **Fix**: split the single `_is_genuine_terminator_end` helper into two
-  deliberately asymmetric forms. `_is_covered_terminator_boundary`
-  (strict — covered whitespace or end-of-string only) is now used
-  *exclusively* by `_sentence_boundary_start_positions`, governing where
-  an anchor may *begin* — unchanged, since granting a new anchor must
-  stay hard to trigger. `_is_region_ending_boundary` (liberal — *any*
-  Unicode whitespace character, via `str.isspace()`, or end-of-string)
-  is now used by `_next_genuine_terminator_end`, governing where a
-  region *ends* — widened, fail-closed: a region also grants extra
-  permission, so a punctuation run followed by anything whitespace-like
-  must stop the region right there rather than risk extending across
-  unrelated text looking for a stricter match. No other grammar changed:
-  unambiguous whole-text matching, the title role-noun-adjacency rule,
-  and the anchor-start mechanism itself are all untouched.
-- **Regressions and mutation-proving**: added `backend/tests/fixtures/
-  normalization/skill_cases.json` cases
-  `description_nbsp_after_terminator_ends_region_go` and `..._node` (the
-  two exact reported inputs, both now correctly returning only
-  `python`), `description_ascii_space_after_terminator_ends_region_control`
-  (the same shape with an ordinary space, proving the already-correct
-  covered-whitespace case is unaffected), and
-  `description_vertical_tab_after_terminator_ends_region` /
-  `..._form_feed_after_terminator_ends_region` (proving the fix
-  generalizes beyond the no-break space specifically). Fixture corpus is
-  now 66 cases (61 + 5). Added direct unit-level tests in
-  `backend/tests/test_normalization_skills.py` against the two boundary
-  helpers themselves (`_is_covered_terminator_boundary`,
-  `_is_region_ending_boundary`), parametrized over covered whitespace,
-  four non-covered whitespace variants, a non-whitespace letter, and a
-  bare punctuation character, plus a test proving the liberal form
-  accepts a strict superset of what the strict form accepts (never a
-  narrower, inconsistent widening) — 104 tests total (76 + 28).
-- **Adversarial self-review finding, fixed before this commit**: an
-  independent adversarial-review pass (read-only, including live
-  monkeypatch-based reverts of the fix and direct execution against the
-  real taxonomy, not just static reasoning) confirmed the fix genuinely
-  generalizes across a wide range of Unicode whitespace categories
-  (no-break space, vertical tab, form feed, em/en space, line/paragraph
-  separator, narrow no-break space, NEL, ideographic space, C0
-  separators), confirmed no regression across the 61 pre-existing
-  fixture cases (provably, since covered whitespace is a strict subset
-  of `str.isspace()`, so the liberal boundary can only end a region at
-  the same position or earlier, never later), confirmed the two new
-  unit tests are not vacuous (reverting `_is_region_ending_boundary` to
-  the old strict form makes them, and 4 of the 5 new fixture cases,
-  genuinely fail), and confirmed no analogous bug on the anchor-start
-  side. It found one real defect: the module docstring's "terminator"
-  definition still described only the strict, covered-whitespace-only
-  rule, which after this fix is accurate for anchor-*start* eligibility
-  only, not for region-*ending* -- silently understating the fix to a
-  future reader relying on the docstring as the grammar spec. Fixed by
-  splitting the docstring's single "terminator" definition into the same
-  two named, asymmetric concepts the code now uses. Also noted, not
-  fixed here (identical before and after this diff, so out of this
-  correction's bounded scope): Unicode format characters (zero-width
-  space, BOM, the Mongolian vowel separator) are category `Cf`, not
-  whitespace, so `str.isspace()` is `False` for them and they still do
-  not end a region either way -- a pre-existing residual gap in the same
-  threat family, not introduced or worsened by this correction.
-- **Old receipt/publication cycle superseded, non-reusable**: receipt
-  `769a9115-2e13-4c92-abfe-6c37a92e26e9` (for `candidate_sha: 109a307`)
-  verified code containing the bug above and is superseded by this
-  correction — it must not be cited as current evidence for this slice
-  going forward. It remains on disk unmodified (receipts are
-  durable/create-only, never deleted or edited) purely as an immutable
-  historical record of what that specific candidate actually contained.
-- **`17f6f24` structurally could not serve as `A`**: `check_review.
-  validate_c_to_a_transition(C=109a307, A=17f6f24, ...)` passed, because
-  that validator only diffs file *content* between the two named commits
-  — it never inspects git parentage. But `17f6f24`'s sole parent is
-  `85ce56a` (the mistaken commit that first published the receipt with
-  an out-of-scope prose expansion), not `109a307` directly. `A` must be
-  `C`'s own direct, single-parent child — a content-only diff passing is
-  necessary but not sufficient. This is disclosed here rather than
-  silently relied upon; `109a307`, `85ce56a`, and `17f6f24` are all
-  preserved unamended in history as the record of how this was found and
-  worked around, but `17f6f24` is not treated as a valid `A` for
-  anything going forward. `C2`/`A2` (this correction) will have their
-  own genuine, directly-verified single-parent relationship, checked
-  explicitly before this correction is reported complete.
-- **Handoff ledger corrected to the documented at-most-two-iteration
-  rule**: the ledger had drifted to a rolling three-iteration pattern
-  across several prior slices (each rotation kept the two newest of
-  three instead of collapsing to two), never itself flagged before now.
-  Corrected in this same commit: the two older, unrelated iterations
-  (the post-merge `Q`-producer slice and the skill-taxonomy-foundation
-  slice) are removed entirely; the skill-classifier implementation entry
-  (this slice's own `C`/`A` record, previously "Iteration 3") is
-  renumbered to Iteration 1, unchanged in content; this correction
-  becomes Iteration 2.
-- Files changed: `backend/app/normalization/skills.py` (edited — the
-  boundary-helper fix only); `backend/tests/fixtures/normalization/
-  skill_cases.json` (edited, +5 cases); `backend/tests/
-  test_normalization_skills.py` (edited, +28 tests); `docs/LLM_HANDOFF.md`
-  (this entry, plus the iteration-count correction above). No taxonomy
-  file, migration, model, service, API, or live-provider file touched;
-  no realistic-corpus work; no title-parser work; no workflow-policy
-  file touched; no database lifecycle operation performed.
-- Verification: pending — see the workflow-metadata block below and the
-  publication (`A2`) entry that will follow it.
-
-```workflow-metadata
-workflow_version: v3.2
-state: published
-slice_id: 2026-09-19-skill-classifier-d0159a4
-slice_kind: parser
-risk_class: H
-base_sha: d0159a4cc0faf9fb13f30ea814fa2e6c204570bb
-declared_gate: final
-executed_gate: final
-candidate_sha: e867450a12d63fd961cfe691cb1e84cf406a292e
-receipt_id: 9e01075f-5141-4137-9d1d-870fb2811550
-receipt_path: docs/verification-receipts/e867450a12d63fd961cfe691cb1e84cf406a292e/9e01075f-5141-4137-9d1d-870fb2811550.json
-fixture_path: backend/tests/fixtures/normalization/skill_cases.json
-fixture_count: 66
-full_suite_count: 2839
-focused_test_count: 173
-mutation_witness_count: 34
-```
-
----
-
-## Iteration 2
-
-### Work done
-
 - Date/agent: 2026-09-19, Claude Code (Sonnet 5). Risk class **H** (same
   slice, same primary-risk reasoning as Iteration 1). Base `B` (unchanged
   for this slice's whole correction lifetime) -> candidate `C3`:
@@ -431,3 +280,172 @@ findings: none
 - STOP -- report the synchronized final `main` SHA and stop. No
   realistic-corpus work, title-parser work, another parser slice, or
   workflow-policy change without separate explicit user authorization.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-09-20, Claude Code (Sonnet 5). Risk class **H**
+  (Sol's verdict: one bounded slice covering both acquisition and
+  evaluation under a single authorization). Base `B` -> candidate `C`:
+  `7ce4a1dc770827653ccf8140188c5d1dec6621d8` -> this commit; new branch
+  `phase-3/realistic-evaluation-corpus`, cut from a freshly verified
+  clean `main` (`main` == `origin/main`, both at `7ce4a1d`).
+  `slice_id: 2026-09-20-realistic-evaluation-corpus-7ce4a1d`.
+  `slice_kind: tooling` (product-evaluation code, not a classifier and
+  not workflow/verification tooling — excluded from the three-slice
+  discretionary-tooling freeze per its own binding authorization).
+- **Blocked, honestly, before this entry was written**: the user's
+  authorization named board token 1 (`gitlab`) but left board tokens 2
+  and 3 as the literal placeholder text `[INSERT EXACT TOKEN]`/
+  `[INSERT EXACT TOKEN OR none]`. Per the binding requirement that at
+  least two distinct boards must succeed or the fetcher aborts with no
+  corpus, and per the standing rule that no network request is
+  authorized until the final exact token list is recorded, **no live
+  network contact was attempted**. This `C` implements and thoroughly
+  tests every piece that does not require it; the live fetch, the real
+  corpus, and the real baseline report remain outstanding, explicitly
+  flagged to the user rather than guessed at.
+- **`backend/scripts/greenhouse_html_convert.py`** (new):
+  `convert_html_to_text(html) -> str`. Deterministic: covered whitespace
+  is exactly `" \t\n\r"`; CRLF/CR normalize to `\n` before parsing; each
+  block boundary (`p`/`div`/`br`/`li`/`h1`-`h6`/`ul`/`ol`) is exactly one
+  `\n`, deduped at the source for adjacent/nested tags; `script`/`style`
+  content is suppressed; horizontal ASCII space/tab runs collapse to one
+  space per line; repeated blank lines (from genuine source whitespace
+  text nodes, not from tag-boundary insertion, which never stacks)
+  collapse to one; NBSP and every other Unicode whitespace/format
+  character are preserved unchanged. 20 offline regressions in
+  `backend/tests/test_greenhouse_html_convert.py`, including the exact
+  concatenation/entity/suppression/blank-line cases the binding
+  requirement named.
+- **`backend/scripts/fetch_greenhouse_evaluation_postings.py`** (new):
+  two-phase per-board fetch (one metadata-only list `GET`, never
+  `content=true`; deterministic selection of <=10 job ids before any
+  description exists to examine; one detail `GET` per id, never
+  `questions=true`/`pay_transparency=true`) reusing
+  `canary_greenhouse.py`'s origin/token-validation/streaming-cap
+  primitives directly rather than re-deriving them. Zero retries. Two
+  independent byte caps (5,000,000 per response, 20,000,000 per run).
+  Reads only `id`/`title`/`location.name`/`content` from a parsed
+  response — no other key is ever traversed, so an unknown or sensitive
+  upstream field cannot reach a log, a staged record, or the committed
+  corpus by construction, never by enumeration. Redaction is explicitly
+  documented as defense in depth only. `compensation_text` is always
+  `None` here. Requires >=2 distinct successful boards or raises without
+  staging anything; a failing board is skipped, never retried, never
+  substituted. Staging is fixed (`backend/.evaluation-staging/`, now
+  gitignored), atomic, and create-only, reusing
+  `verification_receipts.write_receipt_atomic`'s exact algorithm
+  (duplicated, since that function is dict-only and this module's
+  payload is a JSON array). 32 offline tests in
+  `backend/tests/test_fetch_greenhouse_evaluation_postings.py`, all via
+  `httpx.MockTransport` (mirroring `test_canary_greenhouse_mapping.py`'s
+  own established pattern) — no test causes a real HTTP request.
+- **`backend/scripts/evaluate_phase3_corpus.py`** (new): a fail-closed
+  loader (rejects unknown record/annotation/component fields, an
+  unknown parser or composite-component name, `frozen != true`, an
+  unresolved annotation disagreement, an invalid split/provenance/
+  outcome value, a mismatched `expected_value`/`expected_provenance`
+  pair, and a `compensation_text` that is not an exact substring of
+  `description` at its recorded offsets) plus a minimal evaluator
+  against the seven merged classifiers. Every metric reports numerator
+  and denominator explicitly (`MetricCounter.render()` prints `N/A` on
+  a zero denominator, never `0%`). Composite parsers
+  (`experience`/`salary`/`location`) are scored per independently
+  annotated component. `skills` is scored set-based; any returned skill
+  outside the frozen `expected_canonical_ids` is an unconditional false
+  positive. No pass threshold, no CI wiring, no dashboard anywhere. 36
+  tests in `backend/tests/test_evaluate_phase3_corpus.py`: one test per
+  fail-closed loader rule, direct scoring-logic tests against
+  hand-built `MetricCounter`/`ParserComponentMetrics`/`SkillsMetrics`
+  inputs, and one true end-to-end smoke test against the real
+  classifiers (using a title `remote.py` actually recognizes — an
+  earlier draft of this same test used an undelimited "Remote X" title,
+  which is a documented false negative in `remote.py`'s own structural
+  rule, not a bug; caught and corrected before this commit).
+- **`docs/DECISIONS/0010-realistic-evaluation-corpus-methodology.md`**
+  (new): records every binding acquisition/sanitization/annotation/
+  partitioning/metric decision from this slice's negotiated proposal
+  rounds as durable policy, not restated per-round in this ledger.
+- Files changed: the four new files above plus their three new test
+  files; `backend/scripts/verification_scope.py` and
+  `backend/tests/test_verification_scope.py` (the narrowly necessary
+  owner mapping for `backend/tests/fixtures/evaluation/
+  phase3_realistic_corpus.json`, mirroring `_TAXONOMY_FIXTURE_FILES`/
+  `_SKILL_FIXTURE_FILES` exactly — without it the file would fail
+  closed with `OwnerMappingRequiredError` the moment it existed);
+  `.gitignore` (`backend/.evaluation-staging/`); `docs/ROADMAP.md`
+  (corrected the stale "skill-classifier ... not yet merged" passage —
+  it merged last iteration — and added this slice's own neutral,
+  not-yet-merged status); `docs/ARCHITECTURE.md` (corrected the stale
+  "skills.py/skills.yaml ... planned/not yet merged" entries to match).
+  No database lifecycle operation performed; no network contact of any
+  kind attempted; no parser semantic change; no schema/persistence
+  work; `backend/tests/fixtures/evaluation/phase3_realistic_corpus.json`
+  does **not** exist yet.
+- **Adversarial self-review findings, fixed before this commit** (10
+  findings; the 6 below were fixed, 4 were confirmed low-risk/hygiene
+  and left as disclosed, not fixed — see the review's own report for
+  the full list):
+  - `greenhouse_html_convert.py`: an entity-encoded CR/LF (e.g. `&#13;`)
+    bypassed line-ending normalization entirely, since `HTMLParser`
+    decodes character references *during* parsing, after the one
+    pre-parse normalization pass already ran. Fixed by normalizing the
+    fully extracted text a second time, after parsing.
+  - `greenhouse_html_convert.py`: an unclosed `<script>`/`<style>`
+    silently discarded every character after it (Python's `HTMLParser`
+    treats both as CDATA), including real description text, with no
+    signal of truncation. Fixed by raising a new `HtmlConversionError`
+    instead of returning unreliable text; `fetch_greenhouse_evaluation_
+    postings.py`'s `_sanitize_job_detail` converts it to
+    `EvaluationFetchError` (fail closed, never silently degrades).
+  - `evaluate_phase3_corpus.py`: a recorded `disagreement.adjudication`
+    was checked for presence only, never for consistency with the
+    annotation's own scored value — three mutually contradictory values
+    (top-level, second annotation, adjudication) could coexist and
+    evaluation would silently score against the top-level one,
+    ignoring the adjudication entirely. Fixed: the loader now requires
+    `adjudication.final_value` and rejects the record if it does not
+    equal the annotation's own scored field.
+  - `evaluate_phase3_corpus.py`'s `_score_component`: `provenance_
+    correctness` was updated for *any* present outcome, not just
+    `present_supported` — pooling a false positive on an absent/
+    unsupported-form/ambiguous case (already counted by its own
+    dedicated metric) back into a metric meant to describe
+    provenance-labeling quality on genuine hits. Fixed: gated on
+    `present_supported` only.
+  - `fetch_greenhouse_evaluation_postings.py::run_acquisition`: a board
+    that responded successfully but yielded zero usable candidates
+    (e.g. a non-empty list with no job carrying a usable id) was never
+    logged — only the exception path printed anything. Fixed: an
+    explicit log line for this case too.
+  - `fetch_greenhouse_evaluation_postings.py`: `MAX_REQUESTS_PER_BOARD`
+    was declared and documented but never actually checked at runtime —
+    the real ceiling was only an emergent consequence of `_select_job_
+    ids`'s own limit, so a future edit to that limit could silently
+    break the documented guarantee. Fixed: an explicit, independently
+    tested check in `_fetch_board`. Also fixed in the same pass:
+    `_select_job_ids` now de-duplicates repeated ids before selecting
+    (never wasting part of the 10-request budget re-fetching one job
+    twice), and `evaluate_phase3_corpus.py`'s loader now rejects a
+    non-scalar `expected_value` and an out-of-bounds/inverted
+    `compensation_text_source_span` (negative indices, `start > end`)
+    instead of silently accepting either.
+  - 14 new regression tests added across the three test files for the
+    six fixes above (103 tests total in the three new test files, up
+    from 89).
+- Verification: pending — see the workflow-metadata block below and the
+  publication (`A`) entry that will follow it.
+
+```workflow-metadata
+workflow_version: v3.2
+state: pending
+slice_id: 2026-09-20-realistic-evaluation-corpus-7ce4a1d
+slice_kind: tooling
+risk_class: H
+base_sha: 7ce4a1dc770827653ccf8140188c5d1dec6621d8
+declared_gate: final
+```
