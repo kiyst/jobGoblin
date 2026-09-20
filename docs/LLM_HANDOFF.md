@@ -393,3 +393,41 @@ gate: final
 verdict: approved
 findings: none
 ```
+
+### Merge record
+
+- Date: 2026-09-19. Merged `phase-3/skill-classifier` at approved,
+  reviewed commit `f94638c2a8a82fa290996e4c9a4f8d2d79a15b93` (`R`; Sol's
+  "Approved, no executable findings" verdict on `C3`/`A3`, above) into
+  `main` via `git merge --no-ff`. Merge commit:
+  `dad967789227feb65cf776a0675a8fe179873afa`. Pre-merge `main`/
+  `origin/main` tip (rollback boundary):
+  `d0159a4cc0faf9fb13f30ea814fa2e6c204570bb`.
+- Pre-merge checks: confirmed the feature branch and its origin both sat
+  at `f94638c`, and `main`/`origin/main` were both clean and synchronized
+  at `d0159a4` before merging; re-confirmed
+  `check_merge_eligibility(C3, A3, R)` still returned `approved`
+  immediately beforehand.
+- Followed the documented `M -> Q` release sequence: `M` was created
+  locally, not pushed; zero content difference between `M` and `R`
+  confirmed (`git diff --quiet f94638c HEAD`);
+  `verification_coordinator.run_post_merge_verification` was run against
+  `M` in a disposable detached worktree (always full/final) --
+  artifact `3db09310-ca32-4c28-b950-a86b353d18bd`, all 11 steps PASS,
+  full pytest suite **2855 passed**, all 34 mutation witnesses pass,
+  no migration triggered, cleanup PASS. `Q` was authored as `M`'s direct
+  mainline child, bundling that artifact with this append-only merge
+  record in one commit -- this entry itself.
+- Post-merge evidence status: `docs/post-merge/
+  dad967789227feb65cf776a0675a8fe179873afa/
+  3db09310-ca32-4c28-b950-a86b353d18bd.json`, referencing original
+  receipt `b8a569cb-ce08-462e-8172-372f42e00b07` (`docs/
+  verification-receipts/0dbdbc54443237d35b0f139910eb84d11c06b29d/
+  b8a569cb-ce08-462e-8172-372f42e00b07.json`). `check_review.
+  validate_published(C3, A3, R, M, Q)` and `verification_coordinator.
+  confirm_main_unchanged` are run immediately before push; see the
+  agent's final report for their results rather than restating them here
+  ahead of time.
+- STOP -- report the synchronized final `main` SHA and stop. No
+  realistic-corpus work, title-parser work, another parser slice, or
+  workflow-policy change without separate explicit user authorization.
