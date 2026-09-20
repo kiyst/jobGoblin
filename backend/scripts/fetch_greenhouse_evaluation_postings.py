@@ -29,10 +29,18 @@ Safety properties enforced throughout this module (binding requirements):
   `MAX_REQUESTS_PER_BOARD` requests per board.
 - **Zero retries** -- matching `canary_greenhouse.py`'s own established
   property exactly, never reintroduced here.
-- **Two independent byte caps**: `MAX_RESPONSE_BYTES` per individual
-  streamed response (identical cap and streaming-stop behavior to
-  `canary_greenhouse.fetch_greenhouse_jobs_raw`) and `MAX_TOTAL_RUN_BYTES`
-  cumulative across every request this run makes, tracked by `_RunBudget`.
+- **Two independent, truly streaming byte caps**: `MAX_RESPONSE_BYTES` per
+  individual streamed response and `MAX_TOTAL_RUN_BYTES` cumulative across
+  every request this run makes (`_RunBudget`) -- both enforced before each
+  streamed chunk is accepted, never only after a full response has already
+  been downloaded. Exhausting the total-run budget raises
+  `FatalBudgetExhaustedError`, deliberately not a subclass of
+  `EvaluationFetchError`, so it aborts the entire run immediately instead
+  of being treated as one board's ordinary failure.
+- **A detail record must be usable to count toward board success**:
+  matching `id`, non-empty string `title`, and non-empty string `content`
+  that sanitizes successfully into a description (`_is_usable_detail_candidate`).
+  An unusable record is skipped, not staged, and does not abort the board.
 - **Unsanitized response bodies exist only as in-process values for the
   duration of processing one job**, then are discarded -- never written
   to any file, temporary or otherwise, in raw form, at any point.
@@ -121,21 +129,34 @@ _REDACT_PHONE = "[REDACTED_PHONE]"
 
 
 class EvaluationFetchError(RuntimeError):
-    """Fail-closed error for any acquisition-boundary condition -- non-2xx
-    status, oversized response (per-response or total-run), unexpected
-    content type, invalid JSON, malformed schema, a detail response whose
-    `id` does not match the requested one, or fewer than
+    """Fail-closed error for any ordinary, per-board acquisition-boundary
+    condition -- non-2xx status, an oversized individual response,
+    unexpected content type, invalid JSON, malformed schema, a detail
+    response whose `id` does not match the requested one, or fewer than
     `MIN_SUCCESSFUL_BOARDS` successful boards. Never includes raw or
     sanitized posting text, matching `canary_greenhouse.CanaryFetchError`'s
-    own binding rule -- only operational metadata."""
+    own binding rule -- only operational metadata. `run_acquisition`
+    catches this per board and continues to the next one; it must never
+    catch `FatalBudgetExhaustedError` this way (see below)."""
+
+
+class FatalBudgetExhaustedError(RuntimeError):
+    """Raised the instant the cumulative total-run byte budget
+    (`MAX_TOTAL_RUN_BYTES`) is exhausted by any streamed chunk, from any
+    request, on any board. Deliberately **not** a subclass of
+    `EvaluationFetchError`: it must propagate straight out of
+    `run_acquisition`'s per-board `except EvaluationFetchError` handling
+    uncaught, aborting the entire run immediately and contacting no
+    further board -- exhausting the run-wide budget is a run-ending
+    condition, never an ordinary single-board failure to skip past."""
 
 
 @dataclass
 class _RunBudget:
     """Tracks cumulative streamed bytes across every request this run
-    makes. `consume` is called only after a response has already been
-    validated against the per-response cap -- this is a second,
-    independent ceiling, never a substitute for it."""
+    makes. `consume` must be called for each streamed chunk before it is
+    accepted into a response body -- a true streaming cap, never a check
+    performed only after an entire response has already been downloaded."""
 
     max_total_bytes: int
     consumed_bytes: int = 0
@@ -143,7 +164,7 @@ class _RunBudget:
     def consume(self, n: int) -> None:
         self.consumed_bytes += n
         if self.consumed_bytes > self.max_total_bytes:
-            raise EvaluationFetchError(
+            raise FatalBudgetExhaustedError(
                 f"total-run byte cap exceeded: consumed={self.consumed_bytes} "
                 f"cap={self.max_total_bytes}"
             )
@@ -168,27 +189,34 @@ async def _stream_get(
     url: str, *, client: httpx.AsyncClient, run_budget: _RunBudget
 ) -> tuple[int, str | None, bytes]:
     """One GET, streamed and capped exactly like
-    `canary_greenhouse.fetch_greenhouse_jobs_raw`'s own request -- stops
-    consuming bytes as soon as the cumulative count exceeds
-    `MAX_RESPONSE_BYTES` -- plus updating the shared total-run budget on
-    success. Never retried; a transport failure raises immediately."""
+    `canary_greenhouse.fetch_greenhouse_jobs_raw`'s own request. Both the
+    per-response ceiling and the shared total-run budget are enforced
+    *before* each streamed chunk is accepted into the response body --
+    true streaming caps, never checks performed only after an entire
+    response has already been downloaded. A `FatalBudgetExhaustedError`
+    from `run_budget.consume` is deliberately not caught here and
+    propagates straight out. Never retried; a transport failure raises
+    immediately."""
     try:
         async with client.stream("GET", url) as response:
             status_code = response.status_code
             content_type = response.headers.get("content-type")
             chunks: list[bytes] = []
             total_bytes = 0
+            over_response_cap = False
             async for chunk in response.aiter_bytes():
-                total_bytes += len(chunk)
-                chunks.append(chunk)
-                if total_bytes > MAX_RESPONSE_BYTES:
+                chunk_len = len(chunk)
+                if total_bytes + chunk_len > MAX_RESPONSE_BYTES:
+                    over_response_cap = True
                     break
+                run_budget.consume(chunk_len)
+                total_bytes += chunk_len
+                chunks.append(chunk)
             body = b"".join(chunks)
     except httpx.HTTPError as exc:
         raise EvaluationFetchError(f"request failed ({type(exc).__name__}): url={url}") from None
-    if total_bytes > MAX_RESPONSE_BYTES:
+    if over_response_cap:
         raise EvaluationFetchError(f"per-response byte cap exceeded: url={url}")
-    run_budget.consume(total_bytes)
     return status_code, content_type, body
 
 
@@ -299,6 +327,16 @@ def _sanitize_job_detail(
     )
 
 
+def _is_usable_detail_candidate(candidate: SanitizedCandidate) -> bool:
+    """A detail record counts toward board success only once it clears
+    every usability gate: a matching `id` (already enforced, fatally to
+    the request, by `_validate_detail_response`), a non-empty string
+    `title`, and non-empty string `content` that sanitized successfully
+    into a `description`. A record failing this gate is skipped -- never
+    counted, never staged -- without aborting the rest of the board."""
+    return bool(candidate.title) and bool(candidate.description)
+
+
 async def _fetch_board(
     board_token: str, employer: str, *, client: httpx.AsyncClient, run_budget: _RunBudget
 ) -> list[SanitizedCandidate]:
@@ -347,11 +385,29 @@ async def _fetch_board(
             board_token=board_token,
             job_id=job_id,
         )
-        candidates.append(
-            _sanitize_job_detail(
+        try:
+            candidate = _sanitize_job_detail(
                 detail_payload, board_token=board_token, employer=employer, accessed_at=accessed_at
             )
-        )
+        except EvaluationFetchError as exc:
+            # A sanitization failure (e.g. unclosed <script>/<style>,
+            # HtmlConversionError) is this one job's problem, never the
+            # whole board's -- must not discard already-collected
+            # candidates from earlier job ids or abort remaining ones.
+            print(
+                f"skipped unusable detail record: board_token={board_token} job_id={job_id} "
+                f"(sanitization failed: {exc})",
+                file=sys.stderr,
+            )
+            continue
+        if not _is_usable_detail_candidate(candidate):
+            print(
+                f"skipped unusable detail record: board_token={board_token} job_id={job_id} "
+                "(missing/empty title or content)",
+                file=sys.stderr,
+            )
+            continue
+        candidates.append(candidate)
     return candidates
 
 
@@ -496,6 +552,11 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     try:
         candidates = asyncio.run(run_acquisition(args.boards))
+    except FatalBudgetExhaustedError as exc:
+        print(
+            f"error: fatal total-run budget exhaustion, entire run aborted: {exc}", file=sys.stderr
+        )
+        return 1
     except EvaluationFetchError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

@@ -15,8 +15,10 @@ import pytest
 import scripts.fetch_greenhouse_evaluation_postings as fetcher
 from scripts.fetch_greenhouse_evaluation_postings import (
     EvaluationFetchError,
+    FatalBudgetExhaustedError,
     SanitizedCandidate,
     _build_detail_url,
+    _is_usable_detail_candidate,
     _redact_contact_patterns,
     _RunBudget,
     _sanitize_job_detail,
@@ -111,10 +113,18 @@ def test_run_budget_accepts_consumption_under_the_cap() -> None:
 
 
 def test_run_budget_raises_once_the_cap_is_exceeded() -> None:
+    """The total-run budget's exhaustion exception must be
+    `FatalBudgetExhaustedError`, never plain `EvaluationFetchError` --
+    `run_acquisition`'s per-board handling must not be able to catch it
+    as an ordinary single-board failure."""
     budget = _RunBudget(max_total_bytes=1_000)
     budget.consume(600)
-    with pytest.raises(EvaluationFetchError, match="total-run byte cap exceeded"):
+    with pytest.raises(FatalBudgetExhaustedError, match="total-run byte cap exceeded"):
         budget.consume(500)
+
+
+def test_fatal_budget_exhausted_error_is_not_an_evaluation_fetch_error() -> None:
+    assert not issubclass(FatalBudgetExhaustedError, EvaluationFetchError)
 
 
 # ---------------------------------------------------------------------------
@@ -209,6 +219,12 @@ def test_sanitize_job_detail_handles_missing_content() -> None:
     assert candidate.description is None
 
 
+def test_sanitize_job_detail_raises_on_unclosed_script_content() -> None:
+    payload = {"id": 1, "title": "Engineer", "content": "<script>oops"}
+    with pytest.raises(EvaluationFetchError, match="HTML conversion failed"):
+        _sanitize_job_detail(payload, board_token="acme", employer="Acme", accessed_at="t")
+
+
 def test_sanitize_job_detail_redacts_title_and_description() -> None:
     payload = {
         "id": 1,
@@ -218,6 +234,43 @@ def test_sanitize_job_detail_redacts_title_and_description() -> None:
     candidate = _sanitize_job_detail(payload, board_token="acme", employer="Acme", accessed_at="t")
     assert candidate.title is not None and "jane@example.com" not in candidate.title
     assert candidate.description is not None and "555-123-4567" not in candidate.description
+
+
+# ---------------------------------------------------------------------------
+# _is_usable_detail_candidate
+# ---------------------------------------------------------------------------
+def _candidate(**overrides: Any) -> SanitizedCandidate:
+    base: dict[str, Any] = {
+        "board_token": "acme",
+        "employer": "Acme",
+        "job_id": "1",
+        "title": "Engineer",
+        "description": "Some description",
+        "location_raw": None,
+        "accessed_at": "t",
+    }
+    base.update(overrides)
+    return SanitizedCandidate(**base)
+
+
+def test_is_usable_detail_candidate_accepts_title_and_content() -> None:
+    assert _is_usable_detail_candidate(_candidate())
+
+
+def test_is_usable_detail_candidate_rejects_missing_title() -> None:
+    assert not _is_usable_detail_candidate(_candidate(title=None))
+
+
+def test_is_usable_detail_candidate_rejects_empty_title() -> None:
+    assert not _is_usable_detail_candidate(_candidate(title=""))
+
+
+def test_is_usable_detail_candidate_rejects_missing_content() -> None:
+    assert not _is_usable_detail_candidate(_candidate(description=None))
+
+
+def test_is_usable_detail_candidate_rejects_empty_content() -> None:
+    assert not _is_usable_detail_candidate(_candidate(description=""))
 
 
 # ---------------------------------------------------------------------------
@@ -369,6 +422,101 @@ async def test_run_acquisition_logs_a_reachable_but_empty_board(
 
     captured = capsys.readouterr()
     assert "empty_board" in captured.err
+
+
+async def test_fetch_board_skips_unsanitizable_record_without_discarding_earlier_candidates(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A sanitization failure on one job (e.g. an unclosed <script>/
+    <style> tag, raised by `_sanitize_job_detail` as
+    `EvaluationFetchError`) must not discard already-collected valid
+    candidates from earlier job ids on the same board, and must not
+    abort the board -- it is this one record's problem, never the whole
+    board's, matching the same skip-not-abort contract as a missing
+    title/content record."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.endswith("/jobs"):
+            return _list_response([1, 2])
+        job_id = int(path.rsplit("/", 1)[-1])
+        if job_id == 2:
+            return httpx.Response(
+                200,
+                headers={"content-type": "application/json"},
+                json={"id": 2, "title": "Broken", "content": "<script>oops"},
+            )
+        return _detail_response(job_id)
+
+    async with _mock_client(handler) as client:
+        candidates = await fetcher._fetch_board(
+            "board_a", "A", client=client, run_budget=fetcher._RunBudget(max_total_bytes=10**9)
+        )
+
+    assert [c.job_id for c in candidates] == ["1"]
+    captured = capsys.readouterr()
+    assert "sanitization failed" in captured.err
+
+
+async def test_run_acquisition_does_not_count_missing_title_or_content_as_board_success(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A board whose every detail record is missing a usable title or
+    content must not count toward `MIN_SUCCESSFUL_BOARDS`, even though
+    the board itself was perfectly reachable."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        token = path.split("/")[3]
+        if path.endswith("/jobs"):
+            return _list_response([1])
+        job_id = int(path.rsplit("/", 1)[-1])
+        if token == "board_no_title":
+            return httpx.Response(
+                200,
+                headers={"content-type": "application/json"},
+                json={"id": job_id, "content": "<p>Hi</p>"},  # no title
+            )
+        return _detail_response(job_id)
+
+    async with _mock_client(handler) as client:
+        with pytest.raises(EvaluationFetchError, match="only 1 board"):
+            await run_acquisition(
+                [("board_no_title", "NoTitle"), ("board_good", "Good")], client=client
+            )
+
+    captured = capsys.readouterr()
+    assert "skipped unusable detail record" in captured.err
+    assert "board_no_title" in captured.err
+
+
+async def test_run_acquisition_fatal_budget_exhaustion_prevents_later_board_requests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Exhausting the total-run budget during board A's very first
+    request must raise `FatalBudgetExhaustedError` -- not an ordinary
+    per-board `EvaluationFetchError` -- and must prevent every later
+    request to boards B and C, proven by asserting no board beyond the
+    first was ever contacted."""
+    monkeypatch.setattr(fetcher, "MAX_TOTAL_RUN_BYTES", 10)
+    requested_tokens: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        token = request.url.path.split("/")[3]
+        requested_tokens.append(token)
+        path = request.url.path
+        if path.endswith("/jobs"):
+            return _list_response([1])
+        job_id = int(path.rsplit("/", 1)[-1])
+        return _detail_response(job_id)
+
+    async with _mock_client(handler) as client:
+        with pytest.raises(FatalBudgetExhaustedError):
+            await run_acquisition(
+                [("board_a", "A"), ("board_b", "B"), ("board_c", "C")], client=client
+            )
+
+    assert requested_tokens == ["board_a"]
 
 
 async def test_run_acquisition_skips_a_failing_board_without_retry() -> None:
