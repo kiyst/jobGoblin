@@ -442,10 +442,17 @@ findings: none
 
 ```workflow-metadata
 workflow_version: v3.2
-state: pending
+state: published
 slice_id: 2026-09-20-realistic-evaluation-corpus-7ce4a1d
 slice_kind: tooling
 risk_class: H
 base_sha: 7ce4a1dc770827653ccf8140188c5d1dec6621d8
 declared_gate: final
+executed_gate: final
+candidate_sha: a0ddad9489c9020b1c1921d4dac182e7a42ef3d0
+receipt_id: 788ec89b-c81f-41c0-859b-ded428c2d466
+receipt_path: docs/verification-receipts/a0ddad9489c9020b1c1921d4dac182e7a42ef3d0/788ec89b-c81f-41c0-859b-ded428c2d466.json
+full_suite_count: 2961
+focused_test_count: 175
+mutation_witness_count: 34
 ```
