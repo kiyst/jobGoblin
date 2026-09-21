@@ -31,16 +31,24 @@ Safety properties enforced throughout this module (binding requirements):
   property exactly, never reintroduced here.
 - **Two independent, truly streaming byte caps**: `MAX_RESPONSE_BYTES` per
   individual streamed response and `MAX_TOTAL_RUN_BYTES` cumulative across
-  every request this run makes (`_RunBudget`) -- both enforced before each
-  streamed chunk is accepted, never only after a full response has already
-  been downloaded. Exhausting the total-run budget raises
+  every request this run makes (`_RunBudget`) -- every chunk is charged to
+  the cumulative budget *first*, and only then is that response's own
+  per-response ceiling evaluated for that chunk, so an oversized response
+  can never evade the cumulative cap by being rejected before it is
+  counted, and repeated oversized responses accumulate toward it exactly
+  as any other bytes would. Exhausting the total-run budget raises
   `FatalBudgetExhaustedError`, deliberately not a subclass of
   `EvaluationFetchError`, so it aborts the entire run immediately instead
-  of being treated as one board's ordinary failure.
+  of being treated as one board's ordinary failure -- taking precedence
+  over an ordinary per-response overflow when one chunk triggers both.
 - **A detail record must be usable to count toward board success**:
-  matching `id`, non-empty string `title`, and non-empty string `content`
-  that sanitizes successfully into a description (`_is_usable_detail_candidate`).
-  An unusable record is skipped, not staged, and does not abort the board.
+  matching `id`, a `title` containing meaningful text, and `content` that
+  sanitizes successfully into a `description` containing meaningful text
+  (`_is_usable_detail_candidate`/`_has_meaningful_text`) -- a value that is
+  merely a non-empty string is not enough; whitespace-only (including
+  NBSP) and Unicode-format-character-only (category `Cf`) text, and any
+  mixture of the two, are rejected the same as missing/empty text. An
+  unusable record is skipped, not staged, and does not abort the board.
 - **Unsanitized response bodies exist only as in-process values for the
   duration of processing one job**, then are discarded -- never written
   to any file, temporary or otherwise, in raw form, at any point.
@@ -84,6 +92,7 @@ import re
 import sys
 import tempfile
 import time
+import unicodedata
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -189,14 +198,18 @@ async def _stream_get(
     url: str, *, client: httpx.AsyncClient, run_budget: _RunBudget
 ) -> tuple[int, str | None, bytes]:
     """One GET, streamed and capped exactly like
-    `canary_greenhouse.fetch_greenhouse_jobs_raw`'s own request. Both the
-    per-response ceiling and the shared total-run budget are enforced
-    *before* each streamed chunk is accepted into the response body --
-    true streaming caps, never checks performed only after an entire
-    response has already been downloaded. A `FatalBudgetExhaustedError`
-    from `run_budget.consume` is deliberately not caught here and
-    propagates straight out. Never retried; a transport failure raises
-    immediately."""
+    `canary_greenhouse.fetch_greenhouse_jobs_raw`'s own request. Every
+    chunk `httpx` yields is charged to the shared total-run budget
+    *first* -- the cumulative cap measures bytes actually received over
+    the wire, never only bytes a well-behaved response happened to stay
+    under -- and only afterward is that chunk's effect on *this*
+    response's own per-response ceiling evaluated. Consequently, if one
+    chunk would exceed both caps simultaneously, `FatalBudgetExhaustedError`
+    (raised by `run_budget.consume`, and deliberately not caught here)
+    takes precedence over the ordinary per-response
+    `EvaluationFetchError` and propagates straight out, aborting the
+    entire run rather than only this response. Never retried; a
+    transport failure raises immediately."""
     try:
         async with client.stream("GET", url) as response:
             status_code = response.status_code
@@ -206,11 +219,11 @@ async def _stream_get(
             over_response_cap = False
             async for chunk in response.aiter_bytes():
                 chunk_len = len(chunk)
-                if total_bytes + chunk_len > MAX_RESPONSE_BYTES:
-                    over_response_cap = True
-                    break
                 run_budget.consume(chunk_len)
                 total_bytes += chunk_len
+                if total_bytes > MAX_RESPONSE_BYTES:
+                    over_response_cap = True
+                    break
                 chunks.append(chunk)
             body = b"".join(chunks)
     except httpx.HTTPError as exc:
@@ -327,14 +340,32 @@ def _sanitize_job_detail(
     )
 
 
+def _has_meaningful_text(value: str | None) -> bool:
+    """True only if `value` contains at least one character that is
+    neither whitespace (`str.isspace()` -- ASCII space/tab/newline and
+    Unicode spaces such as NBSP) nor a Unicode **format** character
+    (category `Cf` -- zero-width space, BOM, etc.), including a mixture
+    of the two. Rejects `None`, `""`, and any string composed entirely
+    of such characters. Deliberately narrow -- a purely mechanical
+    presence check for *some* real text, never a broader semantic
+    quality heuristic (grammar, language, minimum length, and so on are
+    all out of scope)."""
+    if value is None:
+        return False
+    return any(not char.isspace() and unicodedata.category(char) != "Cf" for char in value)
+
+
 def _is_usable_detail_candidate(candidate: SanitizedCandidate) -> bool:
     """A detail record counts toward board success only once it clears
     every usability gate: a matching `id` (already enforced, fatally to
-    the request, by `_validate_detail_response`), a non-empty string
-    `title`, and non-empty string `content` that sanitized successfully
-    into a `description`. A record failing this gate is skipped -- never
-    counted, never staged -- without aborting the rest of the board."""
-    return bool(candidate.title) and bool(candidate.description)
+    the request, by `_validate_detail_response`), a `title` containing
+    meaningful text, and `content` that sanitized successfully into a
+    `description` containing meaningful text (`_has_meaningful_text`) --
+    never merely a non-empty string, which a whitespace-only or
+    Unicode-format-character-only value would still satisfy. A record
+    failing this gate is skipped -- never counted, never staged --
+    without aborting the rest of the board."""
+    return _has_meaningful_text(candidate.title) and _has_meaningful_text(candidate.description)
 
 
 async def _fetch_board(
@@ -403,7 +434,7 @@ async def _fetch_board(
         if not _is_usable_detail_candidate(candidate):
             print(
                 f"skipped unusable detail record: board_token={board_token} job_id={job_id} "
-                "(missing/empty title or content)",
+                "(title or content has no meaningful text)",
                 file=sys.stderr,
             )
             continue

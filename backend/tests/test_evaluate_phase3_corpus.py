@@ -333,13 +333,17 @@ def test_load_corpus_rejects_naive_manual_review_reviewed_at(tmp_path: Path) -> 
 # ---------------------------------------------------------------------------
 # Disagreement / adjudication -- full shape and consistency
 # ---------------------------------------------------------------------------
-def _resolved_disagreement(*, second_value: Any, final_value: Any) -> dict[str, Any]:
+def _resolved_disagreement(
+    *, second_value: Any, final_outcome: str, final_value: Any, final_provenance: str
+) -> dict[str, Any]:
     return {
         "second_annotation": _annotation(
             outcome="present_supported", expected_value=second_value, expected_provenance="inferred"
         ),
         "adjudication": {
+            "final_outcome": final_outcome,
             "final_value": final_value,
+            "final_provenance": final_provenance,
             "adjudicated_by": "user",
             "adjudicated_at": _TS,
         },
@@ -352,11 +356,87 @@ def test_load_corpus_accepts_a_fully_consistent_resolved_disagreement(tmp_path: 
         outcome="present_supported",
         expected_value="remote",
         expected_provenance="inferred",
-        disagreement=_resolved_disagreement(second_value="hybrid", final_value="remote"),
+        disagreement=_resolved_disagreement(
+            second_value="hybrid",
+            final_outcome="present_supported",
+            final_value="remote",
+            final_provenance="inferred",
+        ),
     )
     path = _write_corpus(tmp_path, records)
     loaded = load_corpus(path, known_canonical_ids=_KNOWN_IDS)
     assert loaded[0].annotations["remote_type"]["expected_value"] == "remote"
+
+
+def test_load_corpus_accepts_disagreement_differing_only_in_outcome(tmp_path: Path) -> None:
+    """Primary and second agree on `expected_value`/`expected_provenance`
+    (both null/unavailable) and differ in `outcome` alone -- still a
+    genuine, independently-detectable disagreement."""
+    records = _minimal_corpus()
+    records[0]["annotations"]["remote_type"] = _annotation(
+        outcome="present_supported",
+        expected_value=None,
+        expected_provenance="unavailable",
+        disagreement={
+            "second_annotation": _annotation(
+                outcome="absent", expected_value=None, expected_provenance="unavailable"
+            ),
+            "adjudication": {
+                "final_outcome": "present_supported",
+                "final_value": None,
+                "final_provenance": "unavailable",
+                "adjudicated_by": "user",
+                "adjudicated_at": _TS,
+            },
+        },
+    )
+    path = _write_corpus(tmp_path, records)
+    loaded = load_corpus(path, known_canonical_ids=_KNOWN_IDS)
+    assert loaded[0].annotations["remote_type"]["outcome"] == "present_supported"
+
+
+def test_load_corpus_accepts_disagreement_differing_only_in_provenance(tmp_path: Path) -> None:
+    """Primary and second agree on `outcome`/`expected_value` and differ
+    in `expected_provenance` alone -- still a genuine disagreement."""
+    records = _minimal_corpus()
+    records[0]["annotations"]["remote_type"] = _annotation(
+        outcome="present_supported",
+        expected_value="remote",
+        expected_provenance="inferred",
+        disagreement={
+            "second_annotation": _annotation(
+                outcome="present_supported", expected_value="remote", expected_provenance="derived"
+            ),
+            "adjudication": {
+                "final_outcome": "present_supported",
+                "final_value": "remote",
+                "final_provenance": "inferred",
+                "adjudicated_by": "user",
+                "adjudicated_at": _TS,
+            },
+        },
+    )
+    path = _write_corpus(tmp_path, records)
+    loaded = load_corpus(path, known_canonical_ids=_KNOWN_IDS)
+    assert loaded[0].annotations["remote_type"]["expected_provenance"] == "inferred"
+
+
+def test_load_corpus_rejects_disagreement_with_no_actual_difference(tmp_path: Path) -> None:
+    records = _minimal_corpus()
+    records[0]["annotations"]["remote_type"] = _annotation(
+        outcome="present_supported",
+        expected_value="remote",
+        expected_provenance="inferred",
+        disagreement=_resolved_disagreement(
+            second_value="remote",  # identical to the primary -- not a real disagreement
+            final_outcome="present_supported",
+            final_value="remote",
+            final_provenance="inferred",
+        ),
+    )
+    path = _write_corpus(tmp_path, records)
+    with pytest.raises(CorpusValidationError, match="no actual difference"):
+        load_corpus(path, known_canonical_ids=_KNOWN_IDS)
 
 
 def test_load_corpus_rejects_adjudication_inconsistent_with_expected_value(tmp_path: Path) -> None:
@@ -365,16 +445,57 @@ def test_load_corpus_rejects_adjudication_inconsistent_with_expected_value(tmp_p
         outcome="present_supported",
         expected_value="remote",
         expected_provenance="inferred",
-        disagreement=_resolved_disagreement(second_value="hybrid", final_value="onsite"),
+        disagreement=_resolved_disagreement(
+            second_value="hybrid",
+            final_outcome="present_supported",
+            final_value="onsite",
+            final_provenance="inferred",
+        ),
     )
     path = _write_corpus(tmp_path, records)
     with pytest.raises(CorpusValidationError, match="does not match the resolved"):
         load_corpus(path, known_canonical_ids=_KNOWN_IDS)
 
 
+def test_load_corpus_rejects_adjudication_resolving_only_a_null_value(tmp_path: Path) -> None:
+    """Sol's exact reproduction: a primary annotation that is absent/
+    null/unavailable disagreeing with a second annotation that is
+    present_supported/remote/inferred must not be silently accepted by
+    an adjudication that resolves only a null `final_value` (the only
+    field the previous schema checked) -- the adjudication must resolve
+    the complete label (`final_outcome`/`final_value`/`final_provenance`),
+    and an incomplete one fails closed rather than coincidentally
+    matching the primary's own null value."""
+    records = _minimal_corpus()
+    disagreement = {
+        "second_annotation": _annotation(
+            outcome="present_supported", expected_value="remote", expected_provenance="inferred"
+        ),
+        "adjudication": {
+            "final_value": None,
+            "adjudicated_by": "user",
+            "adjudicated_at": _TS,
+        },
+    }
+    records[0]["annotations"]["remote_type"] = _annotation(
+        outcome="absent",
+        expected_value=None,
+        expected_provenance="unavailable",
+        disagreement=disagreement,
+    )
+    path = _write_corpus(tmp_path, records)
+    with pytest.raises(CorpusValidationError, match="adjudication must declare exactly"):
+        load_corpus(path, known_canonical_ids=_KNOWN_IDS)
+
+
 def test_load_corpus_rejects_unresolved_disagreement(tmp_path: Path) -> None:
     records = _minimal_corpus()
-    disagreement = _resolved_disagreement(second_value="hybrid", final_value="remote")
+    disagreement = _resolved_disagreement(
+        second_value="hybrid",
+        final_outcome="present_supported",
+        final_value="remote",
+        final_provenance="inferred",
+    )
     disagreement["adjudication"] = None
     records[0]["annotations"]["remote_type"] = _annotation(
         outcome="present_supported",
@@ -389,7 +510,12 @@ def test_load_corpus_rejects_unresolved_disagreement(tmp_path: Path) -> None:
 
 def test_load_corpus_rejects_adjudication_missing_adjudicated_by(tmp_path: Path) -> None:
     records = _minimal_corpus()
-    disagreement = _resolved_disagreement(second_value="hybrid", final_value="remote")
+    disagreement = _resolved_disagreement(
+        second_value="hybrid",
+        final_outcome="present_supported",
+        final_value="remote",
+        final_provenance="inferred",
+    )
     del disagreement["adjudication"]["adjudicated_by"]
     records[0]["annotations"]["remote_type"] = _annotation(
         outcome="present_supported",
@@ -404,7 +530,12 @@ def test_load_corpus_rejects_adjudication_missing_adjudicated_by(tmp_path: Path)
 
 def test_load_corpus_rejects_second_annotation_missing_metadata(tmp_path: Path) -> None:
     records = _minimal_corpus()
-    disagreement = _resolved_disagreement(second_value="hybrid", final_value="remote")
+    disagreement = _resolved_disagreement(
+        second_value="hybrid",
+        final_outcome="present_supported",
+        final_value="remote",
+        final_provenance="inferred",
+    )
     del disagreement["second_annotation"]["rubric_version"]
     records[0]["annotations"]["remote_type"] = _annotation(
         outcome="present_supported",
@@ -419,7 +550,12 @@ def test_load_corpus_rejects_second_annotation_missing_metadata(tmp_path: Path) 
 
 def test_load_corpus_rejects_second_annotation_with_invalid_outcome(tmp_path: Path) -> None:
     records = _minimal_corpus()
-    disagreement = _resolved_disagreement(second_value="hybrid", final_value="remote")
+    disagreement = _resolved_disagreement(
+        second_value="hybrid",
+        final_outcome="present_supported",
+        final_value="remote",
+        final_provenance="inferred",
+    )
     disagreement["second_annotation"]["outcome"] = "not_a_real_outcome"
     records[0]["annotations"]["remote_type"] = _annotation(
         outcome="present_supported",
@@ -436,7 +572,12 @@ def test_load_corpus_rejects_second_annotation_with_invalid_expected_provenance(
     tmp_path: Path,
 ) -> None:
     records = _minimal_corpus()
-    disagreement = _resolved_disagreement(second_value="hybrid", final_value="remote")
+    disagreement = _resolved_disagreement(
+        second_value="hybrid",
+        final_outcome="present_supported",
+        final_value="remote",
+        final_provenance="inferred",
+    )
     disagreement["second_annotation"]["expected_provenance"] = "not_a_real_provenance"
     records[0]["annotations"]["remote_type"] = _annotation(
         outcome="present_supported",
@@ -453,9 +594,17 @@ def test_load_corpus_rejects_second_annotation_with_a_disagreement_of_its_own(
     tmp_path: Path,
 ) -> None:
     records = _minimal_corpus()
-    disagreement = _resolved_disagreement(second_value="hybrid", final_value="remote")
+    disagreement = _resolved_disagreement(
+        second_value="hybrid",
+        final_outcome="present_supported",
+        final_value="remote",
+        final_provenance="inferred",
+    )
     disagreement["second_annotation"]["disagreement"] = _resolved_disagreement(
-        second_value="onsite", final_value="hybrid"
+        second_value="onsite",
+        final_outcome="present_supported",
+        final_value="hybrid",
+        final_provenance="inferred",
     )
     records[0]["annotations"]["remote_type"] = _annotation(
         outcome="present_supported",
@@ -468,6 +617,25 @@ def test_load_corpus_rejects_second_annotation_with_a_disagreement_of_its_own(
         load_corpus(path, known_canonical_ids=_KNOWN_IDS)
 
 
+def test_load_corpus_rejects_second_annotation_with_invalid_value(tmp_path: Path) -> None:
+    records = _minimal_corpus()
+    disagreement = _resolved_disagreement(
+        second_value="not_a_real_remote_type_value",
+        final_outcome="present_supported",
+        final_value="remote",
+        final_provenance="inferred",
+    )
+    records[0]["annotations"]["remote_type"] = _annotation(
+        outcome="present_supported",
+        expected_value="remote",
+        expected_provenance="inferred",
+        disagreement=disagreement,
+    )
+    path = _write_corpus(tmp_path, records)
+    with pytest.raises(CorpusValidationError, match="not valid for"):
+        load_corpus(path, known_canonical_ids=_KNOWN_IDS)
+
+
 def test_load_corpus_accepts_a_resolved_disagreement_on_a_skill_id_annotation(
     tmp_path: Path,
 ) -> None:
@@ -475,7 +643,7 @@ def test_load_corpus_accepts_a_resolved_disagreement_on_a_skill_id_annotation(
     disagreement = {
         "second_annotation": _skill_annotation(outcome="present_unsupported_form"),
         "adjudication": {
-            "final_value": "present_supported",
+            "final_outcome": "present_supported",
             "adjudicated_by": "user",
             "adjudicated_at": _TS,
         },
@@ -488,35 +656,63 @@ def test_load_corpus_accepts_a_resolved_disagreement_on_a_skill_id_annotation(
     assert loaded[0].annotations["skills"]["python"]["outcome"] == "present_supported"
 
 
+def test_load_corpus_rejects_skill_id_disagreement_with_no_actual_difference(
+    tmp_path: Path,
+) -> None:
+    records = _minimal_corpus()
+    disagreement = {
+        "second_annotation": _skill_annotation(outcome="present_supported"),
+        "adjudication": {
+            "final_outcome": "present_supported",
+            "adjudicated_by": "user",
+            "adjudicated_at": _TS,
+        },
+    }
+    records[0]["annotations"]["skills"] = _all_skills(
+        {"python": _skill_annotation(outcome="present_supported", disagreement=disagreement)}
+    )
+    path = _write_corpus(tmp_path, records)
+    with pytest.raises(CorpusValidationError, match="no actual difference"):
+        load_corpus(path, known_canonical_ids=_KNOWN_IDS)
+
+
+def test_load_corpus_rejects_skill_id_adjudication_inconsistent_with_outcome(
+    tmp_path: Path,
+) -> None:
+    records = _minimal_corpus()
+    disagreement = {
+        "second_annotation": _skill_annotation(outcome="present_unsupported_form"),
+        "adjudication": {
+            "final_outcome": "ambiguous",
+            "adjudicated_by": "user",
+            "adjudicated_at": _TS,
+        },
+    }
+    records[0]["annotations"]["skills"] = _all_skills(
+        {"python": _skill_annotation(outcome="present_supported", disagreement=disagreement)}
+    )
+    path = _write_corpus(tmp_path, records)
+    with pytest.raises(CorpusValidationError, match="does not match the resolved"):
+        load_corpus(path, known_canonical_ids=_KNOWN_IDS)
+
+
 def test_load_corpus_rejects_skill_id_second_annotation_with_invalid_outcome(
     tmp_path: Path,
 ) -> None:
     records = _minimal_corpus()
     disagreement = {
         "second_annotation": {**_skill_annotation(), "outcome": "not_a_real_outcome"},
-        "adjudication": {"final_value": "absent", "adjudicated_by": "user", "adjudicated_at": _TS},
+        "adjudication": {
+            "final_outcome": "absent",
+            "adjudicated_by": "user",
+            "adjudicated_at": _TS,
+        },
     }
     records[0]["annotations"]["skills"] = _all_skills(
         {"python": _skill_annotation(disagreement=disagreement)}
     )
     path = _write_corpus(tmp_path, records)
     with pytest.raises(CorpusValidationError, match="outcome must be one of"):
-        load_corpus(path, known_canonical_ids=_KNOWN_IDS)
-
-
-def test_load_corpus_rejects_second_annotation_with_invalid_value(tmp_path: Path) -> None:
-    records = _minimal_corpus()
-    disagreement = _resolved_disagreement(
-        second_value="not_a_real_remote_type_value", final_value="remote"
-    )
-    records[0]["annotations"]["remote_type"] = _annotation(
-        outcome="present_supported",
-        expected_value="remote",
-        expected_provenance="inferred",
-        disagreement=disagreement,
-    )
-    path = _write_corpus(tmp_path, records)
-    with pytest.raises(CorpusValidationError, match="not valid for"):
         load_corpus(path, known_canonical_ids=_KNOWN_IDS)
 
 

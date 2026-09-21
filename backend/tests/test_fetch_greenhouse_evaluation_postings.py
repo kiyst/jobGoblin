@@ -18,11 +18,13 @@ from scripts.fetch_greenhouse_evaluation_postings import (
     FatalBudgetExhaustedError,
     SanitizedCandidate,
     _build_detail_url,
+    _has_meaningful_text,
     _is_usable_detail_candidate,
     _redact_contact_patterns,
     _RunBudget,
     _sanitize_job_detail,
     _select_job_ids,
+    _stream_get,
     _validate_detail_response,
     _write_json_atomic_create_only,
     run_acquisition,
@@ -125,6 +127,87 @@ def test_run_budget_raises_once_the_cap_is_exceeded() -> None:
 
 def test_fatal_budget_exhausted_error_is_not_an_evaluation_fetch_error() -> None:
     assert not issubclass(FatalBudgetExhaustedError, EvaluationFetchError)
+
+
+# ---------------------------------------------------------------------------
+# _stream_get -- every chunk must be charged to the run budget before its
+# effect on the per-response cap is evaluated.
+# ---------------------------------------------------------------------------
+async def test_stream_get_charges_run_budget_even_when_per_response_cap_rejects_the_chunk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A chunk that overflows the (tiny, here) per-response cap must
+    still be charged to the cumulative run budget before that rejection
+    is decided -- the cumulative cap measures bytes actually received,
+    never only bytes a well-behaved response happened to stay under."""
+    monkeypatch.setattr(fetcher, "MAX_RESPONSE_BYTES", 5)
+    body = b'{"id": 1, "title": "Engineer", "content": "<p>Hi</p>"}'
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, headers={"content-type": "application/json"}, content=body)
+
+    run_budget = fetcher._RunBudget(max_total_bytes=10**9)
+    async with _mock_client(handler) as client:
+        with pytest.raises(EvaluationFetchError, match="per-response byte cap exceeded"):
+            await _stream_get(
+                "https://boards-api.greenhouse.io/v1/boards/acme/jobs/1",
+                client=client,
+                run_budget=run_budget,
+            )
+
+    assert run_budget.consumed_bytes > fetcher.MAX_RESPONSE_BYTES
+
+
+async def test_run_acquisition_repeated_per_response_overflows_still_hit_the_cumulative_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every response in this test individually overflows the tiny
+    per-response cap and is treated as an ordinary per-board failure --
+    but each overflowing chunk must still be charged to the cumulative
+    run budget before that per-response rejection is decided, so enough
+    repeated overflow cannot evade the total-run cap."""
+    body = b'{"jobs": [{"id": 1}]}'
+    monkeypatch.setattr(fetcher, "MAX_RESPONSE_BYTES", 5)
+    monkeypatch.setattr(fetcher, "MAX_TOTAL_RUN_BYTES", len(body) + 10)
+
+    requested_tokens: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested_tokens.append(request.url.path.split("/")[3])
+        return httpx.Response(200, headers={"content-type": "application/json"}, content=body)
+
+    async with _mock_client(handler) as client:
+        with pytest.raises(FatalBudgetExhaustedError):
+            await run_acquisition(
+                [("board_a", "A"), ("board_b", "B"), ("board_c", "C")], client=client
+            )
+
+    assert requested_tokens == ["board_a", "board_b"]
+
+
+async def test_run_acquisition_simultaneous_overflow_raises_fatal_error_and_stops_immediately(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When a single chunk simultaneously exceeds both the per-response
+    cap and the cumulative run budget, `FatalBudgetExhaustedError` must
+    take precedence over the ordinary per-response
+    `EvaluationFetchError` and abort the entire run -- not merely this
+    one board."""
+    body = b'{"jobs": [{"id": 1}]}'
+    monkeypatch.setattr(fetcher, "MAX_RESPONSE_BYTES", 5)
+    monkeypatch.setattr(fetcher, "MAX_TOTAL_RUN_BYTES", 5)
+
+    requested_tokens: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested_tokens.append(request.url.path.split("/")[3])
+        return httpx.Response(200, headers={"content-type": "application/json"}, content=body)
+
+    async with _mock_client(handler) as client:
+        with pytest.raises(FatalBudgetExhaustedError):
+            await run_acquisition([("board_a", "A"), ("board_b", "B")], client=client)
+
+    assert requested_tokens == ["board_a"]
 
 
 # ---------------------------------------------------------------------------
@@ -237,7 +320,7 @@ def test_sanitize_job_detail_redacts_title_and_description() -> None:
 
 
 # ---------------------------------------------------------------------------
-# _is_usable_detail_candidate
+# _has_meaningful_text / _is_usable_detail_candidate
 # ---------------------------------------------------------------------------
 def _candidate(**overrides: Any) -> SanitizedCandidate:
     base: dict[str, Any] = {
@@ -253,6 +336,45 @@ def _candidate(**overrides: Any) -> SanitizedCandidate:
     return SanitizedCandidate(**base)
 
 
+def test_has_meaningful_text_accepts_ordinary_text() -> None:
+    assert _has_meaningful_text("Engineer")
+
+
+def test_has_meaningful_text_rejects_none() -> None:
+    assert not _has_meaningful_text(None)
+
+
+def test_has_meaningful_text_rejects_empty_string() -> None:
+    assert not _has_meaningful_text("")
+
+
+def test_has_meaningful_text_rejects_ascii_whitespace_only() -> None:
+    assert not _has_meaningful_text("   \t\n  ")
+
+
+def test_has_meaningful_text_rejects_nbsp_only() -> None:
+    """The exact sanitized-description shape a `<p>&nbsp;</p>` source
+    would produce after HTML conversion (NBSP is Unicode whitespace by
+    `str.isspace()`, so it must be rejected the same as ASCII
+    whitespace)."""
+    assert not _has_meaningful_text(" ")
+
+
+def test_has_meaningful_text_rejects_format_character_only() -> None:
+    """A zero-width space (category `Cf`) is not `str.isspace()`, so the
+    helper must reject it via the explicit Unicode-category check, not
+    `str.isspace()` alone."""
+    assert not _has_meaningful_text("​")
+
+
+def test_has_meaningful_text_rejects_mixed_whitespace_and_format_characters() -> None:
+    assert not _has_meaningful_text(" ​ ﻿ \t")
+
+
+def test_has_meaningful_text_accepts_text_mixed_with_whitespace_and_format_characters() -> None:
+    assert _has_meaningful_text(" ​Engineer  ")
+
+
 def test_is_usable_detail_candidate_accepts_title_and_content() -> None:
     assert _is_usable_detail_candidate(_candidate())
 
@@ -265,12 +387,34 @@ def test_is_usable_detail_candidate_rejects_empty_title() -> None:
     assert not _is_usable_detail_candidate(_candidate(title=""))
 
 
+def test_is_usable_detail_candidate_rejects_ascii_whitespace_only_title() -> None:
+    assert not _is_usable_detail_candidate(_candidate(title="   \t  "))
+
+
+def test_is_usable_detail_candidate_rejects_nbsp_only_description() -> None:
+    """Exercised through the real HTML conversion path: `<p>&nbsp;</p>`
+    sanitizes to a single NBSP character, which must not count as
+    meaningful content."""
+    from scripts.greenhouse_html_convert import convert_html_to_text
+
+    description = convert_html_to_text("<p>&nbsp;</p>")
+    assert not _is_usable_detail_candidate(_candidate(description=description))
+
+
+def test_is_usable_detail_candidate_rejects_format_character_only_content() -> None:
+    assert not _is_usable_detail_candidate(_candidate(description="​​"))
+
+
 def test_is_usable_detail_candidate_rejects_missing_content() -> None:
     assert not _is_usable_detail_candidate(_candidate(description=None))
 
 
 def test_is_usable_detail_candidate_rejects_empty_content() -> None:
     assert not _is_usable_detail_candidate(_candidate(description=""))
+
+
+def test_is_usable_detail_candidate_accepts_ordinary_non_empty_title_and_content() -> None:
+    assert _is_usable_detail_candidate(_candidate(title="Engineer", description="A real job."))
 
 
 # ---------------------------------------------------------------------------

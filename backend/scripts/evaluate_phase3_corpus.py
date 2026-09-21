@@ -42,14 +42,23 @@ Every scalar/component annotation:
       "annotation_provenance": "...", "frozen": true, "frozen_at": "<aware ISO8601>",
       "disagreement": {  # optional
         "second_annotation": {<same shape as above, minus disagreement>},
-        "adjudication": {"final_value": ..., "adjudicated_by": "...",
-                          "adjudicated_at": "<aware ISO8601>"}
+        "adjudication": {"final_outcome": ..., "final_value": ..., "final_provenance": ...,
+                          "adjudicated_by": "...", "adjudicated_at": "<aware ISO8601>"}
       }
     }
 
 A per-skill-id annotation is the same shape, keyed on `"outcome"` alone
 (no `expected_value`/`expected_provenance` -- the outcome itself already
-says whether `classify_skills` is expected to return that id).
+says whether `classify_skills` is expected to return that id); its
+`adjudication` resolves `"final_outcome"` only.
+
+An `adjudication` resolves the *complete* scored label -- never a single
+field in isolation -- validated with exactly the same vocabulary/type/
+null-iff-unavailable/outcome-value rules as any primary annotation, and
+the primary annotation's own scored label must equal that resolved label
+exactly. A `disagreement` block must also reflect an actual difference
+between the primary and second annotation's scored label; one declared
+over two identical labels fails closed.
 
 **Annotations are exhaustive, on every record**: all three scalar
 parsers, every composite component, and *every* known taxonomy canonical
@@ -67,8 +76,11 @@ accepted where an `int` is expected, since `bool` is an `int` subtype in
 Python; `expected_value is None` iff `expected_provenance ==
 "unavailable"`); `frozen != true`; a malformed or naive `frozen_at`/
 `accessed_at`/`reviewed_at`/`adjudicated_at` timestamp; an unresolved or
-inconsistent `disagreement`/`adjudication` (missing metadata, or the
-scored field not matching `adjudication.final_value`); an invalid
+inconsistent `disagreement`/`adjudication` (missing metadata, an
+incomplete or invalid resolved label, the primary annotation's scored
+label not matching that resolved label exactly, or a declared
+disagreement with no actual difference between the two annotations); an
+invalid
 `split`/`provenance.origin`; a malformed or absent `manual_review` block;
 an invalid `capture.board_token`/`capture.job_id`; a non-null
 `compensation_text` whose `fields.description[start:end]` does not equal
@@ -178,7 +190,19 @@ _REQUIRED_SKILL_ID_ANNOTATION_FIELDS = frozenset(
     }
 )
 _OPTIONAL_ANNOTATION_FIELDS = frozenset({"disagreement"})
-_REQUIRED_ADJUDICATION_FIELDS = frozenset({"final_value", "adjudicated_by", "adjudicated_at"})
+# A scalar/composite-component adjudication resolves the *complete*
+# scored label (outcome, value, and provenance) -- never `final_value`
+# alone, which let an adjudication that only ever resolved a null value
+# silently "match" an `absent`/unavailable primary annotation even when
+# the actual disagreement (e.g. absent vs. present_supported) was never
+# resolved at all. A skill-id adjudication resolves `final_outcome` only,
+# since a skill-id annotation itself carries no value/provenance.
+_REQUIRED_SCALAR_ADJUDICATION_FIELDS = frozenset(
+    {"final_outcome", "final_value", "final_provenance", "adjudicated_by", "adjudicated_at"}
+)
+_REQUIRED_SKILL_ADJUDICATION_FIELDS = frozenset(
+    {"final_outcome", "adjudicated_by", "adjudicated_at"}
+)
 
 # Mirrors canary_greenhouse.py's own board-token grammar, declared
 # independently (this module never imports network-adjacent code).
@@ -276,17 +300,18 @@ def _validate_annotation_metadata(annotation: dict[str, Any], *, context: str) -
             raise CorpusValidationError(f"{context}.{key} must be a non-empty string")
 
 
-def _validate_disagreement(
-    annotation: dict[str, Any],
-    *,
-    context: str,
-    scored_field: str,
-    validate_scored_value: Callable[[Any, str], None],
-    validate_second_annotation: Callable[[dict[str, Any], str], None],
-) -> None:
+def _validate_disagreement_envelope(
+    annotation: dict[str, Any], *, context: str
+) -> tuple[dict[str, Any], dict[str, Any]] | None:
+    """Shared shape/presence checks for a `disagreement` block, common to
+    both the scalar/composite and skill-id flavors: exactly
+    `second_annotation` and `adjudication`, `second_annotation` an
+    object, `adjudication` present (not an unresolved `null`). Returns
+    `(second_annotation, adjudication)` for the caller's flavor-specific
+    validation, or `None` if there is no `disagreement` at all."""
     disagreement = annotation.get("disagreement")
     if disagreement is None:
-        return
+        return None
     if not isinstance(disagreement, dict) or set(disagreement) != {
         "second_annotation",
         "adjudication",
@@ -294,41 +319,157 @@ def _validate_disagreement(
         raise CorpusValidationError(
             f"{context}.disagreement must declare exactly 'second_annotation' and 'adjudication'"
         )
-
     second = disagreement["second_annotation"]
     if not isinstance(second, dict):
         raise CorpusValidationError(f"{context}.disagreement.second_annotation must be an object")
-    # Fully validates the second annotation's own shape (exact keys,
-    # outcome, expected_value/expected_provenance invariants where
-    # applicable, and metadata) -- never just its scored field -- via the
-    # same flavor-specific validator used for the primary annotation. A
-    # second annotation may never declare a disagreement of its own.
-    validate_second_annotation(second, f"{context}.disagreement.second_annotation")
-
     adjudication = disagreement["adjudication"]
     if adjudication is None:
         raise CorpusValidationError(
             f"{context}.disagreement is unresolved (adjudication is missing/null)"
         )
-    if not isinstance(adjudication, dict) or set(adjudication) != _REQUIRED_ADJUDICATION_FIELDS:
-        raise CorpusValidationError(
-            f"{context}.disagreement.adjudication must declare exactly "
-            f"{sorted(_REQUIRED_ADJUDICATION_FIELDS)}"
-        )
+    return second, adjudication
+
+
+def _validate_adjudication_metadata(adjudication: dict[str, Any], *, context: str) -> None:
+    """`adjudicated_by`/`adjudicated_at` -- required identically by both
+    adjudication flavors."""
     if not _is_non_empty_str(adjudication["adjudicated_by"]):
-        raise CorpusValidationError(
-            f"{context}.disagreement.adjudication.adjudicated_by must be a non-empty string"
-        )
+        raise CorpusValidationError(f"{context}.adjudicated_by must be a non-empty string")
     if not _is_valid_aware_timestamp(adjudication["adjudicated_at"]):
         raise CorpusValidationError(
-            f"{context}.disagreement.adjudication.adjudicated_at must be a timezone-aware "
-            "ISO8601 timestamp string"
+            f"{context}.adjudicated_at must be a timezone-aware ISO8601 timestamp string"
         )
-    validate_scored_value(adjudication["final_value"], f"{context}.disagreement.adjudication")
-    if annotation[scored_field] != adjudication["final_value"]:
+
+
+def _validate_scalar_disagreement(
+    annotation: dict[str, Any],
+    *,
+    context: str,
+    value_key: str,
+    validate_expected_value: Callable[[Any, str], None],
+) -> None:
+    """Validates a scalar/composite-component `disagreement`: fully
+    validates `second_annotation`'s own shape via the same
+    flavor-specific validator used for the primary annotation (never
+    just its scored field, and never a nested `disagreement`);
+    validates `adjudication`'s complete resolved label -- `final_outcome`
+    / `final_value` / `final_provenance`, held to exactly the same
+    vocabulary/type/null-iff-unavailable/outcome-value rules as any
+    primary annotation -- and requires the primary annotation's own
+    `(outcome, expected_value, expected_provenance)` triple to equal
+    that resolved label exactly, never `final_value` alone (which would
+    let an adjudication resolving only a coincidentally-matching null
+    value silently pass despite never actually resolving the outcome/
+    provenance disagreement). Also requires the primary and second
+    annotation's scored labels to actually differ -- a `disagreement`
+    block declared over two identical labels is not a real disagreement."""
+    envelope = _validate_disagreement_envelope(annotation, context=context)
+    if envelope is None:
+        return
+    second, adjudication = envelope
+
+    _validate_scalar_annotation_shape(
+        second,
+        context=f"{context}.disagreement.second_annotation",
+        value_key=value_key,
+        allow_disagreement=False,
+    )
+
+    adjudication_context = f"{context}.disagreement.adjudication"
+    if (
+        not isinstance(adjudication, dict)
+        or set(adjudication) != _REQUIRED_SCALAR_ADJUDICATION_FIELDS
+    ):
         raise CorpusValidationError(
-            f"{context}.{scored_field} does not match the resolved "
-            "disagreement.adjudication.final_value"
+            f"{adjudication_context} must declare exactly "
+            f"{sorted(_REQUIRED_SCALAR_ADJUDICATION_FIELDS)}"
+        )
+    _validate_adjudication_metadata(adjudication, context=adjudication_context)
+
+    final_outcome = adjudication["final_outcome"]
+    final_value = adjudication["final_value"]
+    final_provenance = adjudication["final_provenance"]
+    if final_outcome not in _VALID_OUTCOMES:
+        raise CorpusValidationError(
+            f"{adjudication_context}.final_outcome must be one of {sorted(_VALID_OUTCOMES)}, "
+            f"got {final_outcome!r}"
+        )
+    validate_expected_value(final_value, adjudication_context)
+    if final_provenance not in _VALID_PROVENANCE_VALUES:
+        raise CorpusValidationError(
+            f"{adjudication_context}.final_provenance must be one of "
+            f"{sorted(_VALID_PROVENANCE_VALUES)}, got {final_provenance!r}"
+        )
+    if (final_value is None) != (final_provenance == Provenance.UNAVAILABLE.value):
+        raise CorpusValidationError(
+            f"{adjudication_context}: final_value must be null iff final_provenance is "
+            "'unavailable'"
+        )
+    if final_outcome != "present_supported" and final_value is not None:
+        raise CorpusValidationError(
+            f"{adjudication_context}: final_outcome {final_outcome!r} requires a null "
+            "final_value (the parser is expected to abstain)"
+        )
+
+    primary_label = (
+        annotation["outcome"],
+        annotation["expected_value"],
+        annotation["expected_provenance"],
+    )
+    final_label = (final_outcome, final_value, final_provenance)
+    if primary_label != final_label:
+        raise CorpusValidationError(
+            f"{context}'s (outcome, expected_value, expected_provenance) does not match the "
+            "resolved disagreement.adjudication's (final_outcome, final_value, final_provenance)"
+        )
+
+    second_label = (second["outcome"], second["expected_value"], second["expected_provenance"])
+    if primary_label == second_label:
+        raise CorpusValidationError(
+            f"{context}.disagreement declares no actual difference between the primary "
+            "annotation's and second_annotation's scored label"
+        )
+
+
+def _validate_skill_id_disagreement(annotation: dict[str, Any], *, context: str) -> None:
+    """The per-skill-id counterpart of `_validate_scalar_disagreement` --
+    a skill-id annotation is scored on `outcome` alone, so its
+    adjudication resolves `final_outcome` only."""
+    envelope = _validate_disagreement_envelope(annotation, context=context)
+    if envelope is None:
+        return
+    second, adjudication = envelope
+
+    _validate_skill_id_annotation_shape(
+        second, context=f"{context}.disagreement.second_annotation", allow_disagreement=False
+    )
+
+    adjudication_context = f"{context}.disagreement.adjudication"
+    if (
+        not isinstance(adjudication, dict)
+        or set(adjudication) != _REQUIRED_SKILL_ADJUDICATION_FIELDS
+    ):
+        raise CorpusValidationError(
+            f"{adjudication_context} must declare exactly "
+            f"{sorted(_REQUIRED_SKILL_ADJUDICATION_FIELDS)}"
+        )
+    _validate_adjudication_metadata(adjudication, context=adjudication_context)
+
+    final_outcome = adjudication["final_outcome"]
+    if final_outcome not in _VALID_OUTCOMES:
+        raise CorpusValidationError(
+            f"{adjudication_context}.final_outcome must be one of {sorted(_VALID_OUTCOMES)}, "
+            f"got {final_outcome!r}"
+        )
+    if annotation["outcome"] != final_outcome:
+        raise CorpusValidationError(
+            f"{context}.outcome does not match the resolved disagreement.adjudication."
+            "final_outcome"
+        )
+    if annotation["outcome"] == second["outcome"]:
+        raise CorpusValidationError(
+            f"{context}.disagreement declares no actual difference between the primary "
+            "annotation's and second_annotation's outcome"
         )
 
 
@@ -386,24 +527,17 @@ def _validate_scalar_annotation(
     validate_expected_value = _validate_scalar_annotation_shape(
         annotation, context=context, value_key=value_key, allow_disagreement=True
     )
-
-    def _validate_second_annotation(second: dict[str, Any], ctx: str) -> None:
-        _validate_scalar_annotation_shape(
-            second, context=ctx, value_key=value_key, allow_disagreement=False
-        )
-
-    _validate_disagreement(
+    _validate_scalar_disagreement(
         annotation,
         context=context,
-        scored_field="expected_value",
-        validate_scored_value=validate_expected_value,
-        validate_second_annotation=_validate_second_annotation,
+        value_key=value_key,
+        validate_expected_value=validate_expected_value,
     )
 
 
 def _validate_skill_id_annotation_shape(
     annotation: dict[str, Any], *, context: str, allow_disagreement: bool
-) -> Callable[[Any, str], None]:
+) -> None:
     """The per-skill-id counterpart of `_validate_scalar_annotation_shape`
     -- same allow_disagreement contract, no `expected_value`/
     `expected_provenance` (a skill-id annotation is scored on `outcome`
@@ -414,33 +548,17 @@ def _validate_skill_id_annotation_shape(
     _require_exact_keys(
         annotation, allowed, required=_REQUIRED_SKILL_ID_ANNOTATION_FIELDS, context=context
     )
-
-    def _validate_outcome(value: Any, ctx: str) -> None:
-        if value not in _VALID_OUTCOMES:
-            raise CorpusValidationError(
-                f"{ctx}.outcome must be one of {sorted(_VALID_OUTCOMES)}, got {value!r}"
-            )
-
-    _validate_outcome(annotation["outcome"], context)
+    outcome = annotation["outcome"]
+    if outcome not in _VALID_OUTCOMES:
+        raise CorpusValidationError(
+            f"{context}.outcome must be one of {sorted(_VALID_OUTCOMES)}, got {outcome!r}"
+        )
     _validate_annotation_metadata(annotation, context=context)
-    return _validate_outcome
 
 
 def _validate_skill_id_annotation(annotation: dict[str, Any], *, context: str) -> None:
-    validate_outcome = _validate_skill_id_annotation_shape(
-        annotation, context=context, allow_disagreement=True
-    )
-
-    def _validate_second_annotation(second: dict[str, Any], ctx: str) -> None:
-        _validate_skill_id_annotation_shape(second, context=ctx, allow_disagreement=False)
-
-    _validate_disagreement(
-        annotation,
-        context=context,
-        scored_field="outcome",
-        validate_scored_value=validate_outcome,
-        validate_second_annotation=_validate_second_annotation,
-    )
+    _validate_skill_id_annotation_shape(annotation, context=context, allow_disagreement=True)
+    _validate_skill_id_disagreement(annotation, context=context)
 
 
 def _validate_annotations(

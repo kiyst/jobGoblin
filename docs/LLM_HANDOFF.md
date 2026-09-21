@@ -98,182 +98,6 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-09-20, Claude Code (Sonnet 5). Risk class **H**
-  (Sol's verdict: one bounded slice covering both acquisition and
-  evaluation under a single authorization). Base `B` -> candidate `C`:
-  `7ce4a1dc770827653ccf8140188c5d1dec6621d8` -> this commit; new branch
-  `phase-3/realistic-evaluation-corpus`, cut from a freshly verified
-  clean `main` (`main` == `origin/main`, both at `7ce4a1d`).
-  `slice_id: 2026-09-20-realistic-evaluation-corpus-7ce4a1d`.
-  `slice_kind: tooling` (product-evaluation code, not a classifier and
-  not workflow/verification tooling — excluded from the three-slice
-  discretionary-tooling freeze per its own binding authorization).
-- **Blocked, honestly, before this entry was written**: the user's
-  authorization named board token 1 (`gitlab`) but left board tokens 2
-  and 3 as the literal placeholder text `[INSERT EXACT TOKEN]`/
-  `[INSERT EXACT TOKEN OR none]`. Per the binding requirement that at
-  least two distinct boards must succeed or the fetcher aborts with no
-  corpus, and per the standing rule that no network request is
-  authorized until the final exact token list is recorded, **no live
-  network contact was attempted**. This `C` implements and thoroughly
-  tests every piece that does not require it; the live fetch, the real
-  corpus, and the real baseline report remain outstanding, explicitly
-  flagged to the user rather than guessed at.
-- **`backend/scripts/greenhouse_html_convert.py`** (new):
-  `convert_html_to_text(html) -> str`. Deterministic: covered whitespace
-  is exactly `" \t\n\r"`; CRLF/CR normalize to `\n` before parsing; each
-  block boundary (`p`/`div`/`br`/`li`/`h1`-`h6`/`ul`/`ol`) is exactly one
-  `\n`, deduped at the source for adjacent/nested tags; `script`/`style`
-  content is suppressed; horizontal ASCII space/tab runs collapse to one
-  space per line; repeated blank lines (from genuine source whitespace
-  text nodes, not from tag-boundary insertion, which never stacks)
-  collapse to one; NBSP and every other Unicode whitespace/format
-  character are preserved unchanged. 20 offline regressions in
-  `backend/tests/test_greenhouse_html_convert.py`, including the exact
-  concatenation/entity/suppression/blank-line cases the binding
-  requirement named.
-- **`backend/scripts/fetch_greenhouse_evaluation_postings.py`** (new):
-  two-phase per-board fetch (one metadata-only list `GET`, never
-  `content=true`; deterministic selection of <=10 job ids before any
-  description exists to examine; one detail `GET` per id, never
-  `questions=true`/`pay_transparency=true`) reusing
-  `canary_greenhouse.py`'s origin/token-validation/streaming-cap
-  primitives directly rather than re-deriving them. Zero retries. Two
-  independent byte caps (5,000,000 per response, 20,000,000 per run).
-  Reads only `id`/`title`/`location.name`/`content` from a parsed
-  response — no other key is ever traversed, so an unknown or sensitive
-  upstream field cannot reach a log, a staged record, or the committed
-  corpus by construction, never by enumeration. Redaction is explicitly
-  documented as defense in depth only. `compensation_text` is always
-  `None` here. Requires >=2 distinct successful boards or raises without
-  staging anything; a failing board is skipped, never retried, never
-  substituted. Staging is fixed (`backend/.evaluation-staging/`, now
-  gitignored), atomic, and create-only, reusing
-  `verification_receipts.write_receipt_atomic`'s exact algorithm
-  (duplicated, since that function is dict-only and this module's
-  payload is a JSON array). 32 offline tests in
-  `backend/tests/test_fetch_greenhouse_evaluation_postings.py`, all via
-  `httpx.MockTransport` (mirroring `test_canary_greenhouse_mapping.py`'s
-  own established pattern) — no test causes a real HTTP request.
-- **`backend/scripts/evaluate_phase3_corpus.py`** (new): a fail-closed
-  loader (rejects unknown record/annotation/component fields, an
-  unknown parser or composite-component name, `frozen != true`, an
-  unresolved annotation disagreement, an invalid split/provenance/
-  outcome value, a mismatched `expected_value`/`expected_provenance`
-  pair, and a `compensation_text` that is not an exact substring of
-  `description` at its recorded offsets) plus a minimal evaluator
-  against the seven merged classifiers. Every metric reports numerator
-  and denominator explicitly (`MetricCounter.render()` prints `N/A` on
-  a zero denominator, never `0%`). Composite parsers
-  (`experience`/`salary`/`location`) are scored per independently
-  annotated component. `skills` is scored set-based; any returned skill
-  outside the frozen `expected_canonical_ids` is an unconditional false
-  positive. No pass threshold, no CI wiring, no dashboard anywhere. 36
-  tests in `backend/tests/test_evaluate_phase3_corpus.py`: one test per
-  fail-closed loader rule, direct scoring-logic tests against
-  hand-built `MetricCounter`/`ParserComponentMetrics`/`SkillsMetrics`
-  inputs, and one true end-to-end smoke test against the real
-  classifiers (using a title `remote.py` actually recognizes — an
-  earlier draft of this same test used an undelimited "Remote X" title,
-  which is a documented false negative in `remote.py`'s own structural
-  rule, not a bug; caught and corrected before this commit).
-- **`docs/DECISIONS/0010-realistic-evaluation-corpus-methodology.md`**
-  (new): records every binding acquisition/sanitization/annotation/
-  partitioning/metric decision from this slice's negotiated proposal
-  rounds as durable policy, not restated per-round in this ledger.
-- Files changed: the four new files above plus their three new test
-  files; `backend/scripts/verification_scope.py` and
-  `backend/tests/test_verification_scope.py` (the narrowly necessary
-  owner mapping for `backend/tests/fixtures/evaluation/
-  phase3_realistic_corpus.json`, mirroring `_TAXONOMY_FIXTURE_FILES`/
-  `_SKILL_FIXTURE_FILES` exactly — without it the file would fail
-  closed with `OwnerMappingRequiredError` the moment it existed);
-  `.gitignore` (`backend/.evaluation-staging/`); `docs/ROADMAP.md`
-  (corrected the stale "skill-classifier ... not yet merged" passage —
-  it merged last iteration — and added this slice's own neutral,
-  not-yet-merged status); `docs/ARCHITECTURE.md` (corrected the stale
-  "skills.py/skills.yaml ... planned/not yet merged" entries to match).
-  No database lifecycle operation performed; no network contact of any
-  kind attempted; no parser semantic change; no schema/persistence
-  work; `backend/tests/fixtures/evaluation/phase3_realistic_corpus.json`
-  does **not** exist yet.
-- **Adversarial self-review findings, fixed before this commit** (10
-  findings; the 6 below were fixed, 4 were confirmed low-risk/hygiene
-  and left as disclosed, not fixed — see the review's own report for
-  the full list):
-  - `greenhouse_html_convert.py`: an entity-encoded CR/LF (e.g. `&#13;`)
-    bypassed line-ending normalization entirely, since `HTMLParser`
-    decodes character references *during* parsing, after the one
-    pre-parse normalization pass already ran. Fixed by normalizing the
-    fully extracted text a second time, after parsing.
-  - `greenhouse_html_convert.py`: an unclosed `<script>`/`<style>`
-    silently discarded every character after it (Python's `HTMLParser`
-    treats both as CDATA), including real description text, with no
-    signal of truncation. Fixed by raising a new `HtmlConversionError`
-    instead of returning unreliable text; `fetch_greenhouse_evaluation_
-    postings.py`'s `_sanitize_job_detail` converts it to
-    `EvaluationFetchError` (fail closed, never silently degrades).
-  - `evaluate_phase3_corpus.py`: a recorded `disagreement.adjudication`
-    was checked for presence only, never for consistency with the
-    annotation's own scored value — three mutually contradictory values
-    (top-level, second annotation, adjudication) could coexist and
-    evaluation would silently score against the top-level one,
-    ignoring the adjudication entirely. Fixed: the loader now requires
-    `adjudication.final_value` and rejects the record if it does not
-    equal the annotation's own scored field.
-  - `evaluate_phase3_corpus.py`'s `_score_component`: `provenance_
-    correctness` was updated for *any* present outcome, not just
-    `present_supported` — pooling a false positive on an absent/
-    unsupported-form/ambiguous case (already counted by its own
-    dedicated metric) back into a metric meant to describe
-    provenance-labeling quality on genuine hits. Fixed: gated on
-    `present_supported` only.
-  - `fetch_greenhouse_evaluation_postings.py::run_acquisition`: a board
-    that responded successfully but yielded zero usable candidates
-    (e.g. a non-empty list with no job carrying a usable id) was never
-    logged — only the exception path printed anything. Fixed: an
-    explicit log line for this case too.
-  - `fetch_greenhouse_evaluation_postings.py`: `MAX_REQUESTS_PER_BOARD`
-    was declared and documented but never actually checked at runtime —
-    the real ceiling was only an emergent consequence of `_select_job_
-    ids`'s own limit, so a future edit to that limit could silently
-    break the documented guarantee. Fixed: an explicit, independently
-    tested check in `_fetch_board`. Also fixed in the same pass:
-    `_select_job_ids` now de-duplicates repeated ids before selecting
-    (never wasting part of the 10-request budget re-fetching one job
-    twice), and `evaluate_phase3_corpus.py`'s loader now rejects a
-    non-scalar `expected_value` and an out-of-bounds/inverted
-    `compensation_text_source_span` (negative indices, `start > end`)
-    instead of silently accepting either.
-  - 14 new regression tests added across the three test files for the
-    six fixes above (103 tests total in the three new test files, up
-    from 89).
-- Verification: pending — see the workflow-metadata block below and the
-  publication (`A`) entry that will follow it.
-
-```workflow-metadata
-workflow_version: v3.2
-state: published
-slice_id: 2026-09-20-realistic-evaluation-corpus-7ce4a1d
-slice_kind: tooling
-risk_class: H
-base_sha: 7ce4a1dc770827653ccf8140188c5d1dec6621d8
-declared_gate: final
-executed_gate: final
-candidate_sha: a0ddad9489c9020b1c1921d4dac182e7a42ef3d0
-receipt_id: 788ec89b-c81f-41c0-859b-ded428c2d466
-receipt_path: docs/verification-receipts/a0ddad9489c9020b1c1921d4dac182e7a42ef3d0/788ec89b-c81f-41c0-859b-ded428c2d466.json
-full_suite_count: 2961
-focused_test_count: 175
-mutation_witness_count: 34
-```
-
----
-
-## Iteration 2
-
-### Work done
-
 - Date/agent: 2026-09-20, Claude Code (Sonnet 5). Risk class **H** (same
   slice, same authorization). Base `B` (unchanged for this slice's whole
   correction lifetime, `7ce4a1d`) -> candidate `C2`: this commit; same
@@ -406,4 +230,109 @@ receipt_path: docs/verification-receipts/f9f531eb568027ebad311404ed05cba9c28ab0c
 full_suite_count: 2978
 focused_test_count: 192
 mutation_witness_count: 34
+```
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-09-20, Claude Code (Sonnet 5). Risk class **H** (same
+  slice, same authorization). Base `B` (unchanged for this slice's whole
+  correction lifetime, `7ce4a1d`) -> candidate `C3`: this commit; same
+  branch `phase-3/realistic-evaluation-corpus`, on top of the existing
+  pushed tip `A2 = 616dd59a17c6c6d64cecf359f625796de311bd24`.
+  `slice_id: 2026-09-20-realistic-evaluation-corpus-7ce4a1d` (unchanged).
+  Addresses Sol's re-review of `C2 = f9f531eb568027ebad311404ed05
+  cba9c28ab0c2` / `A2 = 616dd59a17c6c6d64cecf359f625796de311bd24`, both
+  of which remain unamended, still pushed, still present in history
+  exactly as they were; the `C2`/`A2` receipt cycle
+  (`2b6174d6-138e-4cd9-b1f8-7b770fdbd282`) is superseded and
+  non-reusable as of this entry. No network contact, board-token
+  request, corpus acquisition, `R`, merge, `M`/`Q`, parser-semantic
+  change, or database work performed.
+- **Finding 1 (total-run byte accounting)**: `_stream_get` checked the
+  per-response cap before charging a chunk to `_RunBudget`, so a chunk
+  rejected for exceeding `MAX_RESPONSE_BYTES` was never counted toward
+  `MAX_TOTAL_RUN_BYTES` -- repeated oversized responses could never
+  exhaust the cumulative cap. Fixed: every chunk is now charged to
+  `run_budget.consume` first, and only then is the per-response ceiling
+  evaluated, so `FatalBudgetExhaustedError` takes precedence over an
+  ordinary per-response `EvaluationFetchError` when one chunk triggers
+  both. Three regressions added:
+  `test_stream_get_charges_run_budget_even_when_per_response_cap_rejects_the_chunk`,
+  `test_run_acquisition_repeated_per_response_overflows_still_hit_the_cumulative_cap`,
+  `test_run_acquisition_simultaneous_overflow_raises_fatal_error_and_stops_immediately`.
+- **Finding 2 (complete adjudication)**: `disagreement.adjudication`
+  previously resolved `final_value` alone, so an adjudication that only
+  ever resolved a null value could coincidentally "match" an `absent`/
+  unavailable primary annotation without ever actually resolving the
+  real disagreement (Sol's exact reproduction: primary absent/null/
+  unavailable, second present_supported/remote/inferred, adjudication
+  resolving only null -- previously accepted). Fixed: for scalar/
+  composite-component annotations, adjudication now resolves the
+  complete `(final_outcome, final_value, final_provenance)` label,
+  validated with the same vocabulary/type/null-iff-unavailable/outcome-
+  value rules as any primary annotation, and the primary annotation's
+  own scored triple must equal it exactly; for per-skill annotations,
+  adjudication resolves `final_outcome` only, checked against the
+  primary's own `outcome`. A `disagreement` block is now also rejected
+  if the primary and second annotation's scored labels are identical
+  (`_validate_scalar_disagreement`/`_validate_skill_id_disagreement`
+  replace the old single generic `_validate_disagreement`). New
+  regressions cover: the exact reproduced defect
+  (`test_load_corpus_rejects_adjudication_resolving_only_a_null_value`),
+  independent outcome-only and provenance-only disagreement acceptance,
+  a "no actual difference" rejection for both the scalar and skill-id
+  flavors, and a skill-id adjudication inconsistent with the primary
+  outcome.
+- **Finding 3 (usable-detail text)**: `_is_usable_detail_candidate`
+  replaced `bool(title)`/`bool(description)` with `_has_meaningful_text`,
+  which rejects missing, empty, whitespace-only (`str.isspace()` --
+  including NBSP), and Unicode-format-character-only (category `Cf`)
+  text, including any mixture of the two, while adding no broader
+  semantic quality heuristic. Regressions cover an ASCII-whitespace-only
+  title, an NBSP-only sanitized description produced by the real
+  `convert_html_to_text("<p>&nbsp;</p>")` path, format-character-only
+  content, mixed whitespace/format-character-only content, and ordinary
+  non-empty text (including text merely *containing* stray whitespace/
+  format characters alongside real words, which must still be accepted).
+- **Adversarial self-review**: a dedicated pass traced all three fixes'
+  actual execution paths (exception propagation for finding 1; every
+  validation branch and a deliberate search for a bypass of the "no
+  actual difference" check for finding 2; character-by-character boolean
+  logic for finding 3) and found no defect requiring a code change.
+  **Disclosed, not fixed** (deliberately out of Sol's narrow scope for
+  finding 3): `_has_meaningful_text` does not reject text composed
+  solely of Unicode control characters (category `Cc`, e.g. `\x00`) --
+  neither `str.isspace()` nor category `Cf` -- since Sol's instruction
+  was explicitly limited to whitespace and category-`Cf` text and warned
+  against adding broader semantic quality heuristics; noted here for a
+  possible future, separately-authorized bounded amendment rather than
+  addressed unilaterally.
+- Files changed: `backend/scripts/fetch_greenhouse_evaluation_postings.py`
+  (streaming budget reorder, `_has_meaningful_text`),
+  `backend/scripts/evaluate_phase3_corpus.py` (adjudication rewrite),
+  `backend/tests/test_fetch_greenhouse_evaluation_postings.py` (60
+  tests, up from 45), `backend/tests/test_evaluate_phase3_corpus.py` (55
+  tests, up from 49), `docs/LLM_HANDOFF.md` (this entry, plus the
+  iteration rotation above). No other file touched -- no network
+  contact, board-token request, corpus acquisition, parser-semantic
+  change, database work, or unrelated tooling.
+- **Two-iteration rotation applied**: the oldest iteration (this
+  slice's original `C`/`A`) is deleted; the former Iteration 2 (the
+  `C2`/`A2` correction) is renumbered to Iteration 1, unchanged in
+  content; this correction becomes Iteration 2.
+- Verification: pending — see the workflow-metadata block below and the
+  publication (`A3`) entry that will follow it.
+
+```workflow-metadata
+workflow_version: v3.2
+state: pending
+slice_id: 2026-09-20-realistic-evaluation-corpus-7ce4a1d
+slice_kind: tooling
+risk_class: H
+base_sha: 7ce4a1dc770827653ccf8140188c5d1dec6621d8
+declared_gate: final
 ```
