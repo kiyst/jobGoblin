@@ -1,0 +1,6 @@
+schema_version: 1
+entries:
+  - canonical_id: alpha
+    canonical_id: alpha-again
+    display_name: Alpha
+    aliases: []

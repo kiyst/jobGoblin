@@ -1,0 +1,47 @@
+schema_version: 1
+entries:
+  - canonical_id: python
+    display_name: Python
+    aliases: []
+  - canonical_id: javascript
+    display_name: JavaScript
+    aliases: [js]
+  - canonical_id: typescript
+    display_name: TypeScript
+    aliases: [ts]
+  - canonical_id: java
+    display_name: Java
+    aliases: []
+  - canonical_id: cpp
+    display_name: C++
+    aliases: [c++, cplusplus]
+  - canonical_id: csharp
+    display_name: C#
+    aliases: [c#, c-sharp]
+  - canonical_id: c
+    display_name: C
+    aliases: []
+  - canonical_id: golang
+    display_name: Go
+    aliases: [go]
+  - canonical_id: rlang
+    display_name: R
+    aliases: [r]
+  - canonical_id: postgresql
+    display_name: PostgreSQL
+    aliases: [postgres]
+  - canonical_id: mysql
+    display_name: MySQL
+    aliases: []
+  - canonical_id: mongodb
+    display_name: MongoDB
+    aliases: [mongo]
+  - canonical_id: kubernetes
+    display_name: Kubernetes
+    aliases: [k8s]
+  - canonical_id: docker
+    display_name: Docker
+    aliases: []
+  - canonical_id: node.js
+    display_name: Node.js
+    aliases: [node, nodejs]
