@@ -304,10 +304,17 @@ mutation_witness_count: 34
 
 ```workflow-metadata
 workflow_version: v3.2
-state: pending
+state: published
 slice_id: 2026-09-20-realistic-evaluation-corpus-7ce4a1d
 slice_kind: tooling
 risk_class: H
 base_sha: 7ce4a1dc770827653ccf8140188c5d1dec6621d8
 declared_gate: final
+executed_gate: final
+candidate_sha: 61a18819abb509ab0a5f74c60924cc968dc1499f
+receipt_id: 16ea83c7-ea7a-4a5e-aea8-e53e3c4b8c1a
+receipt_path: docs/verification-receipts/61a18819abb509ab0a5f74c60924cc968dc1499f/16ea83c7-ea7a-4a5e-aea8-e53e3c4b8c1a.json
+full_suite_count: 3004
+focused_test_count: 218
+mutation_witness_count: 34
 ```
