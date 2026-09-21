@@ -100,146 +100,6 @@ that detail.
 
 - Date/agent: 2026-09-20, Claude Code (Sonnet 5). Risk class **H** (same
   slice, same authorization). Base `B` (unchanged for this slice's whole
-  correction lifetime, `7ce4a1d`) -> candidate `C2`: this commit; same
-  branch `phase-3/realistic-evaluation-corpus`, on top of the existing
-  pushed tip `A = 5160a57731c49e4a28bf4f4cde15b9fc45d4209c`.
-  `slice_id: 2026-09-20-realistic-evaluation-corpus-7ce4a1d` (unchanged).
-  Addresses Sol's "Changes requested" verdict on `C = a0ddad9489c9020
-  b1c1921d4dac182e7a42ef3d0` / `A = 5160a57731c49e4a28bf4f4cde15b9fc45d42
-  09c`, both of which remain unamended, still pushed, still present in
-  history exactly as they were; the `C`/`A` receipt cycle
-  (`788ec89b-c81f-41c0-859b-ded428c2d466`) is superseded and
-  non-reusable as of this entry. No network contact, board-token
-  request, corpus acquisition, `R`, merge, `M`/`Q`, parser-semantic
-  change, or database work performed.
-- **Finding 1 (streaming total-run budget)**: `fetch_greenhouse_
-  evaluation_postings.py`'s `_stream_get` checked the total-run budget
-  only once, after an entire response had already been downloaded, and
-  the same `EvaluationFetchError` its per-board caller already treats as
-  an ordinary, skip-and-continue failure. Fixed: the per-response cap
-  and the shared `_RunBudget` are now both enforced before each streamed
-  chunk is accepted; exhausting the budget now raises a new
-  `FatalBudgetExhaustedError`, deliberately **not** a subclass of
-  `EvaluationFetchError`, so it propagates straight out of
-  `run_acquisition`'s per-board exception handling uncaught, aborting
-  the whole run. Regression:
-  `test_run_acquisition_fatal_budget_exhaustion_prevents_later_board_requests`
-  proves exhausting a 10-byte budget on board A's first request leaves
-  boards B and C completely uncontacted.
-- **Finding 2 (usable-record gate + loader hardening)**: added
-  `_is_usable_detail_candidate` (matching id, non-empty title, non-empty
-  sanitized content) so `_fetch_board` only counts a genuinely usable
-  detail record toward board success; an unusable one is skipped, not
-  aborted. `evaluate_phase3_corpus.py`'s loader now rejects (each with
-  its own regression): duplicate JSON keys at any nesting depth, an
-  empty corpus, a non-list top level, a duplicate record id, any missing
-  scalar/composite/skill annotation, any `bool` masquerading as an
-  `int`, any value from the wrong parser's closed vocabulary, malformed/
-  naive `frozen_at`/`accessed_at`/`reviewed_at`/`adjudicated_at`
-  timestamps, a malformed `capture.board_token`/`capture.job_id`, and a
-  missing/malformed `manual_review` block.
-- **Finding 3 (exhaustive annotations + full disagreement validation)**:
-  annotations are now exhaustive over all three scalar parsers, every
-  composite component, and every taxonomy canonical id under `skills`
-  (never a subset). `_validate_disagreement` now fully validates
-  `second_annotation`'s entire shape (exact keys, outcome, `expected_
-  value`/`expected_provenance` invariants, metadata) via the same
-  flavor-specific validator used for the primary annotation --
-  previously only the scored field and metadata were checked, so a
-  `second_annotation` with a garbage `outcome`/`expected_provenance`
-  loaded silently (an adversarial-review finding on this same commit,
-  below). `adjudication.final_value` must still equal the annotation's
-  own scored field.
-- **Finding 4 (corrected metrics)**: `supported_correctness`/
-  `supported_abstention`/`confidently_wrong` now unconditionally share
-  one denominator for every `present_supported` case with a completed
-  invocation (an abstention is incorrect but never also confidently
-  wrong). `_evaluate_composite` now increments a composite parser's
-  `runtime_failure` exactly once per invocation, never once per
-  component, and skips all component-level scoring on a raised
-  invocation. `MismatchDetail` records are deterministic, keyed by
-  record/parser/component, and never carry posting text.
-- **Finding 5 (partitioning)**: `_validate_partitioning` requires
-  non-empty `dev` and `holdout` employer sets and rejects any employer
-  appearing in both. `evaluate_corpus` returns `dev`/`holdout`/
-  `combined` as three fully independent `SplitEvaluation`s.
-- **Finding 6 (exhaustive skills outcome model)**: skills annotations
-  are now `{canonical_id: {outcome, ...}}` over every known id (never a
-  flat `expected_canonical_ids` list); `_evaluate_skills` derives
-  recall and all three false-positive categories from every known id's
-  outcome, and precision plus `false_positive_outside_frozen_set` from
-  every actually-returned id's own outcome in that same frozen map --
-  proven by `test_skills_record_with_all_four_outcomes_simultaneously`
-  (one record scoring `present_supported`, `present_unsupported_form`,
-  and `ambiguous` ids all at once).
-- **Adversarial self-review findings, fixed before this commit** (2
-  findings, both confirmed real by tracing execution paths, not merely
-  re-reading docstrings):
-  - `fetch_greenhouse_evaluation_postings.py::_fetch_board`: a
-    sanitization failure on one job (`_sanitize_job_detail` raising
-    `EvaluationFetchError` for an unclosed `<script>`/`<style>`) was
-    uncaught locally, so it propagated out of `_fetch_board`, discarding
-    every already-collected valid candidate from earlier job ids on
-    that same board and aborting the board entirely -- directly
-    contradicting this module's own "skipped, not staged, does not
-    abort the board" contract. Fixed: caught locally and treated the
-    same as an unusable record (skip, continue). Regression:
-    `test_fetch_board_skips_unsanitizable_record_without_discarding_earlier_candidates`.
-  - `evaluate_phase3_corpus.py::_validate_disagreement`: as noted under
-    finding 3 above, `second_annotation` was validated on its scored
-    field and metadata only -- a garbage `outcome` or `expected_
-    provenance` in `second_annotation` loaded without error. Fixed by
-    extracting `_validate_scalar_annotation_shape`/`_validate_skill_id_
-    annotation_shape` (parameterized on `allow_disagreement`, so a
-    `second_annotation` is held to the same rules as a primary
-    annotation but may never declare a nested disagreement of its own)
-    and validating `second_annotation` through the same function as the
-    primary annotation. Four new regressions cover invalid `outcome`,
-    invalid `expected_provenance`, a nested `disagreement`, and the
-    previously-untested skill-id disagreement path.
-- Files changed: `backend/scripts/evaluate_phase3_corpus.py` (rewritten
-  loader/evaluator), `backend/scripts/fetch_greenhouse_evaluation_
-  postings.py` (streaming budget + usable-record gate + sanitization-
-  failure fix), `backend/tests/test_evaluate_phase3_corpus.py`
-  (rewritten for the new exhaustive schema, 49 tests, up from 36),
-  `backend/tests/test_fetch_greenhouse_evaluation_postings.py` (45
-  tests, up from 32), `docs/LLM_HANDOFF.md` (this entry, plus the
-  iteration rotation above). No other file touched -- no network
-  contact, board-token request, corpus acquisition, parser-semantic
-  change, database work, or unrelated tooling.
-- **Two-iteration rotation applied**: the oldest iteration (the
-  skill-classifier Unicode-format-character correction, `C3`/`A3`,
-  merged and `Q`'d) is deleted; the former Iteration 2 (this slice's
-  original `C`/`A`) is renumbered to Iteration 1, unchanged in content;
-  this correction becomes Iteration 2.
-- Verification: pending — see the workflow-metadata block below and the
-  publication (`A2`) entry that will follow it.
-
-```workflow-metadata
-workflow_version: v3.2
-state: published
-slice_id: 2026-09-20-realistic-evaluation-corpus-7ce4a1d
-slice_kind: tooling
-risk_class: H
-base_sha: 7ce4a1dc770827653ccf8140188c5d1dec6621d8
-declared_gate: final
-executed_gate: final
-candidate_sha: f9f531eb568027ebad311404ed05cba9c28ab0c2
-receipt_id: 2b6174d6-138e-4cd9-b1f8-7b770fdbd282
-receipt_path: docs/verification-receipts/f9f531eb568027ebad311404ed05cba9c28ab0c2/2b6174d6-138e-4cd9-b1f8-7b770fdbd282.json
-full_suite_count: 2978
-focused_test_count: 192
-mutation_witness_count: 34
-```
-
----
-
-## Iteration 2
-
-### Work done
-
-- Date/agent: 2026-09-20, Claude Code (Sonnet 5). Risk class **H** (same
-  slice, same authorization). Base `B` (unchanged for this slice's whole
   correction lifetime, `7ce4a1d`) -> candidate `C3`: this commit; same
   branch `phase-3/realistic-evaluation-corpus`, on top of the existing
   pushed tip `A2 = 616dd59a17c6c6d64cecf359f625796de311bd24`.
@@ -342,4 +202,112 @@ receipt_path: docs/verification-receipts/5aa1a57271b2317885e154e0de5e7b4cd183d94
 full_suite_count: 2999
 focused_test_count: 213
 mutation_witness_count: 34
+```
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-09-20, Claude Code (Sonnet 5). Risk class **H** (same
+  slice, same authorization). Base `B` (unchanged for this slice's whole
+  correction lifetime, `7ce4a1d`) -> candidate `C4`: this commit; same
+  branch `phase-3/realistic-evaluation-corpus`, on top of the existing
+  pushed tip `A3 = 18e1d03ea7f8126ca8e3d36e3dfa4f0354d7d612`. `slice_id:
+  2026-09-20-realistic-evaluation-corpus-7ce4a1d` (unchanged). Addresses
+  Sol's C3/A3 re-review, which confirmed all three prior mechanisms
+  correct but found one remaining High evidence-integrity finding on
+  `C3 = 5aa1a57271b2317885e154e0de5e7b4cd183d94e` / `A3 =
+  18e1d03ea7f8126ca8e3d36e3dfa4f0354d7d612`, both of which remain
+  unamended, still pushed, still present in history exactly as they
+  were; the `C3`/`A3` receipt cycle
+  (`c394be69-b724-44ab-8e26-05bdce25cfba`) is superseded and
+  non-reusable as of this entry. No network contact, board-token
+  request, corpus acquisition, `R`, merge, `M`/`Q`, parser-semantic
+  change, database work, or fetcher change performed.
+- **Finding (contradictory scored label, evidence integrity)**: the
+  loader enforced only one direction of the outcome/value invariant --
+  "any outcome other than `present_supported` requires a null
+  `expected_value`" -- but never its converse. `outcome=
+  "present_supported"` with `expected_value=null`/`expected_provenance=
+  "unavailable"` (Sol reproduced this through `load_corpus`) silently
+  loaded despite being self-contradictory: `present_supported` means
+  the parser is expected to return a real value, while null/unavailable
+  means expected abstention. Left uncorrected, such a record corrupts
+  `supported_correctness`/`supported_abstention`'s shared denominator
+  downstream.
+- **Fix**: added `_validate_scored_label`, one function now shared
+  identically by every place a scalar/composite-component scored label
+  is checked -- the primary annotation (via `_validate_scalar_
+  annotation_shape`), `disagreement.second_annotation` (the same
+  function, `allow_disagreement=False`), and `disagreement.
+  adjudication`'s resolved `final_outcome`/`final_value`/
+  `final_provenance` triple (via `_validate_scalar_disagreement`,
+  passing `outcome_field="final_outcome"` etc. so error messages still
+  name the real JSON keys) -- so none of the three can ever drift into
+  different rules. The new check is exactly bidirectional:
+  `(outcome == "present_supported") != (expected_value is not None)`
+  raises. The two previously-duplicated inline invariant blocks (one in
+  the annotation-shape validator, one in the disagreement validator)
+  are deleted outright, not left behind alongside the new function.
+  Skill-id annotations are outcome-only and were correctly left
+  untouched -- no `expected_value`/`expected_provenance` concept
+  applies to them.
+- **Regressions added** (3 rejections + 2 positive controls, all new):
+  `test_load_corpus_rejects_present_supported_with_null_value` (the
+  exact reproduced defect, on the primary annotation);
+  `test_load_corpus_rejects_second_annotation_present_supported_with_null_value`;
+  `test_load_corpus_rejects_adjudication_present_supported_with_null_value`
+  (traced to confirm each raises from the new bidirectional check
+  specifically, not some other already-invalid field in the same
+  constructed record); `test_load_corpus_accepts_present_supported_with_non_null_value`
+  and `test_load_corpus_accepts_absent_with_null_value` (the two valid,
+  non-contradictory directions of the same invariant). One pre-existing
+  test, `test_load_corpus_accepts_disagreement_differing_only_in_outcome`,
+  previously relied on a now-invalid `present_supported`/null/
+  unavailable primary label to build an "outcome-only difference"
+  disagreement; corrected to use `absent`/`ambiguous` (both non-
+  `present_supported`, both null/unavailable) instead, preserving a
+  genuine differing-outcome disagreement under the new invariant.
+- **Mutation-proved**: temporarily reverted the new bidirectional check
+  in `_validate_scored_label` back to the old one-directional form
+  (`outcome != "present_supported" and expected_value is not None`) and
+  reran the full focused suite -- exactly the 3 new rejection tests
+  failed (one of the three, the adjudication case, failed via a
+  different, still-correctly-firing consistency check rather than a
+  false pass -- confirming the mutation genuinely disabled the intended
+  guard rather than the test being vacuous), all other 57 tests still
+  passed; restored the fix and reran to confirm 60/60 pass again.
+- **Adversarial self-review**: a dedicated pass traced every check in
+  `_validate_scored_label` in order, confirmed no `bool()`/truthiness
+  substitutes for `is None`/`is not None` anywhere, confirmed all three
+  call sites actually reach the centralized function on every path with
+  no duplicated/contradicting inline check remaining, confirmed the
+  skill-id path was untouched, and traced both new rejection-by-
+  disagreement tests field-by-field against the exact validation order
+  to confirm each raises for the intended reason. No defect requiring a
+  further change was found.
+- Files changed: `backend/scripts/evaluate_phase3_corpus.py` (the
+  centralized `_validate_scored_label` function and its three call
+  sites), `backend/tests/test_evaluate_phase3_corpus.py` (60 tests, up
+  from 55), `docs/LLM_HANDOFF.md` (this entry, plus the iteration
+  rotation above). No other file touched -- no fetcher change, no
+  network contact, no board-token request, no corpus acquisition, no
+  parser-semantic change, no database work, no workflow-tooling change.
+- **Two-iteration rotation applied**: the oldest iteration (the
+  `C2`/`A2` correction) is deleted; the former Iteration 2 (the
+  `C3`/`A3` correction) is renumbered to Iteration 1, unchanged in
+  content; this correction becomes Iteration 2.
+- Verification: pending — see the workflow-metadata block below and the
+  publication (`A4`) entry that will follow it.
+
+```workflow-metadata
+workflow_version: v3.2
+state: pending
+slice_id: 2026-09-20-realistic-evaluation-corpus-7ce4a1d
+slice_kind: tooling
+risk_class: H
+base_sha: 7ce4a1dc770827653ccf8140188c5d1dec6621d8
+declared_gate: final
 ```

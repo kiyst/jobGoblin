@@ -350,6 +350,106 @@ def _resolved_disagreement(
     }
 
 
+def test_load_corpus_rejects_present_supported_with_null_value(tmp_path: Path) -> None:
+    """Sol's finding: `present_supported`/null/unavailable is a
+    contradictory scored label -- `present_supported` requires an
+    expected parser value, while null/unavailable means expected
+    abstention. Must fail closed, not silently corrupt supported
+    correctness/abstention metrics."""
+    records = _minimal_corpus()
+    records[0]["annotations"]["remote_type"] = _annotation(
+        outcome="present_supported", expected_value=None, expected_provenance="unavailable"
+    )
+    path = _write_corpus(tmp_path, records)
+    with pytest.raises(CorpusValidationError, match="must be 'present_supported' iff"):
+        load_corpus(path, known_canonical_ids=_KNOWN_IDS)
+
+
+def test_load_corpus_accepts_present_supported_with_non_null_value(tmp_path: Path) -> None:
+    """Positive control: the valid, non-contradictory counterpart of the
+    rejected label above."""
+    records = _minimal_corpus()
+    records[0]["annotations"]["remote_type"] = _annotation(
+        outcome="present_supported", expected_value="remote", expected_provenance="inferred"
+    )
+    path = _write_corpus(tmp_path, records)
+    loaded = load_corpus(path, known_canonical_ids=_KNOWN_IDS)
+    assert loaded[0].annotations["remote_type"]["outcome"] == "present_supported"
+
+
+def test_load_corpus_accepts_absent_with_null_value(tmp_path: Path) -> None:
+    """Positive control: the converse direction of the same invariant --
+    a non-`present_supported` outcome paired with null/unavailable."""
+    records = _minimal_corpus()
+    records[0]["annotations"]["remote_type"] = _annotation(
+        outcome="absent", expected_value=None, expected_provenance="unavailable"
+    )
+    path = _write_corpus(tmp_path, records)
+    loaded = load_corpus(path, known_canonical_ids=_KNOWN_IDS)
+    assert loaded[0].annotations["remote_type"]["outcome"] == "absent"
+
+
+def test_load_corpus_rejects_second_annotation_present_supported_with_null_value(
+    tmp_path: Path,
+) -> None:
+    """The bidirectional outcome/value invariant is centralized and must
+    apply identically to `second_annotation`, not just the primary."""
+    records = _minimal_corpus()
+    disagreement = {
+        "second_annotation": _annotation(
+            outcome="present_supported", expected_value=None, expected_provenance="unavailable"
+        ),
+        "adjudication": {
+            "final_outcome": "absent",
+            "final_value": None,
+            "final_provenance": "unavailable",
+            "adjudicated_by": "user",
+            "adjudicated_at": _TS,
+        },
+    }
+    records[0]["annotations"]["remote_type"] = _annotation(
+        outcome="absent",
+        expected_value=None,
+        expected_provenance="unavailable",
+        disagreement=disagreement,
+    )
+    path = _write_corpus(tmp_path, records)
+    with pytest.raises(CorpusValidationError, match="must be 'present_supported' iff"):
+        load_corpus(path, known_canonical_ids=_KNOWN_IDS)
+
+
+def test_load_corpus_rejects_adjudication_present_supported_with_null_value(
+    tmp_path: Path,
+) -> None:
+    """The bidirectional outcome/value invariant is centralized and must
+    apply identically to `disagreement.adjudication`'s resolved
+    `final_outcome`/`final_value`/`final_provenance` triple."""
+    records = _minimal_corpus()
+    disagreement = {
+        "second_annotation": _annotation(
+            outcome="present_supported", expected_value="remote", expected_provenance="inferred"
+        ),
+        "adjudication": {
+            "final_outcome": "present_supported",
+            "final_value": None,
+            "final_provenance": "unavailable",
+            "adjudicated_by": "user",
+            "adjudicated_at": _TS,
+        },
+    }
+    records[0]["annotations"]["remote_type"] = _annotation(
+        outcome="absent",
+        expected_value=None,
+        expected_provenance="unavailable",
+        disagreement=disagreement,
+    )
+    path = _write_corpus(tmp_path, records)
+    with pytest.raises(
+        CorpusValidationError, match="final_outcome must be 'present_supported' iff"
+    ):
+        load_corpus(path, known_canonical_ids=_KNOWN_IDS)
+
+
 def test_load_corpus_accepts_a_fully_consistent_resolved_disagreement(tmp_path: Path) -> None:
     records = _minimal_corpus()
     records[0]["annotations"]["remote_type"] = _annotation(
@@ -370,19 +470,21 @@ def test_load_corpus_accepts_a_fully_consistent_resolved_disagreement(tmp_path: 
 
 def test_load_corpus_accepts_disagreement_differing_only_in_outcome(tmp_path: Path) -> None:
     """Primary and second agree on `expected_value`/`expected_provenance`
-    (both null/unavailable) and differ in `outcome` alone -- still a
-    genuine, independently-detectable disagreement."""
+    (both null/unavailable, valid for any non-`present_supported`
+    outcome under the bidirectional outcome/value invariant) and differ
+    in `outcome` alone -- still a genuine, independently-detectable
+    disagreement."""
     records = _minimal_corpus()
     records[0]["annotations"]["remote_type"] = _annotation(
-        outcome="present_supported",
+        outcome="absent",
         expected_value=None,
         expected_provenance="unavailable",
         disagreement={
             "second_annotation": _annotation(
-                outcome="absent", expected_value=None, expected_provenance="unavailable"
+                outcome="ambiguous", expected_value=None, expected_provenance="unavailable"
             ),
             "adjudication": {
-                "final_outcome": "present_supported",
+                "final_outcome": "absent",
                 "final_value": None,
                 "final_provenance": "unavailable",
                 "adjudicated_by": "user",
@@ -392,7 +494,7 @@ def test_load_corpus_accepts_disagreement_differing_only_in_outcome(tmp_path: Pa
     )
     path = _write_corpus(tmp_path, records)
     loaded = load_corpus(path, known_canonical_ids=_KNOWN_IDS)
-    assert loaded[0].annotations["remote_type"]["outcome"] == "present_supported"
+    assert loaded[0].annotations["remote_type"]["outcome"] == "absent"
 
 
 def test_load_corpus_accepts_disagreement_differing_only_in_provenance(tmp_path: Path) -> None:

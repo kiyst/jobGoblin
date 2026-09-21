@@ -52,13 +52,24 @@ A per-skill-id annotation is the same shape, keyed on `"outcome"` alone
 says whether `classify_skills` is expected to return that id); its
 `adjudication` resolves `"final_outcome"` only.
 
-An `adjudication` resolves the *complete* scored label -- never a single
-field in isolation -- validated with exactly the same vocabulary/type/
-null-iff-unavailable/outcome-value rules as any primary annotation, and
-the primary annotation's own scored label must equal that resolved label
-exactly. A `disagreement` block must also reflect an actual difference
-between the primary and second annotation's scored label; one declared
-over two identical labels fails closed.
+A scalar/composite-component scored label's internal consistency --
+`outcome` in the known set, `expected_value` valid for its specific
+parser/component, `expected_provenance` a known `Provenance` tag,
+`expected_value is None` iff `expected_provenance == "unavailable"`,
+and, bidirectionally, `outcome == "present_supported"` iff
+`expected_value` is non-null -- is validated by one single function,
+`_validate_scored_label`, shared identically by the primary annotation,
+`disagreement.second_annotation`, and `disagreement.adjudication`'s
+resolved `final_outcome`/`final_value`/`final_provenance` triple, so
+none of the three can drift into different rules. A
+`present_supported` label is never null/unavailable, and every other
+outcome always is -- `present_supported`/null/unavailable is rejected
+exactly as forcefully as `absent`/non-null. An `adjudication` resolves
+that *complete* label -- never a single field in isolation -- and the
+primary annotation's own scored label must equal it exactly. A
+`disagreement` block must also reflect an actual difference between the
+primary and second annotation's scored label; one declared over two
+identical labels fails closed.
 
 **Annotations are exhaustive, on every record**: all three scalar
 parsers, every composite component, and *every* known taxonomy canonical
@@ -74,13 +85,15 @@ specific parser/component -- e.g. `remote_type` only accepts `"remote"`/
 `"hybrid"`/`"onsite"`, never an arbitrary string, and a `bool` is never
 accepted where an `int` is expected, since `bool` is an `int` subtype in
 Python; `expected_value is None` iff `expected_provenance ==
-"unavailable"`); `frozen != true`; a malformed or naive `frozen_at`/
-`accessed_at`/`reviewed_at`/`adjudicated_at` timestamp; an unresolved or
-inconsistent `disagreement`/`adjudication` (missing metadata, an
-incomplete or invalid resolved label, the primary annotation's scored
-label not matching that resolved label exactly, or a declared
-disagreement with no actual difference between the two annotations); an
-invalid
+"unavailable"`; `outcome == "present_supported"` iff `expected_value` is
+non-null, so `present_supported`/null/unavailable and any other
+outcome paired with a real value both fail closed); `frozen != true`; a
+malformed or naive `frozen_at`/`accessed_at`/`reviewed_at`/
+`adjudicated_at` timestamp; an unresolved or inconsistent
+`disagreement`/`adjudication` (missing metadata, an incomplete or
+invalid resolved label, the primary annotation's scored label not
+matching that resolved label exactly, or a declared disagreement with
+no actual difference between the two annotations); an invalid
 `split`/`provenance.origin`; a malformed or absent `manual_review` block;
 an invalid `capture.board_token`/`capture.job_id`; a non-null
 `compensation_text` whose `fields.description[start:end]` does not equal
@@ -341,28 +354,73 @@ def _validate_adjudication_metadata(adjudication: dict[str, Any], *, context: st
         )
 
 
-def _validate_scalar_disagreement(
-    annotation: dict[str, Any],
+def _validate_scored_label(
     *,
-    context: str,
+    outcome: Any,
+    expected_value: Any,
+    expected_provenance: Any,
     value_key: str,
-    validate_expected_value: Callable[[Any, str], None],
+    context: str,
+    outcome_field: str = "outcome",
+    value_field: str = "expected_value",
+    provenance_field: str = "expected_provenance",
+) -> None:
+    """The single source of truth for a scalar/composite-component scored
+    label's internal consistency -- shared identically by a primary
+    annotation, a `disagreement.second_annotation`, and a
+    `disagreement.adjudication`'s resolved `final_outcome`/`final_value`/
+    `final_provenance` triple (via the `*_field` overrides, so error
+    messages still name the actual JSON keys involved), so none of the
+    three can ever drift into different rules. Validates, in order: the
+    outcome is a known outcome; the value is valid for `value_key`'s
+    specific parser/component vocabulary; the provenance is a known
+    `Provenance` tag; the value is `None` iff the provenance is
+    `'unavailable'`; and, bidirectionally, the outcome is
+    `'present_supported'` iff the value is non-null (equivalently, iff
+    the provenance is not `'unavailable'`) -- a `present_supported`
+    label is never null/unavailable, and every other outcome always is."""
+    if outcome not in _VALID_OUTCOMES:
+        raise CorpusValidationError(
+            f"{context}.{outcome_field} must be one of {sorted(_VALID_OUTCOMES)}, got {outcome!r}"
+        )
+    validator = _EXPECTED_VALUE_VALIDATORS[value_key]
+    if expected_value is not None and not validator(expected_value):
+        raise CorpusValidationError(f"{context}.{value_field} is not valid for {value_key!r}")
+    if expected_provenance not in _VALID_PROVENANCE_VALUES:
+        raise CorpusValidationError(
+            f"{context}.{provenance_field} must be one of {sorted(_VALID_PROVENANCE_VALUES)}, "
+            f"got {expected_provenance!r}"
+        )
+    if (expected_value is None) != (expected_provenance == Provenance.UNAVAILABLE.value):
+        raise CorpusValidationError(
+            f"{context}: {value_field} must be null iff {provenance_field} is 'unavailable'"
+        )
+    if (outcome == "present_supported") != (expected_value is not None):
+        raise CorpusValidationError(
+            f"{context}: {outcome_field} must be 'present_supported' iff {value_field} is "
+            f"non-null and {provenance_field} is not 'unavailable'"
+        )
+
+
+def _validate_scalar_disagreement(
+    annotation: dict[str, Any], *, context: str, value_key: str
 ) -> None:
     """Validates a scalar/composite-component `disagreement`: fully
     validates `second_annotation`'s own shape via the same
     flavor-specific validator used for the primary annotation (never
-    just its scored field, and never a nested `disagreement`);
-    validates `adjudication`'s complete resolved label -- `final_outcome`
-    / `final_value` / `final_provenance`, held to exactly the same
-    vocabulary/type/null-iff-unavailable/outcome-value rules as any
-    primary annotation -- and requires the primary annotation's own
-    `(outcome, expected_value, expected_provenance)` triple to equal
-    that resolved label exactly, never `final_value` alone (which would
-    let an adjudication resolving only a coincidentally-matching null
-    value silently pass despite never actually resolving the outcome/
-    provenance disagreement). Also requires the primary and second
-    annotation's scored labels to actually differ -- a `disagreement`
-    block declared over two identical labels is not a real disagreement."""
+    just its scored field, and never a nested `disagreement`); validates
+    `adjudication`'s complete resolved label -- `final_outcome`/
+    `final_value`/`final_provenance` -- through the exact same
+    `_validate_scored_label` used for the primary and second annotation,
+    so none of the three can drift into different rules; and requires
+    the primary annotation's own `(outcome, expected_value,
+    expected_provenance)` triple to equal that resolved label exactly,
+    never `final_value` alone (which would let an adjudication resolving
+    only a coincidentally-matching null value silently pass despite
+    never actually resolving the outcome/provenance disagreement). Also
+    requires the primary and second annotation's scored labels to
+    actually differ -- a `disagreement` block declared over two
+    identical labels is not a real disagreement."""
     envelope = _validate_disagreement_envelope(annotation, context=context)
     if envelope is None:
         return
@@ -385,38 +443,27 @@ def _validate_scalar_disagreement(
             f"{sorted(_REQUIRED_SCALAR_ADJUDICATION_FIELDS)}"
         )
     _validate_adjudication_metadata(adjudication, context=adjudication_context)
-
-    final_outcome = adjudication["final_outcome"]
-    final_value = adjudication["final_value"]
-    final_provenance = adjudication["final_provenance"]
-    if final_outcome not in _VALID_OUTCOMES:
-        raise CorpusValidationError(
-            f"{adjudication_context}.final_outcome must be one of {sorted(_VALID_OUTCOMES)}, "
-            f"got {final_outcome!r}"
-        )
-    validate_expected_value(final_value, adjudication_context)
-    if final_provenance not in _VALID_PROVENANCE_VALUES:
-        raise CorpusValidationError(
-            f"{adjudication_context}.final_provenance must be one of "
-            f"{sorted(_VALID_PROVENANCE_VALUES)}, got {final_provenance!r}"
-        )
-    if (final_value is None) != (final_provenance == Provenance.UNAVAILABLE.value):
-        raise CorpusValidationError(
-            f"{adjudication_context}: final_value must be null iff final_provenance is "
-            "'unavailable'"
-        )
-    if final_outcome != "present_supported" and final_value is not None:
-        raise CorpusValidationError(
-            f"{adjudication_context}: final_outcome {final_outcome!r} requires a null "
-            "final_value (the parser is expected to abstain)"
-        )
+    _validate_scored_label(
+        outcome=adjudication["final_outcome"],
+        expected_value=adjudication["final_value"],
+        expected_provenance=adjudication["final_provenance"],
+        value_key=value_key,
+        context=adjudication_context,
+        outcome_field="final_outcome",
+        value_field="final_value",
+        provenance_field="final_provenance",
+    )
 
     primary_label = (
         annotation["outcome"],
         annotation["expected_value"],
         annotation["expected_provenance"],
     )
-    final_label = (final_outcome, final_value, final_provenance)
+    final_label = (
+        adjudication["final_outcome"],
+        adjudication["final_value"],
+        adjudication["final_provenance"],
+    )
     if primary_label != final_label:
         raise CorpusValidationError(
             f"{context}'s (outcome, expected_value, expected_provenance) does not match the "
@@ -475,64 +522,35 @@ def _validate_skill_id_disagreement(annotation: dict[str, Any], *, context: str)
 
 def _validate_scalar_annotation_shape(
     annotation: dict[str, Any], *, context: str, value_key: str, allow_disagreement: bool
-) -> Callable[[Any, str], None]:
+) -> None:
     """Validates one scalar/composite-component annotation's own shape --
-    exact keys, `outcome`, the `expected_value`/`expected_provenance`
-    invariants, and shared metadata -- excluding disagreement recursion.
-    Used for both the primary annotation (`allow_disagreement=True`) and
-    a `disagreement.second_annotation` (`allow_disagreement=False`, which
+    exact keys, the scored label (via `_validate_scored_label`), and
+    shared metadata -- excluding disagreement recursion. Used for both
+    the primary annotation (`allow_disagreement=True`) and a
+    `disagreement.second_annotation` (`allow_disagreement=False`, which
     also forbids a nested `disagreement` key), so both are held to
-    exactly the same rules. Returns the `expected_value` validator so
-    `_validate_disagreement` can reuse it for `adjudication.final_value`
-    without re-deriving this parser/component's vocabulary."""
+    exactly the same rules."""
     allowed = _REQUIRED_ANNOTATION_FIELDS | (
         _OPTIONAL_ANNOTATION_FIELDS if allow_disagreement else frozenset()
     )
     _require_exact_keys(annotation, allowed, required=_REQUIRED_ANNOTATION_FIELDS, context=context)
-    validator = _EXPECTED_VALUE_VALIDATORS[value_key]
-
-    def _validate_expected_value(value: Any, ctx: str) -> None:
-        if value is not None and not validator(value):
-            raise CorpusValidationError(f"{ctx}.expected_value is not valid for {value_key!r}")
-
-    outcome = annotation["outcome"]
-    if outcome not in _VALID_OUTCOMES:
-        raise CorpusValidationError(
-            f"{context}.outcome must be one of {sorted(_VALID_OUTCOMES)}, got {outcome!r}"
-        )
-    expected_value = annotation["expected_value"]
-    expected_provenance = annotation["expected_provenance"]
-    _validate_expected_value(expected_value, context)
-    if expected_provenance not in _VALID_PROVENANCE_VALUES:
-        raise CorpusValidationError(
-            f"{context}.expected_provenance must be one of {sorted(_VALID_PROVENANCE_VALUES)}, "
-            f"got {expected_provenance!r}"
-        )
-    if (expected_value is None) != (expected_provenance == Provenance.UNAVAILABLE.value):
-        raise CorpusValidationError(
-            f"{context}: expected_value must be null iff expected_provenance is 'unavailable'"
-        )
-    if outcome != "present_supported" and expected_value is not None:
-        raise CorpusValidationError(
-            f"{context}: outcome {outcome!r} requires a null expected_value (the parser is "
-            "expected to abstain)"
-        )
+    _validate_scored_label(
+        outcome=annotation["outcome"],
+        expected_value=annotation["expected_value"],
+        expected_provenance=annotation["expected_provenance"],
+        value_key=value_key,
+        context=context,
+    )
     _validate_annotation_metadata(annotation, context=context)
-    return _validate_expected_value
 
 
 def _validate_scalar_annotation(
     annotation: dict[str, Any], *, context: str, value_key: str
 ) -> None:
-    validate_expected_value = _validate_scalar_annotation_shape(
+    _validate_scalar_annotation_shape(
         annotation, context=context, value_key=value_key, allow_disagreement=True
     )
-    _validate_scalar_disagreement(
-        annotation,
-        context=context,
-        value_key=value_key,
-        validate_expected_value=validate_expected_value,
-    )
+    _validate_scalar_disagreement(annotation, context=context, value_key=value_key)
 
 
 def _validate_skill_id_annotation_shape(
