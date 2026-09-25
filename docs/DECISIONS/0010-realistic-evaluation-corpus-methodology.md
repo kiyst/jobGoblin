@@ -48,10 +48,25 @@ workflow/verification framework.
   ASCII space/tab runs collapse to one space per line; repeated
   generated blank lines collapse to one; NBSP and every other Unicode
   whitespace/format character are preserved unchanged.
+- **Content mode is explicit per board, never inferred.** A real
+  acquisition run against `gitlab`/`anthropic`/`discord` discovered that
+  those three boards' `content` field was, at that time, HTML-encoded
+  once more than `convert_html_to_text` expected (the whole document
+  entity-escaped as an outer layer). `convert_html_to_text` now takes an
+  explicit `mode`: `"standard"` (default, unchanged behavior) or
+  `"declared-double-escaped"` (exactly one additional `html.unescape()`
+  pass, bracketed by fail-closed validation -- see the module's own
+  docstring for the exact stage/grammar contract). Every
+  `BoardAcquisitionSpec` names its mode and, for the declared mode, a
+  bounded `mode_basis_ref` citing either prior retained evidence or a
+  separately authorized probe. No board-token-to-mode inference table
+  exists; this observation from three sampled boards is never
+  generalized into an assumption about any future request.
 - Email/phone-pattern redaction is defense in depth only -- it is never
-  claimed to guarantee the absence of personal/contact data. Every
-  sanitized candidate requires mandatory manual human review before it
-  may be committed.
+  claimed to guarantee the absence of personal/contact data. Redaction
+  always runs on the fully converted text, after every permitted
+  decoding step, never before or between them. Every sanitized candidate
+  requires mandatory manual human review before it may be committed.
 - Raw response bodies and raw HTML exist only as in-process values for
   the duration of processing one job, then are discarded -- never
   written to any file, temporary or otherwise, in raw form.
@@ -133,7 +148,27 @@ anywhere -- this is a report, not a gate.
   any discretionary-tooling freeze.
 - Nothing in this slice changes parser semantics, database state, or
   the existing C -> A -> R -> M -> Q publication chain.
-- Until the separately authorized network contact and manual review
-  complete, no real corpus exists and no accuracy claim is made -- the
-  loader and evaluator are validated only against hand-constructed
-  fixtures proving the mechanism itself is correct.
+- Until the loader and evaluator have run against a frozen, annotated
+  real corpus, no accuracy claim is made -- until then they are
+  validated only against hand-constructed fixtures proving the
+  mechanism itself is correct.
+
+### Lineage of the first real acquisition batch
+
+A separately authorized acquisition run against three named boards
+(`gitlab`, `anthropic`, `discord`) completed and was manually reviewed;
+the reviewer retained all 30 candidates. That run predates the
+`content_mode`/`mode_basis_ref` contract above -- it used the
+then-current, single-pass-only `convert_html_to_text`, discovered the
+double-encoding gap the contract exists to close, and its retained text
+was produced by a manual, offline second conversion pass under that same
+pre-correction code, not by any corrected converter. A future corrected
+converter may be validated against synthetic fixtures of the same shape
+and may reproduce equivalent output on inputs shaped like the retained
+batch; it cannot reconstruct the batch's original raw payloads (never
+retained) and cannot prove it would have produced identical output from
+them. The retained batch and its recorded human retention decisions
+remain the corpus source for these 30 candidates, subject to this
+lineage and to whatever separately authorized corpus-freezing/evaluation
+cycle eventually consumes them; any future change to the retained text
+requires renewed human review.

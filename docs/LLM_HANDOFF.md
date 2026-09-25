@@ -100,118 +100,6 @@ that detail.
 
 - Date/agent: 2026-09-20, Claude Code (Sonnet 5). Risk class **H** (same
   slice, same authorization). Base `B` (unchanged for this slice's whole
-  correction lifetime, `7ce4a1d`) -> candidate `C3`: this commit; same
-  branch `phase-3/realistic-evaluation-corpus`, on top of the existing
-  pushed tip `A2 = 616dd59a17c6c6d64cecf359f625796de311bd24`.
-  `slice_id: 2026-09-20-realistic-evaluation-corpus-7ce4a1d` (unchanged).
-  Addresses Sol's re-review of `C2 = f9f531eb568027ebad311404ed05
-  cba9c28ab0c2` / `A2 = 616dd59a17c6c6d64cecf359f625796de311bd24`, both
-  of which remain unamended, still pushed, still present in history
-  exactly as they were; the `C2`/`A2` receipt cycle
-  (`2b6174d6-138e-4cd9-b1f8-7b770fdbd282`) is superseded and
-  non-reusable as of this entry. No network contact, board-token
-  request, corpus acquisition, `R`, merge, `M`/`Q`, parser-semantic
-  change, or database work performed.
-- **Finding 1 (total-run byte accounting)**: `_stream_get` checked the
-  per-response cap before charging a chunk to `_RunBudget`, so a chunk
-  rejected for exceeding `MAX_RESPONSE_BYTES` was never counted toward
-  `MAX_TOTAL_RUN_BYTES` -- repeated oversized responses could never
-  exhaust the cumulative cap. Fixed: every chunk is now charged to
-  `run_budget.consume` first, and only then is the per-response ceiling
-  evaluated, so `FatalBudgetExhaustedError` takes precedence over an
-  ordinary per-response `EvaluationFetchError` when one chunk triggers
-  both. Three regressions added:
-  `test_stream_get_charges_run_budget_even_when_per_response_cap_rejects_the_chunk`,
-  `test_run_acquisition_repeated_per_response_overflows_still_hit_the_cumulative_cap`,
-  `test_run_acquisition_simultaneous_overflow_raises_fatal_error_and_stops_immediately`.
-- **Finding 2 (complete adjudication)**: `disagreement.adjudication`
-  previously resolved `final_value` alone, so an adjudication that only
-  ever resolved a null value could coincidentally "match" an `absent`/
-  unavailable primary annotation without ever actually resolving the
-  real disagreement (Sol's exact reproduction: primary absent/null/
-  unavailable, second present_supported/remote/inferred, adjudication
-  resolving only null -- previously accepted). Fixed: for scalar/
-  composite-component annotations, adjudication now resolves the
-  complete `(final_outcome, final_value, final_provenance)` label,
-  validated with the same vocabulary/type/null-iff-unavailable/outcome-
-  value rules as any primary annotation, and the primary annotation's
-  own scored triple must equal it exactly; for per-skill annotations,
-  adjudication resolves `final_outcome` only, checked against the
-  primary's own `outcome`. A `disagreement` block is now also rejected
-  if the primary and second annotation's scored labels are identical
-  (`_validate_scalar_disagreement`/`_validate_skill_id_disagreement`
-  replace the old single generic `_validate_disagreement`). New
-  regressions cover: the exact reproduced defect
-  (`test_load_corpus_rejects_adjudication_resolving_only_a_null_value`),
-  independent outcome-only and provenance-only disagreement acceptance,
-  a "no actual difference" rejection for both the scalar and skill-id
-  flavors, and a skill-id adjudication inconsistent with the primary
-  outcome.
-- **Finding 3 (usable-detail text)**: `_is_usable_detail_candidate`
-  replaced `bool(title)`/`bool(description)` with `_has_meaningful_text`,
-  which rejects missing, empty, whitespace-only (`str.isspace()` --
-  including NBSP), and Unicode-format-character-only (category `Cf`)
-  text, including any mixture of the two, while adding no broader
-  semantic quality heuristic. Regressions cover an ASCII-whitespace-only
-  title, an NBSP-only sanitized description produced by the real
-  `convert_html_to_text("<p>&nbsp;</p>")` path, format-character-only
-  content, mixed whitespace/format-character-only content, and ordinary
-  non-empty text (including text merely *containing* stray whitespace/
-  format characters alongside real words, which must still be accepted).
-- **Adversarial self-review**: a dedicated pass traced all three fixes'
-  actual execution paths (exception propagation for finding 1; every
-  validation branch and a deliberate search for a bypass of the "no
-  actual difference" check for finding 2; character-by-character boolean
-  logic for finding 3) and found no defect requiring a code change.
-  **Disclosed, not fixed** (deliberately out of Sol's narrow scope for
-  finding 3): `_has_meaningful_text` does not reject text composed
-  solely of Unicode control characters (category `Cc`, e.g. `\x00`) --
-  neither `str.isspace()` nor category `Cf` -- since Sol's instruction
-  was explicitly limited to whitespace and category-`Cf` text and warned
-  against adding broader semantic quality heuristics; noted here for a
-  possible future, separately-authorized bounded amendment rather than
-  addressed unilaterally.
-- Files changed: `backend/scripts/fetch_greenhouse_evaluation_postings.py`
-  (streaming budget reorder, `_has_meaningful_text`),
-  `backend/scripts/evaluate_phase3_corpus.py` (adjudication rewrite),
-  `backend/tests/test_fetch_greenhouse_evaluation_postings.py` (60
-  tests, up from 45), `backend/tests/test_evaluate_phase3_corpus.py` (55
-  tests, up from 49), `docs/LLM_HANDOFF.md` (this entry, plus the
-  iteration rotation above). No other file touched -- no network
-  contact, board-token request, corpus acquisition, parser-semantic
-  change, database work, or unrelated tooling.
-- **Two-iteration rotation applied**: the oldest iteration (this
-  slice's original `C`/`A`) is deleted; the former Iteration 2 (the
-  `C2`/`A2` correction) is renumbered to Iteration 1, unchanged in
-  content; this correction becomes Iteration 2.
-- Verification: pending — see the workflow-metadata block below and the
-  publication (`A3`) entry that will follow it.
-
-```workflow-metadata
-workflow_version: v3.2
-state: published
-slice_id: 2026-09-20-realistic-evaluation-corpus-7ce4a1d
-slice_kind: tooling
-risk_class: H
-base_sha: 7ce4a1dc770827653ccf8140188c5d1dec6621d8
-declared_gate: final
-executed_gate: final
-candidate_sha: 5aa1a57271b2317885e154e0de5e7b4cd183d94e
-receipt_id: c394be69-b724-44ab-8e26-05bdce25cfba
-receipt_path: docs/verification-receipts/5aa1a57271b2317885e154e0de5e7b4cd183d94e/c394be69-b724-44ab-8e26-05bdce25cfba.json
-full_suite_count: 2999
-focused_test_count: 213
-mutation_witness_count: 34
-```
-
----
-
-## Iteration 2
-
-### Work done
-
-- Date/agent: 2026-09-20, Claude Code (Sonnet 5). Risk class **H** (same
-  slice, same authorization). Base `B` (unchanged for this slice's whole
   correction lifetime, `7ce4a1d`) -> candidate `C4`: this commit; same
   branch `phase-3/realistic-evaluation-corpus`, on top of the existing
   pushed tip `A3 = 18e1d03ea7f8126ca8e3d36e3dfa4f0354d7d612`. `slice_id:
@@ -317,4 +205,113 @@ receipt_path: docs/verification-receipts/61a18819abb509ab0a5f74c60924cc968dc1499
 full_suite_count: 3004
 focused_test_count: 218
 mutation_witness_count: 34
+```
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-09-24, Claude Code (Sonnet 5). Risk class **H** (same
+  slice, same authorization). Base `B` (unchanged for this slice's whole
+  correction lifetime, `7ce4a1d`) -> candidate `C5`: this commit; same
+  branch `phase-3/realistic-evaluation-corpus`, on top of the existing
+  pushed tip `A4 = 549229bde2c59f6453b69c852c9ce5175b6a2f52`. `slice_id:
+  2026-09-20-realistic-evaluation-corpus-7ce4a1d` (unchanged). Implements
+  Sol's frozen, twice-revised sanitizer-correction design proposal
+  (addressing the real double-HTML-encoding defect discovered during the
+  authorized acquisition against `gitlab`/`anthropic`/`discord`, and the
+  30-candidate manually-reviewed salvage batch produced from it, both
+  preserved unchanged by this slice). No network contact, board-token
+  request, corpus acquisition, staged/review-artifact change, parser-
+  semantic change, database work, or unrelated tooling performed.
+- **Explicit input-mode contract**: `convert_html_to_text(html, *,
+  mode="standard")` gained a second mode, `"declared-double-escaped"`,
+  selected only by an explicit caller argument -- never inferred from
+  content. `"standard"` (the default) is byte-for-behavior identical to
+  the function's behavior before this change, with zero new checks at
+  any stage. `"declared-double-escaped"` permits exactly one additional
+  `html.unescape()` pass, bracketed by two fail-closed validation
+  stages sharing one pair of fixed regex constants
+  (`_ESCAPED_ANGLE_REFERENCE_RE` for fully-terminated named/decimal/hex
+  escaped angle-bracket forms; `_UNTERMINATED_NAMED_ANGLE_RE` for a
+  semicolonless `&lt`/`&gt` prefix, rejected regardless of what follows
+  it, since its interaction with `html.unescape()`'s own legacy
+  longer-entity matching -- e.g. the real, unrelated `&ltimes;` -- is not
+  trusted to be safe): raw-input validation
+  (`"mixed-literal-and-escaped-markup"` if a literal angle bracket and an
+  escaped form coexist; `"unsupported-angle-reference"` for any bare
+  semicolonless form) and post-decode validation
+  (`"unsupported-angle-reference"` or `"residual-nested-encoding"`). A
+  new `HtmlDoubleEncodingError(HtmlConversionError)` carries only a fixed
+  category string, never content. A documented accepted limitation: a
+  legitimate escaped-code example that survives exactly one correct
+  decode is indistinguishable from a genuine unresolved second layer, so
+  `"declared-double-escaped"` mode conservatively rejects it too --
+  proved by a direct regression, never "fixed" by making the check
+  smarter (that would violate the bounded design).
+- **Explicit board specification and CLI grammar**: `BoardAcquisitionSpec`
+  (`board_token`, `employer`, closed `content_mode`, `mode_basis_ref`)
+  replaces the prior bare `(board_token, employer)` tuple everywhere
+  (`run_acquisition`, `_fetch_board`, `_sanitize_job_detail`,
+  `SanitizedCandidate`). `mode_basis_ref` is required (non-`None`) iff
+  `content_mode == "declared-double-escaped"`, matching a closed grammar
+  (`^(prior-capture|probe):[A-Za-z0-9_-]{1,100}$`) that resolves the
+  authorization circularity: it must cite either a stable reference to
+  evidence already retained from an earlier, separately authorized
+  capture, or a separately authorized, distinct probe -- never the
+  run's own unapproved contact. No permanent board-token-to-mode
+  inference table exists anywhere. CLI grammar:
+  `token:Employer:standard` (3 parts) or
+  `token:Employer:declared-double-escaped:basis-kind:basis-id` (5
+  parts); `_parse_board_arg` reuses the existing `validate_board_token`
+  (translating its `ValueError` to `argparse.ArgumentTypeError`) and
+  rejects every malformed input during argument parsing, strictly before
+  `run_acquisition` is reachable. `mode_basis_ref`/`content_mode` are
+  appended as fixed-format text onto the existing free-text
+  `sanitization_lineage` provenance field -- no new structured schema
+  field, so `evaluate_phase3_corpus.py`'s provenance validator needed no
+  change, staying within this correction's frozen file scope.
+- **Redaction ownership unchanged**: `_redact_contact_patterns` remains
+  entirely in `fetch_greenhouse_evaluation_postings.py`, called exactly
+  once per description, strictly after the full conversion (all decode
+  stages) completes.
+- **Adversarial self-review findings, fixed before this commit**: (1) a
+  test claiming to prove "`_parse_board_arg` never contacts the
+  network" asserted only that the function is not a coroutine -- a
+  synchronous function can still perform blocking I/O, so the assertion
+  proved nothing; removed rather than papered over (the actual
+  guarantee -- every malformed input raises during argument parsing,
+  strictly before `run_acquisition` is ever reachable in `main()` --
+  is already established by the other `_parse_board_arg` rejection
+  tests together with `main()`'s own control flow). (2)
+  `BoardAcquisitionSpec`'s docstring claimed its mode/basis invariant as
+  a hard contract, but nothing enforced it at construction -- only
+  `_parse_board_arg` checked it, so any non-CLI caller building a spec
+  directly could silently construct an inconsistent, unauthorized
+  combination. Fixed: added `__post_init__` validation to the dataclass
+  itself, with new regressions proving both valid combinations succeed
+  and both invalid combinations raise `ValueError` at construction,
+  independent of the CLI.
+- Files changed (exactly the six named in the frozen proposal's scope,
+  no others): `backend/scripts/greenhouse_html_convert.py`,
+  `backend/scripts/fetch_greenhouse_evaluation_postings.py`,
+  `backend/tests/test_greenhouse_html_convert.py` (26 -> 49 tests),
+  `backend/tests/test_fetch_greenhouse_evaluation_postings.py` (60 ->
+  81 tests), `docs/DECISIONS/0010-realistic-evaluation-corpus-
+  methodology.md` (states the corrected contract and the salvage
+  batch's honest lineage), `docs/LLM_HANDOFF.md` (this entry, plus the
+  iteration rotation above).
+- Verification: pending — see the workflow-metadata block below and the
+  publication (`A5`) entry that will follow it.
+
+```workflow-metadata
+workflow_version: v3.2
+state: pending
+slice_id: 2026-09-20-realistic-evaluation-corpus-7ce4a1d
+slice_kind: tooling
+risk_class: H
+base_sha: 7ce4a1dc770827653ccf8140188c5d1dec6621d8
+declared_gate: final
 ```

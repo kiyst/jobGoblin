@@ -6,6 +6,7 @@ request."""
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 from typing import Any
 
@@ -14,12 +15,14 @@ import pytest
 
 import scripts.fetch_greenhouse_evaluation_postings as fetcher
 from scripts.fetch_greenhouse_evaluation_postings import (
+    BoardAcquisitionSpec,
     EvaluationFetchError,
     FatalBudgetExhaustedError,
     SanitizedCandidate,
     _build_detail_url,
     _has_meaningful_text,
     _is_usable_detail_candidate,
+    _parse_board_arg,
     _redact_contact_patterns,
     _RunBudget,
     _sanitize_job_detail,
@@ -33,6 +36,21 @@ from scripts.fetch_greenhouse_evaluation_postings import (
 
 def _mock_client(handler: Any) -> httpx.AsyncClient:
     return httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+
+def _spec(
+    board_token: str,
+    employer: str,
+    *,
+    content_mode: str = "standard",
+    mode_basis_ref: str | None = None,
+) -> BoardAcquisitionSpec:
+    return BoardAcquisitionSpec(
+        board_token=board_token,
+        employer=employer,
+        content_mode=content_mode,  # type: ignore[arg-type]
+        mode_basis_ref=mode_basis_ref,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -179,7 +197,8 @@ async def test_run_acquisition_repeated_per_response_overflows_still_hit_the_cum
     async with _mock_client(handler) as client:
         with pytest.raises(FatalBudgetExhaustedError):
             await run_acquisition(
-                [("board_a", "A"), ("board_b", "B"), ("board_c", "C")], client=client
+                [_spec("board_a", "A"), _spec("board_b", "B"), _spec("board_c", "C")],
+                client=client,
             )
 
     assert requested_tokens == ["board_a", "board_b"]
@@ -205,7 +224,7 @@ async def test_run_acquisition_simultaneous_overflow_raises_fatal_error_and_stop
 
     async with _mock_client(handler) as client:
         with pytest.raises(FatalBudgetExhaustedError):
-            await run_acquisition([("board_a", "A"), ("board_b", "B")], client=client)
+            await run_acquisition([_spec("board_a", "A"), _spec("board_b", "B")], client=client)
 
     assert requested_tokens == ["board_a"]
 
@@ -280,6 +299,18 @@ def test_validate_detail_response_error_never_contains_response_body() -> None:
 # ---------------------------------------------------------------------------
 # _sanitize_job_detail -- only id/title/location.name/content are ever read
 # ---------------------------------------------------------------------------
+def _sanitize(payload: dict[str, Any], **overrides: Any) -> SanitizedCandidate:
+    kwargs: dict[str, Any] = {
+        "board_token": "acme",
+        "employer": "Acme",
+        "accessed_at": "t",
+        "content_mode": "standard",
+        "mode_basis_ref": None,
+    }
+    kwargs.update(overrides)
+    return _sanitize_job_detail(payload, **kwargs)
+
+
 def test_sanitize_job_detail_extracts_only_the_allowed_fields() -> None:
     payload = {
         "id": 1,
@@ -290,7 +321,7 @@ def test_sanitize_job_detail_extracts_only_the_allowed_fields() -> None:
         "internal_job_id": "should never be read",
         "departments": [{"name": "should never be read"}],
     }
-    candidate = _sanitize_job_detail(payload, board_token="acme", employer="Acme", accessed_at="t")
+    candidate = _sanitize(payload)
     assert candidate.title == "Engineer"
     assert candidate.location_raw == "Remote"
     assert candidate.description == "Skills: Python"
@@ -298,14 +329,14 @@ def test_sanitize_job_detail_extracts_only_the_allowed_fields() -> None:
 
 def test_sanitize_job_detail_handles_missing_content() -> None:
     payload = {"id": 1, "title": "Engineer"}
-    candidate = _sanitize_job_detail(payload, board_token="acme", employer="Acme", accessed_at="t")
+    candidate = _sanitize(payload)
     assert candidate.description is None
 
 
 def test_sanitize_job_detail_raises_on_unclosed_script_content() -> None:
     payload = {"id": 1, "title": "Engineer", "content": "<script>oops"}
     with pytest.raises(EvaluationFetchError, match="HTML conversion failed"):
-        _sanitize_job_detail(payload, board_token="acme", employer="Acme", accessed_at="t")
+        _sanitize(payload)
 
 
 def test_sanitize_job_detail_redacts_title_and_description() -> None:
@@ -314,9 +345,27 @@ def test_sanitize_job_detail_redacts_title_and_description() -> None:
         "title": "Contact jane@example.com",
         "content": "<p>Call 555-123-4567</p>",
     }
-    candidate = _sanitize_job_detail(payload, board_token="acme", employer="Acme", accessed_at="t")
+    candidate = _sanitize(payload)
     assert candidate.title is not None and "jane@example.com" not in candidate.title
     assert candidate.description is not None and "555-123-4567" not in candidate.description
+
+
+def test_sanitize_job_detail_propagates_content_mode_and_basis_ref() -> None:
+    payload = {"id": 1, "title": "Engineer", "content": "<p>Hi</p>"}
+    candidate = _sanitize(
+        payload, content_mode="declared-double-escaped", mode_basis_ref="prior-capture:abc123"
+    )
+    assert candidate.content_mode == "declared-double-escaped"
+    assert candidate.mode_basis_ref == "prior-capture:abc123"
+
+
+def test_sanitize_job_detail_raises_html_double_encoding_error_as_evaluation_fetch_error() -> None:
+    """A rejection under `declared-double-escaped` mode is still a
+    sanitization failure isolated to this one job -- caught the same way
+    as any other `HtmlConversionError` subclass."""
+    payload = {"id": 1, "title": "Engineer", "content": "<p>&lt;b&gt;mixed&lt;/b&gt;</p>"}
+    with pytest.raises(EvaluationFetchError, match="HTML conversion failed"):
+        _sanitize(payload, content_mode="declared-double-escaped")
 
 
 # ---------------------------------------------------------------------------
@@ -331,6 +380,8 @@ def _candidate(**overrides: Any) -> SanitizedCandidate:
         "description": "Some description",
         "location_raw": None,
         "accessed_at": "t",
+        "content_mode": "standard",
+        "mode_basis_ref": None,
     }
     base.update(overrides)
     return SanitizedCandidate(**base)
@@ -443,7 +494,7 @@ async def test_run_acquisition_succeeds_with_two_boards() -> None:
 
     async with _mock_client(handler) as client:
         candidates = await run_acquisition(
-            [("board_a", "Employer A"), ("board_b", "Employer B")], client=client
+            [_spec("board_a", "Employer A"), _spec("board_b", "Employer B")], client=client
         )
 
     assert len({c.board_token for c in candidates}) == 2
@@ -469,7 +520,9 @@ async def test_fetch_board_enforces_max_requests_per_board_as_a_real_check(
     async with _mock_client(handler) as client:
         with pytest.raises(EvaluationFetchError, match="MAX_REQUESTS_PER_BOARD"):
             await fetcher._fetch_board(
-                "board_a", "A", client=client, run_budget=fetcher._RunBudget(max_total_bytes=10**9)
+                _spec("board_a", "A"),
+                client=client,
+                run_budget=fetcher._RunBudget(max_total_bytes=10**9),
             )
 
 
@@ -487,7 +540,7 @@ async def test_run_acquisition_caps_detail_requests_at_ten_per_board() -> None:
 
     async with _mock_client(handler) as client:
         candidates = await run_acquisition(
-            [("board_a", "Employer A"), ("board_b", "Employer B")], client=client
+            [_spec("board_a", "Employer A"), _spec("board_b", "Employer B")], client=client
         )
 
     # 1 list + 10 detail per board, 2 boards
@@ -507,7 +560,7 @@ async def test_run_acquisition_never_sends_content_true_on_list_request() -> Non
         return _detail_response(job_id)
 
     async with _mock_client(handler) as client:
-        await run_acquisition([("board_a", "A"), ("board_b", "B")], client=client)
+        await run_acquisition([_spec("board_a", "A"), _spec("board_b", "B")], client=client)
 
     assert all(b"content" not in q for q in seen_query_strings)
 
@@ -526,7 +579,7 @@ async def test_run_acquisition_never_sends_questions_or_pay_transparency_on_deta
         return _detail_response(job_id)
 
     async with _mock_client(handler) as client:
-        await run_acquisition([("board_a", "A"), ("board_b", "B")], client=client)
+        await run_acquisition([_spec("board_a", "A"), _spec("board_b", "B")], client=client)
 
     assert all(
         b"questions" not in q and b"pay_transparency" not in q for q in seen_detail_query_strings
@@ -560,7 +613,7 @@ async def test_run_acquisition_logs_a_reachable_but_empty_board(
     async with _mock_client(handler) as client:
         with pytest.raises(EvaluationFetchError):
             await run_acquisition(
-                [("empty_board", "Empty"), ("board_a", "A")],
+                [_spec("empty_board", "Empty"), _spec("board_a", "A")],
                 client=client,
             )
 
@@ -594,7 +647,9 @@ async def test_fetch_board_skips_unsanitizable_record_without_discarding_earlier
 
     async with _mock_client(handler) as client:
         candidates = await fetcher._fetch_board(
-            "board_a", "A", client=client, run_budget=fetcher._RunBudget(max_total_bytes=10**9)
+            _spec("board_a", "A"),
+            client=client,
+            run_budget=fetcher._RunBudget(max_total_bytes=10**9),
         )
 
     assert [c.job_id for c in candidates] == ["1"]
@@ -626,7 +681,7 @@ async def test_run_acquisition_does_not_count_missing_title_or_content_as_board_
     async with _mock_client(handler) as client:
         with pytest.raises(EvaluationFetchError, match="only 1 board"):
             await run_acquisition(
-                [("board_no_title", "NoTitle"), ("board_good", "Good")], client=client
+                [_spec("board_no_title", "NoTitle"), _spec("board_good", "Good")], client=client
             )
 
     captured = capsys.readouterr()
@@ -657,7 +712,8 @@ async def test_run_acquisition_fatal_budget_exhaustion_prevents_later_board_requ
     async with _mock_client(handler) as client:
         with pytest.raises(FatalBudgetExhaustedError):
             await run_acquisition(
-                [("board_a", "A"), ("board_b", "B"), ("board_c", "C")], client=client
+                [_spec("board_a", "A"), _spec("board_b", "B"), _spec("board_c", "C")],
+                client=client,
             )
 
     assert requested_tokens == ["board_a"]
@@ -680,9 +736,9 @@ async def test_run_acquisition_skips_a_failing_board_without_retry() -> None:
     async with _mock_client(handler) as client:
         candidates = await run_acquisition(
             [
-                ("broken_board", "Broken"),
-                ("board_a", "A"),
-                ("board_b", "B"),
+                _spec("broken_board", "Broken"),
+                _spec("board_a", "A"),
+                _spec("board_b", "B"),
             ],
             client=client,
         )
@@ -702,7 +758,7 @@ async def test_run_acquisition_raises_and_stages_nothing_with_too_few_boards() -
 
     async with _mock_client(handler) as client:
         with pytest.raises(EvaluationFetchError, match="only 1 board"):
-            await run_acquisition([("board_a", "A")], client=client)
+            await run_acquisition([_spec("board_a", "A")], client=client)
 
 
 async def test_run_acquisition_never_substitutes_an_unapproved_board() -> None:
@@ -724,7 +780,7 @@ async def test_run_acquisition_never_substitutes_an_unapproved_board() -> None:
 
     async with _mock_client(handler) as client:
         with pytest.raises(EvaluationFetchError):
-            await run_acquisition([("broken_board", "Broken")], client=client)
+            await run_acquisition([_spec("broken_board", "Broken")], client=client)
 
     assert requested_tokens == {"broken_board"}
 
@@ -766,6 +822,169 @@ def test_sanitized_candidate_compensation_text_is_never_populated_by_this_module
         description="Some description",
         location_raw="Remote",
         accessed_at="t",
+        content_mode="standard",
+        mode_basis_ref=None,
     )
     staged = fetcher._candidate_to_staged_dict(candidate)
     assert staged["fields"]["compensation_text"] is None
+
+
+def test_candidate_to_staged_dict_records_content_mode_and_basis_ref_in_lineage() -> None:
+    candidate = SanitizedCandidate(
+        board_token="acme",
+        employer="Acme",
+        job_id="1",
+        title="Engineer",
+        description="Some description",
+        location_raw="Remote",
+        accessed_at="t",
+        content_mode="declared-double-escaped",
+        mode_basis_ref="prior-capture:abc123",
+    )
+    staged = fetcher._candidate_to_staged_dict(candidate)
+    lineage = staged["provenance"]["sanitization_lineage"]
+    assert "content_mode=declared-double-escaped" in lineage
+    assert "mode_basis_ref=prior-capture:abc123" in lineage
+
+
+def test_candidate_to_staged_dict_omits_basis_ref_text_for_standard_mode() -> None:
+    candidate = SanitizedCandidate(
+        board_token="acme",
+        employer="Acme",
+        job_id="1",
+        title="Engineer",
+        description="Some description",
+        location_raw="Remote",
+        accessed_at="t",
+        content_mode="standard",
+        mode_basis_ref=None,
+    )
+    staged = fetcher._candidate_to_staged_dict(candidate)
+    lineage = staged["provenance"]["sanitization_lineage"]
+    assert "content_mode=standard" in lineage
+    assert "mode_basis_ref" not in lineage
+
+
+# ---------------------------------------------------------------------------
+# BoardAcquisitionSpec -- the mode/basis invariant is enforced by the type
+# itself, at construction, never solely by the CLI parser.
+# ---------------------------------------------------------------------------
+def test_board_acquisition_spec_accepts_standard_with_no_basis_ref() -> None:
+    BoardAcquisitionSpec(
+        board_token="acme", employer="Acme", content_mode="standard", mode_basis_ref=None
+    )
+
+
+def test_board_acquisition_spec_accepts_declared_mode_with_valid_basis_ref() -> None:
+    BoardAcquisitionSpec(
+        board_token="acme",
+        employer="Acme",
+        content_mode="declared-double-escaped",
+        mode_basis_ref="prior-capture:abc123",
+    )
+
+
+def test_board_acquisition_spec_rejects_declared_mode_with_no_basis_ref() -> None:
+    with pytest.raises(ValueError, match="mode_basis_ref is required"):
+        BoardAcquisitionSpec(
+            board_token="acme",
+            employer="Acme",
+            content_mode="declared-double-escaped",
+            mode_basis_ref=None,
+        )
+
+
+def test_board_acquisition_spec_rejects_declared_mode_with_malformed_basis_ref() -> None:
+    with pytest.raises(ValueError, match="mode_basis_ref is required"):
+        BoardAcquisitionSpec(
+            board_token="acme",
+            employer="Acme",
+            content_mode="declared-double-escaped",
+            mode_basis_ref="not-a-valid-ref",
+        )
+
+
+def test_board_acquisition_spec_rejects_standard_mode_with_a_basis_ref() -> None:
+    with pytest.raises(ValueError, match="mode_basis_ref must be None"):
+        BoardAcquisitionSpec(
+            board_token="acme",
+            employer="Acme",
+            content_mode="standard",
+            mode_basis_ref="prior-capture:abc123",
+        )
+
+
+# ---------------------------------------------------------------------------
+# _parse_board_arg -- CLI grammar; every malformed input must fail during
+# argument parsing, before any network request is possible.
+# ---------------------------------------------------------------------------
+def test_parse_board_arg_accepts_standard_three_part_form() -> None:
+    spec = _parse_board_arg("gitlab:GitLab:standard")
+    assert spec == BoardAcquisitionSpec(
+        board_token="gitlab", employer="GitLab", content_mode="standard", mode_basis_ref=None
+    )
+
+
+def test_parse_board_arg_accepts_declared_five_part_form_with_prior_capture() -> None:
+    spec = _parse_board_arg("gitlab:GitLab:declared-double-escaped:prior-capture:abc123")
+    assert spec == BoardAcquisitionSpec(
+        board_token="gitlab",
+        employer="GitLab",
+        content_mode="declared-double-escaped",
+        mode_basis_ref="prior-capture:abc123",
+    )
+
+
+def test_parse_board_arg_accepts_declared_five_part_form_with_probe() -> None:
+    spec = _parse_board_arg("gitlab:GitLab:declared-double-escaped:probe:run-42")
+    assert spec.mode_basis_ref == "probe:run-42"
+
+
+def test_parse_board_arg_rejects_wrong_part_count() -> None:
+    for value in ["gitlab:GitLab", "gitlab:GitLab:standard:extra", "gitlab"]:
+        with pytest.raises(argparse.ArgumentTypeError):
+            _parse_board_arg(value)
+
+
+def test_parse_board_arg_rejects_empty_employer() -> None:
+    with pytest.raises(argparse.ArgumentTypeError, match="employer name must be non-empty"):
+        _parse_board_arg("gitlab::standard")
+
+
+def test_parse_board_arg_rejects_unsafe_board_token() -> None:
+    with pytest.raises(argparse.ArgumentTypeError, match="conservative ASCII slug"):
+        _parse_board_arg("../../etc:Employer:standard")
+
+
+def test_parse_board_arg_rejects_unknown_content_mode() -> None:
+    with pytest.raises(argparse.ArgumentTypeError, match="content mode must be one of"):
+        _parse_board_arg("gitlab:GitLab:not-a-real-mode")
+
+
+def test_parse_board_arg_rejects_standard_mode_with_extra_parts() -> None:
+    with pytest.raises(argparse.ArgumentTypeError, match="'standard' mode takes exactly 3 parts"):
+        _parse_board_arg("gitlab:GitLab:standard:prior-capture:abc123")
+
+
+def test_parse_board_arg_rejects_declared_mode_with_too_few_parts() -> None:
+    with pytest.raises(
+        argparse.ArgumentTypeError, match="'declared-double-escaped' mode requires exactly 5"
+    ):
+        _parse_board_arg("gitlab:GitLab:declared-double-escaped")
+
+
+def test_parse_board_arg_rejects_declared_mode_with_missing_basis_id() -> None:
+    """4 parts is rejected by the generic part-count check before the
+    mode-specific 5-part check is ever reached."""
+    with pytest.raises(argparse.ArgumentTypeError, match=r"\(3 parts\) or"):
+        _parse_board_arg("gitlab:GitLab:declared-double-escaped:prior-capture")
+
+
+def test_parse_board_arg_rejects_unknown_basis_kind() -> None:
+    with pytest.raises(argparse.ArgumentTypeError, match="basis-kind must be one of"):
+        _parse_board_arg("gitlab:GitLab:declared-double-escaped:not-a-real-kind:abc123")
+
+
+def test_parse_board_arg_rejects_malformed_basis_id() -> None:
+    with pytest.raises(argparse.ArgumentTypeError, match="basis-id must match"):
+        _parse_board_arg("gitlab:GitLab:declared-double-escaped:prior-capture:has a space")

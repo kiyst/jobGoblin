@@ -62,7 +62,16 @@ Safety properties enforced throughout this module (binding requirements):
   depth only** -- this module never claims redaction guarantees the
   absence of personal/contact data; a mandatory manual read-through of
   every staged candidate, before any commit, is a separate, later step
-  this module does not and cannot perform.
+  this module does not and cannot perform. Redaction always runs on the
+  final converted text, after every permitted decoding step, never
+  before or between them.
+- **Content mode is explicit per board, never inferred**: each
+  `BoardAcquisitionSpec` names `content_mode` (`"standard"` or
+  `"declared-double-escaped"`) and, for the latter, a bounded
+  `mode_basis_ref` citing either prior retained evidence or a
+  separately authorized probe -- see `BoardAcquisitionSpec`'s own
+  docstring. This module never selects or guesses a mode from a
+  response's content.
 - **`compensation_text` is always `None` here** -- this module fetches no
   dedicated compensation field; a non-null value may only be introduced
   later, manually, as a verbatim substring of the sanitized description.
@@ -79,7 +88,8 @@ Safety properties enforced throughout this module (binding requirements):
   sanitized* posting text.
 
     python scripts/fetch_greenhouse_evaluation_postings.py \\
-        --board gitlab:GitLab --board <token>:<Employer>
+        --board gitlab:GitLab:standard \\
+        --board <token>:<Employer>:declared-double-escaped:prior-capture:<reference>
 """
 
 from __future__ import annotations
@@ -116,7 +126,11 @@ from scripts.canary_greenhouse import (  # noqa: E402
     validate_and_parse_response,
     validate_board_token,
 )
-from scripts.greenhouse_html_convert import HtmlConversionError, convert_html_to_text  # noqa: E402
+from scripts.greenhouse_html_convert import (  # noqa: E402
+    ContentMode,
+    HtmlConversionError,
+    convert_html_to_text,
+)
 
 # Conservative, self-imposed -- matches canary_greenhouse.py's per-response
 # cap exactly; the total-run cap is new to this module (a single-request
@@ -135,6 +149,50 @@ _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 _PHONE_RE = re.compile(r"(?<!\w)(\+?\d[\d().\-\s]{7,}\d)(?!\w)")
 _REDACT_EMAIL = "[REDACTED_EMAIL]"
 _REDACT_PHONE = "[REDACTED_PHONE]"
+
+_VALID_CONTENT_MODES = frozenset({"standard", "declared-double-escaped"})
+_VALID_BASIS_KINDS = frozenset({"prior-capture", "probe"})
+_BASIS_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,100}$")
+_MODE_BASIS_REF_RE = re.compile(r"^(prior-capture|probe):[A-Za-z0-9_-]{1,100}$")
+
+
+@dataclass(frozen=True)
+class BoardAcquisitionSpec:
+    """One board's complete, explicit acquisition declaration -- never
+    inferred by any code in this module. `content_mode` selects between
+    `greenhouse_html_convert`'s two modes; `mode_basis_ref` is required
+    (non-`None`) iff `content_mode == "declared-double-escaped"` and
+    cites, via a closed, bounded grammar (never free prose), either
+    `"prior-capture:<reference>"` (a stable reference to evidence already
+    retained from an earlier, separately authorized capture) or
+    `"probe:<reference>"` (a separately authorized, distinct probe run's
+    own reference) -- resolving the authorization circularity that would
+    otherwise require inspecting a response from the very run being
+    authorized. No permanent board-token-to-mode inference table exists
+    anywhere in this module; every run's declaration is fresh and
+    human-authorized.
+
+    This invariant is enforced here, at construction, via
+    `__post_init__` -- never solely by `_parse_board_arg` -- so any
+    caller building a spec directly (not just the CLI) fails closed on
+    an inconsistent mode/basis combination rather than silently
+    producing an unauthorized `"declared-double-escaped"` candidate."""
+
+    board_token: str
+    employer: str
+    content_mode: ContentMode
+    mode_basis_ref: str | None
+
+    def __post_init__(self) -> None:
+        if self.content_mode == "declared-double-escaped":
+            if self.mode_basis_ref is None or not _MODE_BASIS_REF_RE.fullmatch(self.mode_basis_ref):
+                raise ValueError(
+                    "mode_basis_ref is required and must match "
+                    f"{_MODE_BASIS_REF_RE.pattern!r} when content_mode is "
+                    "'declared-double-escaped'"
+                )
+        elif self.mode_basis_ref is not None:
+            raise ValueError("mode_basis_ref must be None when content_mode is 'standard'")
 
 
 class EvaluationFetchError(RuntimeError):
@@ -298,13 +356,24 @@ class SanitizedCandidate:
     description: str | None
     location_raw: str | None
     accessed_at: str
+    content_mode: ContentMode
+    mode_basis_ref: str | None
 
 
 def _sanitize_job_detail(
-    payload: dict[str, Any], *, board_token: str, employer: str, accessed_at: str
+    payload: dict[str, Any],
+    *,
+    board_token: str,
+    employer: str,
+    accessed_at: str,
+    content_mode: ContentMode,
+    mode_basis_ref: str | None,
 ) -> SanitizedCandidate:
     """Reads exactly `id`, `title`, `location.name`, and `content` from
-    `payload` -- every other key, whatever it is, is never accessed."""
+    `payload` -- every other key, whatever it is, is never accessed.
+    `content_mode`/`mode_basis_ref` come from the caller's
+    `BoardAcquisitionSpec` for this board, propagated unchanged -- this
+    function never selects or infers a mode itself."""
     job_id = str(payload.get("id"))
 
     title_raw = payload.get("title")
@@ -321,7 +390,7 @@ def _sanitize_job_detail(
     content = payload.get("content")
     if isinstance(content, str) and content.strip():
         try:
-            converted = convert_html_to_text(content)
+            converted = convert_html_to_text(content, mode=content_mode)
         except HtmlConversionError as exc:
             raise EvaluationFetchError(
                 f"HTML conversion failed for board_token={board_token} job_id={job_id} "
@@ -337,6 +406,8 @@ def _sanitize_job_detail(
         description=description,
         location_raw=location_raw_value,
         accessed_at=accessed_at,
+        content_mode=content_mode,
+        mode_basis_ref=mode_basis_ref,
     )
 
 
@@ -369,12 +440,14 @@ def _is_usable_detail_candidate(candidate: SanitizedCandidate) -> bool:
 
 
 async def _fetch_board(
-    board_token: str, employer: str, *, client: httpx.AsyncClient, run_budget: _RunBudget
+    spec: BoardAcquisitionSpec, *, client: httpx.AsyncClient, run_budget: _RunBudget
 ) -> list[SanitizedCandidate]:
     """One board's full two-phase fetch. Returns the sanitized candidates
     actually produced -- an empty list, not an exception, if the board is
     reachable but yields nothing usable, so the caller counts it
     accurately against `MIN_SUCCESSFUL_BOARDS`."""
+    board_token = spec.board_token
+    employer = spec.employer
     validate_board_token(board_token)
     list_url = f"{GREENHOUSE_API_ORIGIN}/v1/boards/{board_token}/jobs"
     start = time.monotonic()
@@ -418,7 +491,12 @@ async def _fetch_board(
         )
         try:
             candidate = _sanitize_job_detail(
-                detail_payload, board_token=board_token, employer=employer, accessed_at=accessed_at
+                detail_payload,
+                board_token=board_token,
+                employer=employer,
+                accessed_at=accessed_at,
+                content_mode=spec.content_mode,
+                mode_basis_ref=spec.mode_basis_ref,
             )
         except EvaluationFetchError as exc:
             # A sanitization failure (e.g. unclosed <script>/<style>,
@@ -443,14 +521,16 @@ async def _fetch_board(
 
 
 async def run_acquisition(
-    boards: list[tuple[str, str]], *, client: httpx.AsyncClient | None = None
+    boards: list[BoardAcquisitionSpec], *, client: httpx.AsyncClient | None = None
 ) -> list[SanitizedCandidate]:
-    """`boards` is the caller's already-authorized, closed
-    `(board_token, employer)` list. Attempts every board once; a
-    per-board failure is caught, logged as unavailable, and skipped --
-    never retried, never substituted. Raises `EvaluationFetchError`
-    without returning anything if fewer than `MIN_SUCCESSFUL_BOARDS`
-    boards yield >=1 candidate, so the caller stages nothing."""
+    """`boards` is the caller's already-authorized, closed list of
+    `BoardAcquisitionSpec` (board token, employer, and an explicit,
+    human-declared content mode -- never inferred). Attempts every board
+    once; a per-board failure is caught, logged as unavailable, and
+    skipped -- never retried, never substituted. Raises
+    `EvaluationFetchError` without returning anything if fewer than
+    `MIN_SUCCESSFUL_BOARDS` boards yield >=1 candidate, so the caller
+    stages nothing."""
     run_budget = _RunBudget(max_total_bytes=MAX_TOTAL_RUN_BYTES)
     all_candidates: list[SanitizedCandidate] = []
     successful_boards: set[str] = set()
@@ -462,23 +542,21 @@ async def run_acquisition(
         else httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS, follow_redirects=False)
     )
     try:
-        for board_token, employer in boards:
+        for spec in boards:
             try:
-                candidates = await _fetch_board(
-                    board_token, employer, client=active_client, run_budget=run_budget
-                )
+                candidates = await _fetch_board(spec, client=active_client, run_budget=run_budget)
             except EvaluationFetchError as exc:
                 print(
-                    f"board unavailable, skipped: board_token={board_token} ({exc})",
+                    f"board unavailable, skipped: board_token={spec.board_token} ({exc})",
                     file=sys.stderr,
                 )
                 continue
             if candidates:
-                successful_boards.add(board_token)
+                successful_boards.add(spec.board_token)
                 all_candidates.extend(candidates)
             else:
                 print(
-                    f"board unavailable, skipped: board_token={board_token} "
+                    f"board unavailable, skipped: board_token={spec.board_token} "
                     "(reachable, but yielded zero usable candidates)",
                     file=sys.stderr,
                 )
@@ -525,6 +603,15 @@ def _write_json_atomic_create_only(path: Path, data: Any) -> None:
 
 
 def _candidate_to_staged_dict(candidate: SanitizedCandidate) -> dict[str, Any]:
+    lineage = (
+        "title/location.name/content fetched via the public Greenhouse Job Board "
+        "API detail endpoint (no questions=true, no pay_transparency=true); content "
+        "HTML converted via greenhouse_html_convert.convert_html_to_text; email/phone-"
+        "like patterns redacted; awaiting mandatory manual pre-commit review."
+        f" content_mode={candidate.content_mode}"
+    )
+    if candidate.mode_basis_ref is not None:
+        lineage += f" mode_basis_ref={candidate.mode_basis_ref}"
     return {
         "provenance": {
             "provider": "greenhouse",
@@ -536,12 +623,7 @@ def _candidate_to_staged_dict(candidate: SanitizedCandidate) -> dict[str, Any]:
                 "accessed_at": candidate.accessed_at,
                 "capture_method": "fetch_greenhouse_evaluation_postings.py",
             },
-            "sanitization_lineage": (
-                "title/location.name/content fetched via the public Greenhouse Job Board "
-                "API detail endpoint (no questions=true, no pay_transparency=true); content "
-                "HTML converted via greenhouse_html_convert.convert_html_to_text; email/phone-"
-                "like patterns redacted; awaiting mandatory manual pre-commit review."
-            ),
+            "sanitization_lineage": lineage,
             "origin": "sanitized_capture",
         },
         "fields": {
@@ -553,13 +635,65 @@ def _candidate_to_staged_dict(candidate: SanitizedCandidate) -> dict[str, Any]:
     }
 
 
-def _parse_board_arg(value: str) -> tuple[str, str]:
-    if ":" not in value:
-        raise argparse.ArgumentTypeError(f"expected 'board_token:Employer Name', got {value!r}")
-    token, _, employer = value.partition(":")
-    if not token or not employer:
-        raise argparse.ArgumentTypeError(f"expected 'board_token:Employer Name', got {value!r}")
-    return token, employer
+def _parse_board_arg(value: str) -> BoardAcquisitionSpec:
+    """Exactly two accepted shapes, both fixed and closed -- every other
+    input is rejected here, during argument parsing, strictly before any
+    network request is possible:
+
+    - `token:Employer:standard` (exactly 3 colon-separated parts).
+    - `token:Employer:declared-double-escaped:basis-kind:basis-id`
+      (exactly 5 parts). `basis-kind` is exactly `prior-capture` or
+      `probe`; `basis-id` matches `[A-Za-z0-9_-]{1,100}`. Reconstructed
+      as `mode_basis_ref = f"{basis_kind}:{basis_id}"`.
+    """
+    parts = value.split(":")
+    if len(parts) not in (3, 5):
+        raise argparse.ArgumentTypeError(
+            "expected 'board_token:Employer:standard' (3 parts) or "
+            "'board_token:Employer:declared-double-escaped:basis-kind:basis-id' "
+            f"(5 parts), got {value!r}"
+        )
+    token, employer, content_mode = parts[0], parts[1], parts[2]
+    if not employer:
+        raise argparse.ArgumentTypeError(f"employer name must be non-empty, got {value!r}")
+    try:
+        validate_board_token(token)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from None
+    if content_mode not in _VALID_CONTENT_MODES:
+        raise argparse.ArgumentTypeError(
+            f"content mode must be one of {sorted(_VALID_CONTENT_MODES)}, got {content_mode!r}"
+        )
+
+    if content_mode == "standard":
+        if len(parts) != 3:
+            raise argparse.ArgumentTypeError(
+                f"'standard' mode takes exactly 3 parts (no basis-kind/basis-id), got {value!r}"
+            )
+        return BoardAcquisitionSpec(
+            board_token=token, employer=employer, content_mode="standard", mode_basis_ref=None
+        )
+
+    if len(parts) != 5:
+        raise argparse.ArgumentTypeError(
+            "'declared-double-escaped' mode requires exactly 5 parts "
+            f"(board_token:Employer:declared-double-escaped:basis-kind:basis-id), got {value!r}"
+        )
+    basis_kind, basis_id = parts[3], parts[4]
+    if basis_kind not in _VALID_BASIS_KINDS:
+        raise argparse.ArgumentTypeError(
+            f"basis-kind must be one of {sorted(_VALID_BASIS_KINDS)}, got {basis_kind!r}"
+        )
+    if not _BASIS_ID_RE.fullmatch(basis_id):
+        raise argparse.ArgumentTypeError(
+            f"basis-id must match {_BASIS_ID_RE.pattern}, got {basis_id!r}"
+        )
+    return BoardAcquisitionSpec(
+        board_token=token,
+        employer=employer,
+        content_mode="declared-double-escaped",
+        mode_basis_ref=f"{basis_kind}:{basis_id}",
+    )
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -573,8 +707,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         required=True,
         type=_parse_board_arg,
         dest="boards",
-        metavar="board_token:Employer",
-        help="Repeatable. Exactly the boards named in the user's authorization statement.",
+        metavar="board_token:Employer:standard|declared-double-escaped:basis-kind:basis-id",
+        help=(
+            "Repeatable. Exactly the boards named in the user's authorization statement, "
+            "each with an explicit content mode: 'token:Employer:standard' or "
+            "'token:Employer:declared-double-escaped:basis-kind:basis-id' where basis-kind "
+            "is 'prior-capture' or 'probe'."
+        ),
     )
     return parser.parse_args(argv)
 
