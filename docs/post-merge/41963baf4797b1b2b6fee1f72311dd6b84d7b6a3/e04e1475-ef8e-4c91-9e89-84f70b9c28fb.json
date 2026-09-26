@@ -1,0 +1,148 @@
+{
+  "schema_version": "1",
+  "kind": "post_merge_verification",
+  "slice_id": "2026-09-20-realistic-evaluation-corpus-7ce4a1d",
+  "base_sha": "7ce4a1dc770827653ccf8140188c5d1dec6621d8",
+  "candidate_sha": "4771c2df38a7c913a852fa5cfe24dc795c5d587f",
+  "publication_commit_sha": "6cbda7135ae21e6fe818313f0dfaf9fa0097b247",
+  "review_commit_sha": "ccfda9055cefbc4088f75e2659f54c9be703cc3c",
+  "original_receipt_id": "69759bd7-d539-4417-8685-730900e4db20",
+  "original_receipt_path": "docs/verification-receipts/4771c2df38a7c913a852fa5cfe24dc795c5d587f/69759bd7-d539-4417-8685-730900e4db20.json",
+  "merged_commit": "41963baf4797b1b2b6fee1f72311dd6b84d7b6a3",
+  "environment_descriptor": {
+    "python_version": "3.12.13 (main, Aug  7 2026, 02:26:41) [MSC v.1944 64 bit (AMD64)]",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "postgresql_version": "PostgreSQL 16.15 (Debian 16.15-1.pgdg13+2) on x86_64-pc-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+    "installed_distributions_digest": "09454b9fcb81d58d73b301b3c138f4d1f511779b15bce3438c0f343f98715c9a"
+  },
+  "coordinator": {
+    "authoring_checkout_head_at_start": "41963baf4797b1b2b6fee1f72311dd6b84d7b6a3",
+    "worktree_initial_snapshot": {
+      "tracked_tree_sha": "18010b5ca319097f1df3c0ad51fe072a7c54afc5",
+      "untracked_present": false
+    },
+    "run_cache_redirect": {
+      "pytest_basetemp_redirected": true,
+      "ruff_cache_redirected": true,
+      "mypy_cache_redirected": true,
+      "pycache_redirected": true
+    },
+    "worktree_final_snapshot": {
+      "tracked_tree_sha": "18010b5ca319097f1df3c0ad51fe072a7c54afc5",
+      "untracked_present": false
+    },
+    "worktree_removed": true,
+    "worktree_leak_check": "no residual .git/worktrees entry, no residual directory",
+    "authoring_checkout_head_at_receipt": "41963baf4797b1b2b6fee1f72311dd6b84d7b6a3",
+    "authoring_checkout_clean_at_receipt": true
+  },
+  "full_suite": {
+    "status": "ran",
+    "count": 3062
+  },
+  "mutation_witnesses": {
+    "status": "ran",
+    "guard_refs": [
+      "experience/g01-attribution-frame",
+      "experience/g02-continuation-boundary",
+      "experience/g03-individual-number-redaction",
+      "experience/g04-positional-preference-suppression",
+      "experience/g05-internal-conflict-precedence",
+      "experience/g06-original-unicode-hyphen-disambiguation",
+      "experience/g08-title-leading-preference",
+      "experience/g09-cross-segment-qualifier-following",
+      "experience/g10-trailing-bound-marker",
+      "experience/g11-unsupported-prefix-poison",
+      "experience/g12-fraction-slash-normalization",
+      "experience/g13-unicode-dash-poison",
+      "experience/g14-multi-candidate-collection",
+      "experience/g15-title-segment-order-preservation",
+      "experience/g16-bidirectional-adjacency",
+      "experience/g17-composite-range-poison-decimal-fraction",
+      "experience/g18-description-label-value-scope-removed",
+      "experience/g19-title-label-value-whole-anchor",
+      "experience/g20-empty-segment-adjacency",
+      "experience/g21-composite-range-poison-negative",
+      "experience/g22-composite-poison-casefold",
+      "location/g01-alias-trailing-period",
+      "location/g02-state-zip-provenance",
+      "location/g03-region-whitespace-trim",
+      "location/g04-negation-standalone-word",
+      "location/g05-country-conflict-discarded-span",
+      "location/g06-ascii-only-casefold",
+      "location/g07-state-precedence-over-coordinator",
+      "location/g08-exact-state-token-grammar",
+      "salary/g01-covered-whitespace-class",
+      "salary/g02-label-boundary-strictness",
+      "salary/g03-currency-code-boundary-strictness",
+      "salary/g04-period-boundary-by-shape",
+      "salary/g05-up-to-narrowed-forms"
+    ],
+    "passed": 34,
+    "failed": 0
+  },
+  "migration_matrix": {
+    "triggered": false
+  },
+  "steps": [
+    {
+      "name": "ruff format --check",
+      "status": "PASS",
+      "duration_seconds": 0.5459999999729916
+    },
+    {
+      "name": "ruff check",
+      "status": "PASS",
+      "duration_seconds": 0.2190000000409782
+    },
+    {
+      "name": "mypy",
+      "status": "PASS",
+      "duration_seconds": 45.01599999994505
+    },
+    {
+      "name": "check_repo.py",
+      "status": "PASS",
+      "duration_seconds": 1.8900000000139698
+    },
+    {
+      "name": "git diff --check",
+      "status": "PASS",
+      "duration_seconds": 0.125
+    },
+    {
+      "name": "disposable test-database URL validation",
+      "status": "PASS",
+      "duration_seconds": 0.0
+    },
+    {
+      "name": "test-database reachability preflight",
+      "status": "PASS",
+      "duration_seconds": 0.8290000000270084
+    },
+    {
+      "name": "full pytest suite",
+      "status": "PASS",
+      "duration_seconds": 329.64000000001397
+    },
+    {
+      "name": "contract mutation witnesses",
+      "status": "PASS",
+      "duration_seconds": 0.375
+    },
+    {
+      "name": "handoff metadata validation",
+      "status": "PASS",
+      "duration_seconds": 0.0
+    },
+    {
+      "name": "temporary-directory cleanup",
+      "status": "PASS",
+      "duration_seconds": 0.5940000000409782
+    }
+  ],
+  "cleanup": {
+    "attempted": true,
+    "status": "PASS"
+  }
+}
