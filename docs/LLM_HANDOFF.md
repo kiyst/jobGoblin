@@ -330,3 +330,51 @@ full_suite_count: 3062
 focused_test_count: 276
 mutation_witness_count: 34
 ```
+
+### Work review
+
+- Sol's review of `C6` = `4771c2df38a7c913a852fa5cfe24dc795c5d587f` and
+  `A6` = `6cbda7135ae21e6fe818313f0dfaf9fa0097b247`: **Approved, no
+  executable findings.** Independently verified: `C6`'s sole parent is
+  `A5` (`58de6976d72a370a871882f069bf74abcc1e1a1c`) and `A6`'s sole
+  parent is `C6`, confirming a clean, unamended, single-parent chain;
+  the correction remained within the bounded scope named for this
+  round (`backend/scripts/greenhouse_html_convert.py`,
+  `backend/scripts/fetch_greenhouse_evaluation_postings.py`,
+  `backend/tests/test_greenhouse_html_convert.py`,
+  `backend/tests/test_fetch_greenhouse_evaluation_postings.py`,
+  `docs/LLM_HANDOFF.md` -- no proposal rewrite, no new semantics); the
+  uppercase `LT`/`GT` entity handling closes the fail-closed bypass
+  while the mixed-case `Lt`/`Gt` (real, distinct, unrelated named
+  entities) correctly remain unclassified by either shared regex;
+  `BoardAcquisitionSpec.__post_init__` now rejects an unrecognized
+  `content_mode` before any mode/basis relationship validation runs;
+  the encoded-PII decode/HTML-to-text-ordering test, the exactly-once
+  redaction spy, and the genuine `_fetch_board` mixed-encoding
+  failure-isolation test are substantive, not merely docstring claims.
+  Ran the two directly affected test modules --
+  `backend/tests/test_greenhouse_html_convert.py` and
+  `backend/tests/test_fetch_greenhouse_evaluation_postings.py` --
+  **144/144 passed**. Confirmed the working tree is clean and
+  `main`/`origin/main` remain unchanged at
+  `7ce4a1dc770827653ccf8140188c5d1dec6621d8`. Sol did **not**
+  independently repeat the full 3,062-test suite or all 34 mutation
+  witnesses; those remain supported by `A6`'s own genuine
+  receipt-eligible verification, not re-derived here.
+
+```workflow-review-metadata
+schema_version: 2
+slice_id: 2026-09-20-realistic-evaluation-corpus-7ce4a1d
+risk_class: H
+reviewer: Sol
+reviewer_role: primary
+reviewer_model: Sol Medium
+reviewed_at: 2026-09-26T00:00:00Z
+candidate_sha: 4771c2df38a7c913a852fa5cfe24dc795c5d587f
+publication_commit_sha: 6cbda7135ae21e6fe818313f0dfaf9fa0097b247
+receipt_path: docs/verification-receipts/4771c2df38a7c913a852fa5cfe24dc795c5d587f/69759bd7-d539-4417-8685-730900e4db20.json
+receipt_id: 69759bd7-d539-4417-8685-730900e4db20
+gate: final
+verdict: approved
+findings: none
+```
