@@ -15,6 +15,7 @@ from scripts.evaluate_phase3_corpus import (
     _evaluate_skills,
     evaluate_corpus,
     load_corpus,
+    render_report,
 )
 
 _KNOWN_IDS = frozenset({"python", "golang", "javascript"})
@@ -1112,10 +1113,94 @@ def test_evaluate_corpus_reports_dev_holdout_and_combined_separately(tmp_path: P
     loaded = load_corpus(path, known_canonical_ids=real_ids)
     evaluations = evaluate_corpus(loaded, taxonomy=taxonomy)
 
-    assert set(evaluations) == {"dev", "holdout", "combined"}
+    assert set(evaluations) == {
+        "dev",
+        "holdout",
+        "combined",
+        "employer:Acme",
+        "employer:Globex",
+    }
     dev_metrics = evaluations["dev"].components["remote_type"]
     assert dev_metrics.supported_correctness.render() == "1/1"
     holdout_metrics = evaluations["holdout"].components["remote_type"]
     assert holdout_metrics.supported_correctness.render() == "N/A"  # holdout record is "absent"
     combined_metrics = evaluations["combined"].components["remote_type"]
     assert combined_metrics.supported_correctness.render() == "1/1"
+
+
+# ---------------------------------------------------------------------------
+# Per-employer reporting
+# ---------------------------------------------------------------------------
+def test_evaluate_corpus_reports_one_key_per_distinct_employer(tmp_path: Path) -> None:
+    """`_minimal_corpus()`'s dev record is employer "Acme", holdout is
+    "Globex" -- each employer's own key must reflect only its own
+    record(s), matching what a same-employer split subset would show."""
+    from app.normalization.taxonomy import DEFAULT_SKILLS_TAXONOMY_PATH, load_taxonomy
+
+    taxonomy = load_taxonomy(DEFAULT_SKILLS_TAXONOMY_PATH)
+    real_ids = taxonomy.canonical_ids()
+    records = _minimal_corpus()
+    for record in records:
+        record["annotations"]["skills"] = {cid: _skill_annotation() for cid in real_ids}
+    path = _write_corpus(tmp_path, records)
+    loaded = load_corpus(path, known_canonical_ids=real_ids)
+    evaluations = evaluate_corpus(loaded, taxonomy=taxonomy)
+
+    acme_matrix = evaluations["employer:Acme"].components["remote_type"].opportunity_matrix
+    dev_matrix = evaluations["dev"].components["remote_type"].opportunity_matrix
+    assert acme_matrix == dev_matrix
+    globex_matrix = evaluations["employer:Globex"].components["remote_type"].opportunity_matrix
+    holdout_matrix = evaluations["holdout"].components["remote_type"].opportunity_matrix
+    assert globex_matrix == holdout_matrix
+
+
+def test_evaluate_corpus_employer_keys_are_sorted_by_name_in_the_report(tmp_path: Path) -> None:
+    from app.normalization.taxonomy import DEFAULT_SKILLS_TAXONOMY_PATH, load_taxonomy
+
+    taxonomy = load_taxonomy(DEFAULT_SKILLS_TAXONOMY_PATH)
+    real_ids = taxonomy.canonical_ids()
+    records = _minimal_corpus()
+    records[1]["provenance"] = {**records[1]["provenance"], "employer": "Ainbow"}
+    for record in records:
+        record["annotations"]["skills"] = {cid: _skill_annotation() for cid in real_ids}
+    path = _write_corpus(tmp_path, records)
+    loaded = load_corpus(path, known_canonical_ids=real_ids)
+    evaluations = evaluate_corpus(loaded, taxonomy=taxonomy)
+    report = render_report(evaluations, records=loaded)
+
+    assert report.index("===== split: employer:Acme =====") < report.index(
+        "===== split: employer:Ainbow ====="
+    )
+
+
+def test_render_report_states_template_subdivision_is_not_meaningful(tmp_path: Path) -> None:
+    from app.normalization.taxonomy import DEFAULT_SKILLS_TAXONOMY_PATH, load_taxonomy
+
+    taxonomy = load_taxonomy(DEFAULT_SKILLS_TAXONOMY_PATH)
+    real_ids = taxonomy.canonical_ids()
+    records = _minimal_corpus()
+    for record in records:
+        record["annotations"]["skills"] = {cid: _skill_annotation() for cid in real_ids}
+    path = _write_corpus(tmp_path, records)
+    loaded = load_corpus(path, known_canonical_ids=real_ids)
+    evaluations = evaluate_corpus(loaded, taxonomy=taxonomy)
+
+    report = render_report(evaluations, records=loaded)
+    assert "per-template breakdown" in report
+    assert "unknown" in report
+
+
+def test_render_report_omits_the_template_note_without_records(tmp_path: Path) -> None:
+    from app.normalization.taxonomy import DEFAULT_SKILLS_TAXONOMY_PATH, load_taxonomy
+
+    taxonomy = load_taxonomy(DEFAULT_SKILLS_TAXONOMY_PATH)
+    real_ids = taxonomy.canonical_ids()
+    records = _minimal_corpus()
+    for record in records:
+        record["annotations"]["skills"] = {cid: _skill_annotation() for cid in real_ids}
+    path = _write_corpus(tmp_path, records)
+    loaded = load_corpus(path, known_canonical_ids=real_ids)
+    evaluations = evaluate_corpus(loaded, taxonomy=taxonomy)
+
+    report = render_report(evaluations)
+    assert "per-template breakdown" not in report

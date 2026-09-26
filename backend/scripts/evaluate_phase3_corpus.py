@@ -112,8 +112,12 @@ the same event). Runtime failure is counted exactly once per parser
 recall and the three false-positive categories are derived from the
 same frozen, exhaustive per-canonical-id representation. Deterministic
 mismatch details are reported per record/parser/component, keyed by
-id -- never posting text. Dev, holdout, and combined metrics are
-reported separately.
+id -- never posting text. Dev, holdout, combined, and per-employer
+metrics are reported separately (keyed `"employer:<name>"`). Every
+`template_family` in the currently-supported corpus is the fixed
+literal `"unknown"`, so a per-template breakdown would only ever
+duplicate the combined result -- the report states this explicitly
+instead of computing one.
 """
 
 from __future__ import annotations
@@ -1208,22 +1212,42 @@ def _evaluate_records(records: list[CorpusRecord], *, taxonomy: Any) -> SplitEva
     return evaluation
 
 
+def _all_template_families_unknown(records: list[CorpusRecord]) -> bool:
+    return bool(records) and all(r.provenance["template_family"] == "unknown" for r in records)
+
+
 def evaluate_corpus(records: list[CorpusRecord], *, taxonomy: Any) -> dict[str, SplitEvaluation]:
-    """Returns `{"dev": ..., "holdout": ..., "combined": ...}`, each a
-    fully independent `SplitEvaluation` over exactly that subset of
-    records. Never gates, never asserts a threshold -- a report only."""
+    """Returns `{"dev": ..., "holdout": ..., "combined": ..., "employer:<name>": ...}`
+    -- one key per distinct `provenance.employer` value across the whole
+    corpus (evaluated over all records for that employer, irrespective of
+    split), plus the three fixed keys above. Each value is a fully
+    independent `SplitEvaluation` over exactly that subset of records.
+    Never gates, never asserts a threshold -- a report only.
+
+    No per-`template_family` breakdown is computed: see
+    `_all_template_families_unknown` and `render_report`'s explicit note
+    below, which states rather than silently omits this."""
     dev_records = [r for r in records if r.split == "dev"]
     holdout_records = [r for r in records if r.split == "holdout"]
-    return {
+    evaluations: dict[str, SplitEvaluation] = {
         "dev": _evaluate_records(dev_records, taxonomy=taxonomy),
         "holdout": _evaluate_records(holdout_records, taxonomy=taxonomy),
         "combined": _evaluate_records(records, taxonomy=taxonomy),
     }
+    employers = sorted({r.provenance["employer"] for r in records})
+    for employer in employers:
+        employer_records = [r for r in records if r.provenance["employer"] == employer]
+        evaluations[f"employer:{employer}"] = _evaluate_records(employer_records, taxonomy=taxonomy)
+    return evaluations
 
 
-def render_report(evaluations: dict[str, SplitEvaluation]) -> str:
+def render_report(
+    evaluations: dict[str, SplitEvaluation], *, records: list[CorpusRecord] | None = None
+) -> str:
     lines: list[str] = []
-    for split_name in ("dev", "holdout", "combined"):
+    ordered_split_names = [name for name in ("dev", "holdout", "combined") if name in evaluations]
+    ordered_split_names += sorted(name for name in evaluations if name.startswith("employer:"))
+    for split_name in ordered_split_names:
         evaluation = evaluations[split_name]
         lines.append(f"===== split: {split_name} =====")
         for key in sorted(evaluation.components):
@@ -1266,6 +1290,13 @@ def render_report(evaluations: dict[str, SplitEvaluation]) -> str:
                 f"component={mismatch.component} category={mismatch.category} "
                 f"expected={mismatch.expected!r} actual={mismatch.actual!r}"
             )
+    if records is not None and _all_template_families_unknown(records):
+        lines.append(
+            "note: every record's provenance.template_family is 'unknown' -- a "
+            "per-template breakdown would only ever duplicate the combined result "
+            "above, so it is intentionally omitted; see the per-employer sections "
+            "instead."
+        )
     return "\n".join(lines)
 
 
@@ -1279,7 +1310,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     evaluations = evaluate_corpus(records, taxonomy=taxonomy)
-    print(render_report(evaluations))
+    print(render_report(evaluations, records=records))
     return 0
 
 

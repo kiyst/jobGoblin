@@ -98,122 +98,6 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-09-24, Claude Code (Sonnet 5). Risk class **H** (same
-  slice, same authorization). Base `B` (unchanged for this slice's whole
-  correction lifetime, `7ce4a1d`) -> candidate `C5`: this commit; same
-  branch `phase-3/realistic-evaluation-corpus`, on top of the existing
-  pushed tip `A4 = 549229bde2c59f6453b69c852c9ce5175b6a2f52`. `slice_id:
-  2026-09-20-realistic-evaluation-corpus-7ce4a1d` (unchanged). Implements
-  Sol's frozen, twice-revised sanitizer-correction design proposal
-  (addressing the real double-HTML-encoding defect discovered during the
-  authorized acquisition against `gitlab`/`anthropic`/`discord`, and the
-  30-candidate manually-reviewed salvage batch produced from it, both
-  preserved unchanged by this slice). No network contact, board-token
-  request, corpus acquisition, staged/review-artifact change, parser-
-  semantic change, database work, or unrelated tooling performed.
-- **Explicit input-mode contract**: `convert_html_to_text(html, *,
-  mode="standard")` gained a second mode, `"declared-double-escaped"`,
-  selected only by an explicit caller argument -- never inferred from
-  content. `"standard"` (the default) is byte-for-behavior identical to
-  the function's behavior before this change, with zero new checks at
-  any stage. `"declared-double-escaped"` permits exactly one additional
-  `html.unescape()` pass, bracketed by two fail-closed validation
-  stages sharing one pair of fixed regex constants
-  (`_ESCAPED_ANGLE_REFERENCE_RE` for fully-terminated named/decimal/hex
-  escaped angle-bracket forms; `_UNTERMINATED_NAMED_ANGLE_RE` for a
-  semicolonless `&lt`/`&gt` prefix, rejected regardless of what follows
-  it, since its interaction with `html.unescape()`'s own legacy
-  longer-entity matching -- e.g. the real, unrelated `&ltimes;` -- is not
-  trusted to be safe): raw-input validation
-  (`"mixed-literal-and-escaped-markup"` if a literal angle bracket and an
-  escaped form coexist; `"unsupported-angle-reference"` for any bare
-  semicolonless form) and post-decode validation
-  (`"unsupported-angle-reference"` or `"residual-nested-encoding"`). A
-  new `HtmlDoubleEncodingError(HtmlConversionError)` carries only a fixed
-  category string, never content. A documented accepted limitation: a
-  legitimate escaped-code example that survives exactly one correct
-  decode is indistinguishable from a genuine unresolved second layer, so
-  `"declared-double-escaped"` mode conservatively rejects it too --
-  proved by a direct regression, never "fixed" by making the check
-  smarter (that would violate the bounded design).
-- **Explicit board specification and CLI grammar**: `BoardAcquisitionSpec`
-  (`board_token`, `employer`, closed `content_mode`, `mode_basis_ref`)
-  replaces the prior bare `(board_token, employer)` tuple everywhere
-  (`run_acquisition`, `_fetch_board`, `_sanitize_job_detail`,
-  `SanitizedCandidate`). `mode_basis_ref` is required (non-`None`) iff
-  `content_mode == "declared-double-escaped"`, matching a closed grammar
-  (`^(prior-capture|probe):[A-Za-z0-9_-]{1,100}$`) that resolves the
-  authorization circularity: it must cite either a stable reference to
-  evidence already retained from an earlier, separately authorized
-  capture, or a separately authorized, distinct probe -- never the
-  run's own unapproved contact. No permanent board-token-to-mode
-  inference table exists anywhere. CLI grammar:
-  `token:Employer:standard` (3 parts) or
-  `token:Employer:declared-double-escaped:basis-kind:basis-id` (5
-  parts); `_parse_board_arg` reuses the existing `validate_board_token`
-  (translating its `ValueError` to `argparse.ArgumentTypeError`) and
-  rejects every malformed input during argument parsing, strictly before
-  `run_acquisition` is reachable. `mode_basis_ref`/`content_mode` are
-  appended as fixed-format text onto the existing free-text
-  `sanitization_lineage` provenance field -- no new structured schema
-  field, so `evaluate_phase3_corpus.py`'s provenance validator needed no
-  change, staying within this correction's frozen file scope.
-- **Redaction ownership unchanged**: `_redact_contact_patterns` remains
-  entirely in `fetch_greenhouse_evaluation_postings.py`, called exactly
-  once per description, strictly after the full conversion (all decode
-  stages) completes.
-- **Adversarial self-review findings, fixed before this commit**: (1) a
-  test claiming to prove "`_parse_board_arg` never contacts the
-  network" asserted only that the function is not a coroutine -- a
-  synchronous function can still perform blocking I/O, so the assertion
-  proved nothing; removed rather than papered over (the actual
-  guarantee -- every malformed input raises during argument parsing,
-  strictly before `run_acquisition` is ever reachable in `main()` --
-  is already established by the other `_parse_board_arg` rejection
-  tests together with `main()`'s own control flow). (2)
-  `BoardAcquisitionSpec`'s docstring claimed its mode/basis invariant as
-  a hard contract, but nothing enforced it at construction -- only
-  `_parse_board_arg` checked it, so any non-CLI caller building a spec
-  directly could silently construct an inconsistent, unauthorized
-  combination. Fixed: added `__post_init__` validation to the dataclass
-  itself, with new regressions proving both valid combinations succeed
-  and both invalid combinations raise `ValueError` at construction,
-  independent of the CLI.
-- Files changed (exactly the six named in the frozen proposal's scope,
-  no others): `backend/scripts/greenhouse_html_convert.py`,
-  `backend/scripts/fetch_greenhouse_evaluation_postings.py`,
-  `backend/tests/test_greenhouse_html_convert.py` (26 -> 49 tests),
-  `backend/tests/test_fetch_greenhouse_evaluation_postings.py` (60 ->
-  81 tests), `docs/DECISIONS/0010-realistic-evaluation-corpus-
-  methodology.md` (states the corrected contract and the salvage
-  batch's honest lineage), `docs/LLM_HANDOFF.md` (this entry, plus the
-  iteration rotation above).
-- Verification: pending — see the workflow-metadata block below and the
-  publication (`A5`) entry that will follow it.
-
-```workflow-metadata
-workflow_version: v3.2
-state: published
-slice_id: 2026-09-20-realistic-evaluation-corpus-7ce4a1d
-slice_kind: tooling
-risk_class: H
-base_sha: 7ce4a1dc770827653ccf8140188c5d1dec6621d8
-declared_gate: final
-executed_gate: final
-candidate_sha: e5a72f6926b826ca9af8cdb93e5368d1fb8ddae8
-receipt_id: 59ee72fa-ca86-4596-bf9c-a8e971cf9ed2
-receipt_path: docs/verification-receipts/e5a72f6926b826ca9af8cdb93e5368d1fb8ddae8/59ee72fa-ca86-4596-bf9c-a8e971cf9ed2.json
-full_suite_count: 3048
-focused_test_count: 262
-mutation_witness_count: 34
-```
-
----
-
-## Iteration 2
-
-### Work done
-
 - Date/agent: 2026-09-26, Claude Code (Sonnet 5). Risk class **H** (same
   slice, same authorization). Base `B` (unchanged for this slice's whole
   correction lifetime, `7ce4a1d`) -> candidate `C6`: this commit; same
@@ -419,3 +303,108 @@ findings: none
   realistic-corpus freezing, evaluation, provider contact, title-
   normalization work, or another slice without separate explicit user
   authorization.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-09-27, Claude Code (Sonnet 5). New slice, Sol-approved
+  freeze/evaluation contract (three negotiation rounds). Risk class **H**,
+  `slice_kind: tooling`, `declared_gate: final`. Base `main`@
+  `0dae4683645599369d41d0228b0edad1cfad73ce` (confirmed clean,
+  `main == origin/main` before starting). `slice_id:
+  2026-09-27-realistic-corpus-freeze-evaluation-0dae468`. New branch
+  `phase-3/realistic-corpus-freeze-evaluation`. **This is Stage 1 of 8 in
+  the approved staged execution sequence only** -- rubric, common-packet
+  tooling, and the freeze/evaluator scaffolding. No annotation pass, no
+  adjudication, no corpus freeze, no baseline evaluation, no provider
+  contact, no database work, and no parser-semantic change performed or
+  authorized by this commit. This is a checkpoint within an incomplete
+  slice, not a candidate `C` -- no receipt-eligible verification run, no
+  `A`/`R`/`M`/`Q` authorized yet.
+- **Frozen rubric**: `docs/evaluation/phase3-realistic-annotation-
+  rubric.md`, `rubric_version: 1.0.0`. Defines all four outcomes
+  (`present_supported`/`present_unsupported_form`/`absent`/`ambiguous`),
+  the bidirectional value/provenance rule (mirroring
+  `evaluate_phase3_corpus.py`'s own `_validate_scored_label`), the closed
+  per-parser/component value vocabulary, the two provenance tags this
+  corpus may actually use (`parsed_description`/`inferred`), missing-
+  information/ambiguity/unsupported-form handling, the skill-label rule,
+  and an explicit "procedural, not cryptographic" blindness statement.
+- **`backend/scripts/freeze_phase3_realistic_corpus.py`** (new) +
+  **`backend/tests/test_freeze_phase3_realistic_corpus.py`** (new, 31
+  tests, entirely synthetic fixtures -- no real posting text). Implements:
+  `compute_source_packet_hash` (the binding canonical manifest -- salvage/
+  taxonomy/rubric paths and sha256 plus `rubric_version`, canonical-JSON
+  serialized, sha256 hashed); `load_annotation_pass` (closed 6-key top-
+  level schema, closed per-label schema -- 3-key scalar/composite, 1-key
+  skill -- exhaustive 3+10+taxonomy-size label count, role/rubric-version/
+  recomputed-hash cross-check); `load_adjudication_audit` (validates every
+  genuine pass disagreement has a complete adjudication, every required
+  agreement audit per the deterministic rule -- every `present_supported`
+  agreement, plus the lexicographically-smallest record id per non-
+  `present_supported` (label, outcome, employer) stratum -- is present,
+  and an `overturned` entry both has a matching disagreement and actually
+  changes the previously agreed label); `deterministic_split` (employers
+  sorted ascending, lexicographically last is `holdout`); `build_corpus`
+  (verifies the salvage sha256 and retained-only candidates, merges both
+  validated passes plus adjudication evidence into
+  `evaluate_phase3_corpus.py`'s own committed schema -- agreements tagged
+  `annotator_role: "claude+sol:agreed"`, adjudicated disagreements tagged
+  `"adjudicated:user"` with a `second_annotation` chosen to be whichever
+  raw pass differs from the final value, keeping the existing corpus
+  validator's "a disagreement must reflect an actual difference"
+  invariant satisfiable even when the final answer exactly matches one
+  raw pass -- copies `fields` unmodified, atomically create-only writes,
+  and self-checks the result by calling the real
+  `evaluate_phase3_corpus.load_corpus`, never a shadow reimplementation,
+  before the write is made durable). A CLI `manifest` subcommand prints
+  the canonical packet/hash for handing to each fresh annotator task; a
+  `build` subcommand is implemented and tested but not invoked against
+  real data this stage.
+- **`backend/scripts/evaluate_phase3_corpus.py`** extended (bounded, no
+  parser-semantic or existing-metric change): `evaluate_corpus` now also
+  returns one `"employer:<name>"` key per distinct employer across the
+  whole corpus; `render_report` prints those sections (sorted after dev/
+  holdout/combined) and, given the loaded records, an explicit note that
+  per-`template_family` subdivision is intentionally omitted since every
+  record's `template_family` is `"unknown"` (never silently duplicating
+  the combined result under a fake breakdown). `backend/tests/
+  test_evaluate_phase3_corpus.py`: 62 -> 66 tests (4 new: per-employer
+  keys reflect the matching split subset, sorted employer ordering, the
+  template note appears/is absent correctly).
+- Verification: `ruff format --check`/`ruff check` clean on all four
+  touched/added files; `mypy` clean on both scripts; full backend suite
+  **3097 passed** (was 3062; +35 = 31 new freeze-builder tests + 4 new
+  evaluator tests); `check_repo.py` clean; `git diff --check` clean.
+- Adversarial self-review: traced the `second_annotation` "whichever raw
+  pass differs from final" rule against all three cases (final matches
+  neither raw, final matches Claude's raw, final matches Sol's raw) to
+  confirm the existing corpus validator's "no actual difference" check
+  can never spuriously fire; confirmed an `overturned` audit entry whose
+  adjudication resolves back to the original agreed value is rejected
+  (a genuine overturn must change the label); confirmed extra (non-
+  required) agreement audits are accepted, not just the minimum; confirmed
+  the deterministic split raises on fewer than two employers rather than
+  silently picking an arbitrary holdout.
+- Known limitation: `_validate_raw_label` checks the bidirectional
+  outcome/value rule and restricts `present_supported` provenance to
+  `parsed_description`/`inferred`, but does not re-validate each parser's
+  exact value vocabulary (e.g. `remote_type in {"remote","hybrid",
+  "onsite"}`) -- that is deferred to `build_corpus`'s own authoritative
+  `load_corpus` self-check on the merged output, deliberately avoiding a
+  second, independently-drifting copy of `evaluate_phase3_corpus.py`'s
+  `_EXPECTED_VALUE_VALIDATORS`.
+- Files changed: `docs/evaluation/phase3-realistic-annotation-rubric.md`
+  (new), `backend/scripts/freeze_phase3_realistic_corpus.py` (new),
+  `backend/tests/test_freeze_phase3_realistic_corpus.py` (new),
+  `backend/scripts/evaluate_phase3_corpus.py` (extended),
+  `backend/tests/test_evaluate_phase3_corpus.py` (extended),
+  `docs/LLM_HANDOFF.md` (this entry, plus the iteration rotation above).
+- STOP -- this is a checkpoint within an incomplete slice, not a
+  candidate. No annotation pass, adjudication, corpus freeze, baseline
+  evaluation, provider contact, database work, parser change, title
+  normalization, `R`, merge, `M`, or `Q` is authorized by this commit.
+  Waiting for Sol's pre-annotation review of the rubric and tooling.
