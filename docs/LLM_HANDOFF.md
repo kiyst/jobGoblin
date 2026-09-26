@@ -98,148 +98,113 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-09-19, Claude Code (Sonnet 5). Risk class **H**
-  (same slice, same primary-risk reasoning as Iteration 1). Base `B`
-  (unchanged for this slice's whole correction lifetime) ->
-  candidate `C2`: `d0159a4cc0faf9fb13f30ea814fa2e6c204570bb` -> this
-  commit; same branch `phase-3/skill-classifier`, on top of the existing
-  pushed tip `17f6f24`. `slice_id: 2026-09-19-skill-classifier-d0159a4`
-  (unchanged — same slice, a correction cycle within it, matching the
-  skill-taxonomy-foundation slice's own C1/C2 precedent). Addresses
-  Sol's review of `C = 109a307` and claimed `A = 17f6f24`, both of which
-  remain unamended, still pushed, still present in history exactly as
-  they were.
-- **Bug fix, Sol's finding**: `_next_genuine_terminator_end` scanned
-  forward for the first punctuation run whose *following* character was
-  in this module's covered-whitespace class (`\t`/`\n`/`\r`/space) or
-  end-of-string, and — critically — **skipped past** any punctuation run
-  that failed that check, continuing to scan for a *later* one instead
-  of stopping. A punctuation run followed by any other Unicode
-  whitespace (a no-break space, a vertical tab, a form feed, an em
-  space, ...) therefore never ended the region at all; the scan kept
-  going, and if no strictly-covered terminator existed later in the
-  text, the region silently extended all the way to end-of-string —
-  crossing an unrelated clause boundary and wrongly authorizing a
-  standalone ambiguous key found there. Confirmed exactly as reported:
-  `"Skills: Python. When ready, Go"` returned `golang`;
-  `"Skills: Python. See details, Node"` returned `node.js`.
-  **Fix**: split the single `_is_genuine_terminator_end` helper into two
-  deliberately asymmetric forms. `_is_covered_terminator_boundary`
-  (strict — covered whitespace or end-of-string only) is now used
-  *exclusively* by `_sentence_boundary_start_positions`, governing where
-  an anchor may *begin* — unchanged, since granting a new anchor must
-  stay hard to trigger. `_is_region_ending_boundary` (liberal — *any*
-  Unicode whitespace character, via `str.isspace()`, or end-of-string)
-  is now used by `_next_genuine_terminator_end`, governing where a
-  region *ends* — widened, fail-closed: a region also grants extra
-  permission, so a punctuation run followed by anything whitespace-like
-  must stop the region right there rather than risk extending across
-  unrelated text looking for a stricter match. No other grammar changed:
-  unambiguous whole-text matching, the title role-noun-adjacency rule,
-  and the anchor-start mechanism itself are all untouched.
-- **Regressions and mutation-proving**: added `backend/tests/fixtures/
-  normalization/skill_cases.json` cases
-  `description_nbsp_after_terminator_ends_region_go` and `..._node` (the
-  two exact reported inputs, both now correctly returning only
-  `python`), `description_ascii_space_after_terminator_ends_region_control`
-  (the same shape with an ordinary space, proving the already-correct
-  covered-whitespace case is unaffected), and
-  `description_vertical_tab_after_terminator_ends_region` /
-  `..._form_feed_after_terminator_ends_region` (proving the fix
-  generalizes beyond the no-break space specifically). Fixture corpus is
-  now 66 cases (61 + 5). Added direct unit-level tests in
-  `backend/tests/test_normalization_skills.py` against the two boundary
-  helpers themselves (`_is_covered_terminator_boundary`,
-  `_is_region_ending_boundary`), parametrized over covered whitespace,
-  four non-covered whitespace variants, a non-whitespace letter, and a
-  bare punctuation character, plus a test proving the liberal form
-  accepts a strict superset of what the strict form accepts (never a
-  narrower, inconsistent widening) — 104 tests total (76 + 28).
-- **Adversarial self-review finding, fixed before this commit**: an
-  independent adversarial-review pass (read-only, including live
-  monkeypatch-based reverts of the fix and direct execution against the
-  real taxonomy, not just static reasoning) confirmed the fix genuinely
-  generalizes across a wide range of Unicode whitespace categories
-  (no-break space, vertical tab, form feed, em/en space, line/paragraph
-  separator, narrow no-break space, NEL, ideographic space, C0
-  separators), confirmed no regression across the 61 pre-existing
-  fixture cases (provably, since covered whitespace is a strict subset
-  of `str.isspace()`, so the liberal boundary can only end a region at
-  the same position or earlier, never later), confirmed the two new
-  unit tests are not vacuous (reverting `_is_region_ending_boundary` to
-  the old strict form makes them, and 4 of the 5 new fixture cases,
-  genuinely fail), and confirmed no analogous bug on the anchor-start
-  side. It found one real defect: the module docstring's "terminator"
-  definition still described only the strict, covered-whitespace-only
-  rule, which after this fix is accurate for anchor-*start* eligibility
-  only, not for region-*ending* -- silently understating the fix to a
-  future reader relying on the docstring as the grammar spec. Fixed by
-  splitting the docstring's single "terminator" definition into the same
-  two named, asymmetric concepts the code now uses. Also noted, not
-  fixed here (identical before and after this diff, so out of this
-  correction's bounded scope): Unicode format characters (zero-width
-  space, BOM, the Mongolian vowel separator) are category `Cf`, not
-  whitespace, so `str.isspace()` is `False` for them and they still do
-  not end a region either way -- a pre-existing residual gap in the same
-  threat family, not introduced or worsened by this correction.
-- **Old receipt/publication cycle superseded, non-reusable**: receipt
-  `769a9115-2e13-4c92-abfe-6c37a92e26e9` (for `candidate_sha: 109a307`)
-  verified code containing the bug above and is superseded by this
-  correction — it must not be cited as current evidence for this slice
-  going forward. It remains on disk unmodified (receipts are
-  durable/create-only, never deleted or edited) purely as an immutable
-  historical record of what that specific candidate actually contained.
-- **`17f6f24` structurally could not serve as `A`**: `check_review.
-  validate_c_to_a_transition(C=109a307, A=17f6f24, ...)` passed, because
-  that validator only diffs file *content* between the two named commits
-  — it never inspects git parentage. But `17f6f24`'s sole parent is
-  `85ce56a` (the mistaken commit that first published the receipt with
-  an out-of-scope prose expansion), not `109a307` directly. `A` must be
-  `C`'s own direct, single-parent child — a content-only diff passing is
-  necessary but not sufficient. This is disclosed here rather than
-  silently relied upon; `109a307`, `85ce56a`, and `17f6f24` are all
-  preserved unamended in history as the record of how this was found and
-  worked around, but `17f6f24` is not treated as a valid `A` for
-  anything going forward. `C2`/`A2` (this correction) will have their
-  own genuine, directly-verified single-parent relationship, checked
-  explicitly before this correction is reported complete.
-- **Handoff ledger corrected to the documented at-most-two-iteration
-  rule**: the ledger had drifted to a rolling three-iteration pattern
-  across several prior slices (each rotation kept the two newest of
-  three instead of collapsing to two), never itself flagged before now.
-  Corrected in this same commit: the two older, unrelated iterations
-  (the post-merge `Q`-producer slice and the skill-taxonomy-foundation
-  slice) are removed entirely; the skill-classifier implementation entry
-  (this slice's own `C`/`A` record, previously "Iteration 3") is
-  renumbered to Iteration 1, unchanged in content; this correction
-  becomes Iteration 2.
-- Files changed: `backend/app/normalization/skills.py` (edited — the
-  boundary-helper fix only); `backend/tests/fixtures/normalization/
-  skill_cases.json` (edited, +5 cases); `backend/tests/
-  test_normalization_skills.py` (edited, +28 tests); `docs/LLM_HANDOFF.md`
-  (this entry, plus the iteration-count correction above). No taxonomy
-  file, migration, model, service, API, or live-provider file touched;
-  no realistic-corpus work; no title-parser work; no workflow-policy
-  file touched; no database lifecycle operation performed.
+- Date/agent: 2026-09-24, Claude Code (Sonnet 5). Risk class **H** (same
+  slice, same authorization). Base `B` (unchanged for this slice's whole
+  correction lifetime, `7ce4a1d`) -> candidate `C5`: this commit; same
+  branch `phase-3/realistic-evaluation-corpus`, on top of the existing
+  pushed tip `A4 = 549229bde2c59f6453b69c852c9ce5175b6a2f52`. `slice_id:
+  2026-09-20-realistic-evaluation-corpus-7ce4a1d` (unchanged). Implements
+  Sol's frozen, twice-revised sanitizer-correction design proposal
+  (addressing the real double-HTML-encoding defect discovered during the
+  authorized acquisition against `gitlab`/`anthropic`/`discord`, and the
+  30-candidate manually-reviewed salvage batch produced from it, both
+  preserved unchanged by this slice). No network contact, board-token
+  request, corpus acquisition, staged/review-artifact change, parser-
+  semantic change, database work, or unrelated tooling performed.
+- **Explicit input-mode contract**: `convert_html_to_text(html, *,
+  mode="standard")` gained a second mode, `"declared-double-escaped"`,
+  selected only by an explicit caller argument -- never inferred from
+  content. `"standard"` (the default) is byte-for-behavior identical to
+  the function's behavior before this change, with zero new checks at
+  any stage. `"declared-double-escaped"` permits exactly one additional
+  `html.unescape()` pass, bracketed by two fail-closed validation
+  stages sharing one pair of fixed regex constants
+  (`_ESCAPED_ANGLE_REFERENCE_RE` for fully-terminated named/decimal/hex
+  escaped angle-bracket forms; `_UNTERMINATED_NAMED_ANGLE_RE` for a
+  semicolonless `&lt`/`&gt` prefix, rejected regardless of what follows
+  it, since its interaction with `html.unescape()`'s own legacy
+  longer-entity matching -- e.g. the real, unrelated `&ltimes;` -- is not
+  trusted to be safe): raw-input validation
+  (`"mixed-literal-and-escaped-markup"` if a literal angle bracket and an
+  escaped form coexist; `"unsupported-angle-reference"` for any bare
+  semicolonless form) and post-decode validation
+  (`"unsupported-angle-reference"` or `"residual-nested-encoding"`). A
+  new `HtmlDoubleEncodingError(HtmlConversionError)` carries only a fixed
+  category string, never content. A documented accepted limitation: a
+  legitimate escaped-code example that survives exactly one correct
+  decode is indistinguishable from a genuine unresolved second layer, so
+  `"declared-double-escaped"` mode conservatively rejects it too --
+  proved by a direct regression, never "fixed" by making the check
+  smarter (that would violate the bounded design).
+- **Explicit board specification and CLI grammar**: `BoardAcquisitionSpec`
+  (`board_token`, `employer`, closed `content_mode`, `mode_basis_ref`)
+  replaces the prior bare `(board_token, employer)` tuple everywhere
+  (`run_acquisition`, `_fetch_board`, `_sanitize_job_detail`,
+  `SanitizedCandidate`). `mode_basis_ref` is required (non-`None`) iff
+  `content_mode == "declared-double-escaped"`, matching a closed grammar
+  (`^(prior-capture|probe):[A-Za-z0-9_-]{1,100}$`) that resolves the
+  authorization circularity: it must cite either a stable reference to
+  evidence already retained from an earlier, separately authorized
+  capture, or a separately authorized, distinct probe -- never the
+  run's own unapproved contact. No permanent board-token-to-mode
+  inference table exists anywhere. CLI grammar:
+  `token:Employer:standard` (3 parts) or
+  `token:Employer:declared-double-escaped:basis-kind:basis-id` (5
+  parts); `_parse_board_arg` reuses the existing `validate_board_token`
+  (translating its `ValueError` to `argparse.ArgumentTypeError`) and
+  rejects every malformed input during argument parsing, strictly before
+  `run_acquisition` is reachable. `mode_basis_ref`/`content_mode` are
+  appended as fixed-format text onto the existing free-text
+  `sanitization_lineage` provenance field -- no new structured schema
+  field, so `evaluate_phase3_corpus.py`'s provenance validator needed no
+  change, staying within this correction's frozen file scope.
+- **Redaction ownership unchanged**: `_redact_contact_patterns` remains
+  entirely in `fetch_greenhouse_evaluation_postings.py`, called exactly
+  once per description, strictly after the full conversion (all decode
+  stages) completes.
+- **Adversarial self-review findings, fixed before this commit**: (1) a
+  test claiming to prove "`_parse_board_arg` never contacts the
+  network" asserted only that the function is not a coroutine -- a
+  synchronous function can still perform blocking I/O, so the assertion
+  proved nothing; removed rather than papered over (the actual
+  guarantee -- every malformed input raises during argument parsing,
+  strictly before `run_acquisition` is ever reachable in `main()` --
+  is already established by the other `_parse_board_arg` rejection
+  tests together with `main()`'s own control flow). (2)
+  `BoardAcquisitionSpec`'s docstring claimed its mode/basis invariant as
+  a hard contract, but nothing enforced it at construction -- only
+  `_parse_board_arg` checked it, so any non-CLI caller building a spec
+  directly could silently construct an inconsistent, unauthorized
+  combination. Fixed: added `__post_init__` validation to the dataclass
+  itself, with new regressions proving both valid combinations succeed
+  and both invalid combinations raise `ValueError` at construction,
+  independent of the CLI.
+- Files changed (exactly the six named in the frozen proposal's scope,
+  no others): `backend/scripts/greenhouse_html_convert.py`,
+  `backend/scripts/fetch_greenhouse_evaluation_postings.py`,
+  `backend/tests/test_greenhouse_html_convert.py` (26 -> 49 tests),
+  `backend/tests/test_fetch_greenhouse_evaluation_postings.py` (60 ->
+  81 tests), `docs/DECISIONS/0010-realistic-evaluation-corpus-
+  methodology.md` (states the corrected contract and the salvage
+  batch's honest lineage), `docs/LLM_HANDOFF.md` (this entry, plus the
+  iteration rotation above).
 - Verification: pending — see the workflow-metadata block below and the
-  publication (`A2`) entry that will follow it.
+  publication (`A5`) entry that will follow it.
 
 ```workflow-metadata
 workflow_version: v3.2
 state: published
-slice_id: 2026-09-19-skill-classifier-d0159a4
-slice_kind: parser
+slice_id: 2026-09-20-realistic-evaluation-corpus-7ce4a1d
+slice_kind: tooling
 risk_class: H
-base_sha: d0159a4cc0faf9fb13f30ea814fa2e6c204570bb
+base_sha: 7ce4a1dc770827653ccf8140188c5d1dec6621d8
 declared_gate: final
 executed_gate: final
-candidate_sha: e867450a12d63fd961cfe691cb1e84cf406a292e
-receipt_id: 9e01075f-5141-4137-9d1d-870fb2811550
-receipt_path: docs/verification-receipts/e867450a12d63fd961cfe691cb1e84cf406a292e/9e01075f-5141-4137-9d1d-870fb2811550.json
-fixture_path: backend/tests/fixtures/normalization/skill_cases.json
-fixture_count: 66
-full_suite_count: 2839
-focused_test_count: 173
+candidate_sha: e5a72f6926b826ca9af8cdb93e5368d1fb8ddae8
+receipt_id: 59ee72fa-ca86-4596-bf9c-a8e971cf9ed2
+receipt_path: docs/verification-receipts/e5a72f6926b826ca9af8cdb93e5368d1fb8ddae8/59ee72fa-ca86-4596-bf9c-a8e971cf9ed2.json
+full_suite_count: 3048
+focused_test_count: 262
 mutation_witness_count: 34
 ```
 
@@ -249,185 +214,167 @@ mutation_witness_count: 34
 
 ### Work done
 
-- Date/agent: 2026-09-19, Claude Code (Sonnet 5). Risk class **H** (same
-  slice, same primary-risk reasoning as Iteration 1). Base `B` (unchanged
-  for this slice's whole correction lifetime) -> candidate `C3`:
-  `d0159a4cc0faf9fb13f30ea814fa2e6c204570bb` -> this commit; same branch
-  `phase-3/skill-classifier`, on top of the existing pushed tip
-  `449e00c`. `slice_id: 2026-09-19-skill-classifier-d0159a4` (unchanged).
-  Addresses Sol's re-review of `C2 = e867450` and `A2 = 449e00c`, both of
-  which remain unamended, still pushed, still present in history exactly
-  as they were; the `C2`/`A2` receipt cycle is superseded and
-  non-reusable as of this entry.
-- **Remaining bug, Sol's re-review finding**: the prior correction
-  widened `_is_region_ending_boundary` to accept any `str.isspace()`
-  character, but three Unicode **format** characters (category `Cf` --
-  zero-width space `U+200B`, the BOM/zero-width no-break space
-  `U+FEFF`, the Mongolian vowel separator `U+180E`) are *not* whitespace
-  by `str.isspace()`, so a punctuation run followed by one of them still
-  fell through to the same "skip past it and keep scanning" defect the
-  prior fix closed for whitespace. Confirmed exactly as reported:
-  `"Skills: Python.​When ready, Go"` returned `golang`;
-  `"Skills: Python.﻿See details, Node"` returned `node.js`;
-  `"Skills: Python.᠎When ready, Go"` returned `golang`. **Fix**:
-  `_is_region_ending_boundary` now also accepts
-  `unicodedata.category(char) == "Cf"`, in addition to `str.isspace()`
-  and end-of-string. `_is_covered_terminator_boundary` (anchor-start
-  eligibility) is untouched -- a format character still never creates a
-  new anchor, only ends an existing region, preserving the same
-  strict/liberal asymmetry as the whitespace case. `unicodedata` is now
-  imported by `app/normalization/skills.py`; its own exact
-  import-allow-list test is updated accordingly.
-- **Regressions and mutation-proving**: added `backend/tests/fixtures/
-  normalization/skill_cases.json` cases
-  `description_zwsp_after_terminator_ends_region`,
-  `description_bom_after_terminator_ends_region`, and
-  `description_mongolian_vowel_separator_after_terminator_ends_region`
-  (the three exact reported inputs), plus positive controls
-  `description_format_char_does_not_create_anchor` (a format character
-  after a period never makes a new anchor-start position),
-  `description_letter_after_period_is_non_terminating`, and
-  `description_digit_after_period_is_non_terminating` (an ordinary
-  letter or digit after a period never ends a region either). Fixture
-  corpus is now 72 cases (66 + 6). Added direct unit-level tests
-  extending `test_is_covered_terminator_boundary_is_strict` and
-  `test_is_region_ending_boundary_is_liberal` with the three `Cf`
-  characters plus a bare digit, and two new isolated tests proving the
-  `Node.js` internal period and a letter/digit-following period are
-  non-terminating at the predicate level directly, independent of the
-  fixture corpus -- 120 tests total (104 + 16). **Mutation-proved**:
-  temporarily reverted `_is_region_ending_boundary` to the pre-`Cf` form
-  (`str.isspace()` only, no `unicodedata` check) in the real source and
-  reran the full focused suite -- exactly 6 tests failed (the 3 exact
-  fixture regressions and the 3 corresponding `Cf` unit-test
-  parametrizations), 114 still passed; restored the fix and reran to
-  confirm 120/120 pass again. The regression set is genuinely
-  load-bearing, not vacuous.
-- **Adversarial self-review finding, fixed before this commit**: while
-  applying this correction, found that the module docstring's "terminator"
-  paragraph (edited by the prior correction) still described only the
-  strict/liberal whitespace asymmetry and did not mention format
-  characters at all, understating the grammar this fix now implements.
-  Corrected in the same commit to name the `Cf` category explicitly for
-  region-ending, restate that format-character eligibility is anchor-end
-  only, and add the letter/digit non-terminating examples. While editing
-  that paragraph, also found and fixed one stray raw no-break-space byte
-  left embedded directly in a docstring example by an earlier round's
-  edit tooling (an editing-tool artifact, not a grammar defect) --
-  replaced with a proper ` ` escape in source; no behavior changed,
-  confirmed by the full suite before and after. Left unchanged: an
-  identical-looking stray raw character in this same file's *own*
-  historical prose (Iteration 1's "Confirmed exactly as reported" quote)
-  -- that is a factual quoting inaccuracy in a past iteration's narrative,
-  not a live code or grammar defect, and out of this correction's bounded
-  scope; noted here rather than silently touched.
-- Files changed: `backend/app/normalization/skills.py` (edited -- the
-  `Cf`-category fix, the `unicodedata` import, and the docstring
-  correction); `backend/tests/fixtures/normalization/skill_cases.json`
-  (edited, +6 cases); `backend/tests/test_normalization_skills.py`
-  (edited, +16 tests, +1 import-allow-list entry); `docs/LLM_HANDOFF.md`
-  (this entry, plus the iteration rotation below). No taxonomy file,
-  migration, model, service, API, or live-provider file touched; no
-  realistic-corpus work; no title-parser work; no workflow-policy file
-  touched; no database lifecycle operation performed.
-- **Two-iteration rotation applied**: the oldest iteration (the original
-  skill-classifier implementation's `C`/`A` record) is deleted; the
-  former Iteration 2 (the Unicode-whitespace region-boundary correction,
-  `C2`/`A2`) is renumbered to Iteration 1, unchanged in content; this
-  correction becomes Iteration 2.
+- Date/agent: 2026-09-26, Claude Code (Sonnet 5). Risk class **H** (same
+  slice, same authorization). Base `B` (unchanged for this slice's whole
+  correction lifetime, `7ce4a1d`) -> candidate `C6`: this commit; same
+  branch `phase-3/realistic-evaluation-corpus`, on top of the existing
+  pushed tip `A5 = 58de6976d72a370a871882f069bf74abcc1e1a1c`. `slice_id:
+  2026-09-20-realistic-evaluation-corpus-7ce4a1d` (unchanged). One
+  bounded correction round for Sol's three findings on `C5 =
+  e5a72f6926b826ca9af8cdb93e5368d1fb8ddae8` / `A5 =
+  58de6976d72a370a871882f069bf74abcc1e1a1c`, both of which remain
+  unamended, still pushed, still present in history exactly as they
+  were; the `C5`/`A5` receipt cycle
+  (`59ee72fa-ca86-4596-bf9c-a8e971cf9ed2`) is superseded and
+  non-reusable as of this entry. No proposal rewrite, no new semantics,
+  no network contact, board-token request, corpus acquisition, staged/
+  review-artifact change, parser/taxonomy change, evaluation-label
+  change, database work, or workflow-tooling change.
+- **Finding 1 (uppercase angle-entity bypass)**: `_ESCAPED_ANGLE_
+  REFERENCE_RE` and `_UNTERMINATED_NAMED_ANGLE_RE` only recognized
+  lowercase `lt`/`gt`, but `html.unescape()` also decodes the all-
+  uppercase aliases `&LT;`/`&GT;` (and their semicolonless legacy forms)
+  to `<`/`>` -- confirmed empirically -- so a double-encoded document
+  using the uppercase spelling could bypass both the mixed-content and
+  residual-nested-encoding checks entirely. Fixed by adding `|LT|GT` to
+  both regex alternations, exactly as specified; the mixed-case `&Lt;`/
+  `&Gt;` (real, distinct, unrelated named entities, U+226A/U+226B) are
+  confirmed to still not match either regex. Nine new regressions cover
+  uppercase acceptance, uppercase mixed-content rejection, uppercase
+  semicolonless-form rejection (both a followed-by-more-text and a bare
+  form), uppercase nested-encoding rejection, and non-classification of
+  the mixed-case entities -- full parity with the existing lowercase
+  coverage.
+- **Finding 2 (unknown `content_mode` bypass)**:
+  `BoardAcquisitionSpec.__post_init__`'s `if content_mode ==
+  "declared-double-escaped": ... elif mode_basis_ref is not None: raise
+  ...` let an unrecognized `content_mode` string with `mode_basis_ref=
+  None` fall through both branches and construct successfully with no
+  validation at all; with a non-`None` `mode_basis_ref` it raised the
+  wrong, misleading message ("must be None when content_mode is
+  'standard'") even though the mode wasn't `"standard"`. Fixed by adding
+  an explicit `content_mode not in _VALID_CONTENT_MODES` check as the
+  first statement in `__post_init__`, before the mode/basis logic --
+  independent of the CLI parser and of static type hints. Two new
+  regressions cover both invalid combinations.
+- **Finding 3 (three required caller-level proofs, previously
+  missing)**: (1) a synthetic outer-encoded description whose email and
+  phone are built from numeric character references (`&#64;` for '@',
+  `&#53;` for the phone's leading digit) at the original single-encoded
+  source, then escaped one further layer -- neither the raw `content`
+  field nor the single permitted `html.unescape()` output ever contains
+  a literal '@' or '555' (confirmed empirically); both only become
+  literal via `HTMLParser(convert_charrefs=True)`'s own entity decoding
+  during HTML-to-text extraction, a third, separate decoding mechanism.
+  Both are correctly redacted in the final description. (2) A spy
+  around `_redact_contact_patterns` proving description redaction is
+  called exactly once, with the final converted text -- the payload has
+  no `title`/`location` keys, so neither triggers its own independent
+  call that could confound the count. (3) A genuine `_fetch_board` test
+  (via `httpx.MockTransport`) under `declared-double-escaped` mode with
+  two selected detail records: the first mixes literal and escaped
+  markup and is correctly rejected/skipped without aborting the board;
+  the second is genuinely once-escaped valid content and is fetched,
+  converted, and returned.
+- **Adversarial self-review**: a dedicated pass traced the uppercase
+  regex fix character-by-character against `html.unescape()`'s actual
+  behavior (no `re.IGNORECASE` flag present; the fix is precisely
+  scoped, no over- or under-matching), confirmed the `__post_init__`
+  ordering guarantee and that `_parse_board_arg`'s own mode check is
+  legitimate defense-in-depth rather than dead code, and independently
+  re-derived all three Finding-3 test claims rather than trusting their
+  docstrings. One gap found and closed before this commit: the new
+  uppercase-form tests had no equivalent of the existing lowercase
+  `residual-nested-encoding`/bare-semicolonless-form tests; added
+  `test_declared_mode_rejects_uppercase_nested_named_encoding` and
+  `test_declared_mode_rejects_bare_uppercase_semicolonless_form` for
+  full parity.
+- **Mutation-proved**: temporarily reverted the Finding-1 regex change
+  (dropped `|LT|GT` from both constants) and reran the html-convert
+  suite -- exactly the 3 uppercase-rejection tests failed (the
+  uppercase-success test does not require the fix, since decoding
+  itself is unaffected -- only the *validation* regexes changed), all
+  other tests unaffected; restored and confirmed all pass again.
+  Temporarily reverted the Finding-2 `__post_init__` ordering fix and
+  reran the fetcher suite -- exactly the 2 new
+  `test_board_acquisition_spec_rejects_unknown_mode_*` tests failed
+  (one with a silent non-raise, one with the old misleading message,
+  matching the exact defect described above), all other tests
+  unaffected; restored and confirmed all pass again.
+- Files changed: `backend/scripts/greenhouse_html_convert.py` (regex
+  fix), `backend/scripts/fetch_greenhouse_evaluation_postings.py`
+  (`__post_init__` ordering fix), `backend/tests/
+  test_greenhouse_html_convert.py` (49 -> 58 tests),
+  `backend/tests/test_fetch_greenhouse_evaluation_postings.py` (81 ->
+  86 tests), `docs/LLM_HANDOFF.md` (this entry, plus the iteration
+  rotation above). `docs/DECISIONS/0010-realistic-evaluation-corpus-
+  methodology.md` not touched this round -- no design/semantic change,
+  only bug fixes and test completeness within the already-documented
+  contract.
 - Verification: pending — see the workflow-metadata block below and the
-  publication (`A3`) entry that will follow it.
+  publication (`A6`) entry that will follow it.
 
 ```workflow-metadata
 workflow_version: v3.2
 state: published
-slice_id: 2026-09-19-skill-classifier-d0159a4
-slice_kind: parser
+slice_id: 2026-09-20-realistic-evaluation-corpus-7ce4a1d
+slice_kind: tooling
 risk_class: H
-base_sha: d0159a4cc0faf9fb13f30ea814fa2e6c204570bb
+base_sha: 7ce4a1dc770827653ccf8140188c5d1dec6621d8
 declared_gate: final
 executed_gate: final
-candidate_sha: 0dbdbc54443237d35b0f139910eb84d11c06b29d
-receipt_id: b8a569cb-ce08-462e-8172-372f42e00b07
-receipt_path: docs/verification-receipts/0dbdbc54443237d35b0f139910eb84d11c06b29d/b8a569cb-ce08-462e-8172-372f42e00b07.json
-fixture_path: backend/tests/fixtures/normalization/skill_cases.json
-fixture_count: 72
-full_suite_count: 2855
-focused_test_count: 189
+candidate_sha: 4771c2df38a7c913a852fa5cfe24dc795c5d587f
+receipt_id: 69759bd7-d539-4417-8685-730900e4db20
+receipt_path: docs/verification-receipts/4771c2df38a7c913a852fa5cfe24dc795c5d587f/69759bd7-d539-4417-8685-730900e4db20.json
+full_suite_count: 3062
+focused_test_count: 276
 mutation_witness_count: 34
 ```
 
 ### Work review
 
-- Sol's review of `C3` = `0dbdbc54443237d35b0f139910eb84d11c06b29d` and
-  `A3` = `bc073ea54aaca6df254579d58a82de44a55dbd6d`: **Approved, no
-  executable findings.** Independently confirmed: `A3`'s single-parent
-  relationship to `C3` (no intervening commit, unlike the earlier
-  `17f6f24`/`85ce56a` finding this same slice had); the `C..A` transition
-  changed only the `workflow-metadata` block; replayed the three exact
-  Unicode-format-character regressions
-  (`description_zwsp_after_terminator_ends_region`,
-  `description_bom_after_terminator_ends_region`,
-  `description_mongolian_vowel_separator_after_terminator_ends_region`)
-  and the `Node.js` internal-period positive control, all matching their
-  declared expectations; ran all 189 focused tests, `ruff format --check`,
-  `ruff check`, `mypy`, `check_handoff.py`, `check_repo.py`, and
-  `git diff --check`, all passing; independently validated receipt
-  `b8a569cb-ce08-462e-8172-372f42e00b07` and recomputed
-  `approval_eligible: true`. Sol did not independently repeat the
-  2,855-test full suite.
+- Sol's review of `C6` = `4771c2df38a7c913a852fa5cfe24dc795c5d587f` and
+  `A6` = `6cbda7135ae21e6fe818313f0dfaf9fa0097b247`: **Approved, no
+  executable findings.** Independently verified: `C6`'s sole parent is
+  `A5` (`58de6976d72a370a871882f069bf74abcc1e1a1c`) and `A6`'s sole
+  parent is `C6`, confirming a clean, unamended, single-parent chain;
+  the correction remained within the bounded scope named for this
+  round (`backend/scripts/greenhouse_html_convert.py`,
+  `backend/scripts/fetch_greenhouse_evaluation_postings.py`,
+  `backend/tests/test_greenhouse_html_convert.py`,
+  `backend/tests/test_fetch_greenhouse_evaluation_postings.py`,
+  `docs/LLM_HANDOFF.md` -- no proposal rewrite, no new semantics); the
+  uppercase `LT`/`GT` entity handling closes the fail-closed bypass
+  while the mixed-case `Lt`/`Gt` (real, distinct, unrelated named
+  entities) correctly remain unclassified by either shared regex;
+  `BoardAcquisitionSpec.__post_init__` now rejects an unrecognized
+  `content_mode` before any mode/basis relationship validation runs;
+  the encoded-PII decode/HTML-to-text-ordering test, the exactly-once
+  redaction spy, and the genuine `_fetch_board` mixed-encoding
+  failure-isolation test are substantive, not merely docstring claims.
+  Ran the two directly affected test modules --
+  `backend/tests/test_greenhouse_html_convert.py` and
+  `backend/tests/test_fetch_greenhouse_evaluation_postings.py` --
+  **144/144 passed**. Confirmed the working tree is clean and
+  `main`/`origin/main` remain unchanged at
+  `7ce4a1dc770827653ccf8140188c5d1dec6621d8`. Sol did **not**
+  independently repeat the full 3,062-test suite or all 34 mutation
+  witnesses; those remain supported by `A6`'s own genuine
+  receipt-eligible verification, not re-derived here.
 
 ```workflow-review-metadata
 schema_version: 2
-slice_id: 2026-09-19-skill-classifier-d0159a4
+slice_id: 2026-09-20-realistic-evaluation-corpus-7ce4a1d
 risk_class: H
 reviewer: Sol
 reviewer_role: primary
 reviewer_model: Sol Medium
-reviewed_at: 2026-09-19T00:00:00Z
-candidate_sha: 0dbdbc54443237d35b0f139910eb84d11c06b29d
-publication_commit_sha: bc073ea54aaca6df254579d58a82de44a55dbd6d
-receipt_path: docs/verification-receipts/0dbdbc54443237d35b0f139910eb84d11c06b29d/b8a569cb-ce08-462e-8172-372f42e00b07.json
-receipt_id: b8a569cb-ce08-462e-8172-372f42e00b07
+reviewed_at: 2026-09-26T00:00:00Z
+candidate_sha: 4771c2df38a7c913a852fa5cfe24dc795c5d587f
+publication_commit_sha: 6cbda7135ae21e6fe818313f0dfaf9fa0097b247
+receipt_path: docs/verification-receipts/4771c2df38a7c913a852fa5cfe24dc795c5d587f/69759bd7-d539-4417-8685-730900e4db20.json
+receipt_id: 69759bd7-d539-4417-8685-730900e4db20
 gate: final
 verdict: approved
 findings: none
 ```
-
-### Merge record
-
-- Date: 2026-09-19. Merged `phase-3/skill-classifier` at approved,
-  reviewed commit `f94638c2a8a82fa290996e4c9a4f8d2d79a15b93` (`R`; Sol's
-  "Approved, no executable findings" verdict on `C3`/`A3`, above) into
-  `main` via `git merge --no-ff`. Merge commit:
-  `dad967789227feb65cf776a0675a8fe179873afa`. Pre-merge `main`/
-  `origin/main` tip (rollback boundary):
-  `d0159a4cc0faf9fb13f30ea814fa2e6c204570bb`.
-- Pre-merge checks: confirmed the feature branch and its origin both sat
-  at `f94638c`, and `main`/`origin/main` were both clean and synchronized
-  at `d0159a4` before merging; re-confirmed
-  `check_merge_eligibility(C3, A3, R)` still returned `approved`
-  immediately beforehand.
-- Followed the documented `M -> Q` release sequence: `M` was created
-  locally, not pushed; zero content difference between `M` and `R`
-  confirmed (`git diff --quiet f94638c HEAD`);
-  `verification_coordinator.run_post_merge_verification` was run against
-  `M` in a disposable detached worktree (always full/final) --
-  artifact `3db09310-ca32-4c28-b950-a86b353d18bd`, all 11 steps PASS,
-  full pytest suite **2855 passed**, all 34 mutation witnesses pass,
-  no migration triggered, cleanup PASS. `Q` was authored as `M`'s direct
-  mainline child, bundling that artifact with this append-only merge
-  record in one commit -- this entry itself.
-- Post-merge evidence status: `docs/post-merge/
-  dad967789227feb65cf776a0675a8fe179873afa/
-  3db09310-ca32-4c28-b950-a86b353d18bd.json`, referencing original
-  receipt `b8a569cb-ce08-462e-8172-372f42e00b07` (`docs/
-  verification-receipts/0dbdbc54443237d35b0f139910eb84d11c06b29d/
-  b8a569cb-ce08-462e-8172-372f42e00b07.json`). `check_review.
-  validate_published(C3, A3, R, M, Q)` and `verification_coordinator.
-  confirm_main_unchanged` are run immediately before push; see the
-  agent's final report for their results rather than restating them here
-  ahead of time.
-- STOP -- report the synchronized final `main` SHA and stop. No
-  realistic-corpus work, title-parser work, another parser slice, or
-  workflow-policy change without separate explicit user authorization.
