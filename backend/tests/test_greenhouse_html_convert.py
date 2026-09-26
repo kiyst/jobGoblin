@@ -305,3 +305,61 @@ def test_ltimes_is_rejected_under_declared_mode_via_the_unterminated_check() -> 
     with pytest.raises(HtmlDoubleEncodingError) as exc_info:
         convert_html_to_text("&ltimes;", mode="declared-double-escaped")
     assert exc_info.value.category == "unsupported-angle-reference"
+
+
+# ---------------------------------------------------------------------------
+# Uppercase named-form aliases -- `html.unescape()` decodes `&LT;`/`&GT;`
+# (and their semicolonless legacy forms) to `<`/`>` exactly like
+# `&lt;`/`&gt;`; the mixed-case `&Lt;`/`&Gt;` are separate, unrelated
+# named references (U+226A/U+226B) and must never be treated as angle
+# references at all.
+# ---------------------------------------------------------------------------
+def test_declared_mode_decodes_uppercase_named_entity_form() -> None:
+    assert (
+        convert_html_to_text("&LT;p&GT;Hello&LT;/p&GT;", mode="declared-double-escaped") == "Hello"
+    )
+
+
+def test_declared_mode_rejects_mixed_literal_and_uppercase_escaped_markup() -> None:
+    with pytest.raises(HtmlDoubleEncodingError) as exc_info:
+        convert_html_to_text(
+            "<p>Hello &LT;b&GT;world&LT;/b&GT;</p>", mode="declared-double-escaped"
+        )
+    assert exc_info.value.category == "mixed-literal-and-escaped-markup"
+
+
+@pytest.mark.parametrize("text", ["&LTfoo", "&GTfoo"])
+def test_declared_mode_rejects_uppercase_semicolonless_named_form(text: str) -> None:
+    with pytest.raises(HtmlDoubleEncodingError) as exc_info:
+        convert_html_to_text(text, mode="declared-double-escaped")
+    assert exc_info.value.category == "unsupported-angle-reference"
+
+
+@pytest.mark.parametrize("text", ["&LT", "&GT"])
+def test_declared_mode_rejects_bare_uppercase_semicolonless_form(text: str) -> None:
+    """Uppercase parity for `test_declared_mode_rejects_bare_semicolonless_lt`."""
+    with pytest.raises(HtmlDoubleEncodingError) as exc_info:
+        convert_html_to_text(text, mode="declared-double-escaped")
+    assert exc_info.value.category == "unsupported-angle-reference"
+
+
+def test_declared_mode_rejects_uppercase_nested_named_encoding() -> None:
+    """Uppercase parity for `test_declared_mode_rejects_nested_named_encoding`
+    -- the one permitted decode resolves only the outer `&amp;`, leaving
+    `&LT;`/`&GT;` behind, which stage 3 correctly still recognizes as
+    angle references now that Finding 1 is fixed."""
+    with pytest.raises(HtmlDoubleEncodingError) as exc_info:
+        convert_html_to_text(
+            "&amp;LT;p&amp;GT;Hello&amp;LT;/p&amp;GT;", mode="declared-double-escaped"
+        )
+    assert exc_info.value.category == "residual-nested-encoding"
+
+
+@pytest.mark.parametrize("text", ["&Lt;", "&Gt;"])
+def test_mixed_case_lt_gt_are_not_classified_as_angle_references(text: str) -> None:
+    """`&Lt;` decodes to U+226A ('MUCH LESS-THAN') and `&Gt;` to U+226B
+    ('MUCH GREATER-THAN') -- real, distinct, unrelated named entities,
+    not aliases of `<`/`>`. Neither shared regex constant may match
+    them."""
+    assert _ESCAPED_ANGLE_REFERENCE_RE.search(text) is None
+    assert _UNTERMINATED_NAMED_ANGLE_RE.search(text) is None

@@ -368,6 +368,60 @@ def test_sanitize_job_detail_raises_html_double_encoding_error_as_evaluation_fet
         _sanitize(payload, content_mode="declared-double-escaped")
 
 
+def test_sanitize_job_detail_redacts_pii_visible_only_after_full_pipeline() -> None:
+    """Synthetic outer-encoded content whose email/phone are constructed
+    from numeric character references (`&#64;` for '@', `&#53;` for the
+    phone's leading '5') at the *original*, single-encoded source, then
+    escaped one further layer to simulate the real double-encoding
+    defect. Neither the raw `content` field nor the stage-2
+    (`html.unescape()`) output contains a literal '@' or '555' anywhere
+    -- both only become literal characters via stage 4's own built-in
+    entity decoding (`HTMLParser(convert_charrefs=True)`), which runs
+    *after* the permitted decode. Confirmed empirically before writing
+    this test. Proves redaction, which runs strictly after the full
+    pipeline, still catches both."""
+    raw_content = (
+        "&lt;p&gt;Contact us at jane&amp;#64;example.com or call " "&amp;#53;55-123-4567.&lt;/p&gt;"
+    )
+    assert "@" not in raw_content
+    assert "555" not in raw_content
+
+    payload = {"id": 1, "content": raw_content}  # no title, no location
+    candidate = _sanitize(payload, content_mode="declared-double-escaped")
+
+    assert candidate.description is not None
+    assert "@" not in candidate.description
+    assert "555" not in candidate.description
+    assert "[REDACTED_EMAIL]" in candidate.description
+    assert "[REDACTED_PHONE]" in candidate.description
+
+
+def test_sanitize_job_detail_redacts_description_exactly_once_with_final_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A spy around `_redact_contact_patterns` proving description
+    redaction receives the final converted description exactly once --
+    title and location are absent from this payload (no `title` key, no
+    `location` key) so neither triggers its own, independent redaction
+    call, and the "exactly once" assertion cannot pass by accident."""
+    calls: list[str] = []
+    real_redact = fetcher._redact_contact_patterns
+
+    def spy(text: str) -> str:
+        calls.append(text)
+        return real_redact(text)
+
+    monkeypatch.setattr(fetcher, "_redact_contact_patterns", spy)
+
+    payload = {"id": 1, "content": "<p>Contact jane@example.com</p>"}
+    candidate = _sanitize(payload)
+
+    assert calls == ["Contact jane@example.com"]
+    assert candidate.title is None
+    assert candidate.location_raw is None
+    assert candidate.description == "Contact [REDACTED_EMAIL]"
+
+
 # ---------------------------------------------------------------------------
 # _has_meaningful_text / _is_usable_detail_candidate
 # ---------------------------------------------------------------------------
@@ -657,6 +711,58 @@ async def test_fetch_board_skips_unsanitizable_record_without_discarding_earlier
     assert "sanitization failed" in captured.err
 
 
+async def test_fetch_board_skips_mixed_encoding_failure_but_returns_later_declared_mode_record(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A genuine `_fetch_board` run (`httpx.MockTransport`) under
+    `declared-double-escaped` mode with two selected detail records:
+    job 1's content mixes literal and escaped markup (rejected
+    `mixed-literal-and-escaped-markup`) and must be skipped without
+    aborting the board; job 2's content is genuinely double-escaped and
+    must still be fetched, converted, and returned."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.endswith("/jobs"):
+            return _list_response([1, 2])
+        job_id = int(path.rsplit("/", 1)[-1])
+        if job_id == 1:
+            return httpx.Response(
+                200,
+                headers={"content-type": "application/json"},
+                json={
+                    "id": 1,
+                    "title": "Broken",
+                    "content": "<p>Hello &lt;b&gt;world&lt;/b&gt;</p>",
+                },
+            )
+        return httpx.Response(
+            200,
+            headers={"content-type": "application/json"},
+            json={
+                "id": 2,
+                "title": "Valid",
+                "content": "&lt;p&gt;Second job description&lt;/p&gt;",
+            },
+        )
+
+    spec = _spec(
+        "board_a",
+        "A",
+        content_mode="declared-double-escaped",
+        mode_basis_ref="prior-capture:abc123",
+    )
+    async with _mock_client(handler) as client:
+        candidates = await fetcher._fetch_board(
+            spec, client=client, run_budget=fetcher._RunBudget(max_total_bytes=10**9)
+        )
+
+    assert [c.job_id for c in candidates] == ["2"]
+    assert candidates[0].description == "Second job description"
+    captured = capsys.readouterr()
+    assert "sanitization failed" in captured.err
+
+
 async def test_run_acquisition_does_not_count_missing_title_or_content_as_board_success(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -910,6 +1016,34 @@ def test_board_acquisition_spec_rejects_standard_mode_with_a_basis_ref() -> None
             board_token="acme",
             employer="Acme",
             content_mode="standard",
+            mode_basis_ref="prior-capture:abc123",
+        )
+
+
+def test_board_acquisition_spec_rejects_unknown_mode_with_no_basis_ref() -> None:
+    """Direct construction with an unrecognized `content_mode` must fail
+    closed regardless of static type hints -- never silently accepted
+    just because `mode_basis_ref` happens to be `None` (which the old
+    `if content_mode == "declared-double-escaped" / elif mode_basis_ref
+    is not None` chain let slip through with no error at all)."""
+    with pytest.raises(ValueError, match="content_mode must be one of"):
+        BoardAcquisitionSpec(
+            board_token="acme",
+            employer="Acme",
+            content_mode="not-a-real-mode",  # type: ignore[arg-type]
+            mode_basis_ref=None,
+        )
+
+
+def test_board_acquisition_spec_rejects_unknown_mode_with_a_basis_ref() -> None:
+    """Same as above, but with a non-`None` `mode_basis_ref` -- the old
+    code would have raised the wrong (misleading) error here, since it
+    never checked `content_mode` against the closed set at all."""
+    with pytest.raises(ValueError, match="content_mode must be one of"):
+        BoardAcquisitionSpec(
+            board_token="acme",
+            employer="Acme",
+            content_mode="not-a-real-mode",  # type: ignore[arg-type]
             mode_basis_ref="prior-capture:abc123",
         )
 

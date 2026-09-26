@@ -184,6 +184,11 @@ class BoardAcquisitionSpec:
     mode_basis_ref: str | None
 
     def __post_init__(self) -> None:
+        if self.content_mode not in _VALID_CONTENT_MODES:
+            raise ValueError(
+                f"content_mode must be one of {sorted(_VALID_CONTENT_MODES)}, "
+                f"got {self.content_mode!r}"
+            )
         if self.content_mode == "declared-double-escaped":
             if self.mode_basis_ref is None or not _MODE_BASIS_REF_RE.fullmatch(self.mode_basis_ref):
                 raise ValueError(

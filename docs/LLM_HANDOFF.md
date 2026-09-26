@@ -98,121 +98,6 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-09-20, Claude Code (Sonnet 5). Risk class **H** (same
-  slice, same authorization). Base `B` (unchanged for this slice's whole
-  correction lifetime, `7ce4a1d`) -> candidate `C4`: this commit; same
-  branch `phase-3/realistic-evaluation-corpus`, on top of the existing
-  pushed tip `A3 = 18e1d03ea7f8126ca8e3d36e3dfa4f0354d7d612`. `slice_id:
-  2026-09-20-realistic-evaluation-corpus-7ce4a1d` (unchanged). Addresses
-  Sol's C3/A3 re-review, which confirmed all three prior mechanisms
-  correct but found one remaining High evidence-integrity finding on
-  `C3 = 5aa1a57271b2317885e154e0de5e7b4cd183d94e` / `A3 =
-  18e1d03ea7f8126ca8e3d36e3dfa4f0354d7d612`, both of which remain
-  unamended, still pushed, still present in history exactly as they
-  were; the `C3`/`A3` receipt cycle
-  (`c394be69-b724-44ab-8e26-05bdce25cfba`) is superseded and
-  non-reusable as of this entry. No network contact, board-token
-  request, corpus acquisition, `R`, merge, `M`/`Q`, parser-semantic
-  change, database work, or fetcher change performed.
-- **Finding (contradictory scored label, evidence integrity)**: the
-  loader enforced only one direction of the outcome/value invariant --
-  "any outcome other than `present_supported` requires a null
-  `expected_value`" -- but never its converse. `outcome=
-  "present_supported"` with `expected_value=null`/`expected_provenance=
-  "unavailable"` (Sol reproduced this through `load_corpus`) silently
-  loaded despite being self-contradictory: `present_supported` means
-  the parser is expected to return a real value, while null/unavailable
-  means expected abstention. Left uncorrected, such a record corrupts
-  `supported_correctness`/`supported_abstention`'s shared denominator
-  downstream.
-- **Fix**: added `_validate_scored_label`, one function now shared
-  identically by every place a scalar/composite-component scored label
-  is checked -- the primary annotation (via `_validate_scalar_
-  annotation_shape`), `disagreement.second_annotation` (the same
-  function, `allow_disagreement=False`), and `disagreement.
-  adjudication`'s resolved `final_outcome`/`final_value`/
-  `final_provenance` triple (via `_validate_scalar_disagreement`,
-  passing `outcome_field="final_outcome"` etc. so error messages still
-  name the real JSON keys) -- so none of the three can ever drift into
-  different rules. The new check is exactly bidirectional:
-  `(outcome == "present_supported") != (expected_value is not None)`
-  raises. The two previously-duplicated inline invariant blocks (one in
-  the annotation-shape validator, one in the disagreement validator)
-  are deleted outright, not left behind alongside the new function.
-  Skill-id annotations are outcome-only and were correctly left
-  untouched -- no `expected_value`/`expected_provenance` concept
-  applies to them.
-- **Regressions added** (3 rejections + 2 positive controls, all new):
-  `test_load_corpus_rejects_present_supported_with_null_value` (the
-  exact reproduced defect, on the primary annotation);
-  `test_load_corpus_rejects_second_annotation_present_supported_with_null_value`;
-  `test_load_corpus_rejects_adjudication_present_supported_with_null_value`
-  (traced to confirm each raises from the new bidirectional check
-  specifically, not some other already-invalid field in the same
-  constructed record); `test_load_corpus_accepts_present_supported_with_non_null_value`
-  and `test_load_corpus_accepts_absent_with_null_value` (the two valid,
-  non-contradictory directions of the same invariant). One pre-existing
-  test, `test_load_corpus_accepts_disagreement_differing_only_in_outcome`,
-  previously relied on a now-invalid `present_supported`/null/
-  unavailable primary label to build an "outcome-only difference"
-  disagreement; corrected to use `absent`/`ambiguous` (both non-
-  `present_supported`, both null/unavailable) instead, preserving a
-  genuine differing-outcome disagreement under the new invariant.
-- **Mutation-proved**: temporarily reverted the new bidirectional check
-  in `_validate_scored_label` back to the old one-directional form
-  (`outcome != "present_supported" and expected_value is not None`) and
-  reran the full focused suite -- exactly the 3 new rejection tests
-  failed (one of the three, the adjudication case, failed via a
-  different, still-correctly-firing consistency check rather than a
-  false pass -- confirming the mutation genuinely disabled the intended
-  guard rather than the test being vacuous), all other 57 tests still
-  passed; restored the fix and reran to confirm 60/60 pass again.
-- **Adversarial self-review**: a dedicated pass traced every check in
-  `_validate_scored_label` in order, confirmed no `bool()`/truthiness
-  substitutes for `is None`/`is not None` anywhere, confirmed all three
-  call sites actually reach the centralized function on every path with
-  no duplicated/contradicting inline check remaining, confirmed the
-  skill-id path was untouched, and traced both new rejection-by-
-  disagreement tests field-by-field against the exact validation order
-  to confirm each raises for the intended reason. No defect requiring a
-  further change was found.
-- Files changed: `backend/scripts/evaluate_phase3_corpus.py` (the
-  centralized `_validate_scored_label` function and its three call
-  sites), `backend/tests/test_evaluate_phase3_corpus.py` (60 tests, up
-  from 55), `docs/LLM_HANDOFF.md` (this entry, plus the iteration
-  rotation above). No other file touched -- no fetcher change, no
-  network contact, no board-token request, no corpus acquisition, no
-  parser-semantic change, no database work, no workflow-tooling change.
-- **Two-iteration rotation applied**: the oldest iteration (the
-  `C2`/`A2` correction) is deleted; the former Iteration 2 (the
-  `C3`/`A3` correction) is renumbered to Iteration 1, unchanged in
-  content; this correction becomes Iteration 2.
-- Verification: pending — see the workflow-metadata block below and the
-  publication (`A4`) entry that will follow it.
-
-```workflow-metadata
-workflow_version: v3.2
-state: published
-slice_id: 2026-09-20-realistic-evaluation-corpus-7ce4a1d
-slice_kind: tooling
-risk_class: H
-base_sha: 7ce4a1dc770827653ccf8140188c5d1dec6621d8
-declared_gate: final
-executed_gate: final
-candidate_sha: 61a18819abb509ab0a5f74c60924cc968dc1499f
-receipt_id: 16ea83c7-ea7a-4a5e-aea8-e53e3c4b8c1a
-receipt_path: docs/verification-receipts/61a18819abb509ab0a5f74c60924cc968dc1499f/16ea83c7-ea7a-4a5e-aea8-e53e3c4b8c1a.json
-full_suite_count: 3004
-focused_test_count: 218
-mutation_witness_count: 34
-```
-
----
-
-## Iteration 2
-
-### Work done
-
 - Date/agent: 2026-09-24, Claude Code (Sonnet 5). Risk class **H** (same
   slice, same authorization). Base `B` (unchanged for this slice's whole
   correction lifetime, `7ce4a1d`) -> candidate `C5`: this commit; same
@@ -321,4 +206,120 @@ receipt_path: docs/verification-receipts/e5a72f6926b826ca9af8cdb93e5368d1fb8ddae
 full_suite_count: 3048
 focused_test_count: 262
 mutation_witness_count: 34
+```
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-09-26, Claude Code (Sonnet 5). Risk class **H** (same
+  slice, same authorization). Base `B` (unchanged for this slice's whole
+  correction lifetime, `7ce4a1d`) -> candidate `C6`: this commit; same
+  branch `phase-3/realistic-evaluation-corpus`, on top of the existing
+  pushed tip `A5 = 58de6976d72a370a871882f069bf74abcc1e1a1c`. `slice_id:
+  2026-09-20-realistic-evaluation-corpus-7ce4a1d` (unchanged). One
+  bounded correction round for Sol's three findings on `C5 =
+  e5a72f6926b826ca9af8cdb93e5368d1fb8ddae8` / `A5 =
+  58de6976d72a370a871882f069bf74abcc1e1a1c`, both of which remain
+  unamended, still pushed, still present in history exactly as they
+  were; the `C5`/`A5` receipt cycle
+  (`59ee72fa-ca86-4596-bf9c-a8e971cf9ed2`) is superseded and
+  non-reusable as of this entry. No proposal rewrite, no new semantics,
+  no network contact, board-token request, corpus acquisition, staged/
+  review-artifact change, parser/taxonomy change, evaluation-label
+  change, database work, or workflow-tooling change.
+- **Finding 1 (uppercase angle-entity bypass)**: `_ESCAPED_ANGLE_
+  REFERENCE_RE` and `_UNTERMINATED_NAMED_ANGLE_RE` only recognized
+  lowercase `lt`/`gt`, but `html.unescape()` also decodes the all-
+  uppercase aliases `&LT;`/`&GT;` (and their semicolonless legacy forms)
+  to `<`/`>` -- confirmed empirically -- so a double-encoded document
+  using the uppercase spelling could bypass both the mixed-content and
+  residual-nested-encoding checks entirely. Fixed by adding `|LT|GT` to
+  both regex alternations, exactly as specified; the mixed-case `&Lt;`/
+  `&Gt;` (real, distinct, unrelated named entities, U+226A/U+226B) are
+  confirmed to still not match either regex. Nine new regressions cover
+  uppercase acceptance, uppercase mixed-content rejection, uppercase
+  semicolonless-form rejection (both a followed-by-more-text and a bare
+  form), uppercase nested-encoding rejection, and non-classification of
+  the mixed-case entities -- full parity with the existing lowercase
+  coverage.
+- **Finding 2 (unknown `content_mode` bypass)**:
+  `BoardAcquisitionSpec.__post_init__`'s `if content_mode ==
+  "declared-double-escaped": ... elif mode_basis_ref is not None: raise
+  ...` let an unrecognized `content_mode` string with `mode_basis_ref=
+  None` fall through both branches and construct successfully with no
+  validation at all; with a non-`None` `mode_basis_ref` it raised the
+  wrong, misleading message ("must be None when content_mode is
+  'standard'") even though the mode wasn't `"standard"`. Fixed by adding
+  an explicit `content_mode not in _VALID_CONTENT_MODES` check as the
+  first statement in `__post_init__`, before the mode/basis logic --
+  independent of the CLI parser and of static type hints. Two new
+  regressions cover both invalid combinations.
+- **Finding 3 (three required caller-level proofs, previously
+  missing)**: (1) a synthetic outer-encoded description whose email and
+  phone are built from numeric character references (`&#64;` for '@',
+  `&#53;` for the phone's leading digit) at the original single-encoded
+  source, then escaped one further layer -- neither the raw `content`
+  field nor the single permitted `html.unescape()` output ever contains
+  a literal '@' or '555' (confirmed empirically); both only become
+  literal via `HTMLParser(convert_charrefs=True)`'s own entity decoding
+  during HTML-to-text extraction, a third, separate decoding mechanism.
+  Both are correctly redacted in the final description. (2) A spy
+  around `_redact_contact_patterns` proving description redaction is
+  called exactly once, with the final converted text -- the payload has
+  no `title`/`location` keys, so neither triggers its own independent
+  call that could confound the count. (3) A genuine `_fetch_board` test
+  (via `httpx.MockTransport`) under `declared-double-escaped` mode with
+  two selected detail records: the first mixes literal and escaped
+  markup and is correctly rejected/skipped without aborting the board;
+  the second is genuinely once-escaped valid content and is fetched,
+  converted, and returned.
+- **Adversarial self-review**: a dedicated pass traced the uppercase
+  regex fix character-by-character against `html.unescape()`'s actual
+  behavior (no `re.IGNORECASE` flag present; the fix is precisely
+  scoped, no over- or under-matching), confirmed the `__post_init__`
+  ordering guarantee and that `_parse_board_arg`'s own mode check is
+  legitimate defense-in-depth rather than dead code, and independently
+  re-derived all three Finding-3 test claims rather than trusting their
+  docstrings. One gap found and closed before this commit: the new
+  uppercase-form tests had no equivalent of the existing lowercase
+  `residual-nested-encoding`/bare-semicolonless-form tests; added
+  `test_declared_mode_rejects_uppercase_nested_named_encoding` and
+  `test_declared_mode_rejects_bare_uppercase_semicolonless_form` for
+  full parity.
+- **Mutation-proved**: temporarily reverted the Finding-1 regex change
+  (dropped `|LT|GT` from both constants) and reran the html-convert
+  suite -- exactly the 3 uppercase-rejection tests failed (the
+  uppercase-success test does not require the fix, since decoding
+  itself is unaffected -- only the *validation* regexes changed), all
+  other tests unaffected; restored and confirmed all pass again.
+  Temporarily reverted the Finding-2 `__post_init__` ordering fix and
+  reran the fetcher suite -- exactly the 2 new
+  `test_board_acquisition_spec_rejects_unknown_mode_*` tests failed
+  (one with a silent non-raise, one with the old misleading message,
+  matching the exact defect described above), all other tests
+  unaffected; restored and confirmed all pass again.
+- Files changed: `backend/scripts/greenhouse_html_convert.py` (regex
+  fix), `backend/scripts/fetch_greenhouse_evaluation_postings.py`
+  (`__post_init__` ordering fix), `backend/tests/
+  test_greenhouse_html_convert.py` (49 -> 58 tests),
+  `backend/tests/test_fetch_greenhouse_evaluation_postings.py` (81 ->
+  86 tests), `docs/LLM_HANDOFF.md` (this entry, plus the iteration
+  rotation above). `docs/DECISIONS/0010-realistic-evaluation-corpus-
+  methodology.md` not touched this round -- no design/semantic change,
+  only bug fixes and test completeness within the already-documented
+  contract.
+- Verification: pending — see the workflow-metadata block below and the
+  publication (`A6`) entry that will follow it.
+
+```workflow-metadata
+workflow_version: v3.2
+state: pending
+slice_id: 2026-09-20-realistic-evaluation-corpus-7ce4a1d
+slice_kind: tooling
+risk_class: H
+base_sha: 7ce4a1dc770827653ccf8140188c5d1dec6621d8
+declared_gate: final
 ```

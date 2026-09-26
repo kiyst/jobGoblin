@@ -32,12 +32,15 @@ all):
    `"mixed-literal-and-escaped-markup"`) if the raw input contains a
    literal `<`/`>` character *and* an escaped-angle-reference-shaped
    substring simultaneously -- never guessed at; also reject
-   (`"unsupported-angle-reference"`) if a semicolonless named `&lt`/`&gt`
-   form is present anywhere, since its interaction with
-   `html.unescape()`'s own legacy matching against a longer entity name
-   sharing the same prefix (e.g. `&ltimes;`, a real, distinct, unrelated
-   named reference) is not trusted to be safe -- every such form is
-   rejected regardless of what follows it.
+   (`"unsupported-angle-reference"`) if a semicolonless named
+   `&lt`/`&gt`/`&LT`/`&GT` form is present anywhere -- exactly the four
+   spellings `html.unescape()` itself decodes to `<`/`>` (confirmed
+   empirically; the mixed-case `&Lt`/`&Gt` are separate, unrelated named
+   references and are never treated as angle references at all) -- since
+   its interaction with `html.unescape()`'s own legacy matching against a
+   longer entity name sharing the same prefix (e.g. `&ltimes;`, a real,
+   distinct, unrelated named reference) is not trusted to be safe --
+   every such form is rejected regardless of what follows it.
 2. Exactly one `html.unescape()` call -- the stdlib's own well-defined
    semantics for named, decimal, and hexadecimal character references,
    including its legacy semicolon-optional behavior. No hand-rolled
@@ -125,14 +128,19 @@ _VALID_CONTENT_MODES = frozenset({"standard", "declared-double-escaped"})
 
 # Shared by stages 1 and 3 -- see the module docstring's "Processing
 # stages" section. Fixed exactly as specified; never modified ad hoc.
+# `lt`/`gt`/`LT`/`GT` are exactly the four named-reference spellings
+# Python's `html.unescape()` decodes to `<`/`>` (confirmed empirically);
+# the mixed-case spellings `Lt`/`Gt` are separate, unrelated HTML5 named
+# references (`&Lt;` -> U+226A, `&Gt;` -> U+226B) and must never be
+# treated as angle references.
 _ESCAPED_ANGLE_REFERENCE_RE = re.compile(
     r"(?:"
-    r"&(?:lt|gt);"
+    r"&(?:lt|gt|LT|GT);"
     r"|&#(?:0*60|0*62)(?:;|(?=[^0-9]|$))"
     r"|&#[xX](?:0*3[cC]|0*3[eE])(?:;|(?=[^0-9A-Fa-f]|$))"
     r")"
 )
-_UNTERMINATED_NAMED_ANGLE_RE = re.compile(r"&(?:lt|gt)(?!;)")
+_UNTERMINATED_NAMED_ANGLE_RE = re.compile(r"&(?:lt|gt|LT|GT)(?!;)")
 
 
 class _BlockAwareTextExtractor(HTMLParser):
@@ -226,11 +234,12 @@ class HtmlDoubleEncodingError(HtmlConversionError):
     - `"mixed-literal-and-escaped-markup"` -- the raw input contains a
       literal angle bracket *and* an escaped-angle-reference-shaped
       substring simultaneously; ambiguous, never guessed at.
-    - `"unsupported-angle-reference"` -- a semicolonless named `&lt`/`&gt`
-      form is present (raw or post-decode); its interaction with
-      `html.unescape()`'s own legacy matching against a longer entity
-      name sharing the same prefix is not trusted to be safe, so every
-      such form is rejected regardless of what follows it.
+    - `"unsupported-angle-reference"` -- a semicolonless named
+      `&lt`/`&gt`/`&LT`/`&GT` form is present (raw or post-decode); its
+      interaction with `html.unescape()`'s own legacy matching against a
+      longer entity name sharing the same prefix is not trusted to be
+      safe, so every such form is rejected regardless of what follows
+      it.
     - `"residual-nested-encoding"` -- the one permitted decode still left
       a fully-terminated escaped-angle-reference-shaped substring behind
       (see the module docstring's accepted-limitation note).
