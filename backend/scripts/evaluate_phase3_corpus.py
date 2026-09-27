@@ -250,7 +250,11 @@ def _is_valid_aware_timestamp(value: Any) -> bool:
 # components, non-empty str for free-text components. Never a bare
 # `isinstance(x, str | int)`, which would silently accept a `bool` (an
 # `int` subtype in Python) or a value from the wrong parser's vocabulary.
-_EXPECTED_VALUE_VALIDATORS: dict[str, Callable[[Any], bool]] = {
+#
+# Public (no leading underscore) so `freeze_phase3_realistic_corpus.py` can
+# import and reuse this exact authoritative vocabulary for pass/adjudication
+# validation, rather than maintaining a second, independently-drifting copy.
+EXPECTED_VALUE_VALIDATORS: dict[str, Callable[[Any], bool]] = {
     "remote_type": lambda v: v in {"remote", "hybrid", "onsite"},
     "employment_type": lambda v: v in {"full_time", "part_time", "seasonal", "internship"},
     "seniority": lambda v: v
@@ -387,7 +391,7 @@ def _validate_scored_label(
         raise CorpusValidationError(
             f"{context}.{outcome_field} must be one of {sorted(_VALID_OUTCOMES)}, got {outcome!r}"
         )
-    validator = _EXPECTED_VALUE_VALIDATORS[value_key]
+    validator = EXPECTED_VALUE_VALIDATORS[value_key]
     if expected_value is not None and not validator(expected_value):
         raise CorpusValidationError(f"{context}.{value_field} is not valid for {value_key!r}")
     if expected_provenance not in _VALID_PROVENANCE_VALUES:

@@ -84,7 +84,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import sys
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -98,7 +100,20 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from app.normalization.taxonomy import load_taxonomy  # noqa: E402
-from scripts.evaluate_phase3_corpus import CorpusValidationError, load_corpus  # noqa: E402
+
+# `_reject_duplicate_keys` is private in evaluate_phase3_corpus.py, but it is
+# the one authoritative fail-closed strict-JSON mechanism this whole corpus
+# pipeline relies on (Sol finding F3) -- imported directly rather than
+# re-implemented, so both modules can never silently drift onto different
+# duplicate-key behavior. `EXPECTED_VALUE_VALIDATORS` is public there
+# specifically so this module can reuse the same per-field vocabulary
+# (Sol finding F5) instead of maintaining a second copy.
+from scripts.evaluate_phase3_corpus import (  # noqa: E402
+    EXPECTED_VALUE_VALIDATORS,
+    CorpusValidationError,
+    _reject_duplicate_keys,
+    load_corpus,
+)
 
 DEFAULT_SALVAGE_PATH = (
     BACKEND_DIR / ".evaluation-staging" / "greenhouse_candidates_second_pass_review.json"
@@ -109,7 +124,7 @@ DEFAULT_CORPUS_OUTPUT_PATH = (
     BACKEND_DIR / "tests" / "fixtures" / "evaluation" / "phase3_realistic_corpus.json"
 )
 
-RUBRIC_VERSION = "1.0.0"
+RUBRIC_VERSION = "1.0.1"
 EXPECTED_SALVAGE_SHA256 = "1273b6eafd42d05898520a783ad94f063da4507e8c00f3c4da86a3273b36fd6a"
 EXPECTED_RECORD_COUNT = 30
 
@@ -140,6 +155,12 @@ _REQUIRED_PASS_TOP_FIELDS = frozenset(
     }
 )
 _VALID_ANNOTATOR_ROLES = frozenset({"claude", "sol"})
+
+# Sol finding F4: adjudication and auditing are personal user decisions,
+# never an agent/model identity -- enforced by exact match, not merely
+# "non-empty string", before either `adjudicated:user`/`agreed` labeling or
+# an "overturned" verdict is ever trusted.
+_REQUIRED_HUMAN_IDENTITY = "user"
 
 
 class FreezeBuilderError(Exception):
@@ -253,7 +274,23 @@ class AnnotationPass:
     records: dict[str, dict[str, Any]]
 
 
-def _validate_raw_label(label: Any, *, is_skill: bool, context: str) -> None:
+def _validate_expected_value_for_field(
+    value_key: str, expected_value: Any, *, context: str
+) -> None:
+    """Sol finding F5: field-aware value validation reusing
+    `evaluate_phase3_corpus.EXPECTED_VALUE_VALIDATORS` -- the exact same
+    per-field vocabulary the committed corpus loader enforces -- applied at
+    pass/adjudication load time, before any human audit work begins,
+    instead of only being discovered later by `build_corpus`'s end-of-
+    pipeline `load_corpus` self-check."""
+    if expected_value is None:
+        return
+    validator = EXPECTED_VALUE_VALIDATORS[value_key]
+    if not validator(expected_value):
+        raise FreezeBuilderError(f"{context}.expected_value is not valid for {value_key!r}")
+
+
+def _validate_raw_label(label: Any, *, is_skill: bool, value_key: str | None, context: str) -> None:
     if not isinstance(label, dict):
         raise FreezeBuilderError(f"{context} must be a JSON object")
     allowed = _RAW_SKILL_LABEL_FIELDS if is_skill else _RAW_SCALAR_LABEL_FIELDS
@@ -264,6 +301,7 @@ def _validate_raw_label(label: Any, *, is_skill: bool, context: str) -> None:
             f"{context}.outcome must be one of {sorted(_VALID_OUTCOMES)}, got {label['outcome']!r}"
         )
     if not is_skill:
+        assert value_key is not None  # every non-skill label path has one
         has_value = label["expected_value"] is not None
         is_supported = label["outcome"] == "present_supported"
         if has_value != is_supported:
@@ -279,6 +317,7 @@ def _validate_raw_label(label: Any, *, is_skill: bool, context: str) -> None:
             raise FreezeBuilderError(
                 f"{context}.expected_provenance must be 'unavailable' when expected_value is null"
             )
+        _validate_expected_value_for_field(value_key, label["expected_value"], context=context)
 
 
 def load_annotation_pass(
@@ -294,9 +333,11 @@ def load_annotation_pass(
     any structural defect, any declared-metadata mismatch, or an incomplete
     inventory -- never silently accepts a partial or malformed pass."""
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        raw = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_reject_duplicate_keys)
     except json.JSONDecodeError as exc:
         raise FreezeBuilderError(f"{path} is not valid JSON: {exc}") from exc
+    except CorpusValidationError as exc:
+        raise FreezeBuilderError(f"{path}: {exc}") from exc
     if not isinstance(raw, dict) or set(raw) != _REQUIRED_PASS_TOP_FIELDS:
         raise FreezeBuilderError(f"{path} must declare exactly {sorted(_REQUIRED_PASS_TOP_FIELDS)}")
 
@@ -338,9 +379,11 @@ def load_annotation_pass(
             raise FreezeBuilderError(f"{path}: records[{record_id!r}] must be a JSON object")
         for label_path in label_paths:
             label = _get_raw_label(record_annotations, label_path)
+            is_skill = _is_skill_path(label_path)
             _validate_raw_label(
                 label,
-                is_skill=_is_skill_path(label_path),
+                is_skill=is_skill,
+                value_key=None if is_skill else ".".join(label_path),
                 context=f"{path}: records[{record_id!r}].{'.'.join(label_path)}",
             )
         # Exhaustiveness: exactly the expected leaf-label count, no more.
@@ -407,16 +450,17 @@ _VALID_AUDIT_RESULTS = frozenset({"confirmed", "overturned"})
 
 
 def _final_label_from_adjudication(
-    adjudication: Any, *, is_skill: bool, context: str
+    adjudication: Any, *, is_skill: bool, value_key: str | None, context: str
 ) -> dict[str, Any]:
     required = (
         _REQUIRED_SKILL_ADJUDICATION_FIELDS if is_skill else _REQUIRED_SCALAR_ADJUDICATION_FIELDS
     )
     if not isinstance(adjudication, dict) or set(adjudication) != required:
         raise FreezeBuilderError(f"{context}.adjudication must declare exactly {sorted(required)}")
-    if not isinstance(adjudication["adjudicated_by"], str) or not adjudication["adjudicated_by"]:
+    if adjudication["adjudicated_by"] != _REQUIRED_HUMAN_IDENTITY:
         raise FreezeBuilderError(
-            f"{context}.adjudication.adjudicated_by must be a non-empty string"
+            f"{context}.adjudication.adjudicated_by must be {_REQUIRED_HUMAN_IDENTITY!r} -- "
+            "adjudication is a personal user decision, never an agent or model identity"
         )
     if not _is_valid_aware_timestamp(adjudication["adjudicated_at"]):
         raise FreezeBuilderError(
@@ -427,6 +471,7 @@ def _final_label_from_adjudication(
         raise FreezeBuilderError(f"{context}.adjudication.final_outcome is not a known outcome")
     if is_skill:
         return {"outcome": final_outcome}
+    assert value_key is not None  # every non-skill label path has one
     final_value = adjudication["final_value"]
     final_provenance = adjudication["final_provenance"]
     has_value = final_value is not None
@@ -446,6 +491,7 @@ def _final_label_from_adjudication(
             f"{context}.adjudication.final_provenance must be 'unavailable' when "
             "final_value is null"
         )
+    _validate_expected_value_for_field(value_key, final_value, context=f"{context}.adjudication")
     return {
         "outcome": final_outcome,
         "expected_value": final_value,
@@ -511,9 +557,11 @@ def load_adjudication_audit(
     actually differs from the previously agreed label; a `confirmed` entry
     must not also be recorded as a disagreement."""
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        raw = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_reject_duplicate_keys)
     except json.JSONDecodeError as exc:
         raise FreezeBuilderError(f"{path} is not valid JSON: {exc}") from exc
+    except CorpusValidationError as exc:
+        raise FreezeBuilderError(f"{path}: {exc}") from exc
     if not isinstance(raw, dict) or set(raw) != _REQUIRED_ADJUDICATION_AUDIT_TOP_FIELDS:
         raise FreezeBuilderError(
             f"{path} must declare exactly {sorted(_REQUIRED_ADJUDICATION_AUDIT_TOP_FIELDS)}"
@@ -564,7 +612,10 @@ def load_adjudication_audit(
         label_path = tuple(label_path_str.split("."))
         is_skill = _is_skill_path(label_path)
         final_label = _final_label_from_adjudication(
-            entry["adjudication"], is_skill=is_skill, context=f"{path}: disagreements[{key!r}]"
+            entry["adjudication"],
+            is_skill=is_skill,
+            value_key=None if is_skill else label_path_str,
+            context=f"{path}: disagreements[{key!r}]",
         )
         if key in spurious_disagreement_keys:
             claude_label, sol_label = agreements[key]
@@ -593,9 +644,11 @@ def load_adjudication_audit(
                 f"{path}: audited_agreements[{key!r}] must declare exactly "
                 f"{sorted(_REQUIRED_AUDIT_ENTRY_FIELDS)}"
             )
-        if not isinstance(entry["audited_by"], str) or not entry["audited_by"]:
+        if entry["audited_by"] != _REQUIRED_HUMAN_IDENTITY:
             raise FreezeBuilderError(
-                f"{path}: audited_agreements[{key!r}].audited_by must be non-empty"
+                f"{path}: audited_agreements[{key!r}].audited_by must be "
+                f"{_REQUIRED_HUMAN_IDENTITY!r} -- auditing is a personal user decision, never "
+                "an agent or model identity"
             )
         if not _is_valid_aware_timestamp(entry["audited_at"]):
             raise FreezeBuilderError(
@@ -749,6 +802,11 @@ def build_corpus(
     authoritative self-check propagate) on any failure -- never leaves a
     partially-written or invalid corpus file behind."""
     if output_path.exists():
+        # Fast fail only -- avoids the (potentially expensive) work below
+        # when the destination obviously already exists. The actual
+        # create-if-absent guarantee is `_write_corpus_atomic`'s `os.link`,
+        # not this check, since another writer could still create
+        # `output_path` after this point (Sol finding F6).
         raise FreezeBuilderError(f"{output_path} already exists -- refusing to overwrite")
 
     actual_salvage_sha256 = _sha256_file(salvage_path)
@@ -832,9 +890,11 @@ def build_corpus(
             claude_label = _get_raw_label(claude_pass.records[record_id], label_path)
             sol_label = _get_raw_label(sol_pass.records[record_id], label_path)
             if key in adjudication_audit.disagreements:
+                is_skill = _is_skill_path(label_path)
                 final_label = _final_label_from_adjudication(
                     adjudication_audit.disagreements[key]["adjudication"],
-                    is_skill=_is_skill_path(label_path),
+                    is_skill=is_skill,
+                    value_key=None if is_skill else ".".join(label_path),
                     context=f"disagreements[{key!r}]",
                 )
                 merged = _merge_adjudicated_label(
@@ -887,23 +947,51 @@ def build_corpus(
             }
         )
 
-    tmp_output_path = output_path.with_name(output_path.name + ".tmp")
-    if tmp_output_path.exists():
-        raise FreezeBuilderError(f"{tmp_output_path} already exists -- remove it before retrying")
-    tmp_output_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_output_path.write_text(
-        json.dumps(corpus_records, indent=2, sort_keys=True, ensure_ascii=False), encoding="utf-8"
-    )
-    try:
-        load_corpus(tmp_output_path, known_canonical_ids=known_canonical_ids)
-    except CorpusValidationError:
-        tmp_output_path.unlink()
-        raise
-    if output_path.exists():
-        tmp_output_path.unlink()
-        raise FreezeBuilderError(f"{output_path} already exists -- refusing to overwrite")
-    tmp_output_path.rename(output_path)
+    _write_corpus_atomic(output_path, corpus_records, known_canonical_ids=known_canonical_ids)
     return output_path
+
+
+def _write_corpus_atomic(
+    output_path: Path, corpus_records: list[dict[str, Any]], *, known_canonical_ids: frozenset[str]
+) -> None:
+    """Sol finding F6: an existence check followed by `Path.rename()` is not
+    atomic create-only -- another writer can create `output_path` in the
+    window between the check and the rename, and `rename()`/`os.replace()`
+    would then silently overwrite it. Mirrors `verification_receipts.
+    write_receipt_atomic`'s proven primitive instead: a same-directory temp
+    file, written and fsynced, validated in place by the real
+    `evaluate_phase3_corpus.load_corpus` self-check, then published via
+    `os.link` -- which the filesystem itself refuses with `FileExistsError`
+    if `output_path` already exists, so the create-if-absent guarantee is
+    the filesystem's, not a race-prone check-then-act in this process."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(corpus_records, indent=2, sort_keys=True, ensure_ascii=False)
+
+    fd, temp_name = tempfile.mkstemp(
+        dir=str(output_path.parent), prefix=".phase3-realistic-corpus-", suffix=".tmp"
+    )
+    temp_path = Path(temp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+
+        load_corpus(temp_path, known_canonical_ids=known_canonical_ids)
+
+        try:
+            os.link(temp_path, output_path)
+        except FileExistsError as exc:
+            raise FreezeBuilderError(
+                f"{output_path} already exists -- create-only, refusing to overwrite"
+            ) from exc
+        except OSError as exc:
+            raise FreezeBuilderError(
+                f"atomic create-if-absent write unavailable for {output_path} "
+                f"({type(exc).__name__}) -- failing closed, no overwrite fallback"
+            ) from exc
+    finally:
+        temp_path.unlink(missing_ok=True)
 
 
 def main(argv: list[str] | None = None) -> int:

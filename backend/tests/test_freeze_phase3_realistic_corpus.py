@@ -943,3 +943,302 @@ def test_build_corpus_rejects_a_non_retained_candidate(tmp_path: Path) -> None:
             adjudication_audit_path=tmp_path / "unused-audit.json",
             output_path=tmp_path / "output" / "corpus.json",
         )
+
+
+# ---------------------------------------------------------------------------
+# F3 -- fail-closed duplicate-JSON-key rejection, every nesting level
+# ---------------------------------------------------------------------------
+def test_load_annotation_pass_rejects_top_level_duplicate_key(tmp_path: Path) -> None:
+    raw = json.dumps(
+        {
+            "schema_version": "1",
+            "annotator_role": "claude",
+            "rubric_version": "1.0.0",
+            "source_packet_hash": "h",
+            "frozen_at": _TS,
+            "records": {"a:1": _record_annotations()},
+        }
+    )
+    injected = raw.replace(
+        '"schema_version": "1"', '"schema_version": "1", "schema_version": "1"', 1
+    )
+    path = tmp_path / "pass-dup.json"
+    path.write_text(injected, encoding="utf-8")
+    with pytest.raises(FreezeBuilderError, match="duplicate JSON key"):
+        load_annotation_pass(path, **_base_pass_kwargs("h"))
+
+
+def test_load_annotation_pass_rejects_nested_duplicate_key(tmp_path: Path) -> None:
+    raw = json.dumps(
+        {
+            "schema_version": "1",
+            "annotator_role": "claude",
+            "rubric_version": "1.0.0",
+            "source_packet_hash": "h",
+            "frozen_at": _TS,
+            "records": {"a:1": _record_annotations()},
+        }
+    )
+    injected = raw.replace('"outcome": "absent"', '"outcome": "absent", "outcome": "absent"', 1)
+    path = tmp_path / "pass-dup-nested.json"
+    path.write_text(injected, encoding="utf-8")
+    with pytest.raises(FreezeBuilderError, match="duplicate JSON key"):
+        load_annotation_pass(path, **_base_pass_kwargs("h"))
+
+
+def test_load_adjudication_audit_rejects_top_level_duplicate_key(tmp_path: Path) -> None:
+    claude_pass, sol_pass = _passes_agreeing_on_everything(["a:1"])
+    raw = json.dumps(
+        {"schema_version": "1", "completed_at": _TS, "disagreements": {}, "audited_agreements": {}}
+    )
+    injected = raw.replace(
+        '"schema_version": "1"', '"schema_version": "1", "schema_version": "1"', 1
+    )
+    path = tmp_path / "audit-dup.json"
+    path.write_text(injected, encoding="utf-8")
+    with pytest.raises(FreezeBuilderError, match="duplicate JSON key"):
+        load_adjudication_audit(
+            path,
+            expected_record_ids=frozenset({"a:1"}),
+            employer_by_record_id={"a:1": "A"},
+            claude_pass=claude_pass,
+            sol_pass=sol_pass,
+            known_canonical_ids=_CANONICAL_IDS,
+        )
+
+
+def test_load_adjudication_audit_rejects_nested_duplicate_key(tmp_path: Path) -> None:
+    claude_pass, sol_pass = _passes_agreeing_on_everything(["a:1"])
+    disagreements = {
+        _artifact_key("a:1", ("remote_type",)): {
+            "adjudication": {
+                "final_outcome": "present_supported",
+                "final_value": "remote",
+                "final_provenance": "parsed_description",
+                "adjudicated_by": "user",
+                "adjudicated_at": _TS,
+            }
+        }
+    }
+    raw = json.dumps(
+        {
+            "schema_version": "1",
+            "completed_at": _TS,
+            "disagreements": disagreements,
+            "audited_agreements": {},
+        }
+    )
+    injected = raw.replace(
+        '"final_outcome": "present_supported"',
+        '"final_outcome": "present_supported", "final_outcome": "present_supported"',
+        1,
+    )
+    path = tmp_path / "audit-dup-nested.json"
+    path.write_text(injected, encoding="utf-8")
+    with pytest.raises(FreezeBuilderError, match="duplicate JSON key"):
+        load_adjudication_audit(
+            path,
+            expected_record_ids=frozenset({"a:1"}),
+            employer_by_record_id={"a:1": "A"},
+            claude_pass=claude_pass,
+            sol_pass=sol_pass,
+            known_canonical_ids=_CANONICAL_IDS,
+        )
+
+
+# ---------------------------------------------------------------------------
+# F4 -- adjudication/audit identity must be exactly the human user, never an
+# agent or model identifier.
+# ---------------------------------------------------------------------------
+def test_load_adjudication_audit_rejects_non_user_adjudicated_by(tmp_path: Path) -> None:
+    claude_records = {"a:1": _record_annotations()}
+    sol_records = {
+        "a:1": _record_annotations(
+            {
+                ("remote_type",): _scalar_label(
+                    outcome="present_supported",
+                    expected_value="remote",
+                    expected_provenance="parsed_description",
+                )
+            }
+        )
+    }
+    claude_pass = AnnotationPass("claude", "1.0.0", "h", _TS, claude_records)
+    sol_pass = AnnotationPass("sol", "1.0.0", "h", _TS, sol_records)
+    disagreements = {
+        _artifact_key("a:1", ("remote_type",)): {
+            "adjudication": {
+                "final_outcome": "present_supported",
+                "final_value": "remote",
+                "final_provenance": "parsed_description",
+                "adjudicated_by": "claude",
+                "adjudicated_at": _TS,
+            }
+        }
+    }
+    path = _write_adjudication_audit(tmp_path, disagreements=disagreements, audited_agreements={})
+    with pytest.raises(FreezeBuilderError, match="adjudicated_by must be 'user'"):
+        load_adjudication_audit(
+            path,
+            expected_record_ids=frozenset({"a:1"}),
+            employer_by_record_id={"a:1": "A"},
+            claude_pass=claude_pass,
+            sol_pass=sol_pass,
+            known_canonical_ids=_CANONICAL_IDS,
+        )
+
+
+def test_load_adjudication_audit_rejects_non_user_audited_by(tmp_path: Path) -> None:
+    claude_pass, sol_pass = _passes_agreeing_on_everything(["a:1"])
+    required, _agreements = _compute_required_audit_keys(
+        expected_record_ids=frozenset({"a:1"}),
+        employer_by_record_id={"a:1": "A"},
+        claude_pass=claude_pass,
+        sol_pass=sol_pass,
+        label_paths=_all_label_paths(),
+    )
+    audited = _auto_audited_agreements(required, audited_by="sol")
+    path = _write_adjudication_audit(tmp_path, disagreements={}, audited_agreements=audited)
+    with pytest.raises(FreezeBuilderError, match="audited_by must be 'user'"):
+        load_adjudication_audit(
+            path,
+            expected_record_ids=frozenset({"a:1"}),
+            employer_by_record_id={"a:1": "A"},
+            claude_pass=claude_pass,
+            sol_pass=sol_pass,
+            known_canonical_ids=_CANONICAL_IDS,
+        )
+
+
+# ---------------------------------------------------------------------------
+# F5 -- field-aware expected-value validation, reusing evaluate_phase3_corpus
+# ---------------------------------------------------------------------------
+def test_load_annotation_pass_rejects_invalid_remote_type_value(tmp_path: Path) -> None:
+    annotations = _record_annotations(
+        {
+            ("remote_type",): _scalar_label(
+                outcome="present_supported",
+                expected_value="not-a-real-remote-type",
+                expected_provenance="parsed_description",
+            )
+        }
+    )
+    path = _write_pass(
+        tmp_path,
+        "claude",
+        annotator_role="claude",
+        source_packet_hash="h",
+        records={"a:1": annotations},
+    )
+    with pytest.raises(FreezeBuilderError, match="not valid for 'remote_type'"):
+        load_annotation_pass(path, **_base_pass_kwargs("h"))
+
+
+def test_load_annotation_pass_rejects_bool_as_int_experience_value(tmp_path: Path) -> None:
+    annotations = _record_annotations(
+        {
+            ("experience", "minimum"): _scalar_label(
+                outcome="present_supported", expected_value=True, expected_provenance="inferred"
+            )
+        }
+    )
+    path = _write_pass(
+        tmp_path,
+        "claude",
+        annotator_role="claude",
+        source_packet_hash="h",
+        records={"a:1": annotations},
+    )
+    with pytest.raises(FreezeBuilderError, match="not valid for 'experience.minimum'"):
+        load_annotation_pass(path, **_base_pass_kwargs("h"))
+
+
+def test_load_adjudication_audit_rejects_invalid_adjudicated_value(tmp_path: Path) -> None:
+    claude_records = {"a:1": _record_annotations()}
+    sol_records = {
+        "a:1": _record_annotations(
+            {
+                ("seniority",): _scalar_label(
+                    outcome="present_supported",
+                    expected_value="senior",
+                    expected_provenance="inferred",
+                )
+            }
+        )
+    }
+    claude_pass = AnnotationPass("claude", "1.0.0", "h", _TS, claude_records)
+    sol_pass = AnnotationPass("sol", "1.0.0", "h", _TS, sol_records)
+    disagreements = {
+        _artifact_key("a:1", ("seniority",)): {
+            "adjudication": {
+                "final_outcome": "present_supported",
+                "final_value": "not-a-real-seniority",
+                "final_provenance": "inferred",
+                "adjudicated_by": "user",
+                "adjudicated_at": _TS,
+            }
+        }
+    }
+    path = _write_adjudication_audit(tmp_path, disagreements=disagreements, audited_agreements={})
+    with pytest.raises(FreezeBuilderError, match="not valid for 'seniority'"):
+        load_adjudication_audit(
+            path,
+            expected_record_ids=frozenset({"a:1"}),
+            employer_by_record_id={"a:1": "A"},
+            claude_pass=claude_pass,
+            sol_pass=sol_pass,
+            known_canonical_ids=_CANONICAL_IDS,
+        )
+
+
+# ---------------------------------------------------------------------------
+# F6 -- genuinely atomic create-only output (temp + fsync + os.link), not a
+# racy existence-check-then-rename.
+# ---------------------------------------------------------------------------
+def test_build_corpus_fails_closed_if_destination_appears_between_preparation_and_publication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Simulates a concurrent writer publishing `output_path` after this
+    process has already written and self-validated its own temp file, but
+    before it links that temp file into place -- the injection point is the
+    real `load_corpus` self-check call, the last thing that runs before
+    `os.link`. Proves the destination is left byte-identical to the
+    concurrent writer's content and no temp file leaks."""
+    import scripts.freeze_phase3_realistic_corpus as freeze_module
+
+    (
+        salvage_path,
+        salvage_sha256,
+        taxonomy_path,
+        rubric_path,
+        pass_claude_path,
+        pass_sol_path,
+        adjudication_audit_path,
+    ) = _build_valid_fixture_set(tmp_path)
+    output_path = tmp_path / "output" / "corpus.json"
+    sentinel = b'{"concurrently-published": "sentinel content, must survive untouched"}'
+    real_load_corpus = freeze_module.load_corpus
+
+    def _racing_load_corpus(path: Path, *, known_canonical_ids: frozenset[str]) -> Any:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(sentinel)
+        return real_load_corpus(path, known_canonical_ids=known_canonical_ids)
+
+    monkeypatch.setattr(freeze_module, "load_corpus", _racing_load_corpus)
+
+    with pytest.raises(FreezeBuilderError, match="already exists"):
+        build_corpus(
+            salvage_path=salvage_path,
+            expected_salvage_sha256=salvage_sha256,
+            taxonomy_path=taxonomy_path,
+            rubric_path=rubric_path,
+            rubric_version="1.0.0",
+            pass_claude_path=pass_claude_path,
+            pass_sol_path=pass_sol_path,
+            adjudication_audit_path=adjudication_audit_path,
+            output_path=output_path,
+        )
+
+    assert output_path.read_bytes() == sentinel
+    leaked_temp_files = list(tmp_path.rglob(".phase3-realistic-corpus-*"))
+    assert leaked_temp_files == []

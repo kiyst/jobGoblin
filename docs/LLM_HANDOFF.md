@@ -98,218 +98,6 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-09-26, Claude Code (Sonnet 5). Risk class **H** (same
-  slice, same authorization). Base `B` (unchanged for this slice's whole
-  correction lifetime, `7ce4a1d`) -> candidate `C6`: this commit; same
-  branch `phase-3/realistic-evaluation-corpus`, on top of the existing
-  pushed tip `A5 = 58de6976d72a370a871882f069bf74abcc1e1a1c`. `slice_id:
-  2026-09-20-realistic-evaluation-corpus-7ce4a1d` (unchanged). One
-  bounded correction round for Sol's three findings on `C5 =
-  e5a72f6926b826ca9af8cdb93e5368d1fb8ddae8` / `A5 =
-  58de6976d72a370a871882f069bf74abcc1e1a1c`, both of which remain
-  unamended, still pushed, still present in history exactly as they
-  were; the `C5`/`A5` receipt cycle
-  (`59ee72fa-ca86-4596-bf9c-a8e971cf9ed2`) is superseded and
-  non-reusable as of this entry. No proposal rewrite, no new semantics,
-  no network contact, board-token request, corpus acquisition, staged/
-  review-artifact change, parser/taxonomy change, evaluation-label
-  change, database work, or workflow-tooling change.
-- **Finding 1 (uppercase angle-entity bypass)**: `_ESCAPED_ANGLE_
-  REFERENCE_RE` and `_UNTERMINATED_NAMED_ANGLE_RE` only recognized
-  lowercase `lt`/`gt`, but `html.unescape()` also decodes the all-
-  uppercase aliases `&LT;`/`&GT;` (and their semicolonless legacy forms)
-  to `<`/`>` -- confirmed empirically -- so a double-encoded document
-  using the uppercase spelling could bypass both the mixed-content and
-  residual-nested-encoding checks entirely. Fixed by adding `|LT|GT` to
-  both regex alternations, exactly as specified; the mixed-case `&Lt;`/
-  `&Gt;` (real, distinct, unrelated named entities, U+226A/U+226B) are
-  confirmed to still not match either regex. Nine new regressions cover
-  uppercase acceptance, uppercase mixed-content rejection, uppercase
-  semicolonless-form rejection (both a followed-by-more-text and a bare
-  form), uppercase nested-encoding rejection, and non-classification of
-  the mixed-case entities -- full parity with the existing lowercase
-  coverage.
-- **Finding 2 (unknown `content_mode` bypass)**:
-  `BoardAcquisitionSpec.__post_init__`'s `if content_mode ==
-  "declared-double-escaped": ... elif mode_basis_ref is not None: raise
-  ...` let an unrecognized `content_mode` string with `mode_basis_ref=
-  None` fall through both branches and construct successfully with no
-  validation at all; with a non-`None` `mode_basis_ref` it raised the
-  wrong, misleading message ("must be None when content_mode is
-  'standard'") even though the mode wasn't `"standard"`. Fixed by adding
-  an explicit `content_mode not in _VALID_CONTENT_MODES` check as the
-  first statement in `__post_init__`, before the mode/basis logic --
-  independent of the CLI parser and of static type hints. Two new
-  regressions cover both invalid combinations.
-- **Finding 3 (three required caller-level proofs, previously
-  missing)**: (1) a synthetic outer-encoded description whose email and
-  phone are built from numeric character references (`&#64;` for '@',
-  `&#53;` for the phone's leading digit) at the original single-encoded
-  source, then escaped one further layer -- neither the raw `content`
-  field nor the single permitted `html.unescape()` output ever contains
-  a literal '@' or '555' (confirmed empirically); both only become
-  literal via `HTMLParser(convert_charrefs=True)`'s own entity decoding
-  during HTML-to-text extraction, a third, separate decoding mechanism.
-  Both are correctly redacted in the final description. (2) A spy
-  around `_redact_contact_patterns` proving description redaction is
-  called exactly once, with the final converted text -- the payload has
-  no `title`/`location` keys, so neither triggers its own independent
-  call that could confound the count. (3) A genuine `_fetch_board` test
-  (via `httpx.MockTransport`) under `declared-double-escaped` mode with
-  two selected detail records: the first mixes literal and escaped
-  markup and is correctly rejected/skipped without aborting the board;
-  the second is genuinely once-escaped valid content and is fetched,
-  converted, and returned.
-- **Adversarial self-review**: a dedicated pass traced the uppercase
-  regex fix character-by-character against `html.unescape()`'s actual
-  behavior (no `re.IGNORECASE` flag present; the fix is precisely
-  scoped, no over- or under-matching), confirmed the `__post_init__`
-  ordering guarantee and that `_parse_board_arg`'s own mode check is
-  legitimate defense-in-depth rather than dead code, and independently
-  re-derived all three Finding-3 test claims rather than trusting their
-  docstrings. One gap found and closed before this commit: the new
-  uppercase-form tests had no equivalent of the existing lowercase
-  `residual-nested-encoding`/bare-semicolonless-form tests; added
-  `test_declared_mode_rejects_uppercase_nested_named_encoding` and
-  `test_declared_mode_rejects_bare_uppercase_semicolonless_form` for
-  full parity.
-- **Mutation-proved**: temporarily reverted the Finding-1 regex change
-  (dropped `|LT|GT` from both constants) and reran the html-convert
-  suite -- exactly the 3 uppercase-rejection tests failed (the
-  uppercase-success test does not require the fix, since decoding
-  itself is unaffected -- only the *validation* regexes changed), all
-  other tests unaffected; restored and confirmed all pass again.
-  Temporarily reverted the Finding-2 `__post_init__` ordering fix and
-  reran the fetcher suite -- exactly the 2 new
-  `test_board_acquisition_spec_rejects_unknown_mode_*` tests failed
-  (one with a silent non-raise, one with the old misleading message,
-  matching the exact defect described above), all other tests
-  unaffected; restored and confirmed all pass again.
-- Files changed: `backend/scripts/greenhouse_html_convert.py` (regex
-  fix), `backend/scripts/fetch_greenhouse_evaluation_postings.py`
-  (`__post_init__` ordering fix), `backend/tests/
-  test_greenhouse_html_convert.py` (49 -> 58 tests),
-  `backend/tests/test_fetch_greenhouse_evaluation_postings.py` (81 ->
-  86 tests), `docs/LLM_HANDOFF.md` (this entry, plus the iteration
-  rotation above). `docs/DECISIONS/0010-realistic-evaluation-corpus-
-  methodology.md` not touched this round -- no design/semantic change,
-  only bug fixes and test completeness within the already-documented
-  contract.
-- Verification: pending — see the workflow-metadata block below and the
-  publication (`A6`) entry that will follow it.
-
-```workflow-metadata
-workflow_version: v3.2
-state: published
-slice_id: 2026-09-20-realistic-evaluation-corpus-7ce4a1d
-slice_kind: tooling
-risk_class: H
-base_sha: 7ce4a1dc770827653ccf8140188c5d1dec6621d8
-declared_gate: final
-executed_gate: final
-candidate_sha: 4771c2df38a7c913a852fa5cfe24dc795c5d587f
-receipt_id: 69759bd7-d539-4417-8685-730900e4db20
-receipt_path: docs/verification-receipts/4771c2df38a7c913a852fa5cfe24dc795c5d587f/69759bd7-d539-4417-8685-730900e4db20.json
-full_suite_count: 3062
-focused_test_count: 276
-mutation_witness_count: 34
-```
-
-### Work review
-
-- Sol's review of `C6` = `4771c2df38a7c913a852fa5cfe24dc795c5d587f` and
-  `A6` = `6cbda7135ae21e6fe818313f0dfaf9fa0097b247`: **Approved, no
-  executable findings.** Independently verified: `C6`'s sole parent is
-  `A5` (`58de6976d72a370a871882f069bf74abcc1e1a1c`) and `A6`'s sole
-  parent is `C6`, confirming a clean, unamended, single-parent chain;
-  the correction remained within the bounded scope named for this
-  round (`backend/scripts/greenhouse_html_convert.py`,
-  `backend/scripts/fetch_greenhouse_evaluation_postings.py`,
-  `backend/tests/test_greenhouse_html_convert.py`,
-  `backend/tests/test_fetch_greenhouse_evaluation_postings.py`,
-  `docs/LLM_HANDOFF.md` -- no proposal rewrite, no new semantics); the
-  uppercase `LT`/`GT` entity handling closes the fail-closed bypass
-  while the mixed-case `Lt`/`Gt` (real, distinct, unrelated named
-  entities) correctly remain unclassified by either shared regex;
-  `BoardAcquisitionSpec.__post_init__` now rejects an unrecognized
-  `content_mode` before any mode/basis relationship validation runs;
-  the encoded-PII decode/HTML-to-text-ordering test, the exactly-once
-  redaction spy, and the genuine `_fetch_board` mixed-encoding
-  failure-isolation test are substantive, not merely docstring claims.
-  Ran the two directly affected test modules --
-  `backend/tests/test_greenhouse_html_convert.py` and
-  `backend/tests/test_fetch_greenhouse_evaluation_postings.py` --
-  **144/144 passed**. Confirmed the working tree is clean and
-  `main`/`origin/main` remain unchanged at
-  `7ce4a1dc770827653ccf8140188c5d1dec6621d8`. Sol did **not**
-  independently repeat the full 3,062-test suite or all 34 mutation
-  witnesses; those remain supported by `A6`'s own genuine
-  receipt-eligible verification, not re-derived here.
-
-```workflow-review-metadata
-schema_version: 2
-slice_id: 2026-09-20-realistic-evaluation-corpus-7ce4a1d
-risk_class: H
-reviewer: Sol
-reviewer_role: primary
-reviewer_model: Sol Medium
-reviewed_at: 2026-09-26T00:00:00Z
-candidate_sha: 4771c2df38a7c913a852fa5cfe24dc795c5d587f
-publication_commit_sha: 6cbda7135ae21e6fe818313f0dfaf9fa0097b247
-receipt_path: docs/verification-receipts/4771c2df38a7c913a852fa5cfe24dc795c5d587f/69759bd7-d539-4417-8685-730900e4db20.json
-receipt_id: 69759bd7-d539-4417-8685-730900e4db20
-gate: final
-verdict: approved
-findings: none
-```
-
-### Merge record
-
-- Date: 2026-09-27. Merged `phase-3/realistic-evaluation-corpus` at
-  approved, reviewed commit `ccfda9055cefbc4088f75e2659f54c9be703cc3c`
-  (`R`; Sol's "Approved, no executable findings" verdict on `C6`/`A6`,
-  above) into `main` via `git merge --no-ff`. Merge commit:
-  `41963baf4797b1b2b6fee1f72311dd6b84d7b6a3`. Pre-merge `main`/
-  `origin/main` tip (rollback boundary):
-  `7ce4a1dc770827653ccf8140188c5d1dec6621d8`.
-- Pre-merge checks: freshly fetched `origin`; confirmed the feature
-  branch and its origin both sat at `ccfda90`, and `main`/`origin/main`
-  were both clean and synchronized at `7ce4a1d` before merging;
-  re-confirmed `validate_c_a_r_chain(C6, A6, R)` and
-  `check_merge_eligibility(C6, A6, R)` both still returned `approved`
-  immediately beforehand, with no unexpected advancement or divergence
-  on either ref.
-- Followed the documented `M -> Q` release sequence: `M` was created
-  locally, not pushed; zero content difference between `M` and `R`
-  confirmed (`git diff --quiet ccfda90 HEAD`);
-  `verification_coordinator.run_post_merge_verification` was run
-  against `M` in a disposable detached worktree (always full/final) --
-  artifact `e04e1475-ef8e-4c91-9e89-84f70b9c28fb`, all 11 steps PASS,
-  full pytest suite **3062 passed**, all 34 mutation witnesses pass,
-  no migration triggered, cleanup PASS. `Q` was authored as `M`'s direct
-  mainline child, bundling that artifact with this append-only merge
-  record in one commit -- this entry itself.
-- Post-merge evidence status: `docs/post-merge/
-  41963baf4797b1b2b6fee1f72311dd6b84d7b6a3/
-  e04e1475-ef8e-4c91-9e89-84f70b9c28fb.json`, referencing original
-  receipt `69759bd7-d539-4417-8685-730900e4db20` (`docs/
-  verification-receipts/4771c2df38a7c913a852fa5cfe24dc795c5d587f/
-  69759bd7-d539-4417-8685-730900e4db20.json`). `check_review.
-  validate_published(C6, A6, R, M, Q)` and `verification_coordinator.
-  confirm_main_unchanged` are run immediately before push; see the
-  agent's final report for their results rather than restating them
-  here ahead of time.
-- STOP -- report the synchronized final `main` SHA and stop. No
-  realistic-corpus freezing, evaluation, provider contact, title-
-  normalization work, or another slice without separate explicit user
-  authorization.
-
----
-
-## Iteration 2
-
-### Work done
-
 - Date/agent: 2026-09-27, Claude Code (Sonnet 5). New slice, Sol-approved
   freeze/evaluation contract (three negotiation rounds). Risk class **H**,
   `slice_kind: tooling`, `declared_gate: final`. Base `main`@
@@ -408,3 +196,114 @@ findings: none
   evaluation, provider contact, database work, parser change, title
   normalization, `R`, merge, `M`, or `Q` is authorized by this commit.
   Waiting for Sol's pre-annotation review of the rubric and tooling.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-09-27, Claude Code (Sonnet 5). Same slice, same
+  authorization (`slice_id: 2026-09-27-realistic-corpus-freeze-evaluation-
+  0dae468`, risk class **H**, `slice_kind: tooling`, `declared_gate: final`).
+  Same branch `phase-3/realistic-corpus-freeze-evaluation`, on top of the
+  existing pushed Stage 1 checkpoint `7644e20e30fdde6e38a840e3b621b6217b93
+  ce14`, preserved unamended. One bounded correction round for Sol's Stage 1
+  pre-annotation review verdict (**CHANGES REQUESTED**, six findings, F1/F2/
+  F4 High, F3 High, F5/F6 Medium). No annotation pass, adjudication, corpus
+  freeze, baseline evaluation, provider contact, database work, parser-
+  semantic change, or new workflow tooling performed. Ending commit: this
+  commit.
+- **F1 (rubric not implementation-independent)**: replaced parser-relative
+  labeling with an implementation-independent semantic ground truth --
+  `present_supported` now means the sourced field(s) unambiguously supply a
+  value representable by the field's closed canonical output domain
+  *regardless of current parser recognition*; `present_unsupported_form`
+  means the domain genuinely cannot represent the stated value (with the
+  honest consequence, stated explicitly, that this outcome cannot arise at
+  all for the four free-text fields whose domain is "any non-empty string").
+  Added a closed **source-field table** (title+description pooled for the
+  three scalars/experience/skills; `compensation_text` only for salary;
+  `location_raw` only for location -- and the explicit rule that a value
+  stated elsewhere, e.g. in `description` when `compensation_text` is null,
+  is still `absent` for that annotation). The rubric now states plainly it
+  requires no parser-implementation access.
+- **F2 (pass schema undocumented)**: added the complete exact annotation-
+  pass JSON schema to the rubric -- all six top-level fields, record-id
+  format, scalar/composite/skills nesting, closed per-label keys, timestamp
+  format, and a compact valid example (2-id synthetic taxonomy for brevity).
+- **F3 (silent duplicate-JSON-key acceptance)**: both `load_annotation_pass`
+  and `load_adjudication_audit` now parse with
+  `object_pairs_hook=evaluate_phase3_corpus._reject_duplicate_keys` -- the
+  one authoritative fail-closed mechanism, imported directly rather than
+  reimplemented, so duplicate-key behavior can never drift between the two
+  modules. Rejects duplicates at every nesting level (recursive by
+  construction). Four new regressions: top-level and nested duplicates, for
+  both the pass and adjudication-audit schemas.
+- **F4 (adjudication/audit identity not enforced)**: `adjudicated_by` and
+  `audited_by` must now equal exactly `"user"` (`_REQUIRED_HUMAN_IDENTITY`)
+  -- previously only checked "non-empty string", so an agent/model identity
+  could reach the hardcoded `annotator_role: "adjudicated:user"` label. Two
+  new regressions (non-`"user"` `adjudicated_by`/`audited_by` rejected).
+- **F5 (no field-aware value validation before audit)**: exposed
+  `evaluate_phase3_corpus._EXPECTED_VALUE_VALIDATORS` as public
+  `EXPECTED_VALUE_VALIDATORS` (pure rename, only reuse-motivated change to
+  that file, no metric/parser-behavior change) and reused it in both
+  `_validate_raw_label` (pass loading) and `_final_label_from_adjudication`
+  (adjudicated values) via one shared `_validate_expected_value_for_field`
+  helper -- invalid `remote_type`/`employment_type`/`seniority` values,
+  bool-as-int numeric values, and invalid adjudicated values are now
+  rejected during pass/adjudication loading, before any human audit work,
+  not only later by `build_corpus`'s end-of-pipeline self-check. Three new
+  regressions (invalid `remote_type` and bool-as-int `experience.minimum`
+  in a pass; an invalid adjudicated `seniority` value).
+- **F6 (racy existence-check-then-rename)**: replaced the
+  check-then-`Path.rename()` sequence with `verification_receipts.
+  write_receipt_atomic`'s proven primitive, reimplemented locally for
+  `FreezeBuilderError` and corpus-specific JSON formatting: same-directory
+  temp file, write + `flush()` + `os.fsync()`, `load_corpus` self-check
+  against the temp file, then `os.link(temp, output_path)` -- create-if-
+  absent is now the filesystem's own guarantee (`FileExistsError`), not a
+  race-prone check in this process; the temp file is always unlinked in a
+  `finally`. One new race/fault-injection regression: a monkeypatched
+  `load_corpus` call injects a competing writer's sentinel file at the
+  exact point between self-check and publication; proves the destination
+  is left byte-identical to the sentinel and no temp file leaks.
+- Because the rubric changed before any annotation exists, `RUBRIC_VERSION`
+  bumped `1.0.0 -> 1.0.1`. **Historical, superseded evidence** (never
+  annotated against): `rubric_version: 1.0.0`, rubric sha256
+  `bb4c8ac44ccb7bf6c0978d36bb4350449076df032e337ef6a8b03a651ee2ade0`,
+  `source_packet_hash 867e5b6d30a4fc858de3146122437ca03a936936c8f88ddc034
+  8ab5dedb92957` (all recorded in superseded commit `7644e20`). **Current**:
+  rubric sha256
+  `47f833d80eb37c8046fc6b243e53fbeaa4cdab78c6b71a52748ecb42e7106f2c`,
+  `source_packet_hash 914ebc5700a4baf9f7b15d25e109ea86d647ef9c8d5bd2fb8e04c
+  db608299651` (taxonomy/salvage hashes unchanged from Stage 1).
+- Verification: `ruff format --check`/`ruff check` clean on all four
+  touched files; `mypy` clean on both scripts; full backend suite **3107
+  passed** (was 3097; +10 = the F3/F4/F5/F6 regressions above); `check_repo.
+  py` clean; `git diff --check` clean.
+- Adversarial self-review: confirmed the F4 identity check is a strict `==`
+  (not merely "truthy"), so an empty string or a look-alike role string both
+  still fail; confirmed `_validate_expected_value_for_field` is a single
+  shared choke point called from both the pass-loading and adjudication-
+  resolution paths (no second copy to drift); confirmed the F6 race
+  regression genuinely exercises the code path between self-check and
+  `os.link` (not merely the earlier fast-fail check) by injecting the
+  competing write from inside a monkeypatched `load_corpus`, the last call
+  before `os.link`; confirmed the rubric's per-field domain table's "this
+  outcome cannot occur" claims for `salary.currency`/`salary.period`/
+  `location.*` against `EXPECTED_VALUE_VALIDATORS`'s actual validators
+  (`_is_non_empty_str` for all eight) rather than asserting it from
+  intuition.
+- Files changed: `docs/evaluation/phase3-realistic-annotation-rubric.md`
+  (rewritten sections, `rubric_version` bump), `backend/scripts/
+  freeze_phase3_realistic_corpus.py` (F3/F4/F5/F6 fixes), `backend/tests/
+  test_freeze_phase3_realistic_corpus.py` (31 -> 41 tests), `backend/
+  scripts/evaluate_phase3_corpus.py` (one rename only, F5 reuse), `docs/
+  LLM_HANDOFF.md` (this entry, plus the iteration rotation above).
+- STOP -- this remains a checkpoint within an incomplete slice, not a
+  candidate. No annotation pass, adjudication, corpus freeze, baseline
+  evaluation, provider contact, database work, parser change, title
+  normalization, `R`, merge, `M`, or `Q` is authorized by this commit.
+  Waiting for Sol's re-review of the corrected Stage 1 checkpoint.
