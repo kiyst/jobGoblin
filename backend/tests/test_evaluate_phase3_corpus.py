@@ -13,6 +13,7 @@ from scripts.evaluate_phase3_corpus import (
     _evaluate_composite,
     _evaluate_scalar,
     _evaluate_skills,
+    _score_component,
     evaluate_corpus,
     load_corpus,
     render_report,
@@ -270,6 +271,30 @@ def test_load_corpus_accepts_a_valid_remote_type_value(tmp_path: Path) -> None:
     path = _write_corpus(tmp_path, records)
     records_loaded = load_corpus(path, known_canonical_ids=_KNOWN_IDS)
     assert records_loaded[0].annotations["remote_type"]["expected_value"] == "remote"
+
+
+def test_load_corpus_rejects_a_salary_period_outside_the_closed_domain(tmp_path: Path) -> None:
+    """Sol finding F8: `salary.period` has a project-documented closed
+    domain (docs/DATA_MODEL.md's `salary_period` enum) and must be
+    validated against it, not accepted as an arbitrary non-empty string."""
+    records = _minimal_corpus()
+    records[0]["annotations"]["salary"]["period"] = _annotation(
+        outcome="present_supported", expected_value="quarterly", expected_provenance="inferred"
+    )
+    path = _write_corpus(tmp_path, records)
+    with pytest.raises(CorpusValidationError, match="not valid for 'salary.period'"):
+        load_corpus(path, known_canonical_ids=_KNOWN_IDS)
+
+
+def test_load_corpus_accepts_every_closed_salary_period_value(tmp_path: Path) -> None:
+    for period in ("hourly", "daily", "monthly", "annual"):
+        records = _minimal_corpus()
+        records[0]["annotations"]["salary"]["period"] = _annotation(
+            outcome="present_supported", expected_value=period, expected_provenance="inferred"
+        )
+        path = _write_corpus(tmp_path, records)
+        loaded = load_corpus(path, known_canonical_ids=_KNOWN_IDS)
+        assert loaded[0].annotations["salary"]["period"]["expected_value"] == period
 
 
 # ---------------------------------------------------------------------------
@@ -1025,6 +1050,104 @@ def test_composite_non_raising_call_scores_each_component_independently() -> Non
     )
 
 
+# ---------------------------------------------------------------------------
+# F7 -- provider/input-mapping gap: a present_supported case must never be
+# scored as parser correctness/abstention/wrong when the parser's actual
+# wired input field was null; it is measured separately.
+# ---------------------------------------------------------------------------
+def test_score_component_routes_missing_wired_input_to_provider_mapping_gap() -> None:
+    evaluation = SplitEvaluation()
+    _score_component(
+        evaluation,
+        record_id="r1",
+        parser="salary",
+        component="minimum",
+        metrics_key="salary.minimum",
+        outcome="present_supported",
+        expected_value=120000,
+        expected_provenance="parsed_description",
+        actual_value=None,
+        actual_provenance="unavailable",
+        wired_input_present=False,
+    )
+    metrics = evaluation.get_component_metrics("salary.minimum")
+    assert metrics.provider_mapping_gap.render() == "1/1"
+    # None of the parser-correctness buckets are touched at all -- not even
+    # as a "0" -- since the parser never received this input in the first
+    # place; scoring it as an abstention would misattribute a wiring gap as
+    # a grammar failure.
+    assert metrics.supported_abstention.render() == "N/A"
+    assert metrics.confidently_wrong.render() == "N/A"
+    assert metrics.supported_correctness.render() == "N/A"
+    assert metrics.provenance_correctness.render() == "N/A"
+    assert len(evaluation.mismatches) == 1
+    assert evaluation.mismatches[0].category == "provider_mapping_gap"
+
+
+def test_score_component_with_wired_input_present_is_unaffected_by_the_new_bucket() -> None:
+    """Regression: the default (`wired_input_present=True`) must behave
+    exactly as the pre-F7 scoring did."""
+    evaluation = SplitEvaluation()
+    _score_component(
+        evaluation,
+        record_id="r1",
+        parser="salary",
+        component="minimum",
+        metrics_key="salary.minimum",
+        outcome="present_supported",
+        expected_value=120000,
+        expected_provenance="parsed_description",
+        actual_value=120000,
+        actual_provenance="parsed_description",
+    )
+    metrics = evaluation.get_component_metrics("salary.minimum")
+    assert metrics.provider_mapping_gap.render() == "0/1"
+    assert metrics.supported_correctness.render() == "1/1"
+    assert metrics.supported_abstention.render() == "0/1"
+    assert metrics.confidently_wrong.render() == "0/1"
+
+
+def test_evaluate_composite_reports_provider_mapping_gap_for_a_null_wired_field() -> None:
+    """End-to-end through `_evaluate_composite`: the annotation claims
+    `present_supported` (ground truth sourced more broadly than the wired
+    field, per the rubric) while the actual classifier call -- correctly
+    given a `None` input, exactly as production wiring does -- abstains."""
+    evaluation = SplitEvaluation()
+    annotations = {
+        "minimum": _annotation(
+            outcome="present_supported",
+            expected_value=100000,
+            expected_provenance="parsed_description",
+        ),
+        "maximum": _annotation(outcome="absent"),
+        "currency": _annotation(outcome="absent"),
+        "period": _annotation(outcome="absent"),
+    }
+
+    class _AllNoneResult:
+        class _Component:
+            value = None
+            provenance = type("P", (), {"value": "unavailable"})()
+
+        minimum = _Component()
+        maximum = _Component()
+        currency = _Component()
+        period = _Component()
+
+    _evaluate_composite(
+        evaluation,
+        record_id="r1",
+        parser="salary",
+        annotations=annotations,
+        fn=lambda: _AllNoneResult(),
+        components=("minimum", "maximum", "currency", "period"),
+        wired_input_present=False,
+    )
+    metrics = evaluation.get_component_metrics("salary.minimum")
+    assert metrics.provider_mapping_gap.render() == "1/1"
+    assert metrics.supported_abstention.render() == "N/A"
+
+
 class _FakeSkillMatch:
     def __init__(self, canonical_id: str) -> None:
         self.canonical_id = canonical_id
@@ -1204,3 +1327,39 @@ def test_render_report_omits_the_template_note_without_records(tmp_path: Path) -
 
     report = render_report(evaluations)
     assert "per-template breakdown" not in report
+
+
+# ---------------------------------------------------------------------------
+# F7 -- end to end through evaluate_corpus/render_report with real classifiers
+# ---------------------------------------------------------------------------
+def test_evaluate_corpus_reports_provider_mapping_gap_for_null_compensation_text(
+    tmp_path: Path,
+) -> None:
+    """`_base_record()`'s `compensation_text` is `None` by default -- exactly
+    this corpus's real, current situation (all 30 retained records). A
+    `present_supported` salary annotation (ground truth sourced more
+    broadly than `compensation_text`, per the rubric) must be reported as a
+    provider_mapping_gap, never as `supported_abstention`/`confidently_wrong`."""
+    from app.normalization.taxonomy import DEFAULT_SKILLS_TAXONOMY_PATH, load_taxonomy
+
+    taxonomy = load_taxonomy(DEFAULT_SKILLS_TAXONOMY_PATH)
+    real_ids = taxonomy.canonical_ids()
+    records = _minimal_corpus()
+    assert records[0]["fields"]["compensation_text"] is None
+    records[0]["annotations"]["salary"]["minimum"] = _annotation(
+        outcome="present_supported", expected_value=100000, expected_provenance="parsed_description"
+    )
+    for record in records:
+        record["annotations"]["skills"] = {cid: _skill_annotation() for cid in real_ids}
+    path = _write_corpus(tmp_path, records)
+    loaded = load_corpus(path, known_canonical_ids=real_ids)
+    evaluations = evaluate_corpus(loaded, taxonomy=taxonomy)
+
+    dev_metrics = evaluations["dev"].components["salary.minimum"]
+    assert dev_metrics.provider_mapping_gap.render() == "1/1"
+    assert dev_metrics.supported_abstention.render() == "N/A"
+    assert dev_metrics.confidently_wrong.render() == "N/A"
+    assert dev_metrics.supported_correctness.render() == "N/A"
+
+    report = render_report(evaluations, records=loaded)
+    assert "provider_mapping_gap: 1/1" in report

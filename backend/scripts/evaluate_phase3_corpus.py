@@ -103,12 +103,20 @@ appearing in both splits, both fail closed.
 
 **Metrics**: every metric reports numerator and denominator explicitly;
 a zero denominator prints `N/A`, never `0%`. Every `present_supported`
-case with a completed (non-raising) invocation contributes to
+case first splits on whether the parser's actual wired input field
+existed at all (`compensation_text` for `salary.*`, `location_raw` for
+`location.*` -- annotation ground truth is sourced more broadly than
+that, per the rubric, so this can and does differ): if the wired input
+was missing, the case contributes only to `provider_mapping_gap`, a
+provider/input-mapping-gap signal distinct from parser correctness; only
+if the wired input was present does the case contribute to
 `supported_correctness`, `supported_abstention`, and `confidently_wrong`
 together, sharing one denominator -- an abstention is "incorrect" but
 never also "confidently wrong" (those are mutually exclusive outcomes of
-the same event). Runtime failure is counted exactly once per parser
-*invocation*, never once per composite component. Skill precision/
+the same event), and neither is conflated with a wiring gap (Sol finding
+F7: a missing wired input is never scored as if the parser had seen and
+failed on that input). Runtime failure is counted exactly once per
+parser *invocation*, never once per composite component. Skill precision/
 recall and the three false-positive categories are derived from the
 same frozen, exhaustive per-canonical-id representation. Deterministic
 mismatch details are reported per record/parser/component, keyed by
@@ -264,7 +272,11 @@ EXPECTED_VALUE_VALIDATORS: dict[str, Callable[[Any], bool]] = {
     "salary.minimum": _is_bool_free_int,
     "salary.maximum": _is_bool_free_int,
     "salary.currency": _is_non_empty_str,
-    "salary.period": _is_non_empty_str,
+    # Closed per docs/DATA_MODEL.md's `salary_period` enum -- the one
+    # composite sub-field this schema already documents a closed domain
+    # for (Sol finding F8); every other free-text sub-field below has no
+    # project-documented enum and stays a bare non-empty-string check.
+    "salary.period": lambda v: v in {"hourly", "daily", "monthly", "annual"},
     "location.city": _is_non_empty_str,
     "location.state": _is_non_empty_str,
     "location.country": _is_non_empty_str,
@@ -899,6 +911,17 @@ class ParserComponentMetrics:
     false_positive_unsupported_form: MetricCounter
     false_positive_ambiguous: MetricCounter
     provenance_correctness: MetricCounter
+    # A `present_supported` case where the parser's actual wired input field
+    # (`compensation_text` for salary, `location_raw` for location) was null
+    # -- the annotation's ground truth is sourced more broadly (may include
+    # `description`), so this is a distinct provider/input-mapping gap, never
+    # folded into supported_correctness/supported_abstention/confidently_wrong
+    # (which would misattribute it as a parser grammar failure -- Sol finding
+    # F7). Denominator is every present_supported case for this component;
+    # numerator is the subset where the wired input was missing entirely.
+    # Always "N/A" for scalar/experience components, which have no narrower-
+    # than-ground-truth wired field to begin with.
+    provider_mapping_gap: MetricCounter
 
     @staticmethod
     def empty() -> ParserComponentMetrics:
@@ -911,6 +934,7 @@ class ParserComponentMetrics:
             false_positive_unsupported_form=MetricCounter(),
             false_positive_ambiguous=MetricCounter(),
             provenance_correctness=MetricCounter(),
+            provider_mapping_gap=MetricCounter(),
         )
 
 
@@ -980,33 +1004,50 @@ def _score_component(
     expected_provenance: str | None,
     actual_value: Any,
     actual_provenance: str | None,
+    wired_input_present: bool = True,
 ) -> None:
     metrics = evaluation.get_component_metrics(metrics_key)
     metrics.opportunity_matrix[outcome] += 1
     is_present = actual_value is not None
 
     if outcome == "present_supported":
-        # All three share one denominator -- every present_supported case
-        # with a completed invocation contributes to each, mutually
-        # exclusively: abstention (not present), confidently_wrong
-        # (present and wrong), or correctness (present and right).
-        metrics.supported_abstention.add(hit=not is_present)
-        metrics.confidently_wrong.add(hit=is_present and actual_value != expected_value)
-        metrics.supported_correctness.add(hit=is_present and actual_value == expected_value)
-        if not is_present:
+        # Every present_supported case contributes to exactly one of two
+        # mutually exclusive buckets, first split by whether the parser's
+        # actual wired input field existed at all (Sol finding F7):
+        # `provider_mapping_gap` (input missing -- a wiring gap, not a
+        # grammar failure) versus the original three -- abstention (not
+        # present), confidently_wrong (present and wrong), or correctness
+        # (present and right) -- which now mean "wired input was present."
+        metrics.provider_mapping_gap.add(hit=not wired_input_present)
+        if not wired_input_present:
             evaluation.mismatches.append(
                 MismatchDetail(
-                    record_id, parser, component, "supported_abstention", expected_value, None
+                    record_id, parser, component, "provider_mapping_gap", expected_value, None
                 )
             )
-        elif actual_value != expected_value:
-            evaluation.mismatches.append(
-                MismatchDetail(
-                    record_id, parser, component, "confidently_wrong", expected_value, actual_value
+        else:
+            metrics.supported_abstention.add(hit=not is_present)
+            metrics.confidently_wrong.add(hit=is_present and actual_value != expected_value)
+            metrics.supported_correctness.add(hit=is_present and actual_value == expected_value)
+            if not is_present:
+                evaluation.mismatches.append(
+                    MismatchDetail(
+                        record_id, parser, component, "supported_abstention", expected_value, None
+                    )
                 )
-            )
-        if is_present:
-            metrics.provenance_correctness.add(hit=actual_provenance == expected_provenance)
+            elif actual_value != expected_value:
+                evaluation.mismatches.append(
+                    MismatchDetail(
+                        record_id,
+                        parser,
+                        component,
+                        "confidently_wrong",
+                        expected_value,
+                        actual_value,
+                    )
+                )
+            if is_present:
+                metrics.provenance_correctness.add(hit=actual_provenance == expected_provenance)
     elif outcome == "absent":
         metrics.false_positive_absent.add(hit=is_present)
         if is_present:
@@ -1068,6 +1109,7 @@ def _evaluate_composite(
     annotations: dict[str, Any],
     fn: Any,
     components: tuple[str, ...],
+    wired_input_present: bool = True,
 ) -> None:
     result = _safe_call(fn)
     raised = isinstance(result, _CallFailed)
@@ -1093,6 +1135,7 @@ def _evaluate_composite(
             expected_provenance=annotation["expected_provenance"],
             actual_value=component_result.value,
             actual_provenance=component_result.provenance.value,
+            wired_input_present=wired_input_present,
         )
 
 
@@ -1195,6 +1238,7 @@ def _evaluate_records(records: list[CorpusRecord], *, taxonomy: Any) -> SplitEva
             annotations=annotations["salary"],
             fn=lambda c=compensation_text: classify_salary(c),
             components=("minimum", "maximum", "currency", "period"),
+            wired_input_present=compensation_text is not None,
         )
         location_raw = record.fields["location_raw"]
         _evaluate_composite(
@@ -1204,6 +1248,7 @@ def _evaluate_records(records: list[CorpusRecord], *, taxonomy: Any) -> SplitEva
             annotations=annotations["location"],
             fn=lambda loc=location_raw: classify_location(loc),
             components=("city", "state", "country", "postal_code"),
+            wired_input_present=location_raw is not None,
         )
         _evaluate_skills(
             evaluation,
@@ -1268,6 +1313,7 @@ def render_report(
             )
             lines.append(f"  false_positive_ambiguous: {metrics.false_positive_ambiguous.render()}")
             lines.append(f"  provenance_correctness: {metrics.provenance_correctness.render()}")
+            lines.append(f"  provider_mapping_gap: {metrics.provider_mapping_gap.render()}")
         skills = evaluation.skills
         lines.append("== skills ==")
         lines.append(f"  opportunity matrix: {skills.opportunity_matrix}")

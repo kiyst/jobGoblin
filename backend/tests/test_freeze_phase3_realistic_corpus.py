@@ -1153,6 +1153,32 @@ def test_load_annotation_pass_rejects_bool_as_int_experience_value(tmp_path: Pat
         load_annotation_pass(path, **_base_pass_kwargs("h"))
 
 
+def test_load_annotation_pass_rejects_a_salary_period_outside_the_closed_domain(
+    tmp_path: Path,
+) -> None:
+    """Sol finding F8: `salary.period` has a project-documented closed
+    domain (docs/DATA_MODEL.md's `salary_period` enum), reused here via
+    `EXPECTED_VALUE_VALIDATORS` -- not an arbitrary non-empty string."""
+    annotations = _record_annotations(
+        {
+            ("salary", "period"): _scalar_label(
+                outcome="present_supported",
+                expected_value="quarterly",
+                expected_provenance="inferred",
+            )
+        }
+    )
+    path = _write_pass(
+        tmp_path,
+        "claude",
+        annotator_role="claude",
+        source_packet_hash="h",
+        records={"a:1": annotations},
+    )
+    with pytest.raises(FreezeBuilderError, match="not valid for 'salary.period'"):
+        load_annotation_pass(path, **_base_pass_kwargs("h"))
+
+
 def test_load_adjudication_audit_rejects_invalid_adjudicated_value(tmp_path: Path) -> None:
     claude_records = {"a:1": _record_annotations()}
     sol_records = {

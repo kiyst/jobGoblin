@@ -98,111 +98,6 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-09-27, Claude Code (Sonnet 5). New slice, Sol-approved
-  freeze/evaluation contract (three negotiation rounds). Risk class **H**,
-  `slice_kind: tooling`, `declared_gate: final`. Base `main`@
-  `0dae4683645599369d41d0228b0edad1cfad73ce` (confirmed clean,
-  `main == origin/main` before starting). `slice_id:
-  2026-09-27-realistic-corpus-freeze-evaluation-0dae468`. New branch
-  `phase-3/realistic-corpus-freeze-evaluation`. **This is Stage 1 of 8 in
-  the approved staged execution sequence only** -- rubric, common-packet
-  tooling, and the freeze/evaluator scaffolding. No annotation pass, no
-  adjudication, no corpus freeze, no baseline evaluation, no provider
-  contact, no database work, and no parser-semantic change performed or
-  authorized by this commit. This is a checkpoint within an incomplete
-  slice, not a candidate `C` -- no receipt-eligible verification run, no
-  `A`/`R`/`M`/`Q` authorized yet.
-- **Frozen rubric**: `docs/evaluation/phase3-realistic-annotation-
-  rubric.md`, `rubric_version: 1.0.0`. Defines all four outcomes
-  (`present_supported`/`present_unsupported_form`/`absent`/`ambiguous`),
-  the bidirectional value/provenance rule (mirroring
-  `evaluate_phase3_corpus.py`'s own `_validate_scored_label`), the closed
-  per-parser/component value vocabulary, the two provenance tags this
-  corpus may actually use (`parsed_description`/`inferred`), missing-
-  information/ambiguity/unsupported-form handling, the skill-label rule,
-  and an explicit "procedural, not cryptographic" blindness statement.
-- **`backend/scripts/freeze_phase3_realistic_corpus.py`** (new) +
-  **`backend/tests/test_freeze_phase3_realistic_corpus.py`** (new, 31
-  tests, entirely synthetic fixtures -- no real posting text). Implements:
-  `compute_source_packet_hash` (the binding canonical manifest -- salvage/
-  taxonomy/rubric paths and sha256 plus `rubric_version`, canonical-JSON
-  serialized, sha256 hashed); `load_annotation_pass` (closed 6-key top-
-  level schema, closed per-label schema -- 3-key scalar/composite, 1-key
-  skill -- exhaustive 3+10+taxonomy-size label count, role/rubric-version/
-  recomputed-hash cross-check); `load_adjudication_audit` (validates every
-  genuine pass disagreement has a complete adjudication, every required
-  agreement audit per the deterministic rule -- every `present_supported`
-  agreement, plus the lexicographically-smallest record id per non-
-  `present_supported` (label, outcome, employer) stratum -- is present,
-  and an `overturned` entry both has a matching disagreement and actually
-  changes the previously agreed label); `deterministic_split` (employers
-  sorted ascending, lexicographically last is `holdout`); `build_corpus`
-  (verifies the salvage sha256 and retained-only candidates, merges both
-  validated passes plus adjudication evidence into
-  `evaluate_phase3_corpus.py`'s own committed schema -- agreements tagged
-  `annotator_role: "claude+sol:agreed"`, adjudicated disagreements tagged
-  `"adjudicated:user"` with a `second_annotation` chosen to be whichever
-  raw pass differs from the final value, keeping the existing corpus
-  validator's "a disagreement must reflect an actual difference"
-  invariant satisfiable even when the final answer exactly matches one
-  raw pass -- copies `fields` unmodified, atomically create-only writes,
-  and self-checks the result by calling the real
-  `evaluate_phase3_corpus.load_corpus`, never a shadow reimplementation,
-  before the write is made durable). A CLI `manifest` subcommand prints
-  the canonical packet/hash for handing to each fresh annotator task; a
-  `build` subcommand is implemented and tested but not invoked against
-  real data this stage.
-- **`backend/scripts/evaluate_phase3_corpus.py`** extended (bounded, no
-  parser-semantic or existing-metric change): `evaluate_corpus` now also
-  returns one `"employer:<name>"` key per distinct employer across the
-  whole corpus; `render_report` prints those sections (sorted after dev/
-  holdout/combined) and, given the loaded records, an explicit note that
-  per-`template_family` subdivision is intentionally omitted since every
-  record's `template_family` is `"unknown"` (never silently duplicating
-  the combined result under a fake breakdown). `backend/tests/
-  test_evaluate_phase3_corpus.py`: 62 -> 66 tests (4 new: per-employer
-  keys reflect the matching split subset, sorted employer ordering, the
-  template note appears/is absent correctly).
-- Verification: `ruff format --check`/`ruff check` clean on all four
-  touched/added files; `mypy` clean on both scripts; full backend suite
-  **3097 passed** (was 3062; +35 = 31 new freeze-builder tests + 4 new
-  evaluator tests); `check_repo.py` clean; `git diff --check` clean.
-- Adversarial self-review: traced the `second_annotation` "whichever raw
-  pass differs from final" rule against all three cases (final matches
-  neither raw, final matches Claude's raw, final matches Sol's raw) to
-  confirm the existing corpus validator's "no actual difference" check
-  can never spuriously fire; confirmed an `overturned` audit entry whose
-  adjudication resolves back to the original agreed value is rejected
-  (a genuine overturn must change the label); confirmed extra (non-
-  required) agreement audits are accepted, not just the minimum; confirmed
-  the deterministic split raises on fewer than two employers rather than
-  silently picking an arbitrary holdout.
-- Known limitation: `_validate_raw_label` checks the bidirectional
-  outcome/value rule and restricts `present_supported` provenance to
-  `parsed_description`/`inferred`, but does not re-validate each parser's
-  exact value vocabulary (e.g. `remote_type in {"remote","hybrid",
-  "onsite"}`) -- that is deferred to `build_corpus`'s own authoritative
-  `load_corpus` self-check on the merged output, deliberately avoiding a
-  second, independently-drifting copy of `evaluate_phase3_corpus.py`'s
-  `_EXPECTED_VALUE_VALIDATORS`.
-- Files changed: `docs/evaluation/phase3-realistic-annotation-rubric.md`
-  (new), `backend/scripts/freeze_phase3_realistic_corpus.py` (new),
-  `backend/tests/test_freeze_phase3_realistic_corpus.py` (new),
-  `backend/scripts/evaluate_phase3_corpus.py` (extended),
-  `backend/tests/test_evaluate_phase3_corpus.py` (extended),
-  `docs/LLM_HANDOFF.md` (this entry, plus the iteration rotation above).
-- STOP -- this is a checkpoint within an incomplete slice, not a
-  candidate. No annotation pass, adjudication, corpus freeze, baseline
-  evaluation, provider contact, database work, parser change, title
-  normalization, `R`, merge, `M`, or `Q` is authorized by this commit.
-  Waiting for Sol's pre-annotation review of the rubric and tooling.
-
----
-
-## Iteration 2
-
-### Work done
-
 - Date/agent: 2026-09-27, Claude Code (Sonnet 5). Same slice, same
   authorization (`slice_id: 2026-09-27-realistic-corpus-freeze-evaluation-
   0dae468`, risk class **H**, `slice_kind: tooling`, `declared_gate: final`).
@@ -307,3 +202,124 @@ that detail.
   evaluation, provider contact, database work, parser change, title
   normalization, `R`, merge, `M`, or `Q` is authorized by this commit.
   Waiting for Sol's re-review of the corrected Stage 1 checkpoint.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-09-27, Claude Code (Sonnet 5). Same slice, same
+  authorization (`slice_id: 2026-09-27-realistic-corpus-freeze-evaluation-
+  0dae468`, risk class **H**, `slice_kind: tooling`, `declared_gate: final`).
+  Same branch `phase-3/realistic-corpus-freeze-evaluation`, on top of the
+  existing pushed checkpoint `64dd730`, preserved unamended. One bounded
+  correction round for Sol's Stage 1 re-review verdict (**CHANGES
+  REQUESTED**, four findings, F7/F8/F9/F10, all High). The F3/F4/F5/F6
+  mechanical corrections from the prior round were accepted unchanged and
+  are untouched here. No annotation pass, adjudication, corpus freeze,
+  baseline evaluation, provider contact, database work, parser-semantic
+  change, or new `compensation_text`/`location_raw` extraction performed.
+  Ending commit: this commit.
+- **F7 (source-field rule hid the provider-mapping gap)**: the rubric's
+  source-field table no longer restricts salary/location *ground truth* to
+  `compensation_text`/`location_raw` alone -- both are now pooled with
+  `title` + `description`, so a real salary/location statement in
+  `description` is annotated as `present_supported` even when the narrower
+  wired field is null (documented fact: all 30 retained records have
+  `compensation_text == null`; an offline scan found dollar-figure salary
+  evidence in `description` for 24/30). The **actual parser invocation is
+  unchanged** -- `classify_salary`/`classify_location` still receive only
+  `compensation_text`/`location_raw`, and nothing extracts or backfills
+  either field. `evaluate_phase3_corpus.py` gained a new
+  `ParserComponentMetrics.provider_mapping_gap` counter: a
+  `present_supported` case now first splits on whether the parser's actual
+  wired input was present at all; if not, it is counted only as
+  `provider_mapping_gap` (with its own `MismatchDetail` category) and is
+  **never** folded into `supported_correctness`/`supported_abstention`/
+  `confidently_wrong`, which continue to mean "wired input was present."
+  The rubric states plainly that this corpus can measure today's end-to-end
+  salary gap but not salary-parser correctness on realistic non-null
+  inputs without a separately reviewed extraction/mapping slice.
+- **F8 (domain table substituted schema types for semantics)**: added
+  closed decision tables to the rubric: a numeric range table for
+  `experience.min/max`/`salary.min/max` (single value, closed range,
+  open-ended lower/upper bound, fractional-value unsupported-form, and the
+  "range plus a preferred figure" non-ambiguity case); a currency
+  normalization table (ISO 4217 codes, ambiguous-bare-symbol handling); and
+  a location table (verbatim copy, no abbreviation-expansion/contraction,
+  multiple-location/conflict handling). `salary.period`'s canonical domain
+  is now closed to exactly `hourly`/`daily`/`monthly`/`annual`, matching
+  `docs/DATA_MODEL.md`'s `salary_period` enum -- the one composite
+  sub-field the project already documents a closed domain for; currency/
+  location sub-fields have no project-documented enum and stay free text,
+  stated explicitly rather than left ambiguous. Code: `evaluate_phase3_
+  corpus.EXPECTED_VALUE_VALIDATORS["salary.period"]` changed from
+  `_is_non_empty_str` to the closed-set check (no other validator changed).
+- **F9 (no target-role relevance rule)**: added a "Role-relevance filter"
+  section, applied before any outcome is chosen for any field: a mention
+  only counts if it asserts something about the advertised role or its
+  candidate requirements, never an unrelated person/reporting line,
+  customer/team description, generic benefits boilerplate, company/product
+  description, or passing example. Five synthetic examples included (a
+  benefits-boilerplate `employment_type` non-assertion, a "reports to"
+  non-assertion for `seniority`, a "leads senior/intermediate engineers"
+  non-assertion about the candidate's *own* level, a company-language
+  `skills` non-assertion, and a positive-control genuine requirement).
+- **F10 (real record id/example contaminated blindness)**: the compact
+  schema example's record id `gitlab:8396674002` (a real batch identifier)
+  and its speculative seniority label are replaced with a wholly synthetic
+  id (`examplecorp:0000000001`) and synthetic labels with no correspondence
+  to any real record's actual content; the rubric now states explicitly
+  that no example may pre-label or quote any of the 30 real evaluation
+  records.
+- Because the rubric changed again before any annotation exists,
+  `RUBRIC_VERSION` bumped `1.0.1 -> 1.0.2`. **Historical, superseded
+  evidence** (neither ever annotated against), both now recorded in the
+  rubric's own superseded-evidence table: `1.0.0` (rubric sha256
+  `bb4c8ac44ccb7bf6c0978d36bb4350449076df032e337ef6a8b03a651ee2ade0`,
+  `source_packet_hash 867e5b6d30a4fc858de3146122437ca03a936936c8f88ddc034
+  8ab5dedb92957`, commit `7644e20`) and `1.0.1` (rubric sha256
+  `47f833d80eb37c8046fc6b243e53fbeaa4cdab78c6b71a52748ecb42e7106f2c`,
+  `source_packet_hash 914ebc5700a4baf9f7b15d25e109ea86d647ef9c8d5bd2fb8e04c
+  db608299651`, commit `64dd730`). **Current**: rubric sha256
+  `736d53bb7da78cd558fb6f7cab1c18fc991940416e059f5e60cc3b92e19ea0f9`,
+  `source_packet_hash 08409a3e57dccf84c34127675078106d6c510ff71813860fb23b
+  69fd26bed55a` (taxonomy/salvage hashes unchanged).
+- Verification: `ruff format --check`/`ruff check` clean on all five
+  touched files; `mypy` clean on both scripts; full backend suite **3114
+  passed** (was 3107; +7 = 6 new evaluator tests (2 F8 domain, 3 F7
+  unit/composite, 1 F7 end-to-end via real classifiers) + 1 new freeze-
+  builder F8 pass-loading test); `check_repo.py` clean; `git diff --check`
+  clean.
+- Adversarial self-review: confirmed `provider_mapping_gap`'s denominator
+  is every `present_supported` case for that component (not just the
+  gapped ones), so the rendered ratio is a genuine "N of M present_supported
+  cases had no wired input" signal, not a bare count; confirmed the
+  `supported_abstention`/`confidently_wrong`/`supported_correctness`/
+  `provenance_correctness` block is skipped **entirely** (not scored as 0)
+  when the wired input is absent, so it renders `N/A` rather than a
+  misleadingly clean "0/0"-shaped result; confirmed `experience`'s call
+  site was deliberately left at the `wired_input_present=True` default
+  (title+description is already the full pooled ground-truth input for
+  that parser, so no analogous gap concept applies there); confirmed the
+  end-to-end F7 test exercises the real `classify_salary` via
+  `evaluate_corpus`, not a mock, against a `compensation_text=None` record
+  matching this batch's actual, confirmed (30/30) condition; confirmed
+  `location`'s parallel `wired_input_present` wiring is real but
+  currently inert in this batch specifically because `location_raw` is
+  null in 0/30 real records (checked directly against the salvage file),
+  stated as such rather than left to be discovered later.
+- Files changed: `docs/evaluation/phase3-realistic-annotation-rubric.md`
+  (F1 continuation + F7/F8/F9/F10, `rubric_version` bump), `backend/
+  scripts/evaluate_phase3_corpus.py` (`provider_mapping_gap` metric,
+  `salary.period` closed-set validator, docstring), `backend/tests/
+  test_evaluate_phase3_corpus.py` (64 -> 70 tests), `backend/scripts/
+  freeze_phase3_realistic_corpus.py` (`RUBRIC_VERSION` bump only),
+  `backend/tests/test_freeze_phase3_realistic_corpus.py` (41 -> 42 tests),
+  `docs/LLM_HANDOFF.md` (this entry, plus the iteration rotation above).
+- STOP -- this remains a checkpoint within an incomplete slice, not a
+  candidate. No annotation pass, adjudication, corpus freeze, baseline
+  evaluation, provider contact, database work, parser change, title
+  normalization, `R`, merge, `M`, or `Q` is authorized by this commit.
+  Waiting for Sol's re-review of the twice-corrected Stage 1 checkpoint.
