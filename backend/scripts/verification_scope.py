@@ -83,6 +83,18 @@ _SKILL_FIXTURE_FILES: dict[str, str] = {
     "backend/tests/fixtures/normalization/skill_cases.json": "test-fixture:skill-classifier",
 }
 
+# The realistic Phase 3 evaluation corpus -- not a contract-record (same
+# reasoning as `_TAXONOMY_FIXTURE_FILES`/`_SKILL_FIXTURE_FILES` above).
+# Declared here regardless of whether the file exists yet on disk (a
+# rule-table key names a path, it does not require the path to already
+# be present) -- the fixture itself is populated only after the
+# separately authorized network contact and manual review complete.
+_EVALUATION_FIXTURE_FILES: dict[str, str] = {
+    "backend/tests/fixtures/evaluation/phase3_realistic_corpus.json": (
+        "test-fixture:phase3-evaluation"
+    ),
+}
+
 _SHARED_HARNESS_CORE_FILES: frozenset[str] = frozenset(
     {
         "backend/tests/contracts/taxonomy.py",
@@ -170,6 +182,7 @@ def _validate_configuration() -> None:
         _RECORD_FILES,
         _TAXONOMY_FIXTURE_FILES,
         _SKILL_FIXTURE_FILES,
+        _EVALUATION_FIXTURE_FILES,
     ]
     exact_sets: list[frozenset[str]] = [
         _SHARED_HARNESS_CORE_FILES,
@@ -233,6 +246,7 @@ def classify_path(path: str) -> Classification:
         _RECORD_FILES,
         _TAXONOMY_FIXTURE_FILES,
         _SKILL_FIXTURE_FILES,
+        _EVALUATION_FIXTURE_FILES,
     ):
         if path in exact_map:
             return Classification(path, exact_map[path])

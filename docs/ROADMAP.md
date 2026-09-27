@@ -495,8 +495,24 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   a narrow title-only role-noun adjacency for `c`/`r`/`go`, or (in `description`) an
   explicit, closed skill-list anchor (`skills:`, `languages:`, `technologies:`,
   `tech stack:`) plus a bounded list region — never punctuation structure alone.
-  Implemented on `phase-3/skill-classifier` — **candidate/publication stage, not yet
-  reviewed, not merged.**
+  **Merged into `main` at `dad967789227feb65cf776a0675a8fe179873afa`.**
+  An ongoing correction lineage on this slice (`C2`/`A2`, `C3`/`A3`) fixed the
+  description anchor's region-ending boundary to fail closed on Unicode whitespace and
+  then on Unicode format characters (categories `Cf`) — both are recorded in this
+  slice's own `docs/LLM_HANDOFF.md` history, not restated here.
+  A ninth slice, the **realistic Phase 3 evaluation corpus** (Class H — acquisition,
+  sanitization, annotation, and a minimal evaluator under one authorization), addresses
+  the exit-gate item every one of the seven merged classifiers' own test suites
+  disclosed as unmet: no realistic captured-payload regression corpus exists yet.
+  `backend/scripts/fetch_greenhouse_evaluation_postings.py` performs a bounded,
+  two-phase, GET-only fetch against a closed, user-named set of public Greenhouse
+  boards; `backend/scripts/evaluate_phase3_corpus.py` is a fail-closed loader plus a
+  minimal, threshold-free evaluator. Implemented on
+  `phase-3/realistic-evaluation-corpus` — **candidate/publication stage, not yet
+  reviewed, not merged.** The live network contact and its resulting real corpus are
+  gated on separate, explicit board-token authorization — see this slice's own
+  `docs/LLM_HANDOFF.md` entry and `docs/DECISIONS/0010-realistic-evaluation-corpus-
+  methodology.md` for exactly what is and is not yet populated.
 - **Phase 4: two bounded read-only prework proofs merged into `main`; the production
   `AtsScrapersProvider` adapter is not started and Phase 4 is not complete.** The
   Greenhouse live ATS canary (`phase-4/greenhouse-canary`, merged at `64a3534`) and the

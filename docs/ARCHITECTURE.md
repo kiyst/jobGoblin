@@ -276,12 +276,12 @@ jobGoblin/
 │   │   ├── normalization/
 │   │   │   ├── titles.py               # planned — title classifier, not started; needs its own
 │   │   │   │                            # (likely hierarchical) taxonomy design, not this slice's
-│   │   │   ├── skills.py               # planned — skill classifier, not started; unblocked by
-│   │   │   │                            # taxonomy.py below, but not itself implemented yet
+│   │   │   ├── skills.py               # skill-mention classifier (Phase 3, seventh parser slice) —
+│   │   │   │                            # merged into main (see docs/ROADMAP.md)
 │   │   │   ├── taxonomy.py             # skill-taxonomy loader/lookup (Phase 3, skill-taxonomy-
-│   │   │   │                            # foundation slice) — candidate/publication stage, not yet
-│   │   │   │                            # merged (see docs/ROADMAP.md); exact-match only, no
-│   │   │   │                            # free-text scanning, no classifier of its own
+│   │   │   │                            # foundation slice) — merged into main (see
+│   │   │   │                            # docs/ROADMAP.md); exact-match only, no free-text
+│   │   │   │                            # scanning, no classifier of its own
 │   │   │   ├── salary.py                # base-pay classifier (Phase 3, fifth parser slice) —
 │   │   │   │                            # merged into main (see docs/ROADMAP.md)
 │   │   │   ├── experience.py            # years-of-experience range classifier (Phase 3, fourth
@@ -298,9 +298,8 @@ jobGoblin/
 │   │   │
 │   │   ├── taxonomy/
 │   │   │   ├── skills.yaml              # skill-taxonomy-foundation slice — 15 seed entries,
-│   │   │   │                            # candidate/publication stage, not yet merged (see
-│   │   │   │                            # docs/ROADMAP.md); loaded/validated by
-│   │   │   │                            # normalization/taxonomy.py above
+│   │   │   │                            # merged into main (see docs/ROADMAP.md); loaded/
+│   │   │   │                            # validated by normalization/taxonomy.py above
 │   │   │   ├── titles.yaml
 │   │   │   ├── industries.yaml
 │   │   │   ├── seniority.yaml           # planned future enrichment — normalization/seniority.py's
