@@ -1,24 +1,26 @@
 # Phase 3 realistic-corpus annotation rubric
 
-`rubric_version: 1.0.2`
+`rubric_version: 1.0.3`
 
 Status: frozen input to the realistic-corpus annotation stage (Sol-approved
 freeze/evaluation contract, 2026-09-27; corrected 2026-09-27 per Sol's Stage 1
 pre-annotation review, findings F1/F2; corrected again 2026-09-27 per Sol's
-Stage 1 re-review, findings F7/F8/F9/F10). Both independent annotation passes
-(Claude, Sol) receive this exact file, byte-identical, alongside the
-byte-identical sanitized source packet and the committed skills taxonomy
-(`backend/app/taxonomy/skills.yaml`) — nothing else. This document, together
-with that packet and taxonomy, fully determines
+Stage 1 re-review, findings F7/F8/F9/F10; corrected a third time 2026-09-27
+per Sol's final Stage 1 re-review, findings F11/F12/F13). Both independent
+annotation passes (Claude, Sol) receive this exact file, byte-identical,
+alongside the byte-identical sanitized source packet and the committed
+skills taxonomy (`backend/app/taxonomy/skills.yaml`) — nothing else. This
+document, together with that packet and taxonomy, fully determines
 `freeze_phase3_realistic_corpus.py`'s canonical `source_packet_hash` (see that
 script's `compute_source_packet_hash`).
 
-**Superseded evidence** (neither version was ever annotated against):
+**Superseded evidence** (none of these versions was ever annotated against):
 
 | Version | Rubric sha256 | `source_packet_hash` |
 |---|---|---|
 | `1.0.0` (commit `7644e20e30fdde6e38a840e3b621b6217b93ce14`) | `bb4c8ac44ccb7bf6c0978d36bb4350449076df032e337ef6a8b03a651ee2ade0` | `867e5b6d30a4fc858de3146122437ca03a936936c8f88ddc0348ab5dedb92957` |
 | `1.0.1` (commit `64dd730`) | `47f833d80eb37c8046fc6b243e53fbeaa4cdab78c6b71a52748ecb42e7106f2c` | `914ebc5700a4baf9f7b15d25e109ea86d647ef9c8d5bd2fb8e04cdb608299651` |
+| `1.0.2` (commit `d2097b4`) | `736d53bb7da78cd558fb6f7cab1c18fc991940416e059f5e60cc3b92e19ea0f9` | `08409a3e57dccf84c34127675078106d6c510ff71813860fb23b69fd26bed55a` |
 
 Editing this file after either pass has been sealed and hashed invalidates
 both passes; a rubric revision requires a fresh `rubric_version` and a fresh
@@ -125,13 +127,22 @@ a false "nothing to see here."
 invocation continues to run unmodified against the field as it exists in
 the record. The evaluator (not the annotation, and not this rubric)
 separately checks, at evaluation time, whether the record's own
-`compensation_text`/`location_raw` was null while the annotation says
-`present_supported`, and reports that combination explicitly as a
-**provider/input-mapping gap** (`ParserComponentMetrics.provider_mapping_gap`)
-— distinct from, and never merged into, `supported_correctness`/
-`supported_abstention`/`confidently_wrong`, which continue to mean "the
-parser's actual wired input was present" (see
-`docs/evaluation` baseline report once produced).
+`compensation_text`/`location_raw` was completely missing (null, or
+present but whitespace-only — the real parser aborts on a blank string
+exactly like a null one, so both are treated identically) while the
+annotation says `present_supported`, and reports that combination
+explicitly as a **missing-wired-input gap**
+(`ParserComponentMetrics.missing_wired_input_gap`) — distinct from, and
+never merged into, `supported_correctness`/`supported_abstention`/
+`confidently_wrong`, which continue to mean "the parser's actual wired
+input was present" (see `docs/evaluation` baseline report once produced).
+
+**This metric only detects a completely absent wired input.** It cannot
+and does not detect a wired input that is present but incomplete or
+mis-mapped (e.g. `compensation_text` populated with only part of the
+actual figure, or the wrong span) — recognizing that requires later,
+manual mismatch attribution against the baseline report's per-record
+mismatch details, not this metric.
 
 This means: **this corpus can measure the current end-to-end salary gap
 (how often real salary information exists but never reaches the parser at
@@ -187,7 +198,10 @@ this corpus is built to satisfy.
 | `salary.minimum`, `salary.maximum` | an integer amount | a fractional amount, or a figure expressed only as a formula/equity grant/commission structure with no fixed number stated (e.g. "1% equity, salary DOE") |
 | `salary.currency` | an ISO 4217 currency code (e.g. `USD`, `CAD`, `GBP`, `EUR`) | a currency described only in a way that cannot be resolved to one ISO code (see the currency table below) |
 | `salary.period` | exactly one of `hourly`, `daily`, `monthly`, `annual` (per `docs/DATA_MODEL.md`'s `salary_period` enum) | a period stated that maps to none of these four and cannot be reduced to one without inventing information (e.g. "per project", "one-time signing bonus" — not a recurring period at all) |
-| `location.city`, `location.state`, `location.country`, `location.postal_code` | the value copied verbatim from the sourced text, exact substring, no abbreviation-expansion or contraction (see the location table below) | none under the current schema — any verbatim textual token is representable as a string; use `absent` when the sub-field genuinely is not stated |
+| `location.city` | a deterministic cleaned canonical spelling (see the location table below) | none under the current schema — any cleaned textual token is representable as a string; use `absent` when not stated |
+| `location.state` | exactly one USPS two-letter code (50 states + DC — the current classifier is US-only; see the location table below) | a non-US state/province/region equivalent, or any spelled-out or otherwise non-two-letter form that cannot be mapped to exactly one USPS code |
+| `location.country` | one canonical full-English-name form (see the alias table below) | none under the current schema — any country name is representable; use `absent` when not stated |
+| `location.postal_code` | a deterministic normalized textual form (see the location table below) | none under the current schema — any normalized textual token is representable as a string; use `absent` when not stated |
 
 ### Numeric range decision table (`experience.minimum`/`.maximum`, `salary.minimum`/`.maximum`)
 
@@ -203,6 +217,25 @@ domain unit differs (years vs. currency amount).
 | A closed range plus a separate "ideally"/"preferred" figure inside it ("3-5 years, ideally 4") | lower bound of the range, `present_supported` | upper bound of the range, `present_supported` — the preferred figure is not part of the min/max domain and is disregarded, not treated as an ambiguity |
 | Fractional/non-integer-only value ("2.5 years minimum") | `present_unsupported_form` | (apply independently to whichever bound is fractional) |
 
+### Multiple/nested/conditional requirement table (`experience.minimum`/`.maximum`, `salary.minimum`/`.maximum`)
+
+For records stating more than one numeric threshold. **Never sum
+potentially overlapping periods or figures unless the text itself
+explicitly makes them additive** — inventing a combined total the text
+does not state is exactly the kind of interpretation this rubric forbids.
+All examples below are fabricated.
+
+| Pattern | Rule | Fabricated example |
+|---|---|---|
+| Independent requirements joined by "and", two co-equal domains, no combined figure stated | `ambiguous` — the schema has one undifferentiated `minimum`/`maximum` pair; two genuinely different, non-overlapping thresholds cannot both be represented and neither is more "the" answer than the other | "3+ years of backend engineering experience and 3+ years of frontend engineering experience." |
+| Explicit cumulative/additive wording | Sum exactly as the text states — `present_supported` with the stated total, never an invented one | "5 years of engineering experience, plus 2 additional years in a lead role, for a combined total of 7 years." → `minimum = 7` |
+| Nested/subset "including" wording: one general/overall threshold with a narrower sub-requirement nested inside it | Annotate the **general/outer** figure only; the nested narrower figure has no dedicated schema field and is not separately captured — this is a scope limitation, not an ambiguity | "5+ years of engineering management experience, including 2+ years managing other managers." → `minimum = 5`; the "2+ years managing managers" detail is not annotated anywhere |
+| Alternatives joined by "or", same numeric field, genuinely different thresholds depending on which path applies | `ambiguous` — the true minimum depends on an unresolvable condition | "5 years of experience with a Bachelor's degree, or 3 years of experience with a Master's degree." |
+| Alternatives joined by "or" where only one path is expressed as a number (the other is a non-numeric alternative, e.g. a degree with no experience figure) | The numeric path alone is `present_supported`; the non-numeric alternative is simply not part of this field's domain | "5+ years of professional experience, or an equivalent combination of education and experience." → `minimum = 5` |
+| Preferred/ideal threshold stated alongside a required one | Annotate the **required** (gating) threshold only; the preferred/ideal figure is disregarded, not treated as an ambiguity (same principle as the "ideally 4" row above) | "3+ years required; 5+ years strongly preferred." → `minimum = 3` |
+| Multiple salary ranges tied to different locations/conditions, no basis to prefer one for this specific record | `ambiguous` | "Salary: $130,000–$150,000 (San Francisco Bay Area); $110,000–$130,000 (Remote, all other US locations)." with no location stated elsewhere in this record indicating which band applies |
+| Multiple salary ranges tied to different locations/conditions, where this record's own stated location clearly selects one band | Annotate that band's figures only, `present_supported` | Same ranges as above, but this record's `location_raw` states "San Francisco, CA" → `minimum = 130000`, `maximum = 150000` |
+
 ### Currency normalization table (`salary.currency`)
 
 | Sourced text | Annotation | Provenance |
@@ -214,18 +247,53 @@ domain unit differs (years vs. currency amount).
 
 ### Location normalization table (`location.city`/`.state`/`.country`/`.postal_code`)
 
-Copy each sub-field **exactly as written** in the sourced text — do not
-expand an abbreviation ("TX" stays "TX", never "Texas") and do not
-abbreviate a spelled-out form ("Texas" stays "Texas", never "TX"). This is
-deterministic by construction: two independent annotators reading identical
-text produce identical strings, with no separate normalization convention
-to apply consistently.
+**Annotate the canonical normalized output a correct classifier would
+produce, not a verbatim copy of the source substring.** Aliases that are
+semantically equivalent (e.g. `location_raw` reading "Remote, US") are not
+a conflict with a canonical form that looks textually different (e.g.
+country `United States`) — the corrected classifier output and the
+source text agree in meaning even though the spelling differs, so scoring
+that as `confidently_wrong` would be false.
+
+- **Country**: one canonical full-English-name form. At minimum:
+  `US`/`U.S.`/`USA`/`United States` → `United States`;
+  `UK`/`United Kingdom` → `United Kingdom`. Any other country name is
+  written in its own canonical full English form (e.g. "Germany",
+  "Canada", "Australia") — the same alias-collapsing principle applies
+  even though this table does not enumerate every country.
+- **US state**: exactly one USPS two-letter code, uppercase, no periods
+  (e.g. "Texas" → `TX`, "Calif." → `CA`) — this is the one location
+  sub-field with a genuinely closed, mechanically validated domain in the
+  current (US-only) classifier design; a non-US state/province/region has
+  no dedicated canonical form here (annotate it in its own natural written
+  form, and see `present_unsupported_form` in the domain table above).
+- **City**: a deterministic cleaned canonical spelling — trim surrounding
+  whitespace and punctuation, preserve the source text's own capitalization
+  and spelling otherwise (no gazetteer-based renaming). A **region**, not a
+  city, must not be silently annotated as one: phrases like "San Francisco
+  Bay Area", "Greater Boston Area", or "Pacific Northwest" name a region,
+  not a single city, and are `absent` for `city` (not `present_supported`
+  with the region's name standing in for a city) unless the text also
+  separately names an actual city within it.
+- **Postal code**: a deterministic normalized textual form — digits only
+  for a US ZIP5 or ZIP5-4 (`"95814"` or `"95814-1234"`, no internal spaces);
+  a non-US postal code is written trimmed, in its own natural form.
+
+**Known, deliberate scope boundary** (not a new discovery, not something
+these examples are working around): the current classifier never
+populates `city` at all, for any input, by permanent design (no
+city gazetteer exists) — so `location.city`'s `supported_abstention` is
+expected to be at or near 100% whenever `city` is annotated
+`present_supported`. This is a real, correctly-reported finding about
+current classifier coverage, not a bug in this rubric or the evaluator.
 
 | Situation | Rule |
 |---|---|
 | Text names exactly one geographic location, optionally with a remote/hybrid modifier ("Austin, TX (Hybrid)") | Annotate `city`/`state`/etc. from the geographic part only; the modifier is `remote_type`'s concern, not a location conflict |
-| Text names two or more genuinely different geographic locations with no marked primary ("Austin, TX or Remote (anywhere in the US)"; "San Francisco or New York") | `ambiguous` for whichever sub-field actually differs between the candidates (e.g. `city`); a sub-field that happens to agree across all candidates (e.g. `country` is `US` in both) may still be `present_supported` |
+| Text names two or more genuinely different geographic locations with no marked primary ("Austin, TX or Remote (anywhere in the US)"; "San Francisco or New York") | `ambiguous` for whichever sub-field actually differs between the candidates (e.g. `city`); a sub-field that happens to agree across all candidates (e.g. `country` is `United States` in both) may still be `present_supported` |
 | Text gives a sub-field only implicitly (e.g. a well-known city with no state/country stated) | `absent` for the unstated sub-field — do not infer a state/country from world knowledge of the city |
+| `location_raw` states some but not all sub-fields, and `description` states the rest with no conflict (e.g. `location_raw` = "Austin, TX" with no country stated; `description` separately confirms a US-based role with nothing contradicting Texas) | `description` may fill the missing sub-field (`country = United States`, `inferred`) — this is ordinary pooled-evidence handling, not a special case |
+| `location_raw` and `description` state genuinely different, non-equivalent values for the same sub-field (not just a different spelling of the same value) | `ambiguous` for that sub-field — a true semantic conflict, not resolved silently in either field's favor |
 
 ## Provenance rule (for every `present_supported` annotation)
 
@@ -323,7 +391,7 @@ fields, no more, no fewer:
 {
   "schema_version": "1",
   "annotator_role": "claude",
-  "rubric_version": "1.0.2",
+  "rubric_version": "1.0.3",
   "source_packet_hash": "<the canonical sha256 hex handed to you with this packet>",
   "frozen_at": "2026-09-27T18:00:00+00:00",
   "records": {
@@ -335,7 +403,7 @@ fields, no more, no fewer:
 - `schema_version` is the fixed string `"1"`.
 - `annotator_role` is exactly `"claude"` or exactly `"sol"` — whichever role
   you were told you are performing. Never anything else.
-- `rubric_version` is exactly `"1.0.2"` (this document's version) — copy it
+- `rubric_version` is exactly `"1.0.3"` (this document's version) — copy it
   verbatim, do not derive or reformat it.
 - `source_packet_hash` is the canonical hash value you were given alongside
   this rubric, the taxonomy, and the sanitized source packet — copy it
@@ -399,7 +467,7 @@ written here could ever be the real one):
 {
   "schema_version": "1",
   "annotator_role": "claude",
-  "rubric_version": "1.0.2",
+  "rubric_version": "1.0.3",
   "source_packet_hash": "<the actual value handed to you with your packet, copied verbatim>",
   "frozen_at": "2026-09-27T18:00:00+00:00",
   "records": {

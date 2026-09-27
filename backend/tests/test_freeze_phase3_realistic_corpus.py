@@ -1179,6 +1179,33 @@ def test_load_annotation_pass_rejects_a_salary_period_outside_the_closed_domain(
         load_annotation_pass(path, **_base_pass_kwargs("h"))
 
 
+def test_load_annotation_pass_rejects_a_state_outside_the_usps_closed_domain(
+    tmp_path: Path,
+) -> None:
+    """Sol finding F11: `location.state` has a genuinely closed domain
+    (USPS two-letter codes) in the current US-only classifier design,
+    reused here via `EXPECTED_VALUE_VALIDATORS` -- not an arbitrary
+    non-empty string."""
+    annotations = _record_annotations(
+        {
+            ("location", "state"): _scalar_label(
+                outcome="present_supported",
+                expected_value="Texas",
+                expected_provenance="parsed_description",
+            )
+        }
+    )
+    path = _write_pass(
+        tmp_path,
+        "claude",
+        annotator_role="claude",
+        source_packet_hash="h",
+        records={"a:1": annotations},
+    )
+    with pytest.raises(FreezeBuilderError, match="not valid for 'location.state'"):
+        load_annotation_pass(path, **_base_pass_kwargs("h"))
+
+
 def test_load_adjudication_audit_rejects_invalid_adjudicated_value(tmp_path: Path) -> None:
     claude_records = {"a:1": _record_annotations()}
     sol_records = {

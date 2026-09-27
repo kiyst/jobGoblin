@@ -102,117 +102,6 @@ that detail.
   authorization (`slice_id: 2026-09-27-realistic-corpus-freeze-evaluation-
   0dae468`, risk class **H**, `slice_kind: tooling`, `declared_gate: final`).
   Same branch `phase-3/realistic-corpus-freeze-evaluation`, on top of the
-  existing pushed Stage 1 checkpoint `7644e20e30fdde6e38a840e3b621b6217b93
-  ce14`, preserved unamended. One bounded correction round for Sol's Stage 1
-  pre-annotation review verdict (**CHANGES REQUESTED**, six findings, F1/F2/
-  F4 High, F3 High, F5/F6 Medium). No annotation pass, adjudication, corpus
-  freeze, baseline evaluation, provider contact, database work, parser-
-  semantic change, or new workflow tooling performed. Ending commit: this
-  commit.
-- **F1 (rubric not implementation-independent)**: replaced parser-relative
-  labeling with an implementation-independent semantic ground truth --
-  `present_supported` now means the sourced field(s) unambiguously supply a
-  value representable by the field's closed canonical output domain
-  *regardless of current parser recognition*; `present_unsupported_form`
-  means the domain genuinely cannot represent the stated value (with the
-  honest consequence, stated explicitly, that this outcome cannot arise at
-  all for the four free-text fields whose domain is "any non-empty string").
-  Added a closed **source-field table** (title+description pooled for the
-  three scalars/experience/skills; `compensation_text` only for salary;
-  `location_raw` only for location -- and the explicit rule that a value
-  stated elsewhere, e.g. in `description` when `compensation_text` is null,
-  is still `absent` for that annotation). The rubric now states plainly it
-  requires no parser-implementation access.
-- **F2 (pass schema undocumented)**: added the complete exact annotation-
-  pass JSON schema to the rubric -- all six top-level fields, record-id
-  format, scalar/composite/skills nesting, closed per-label keys, timestamp
-  format, and a compact valid example (2-id synthetic taxonomy for brevity).
-- **F3 (silent duplicate-JSON-key acceptance)**: both `load_annotation_pass`
-  and `load_adjudication_audit` now parse with
-  `object_pairs_hook=evaluate_phase3_corpus._reject_duplicate_keys` -- the
-  one authoritative fail-closed mechanism, imported directly rather than
-  reimplemented, so duplicate-key behavior can never drift between the two
-  modules. Rejects duplicates at every nesting level (recursive by
-  construction). Four new regressions: top-level and nested duplicates, for
-  both the pass and adjudication-audit schemas.
-- **F4 (adjudication/audit identity not enforced)**: `adjudicated_by` and
-  `audited_by` must now equal exactly `"user"` (`_REQUIRED_HUMAN_IDENTITY`)
-  -- previously only checked "non-empty string", so an agent/model identity
-  could reach the hardcoded `annotator_role: "adjudicated:user"` label. Two
-  new regressions (non-`"user"` `adjudicated_by`/`audited_by` rejected).
-- **F5 (no field-aware value validation before audit)**: exposed
-  `evaluate_phase3_corpus._EXPECTED_VALUE_VALIDATORS` as public
-  `EXPECTED_VALUE_VALIDATORS` (pure rename, only reuse-motivated change to
-  that file, no metric/parser-behavior change) and reused it in both
-  `_validate_raw_label` (pass loading) and `_final_label_from_adjudication`
-  (adjudicated values) via one shared `_validate_expected_value_for_field`
-  helper -- invalid `remote_type`/`employment_type`/`seniority` values,
-  bool-as-int numeric values, and invalid adjudicated values are now
-  rejected during pass/adjudication loading, before any human audit work,
-  not only later by `build_corpus`'s end-of-pipeline self-check. Three new
-  regressions (invalid `remote_type` and bool-as-int `experience.minimum`
-  in a pass; an invalid adjudicated `seniority` value).
-- **F6 (racy existence-check-then-rename)**: replaced the
-  check-then-`Path.rename()` sequence with `verification_receipts.
-  write_receipt_atomic`'s proven primitive, reimplemented locally for
-  `FreezeBuilderError` and corpus-specific JSON formatting: same-directory
-  temp file, write + `flush()` + `os.fsync()`, `load_corpus` self-check
-  against the temp file, then `os.link(temp, output_path)` -- create-if-
-  absent is now the filesystem's own guarantee (`FileExistsError`), not a
-  race-prone check in this process; the temp file is always unlinked in a
-  `finally`. One new race/fault-injection regression: a monkeypatched
-  `load_corpus` call injects a competing writer's sentinel file at the
-  exact point between self-check and publication; proves the destination
-  is left byte-identical to the sentinel and no temp file leaks.
-- Because the rubric changed before any annotation exists, `RUBRIC_VERSION`
-  bumped `1.0.0 -> 1.0.1`. **Historical, superseded evidence** (never
-  annotated against): `rubric_version: 1.0.0`, rubric sha256
-  `bb4c8ac44ccb7bf6c0978d36bb4350449076df032e337ef6a8b03a651ee2ade0`,
-  `source_packet_hash 867e5b6d30a4fc858de3146122437ca03a936936c8f88ddc034
-  8ab5dedb92957` (all recorded in superseded commit `7644e20`). **Current**:
-  rubric sha256
-  `47f833d80eb37c8046fc6b243e53fbeaa4cdab78c6b71a52748ecb42e7106f2c`,
-  `source_packet_hash 914ebc5700a4baf9f7b15d25e109ea86d647ef9c8d5bd2fb8e04c
-  db608299651` (taxonomy/salvage hashes unchanged from Stage 1).
-- Verification: `ruff format --check`/`ruff check` clean on all four
-  touched files; `mypy` clean on both scripts; full backend suite **3107
-  passed** (was 3097; +10 = the F3/F4/F5/F6 regressions above); `check_repo.
-  py` clean; `git diff --check` clean.
-- Adversarial self-review: confirmed the F4 identity check is a strict `==`
-  (not merely "truthy"), so an empty string or a look-alike role string both
-  still fail; confirmed `_validate_expected_value_for_field` is a single
-  shared choke point called from both the pass-loading and adjudication-
-  resolution paths (no second copy to drift); confirmed the F6 race
-  regression genuinely exercises the code path between self-check and
-  `os.link` (not merely the earlier fast-fail check) by injecting the
-  competing write from inside a monkeypatched `load_corpus`, the last call
-  before `os.link`; confirmed the rubric's per-field domain table's "this
-  outcome cannot occur" claims for `salary.currency`/`salary.period`/
-  `location.*` against `EXPECTED_VALUE_VALIDATORS`'s actual validators
-  (`_is_non_empty_str` for all eight) rather than asserting it from
-  intuition.
-- Files changed: `docs/evaluation/phase3-realistic-annotation-rubric.md`
-  (rewritten sections, `rubric_version` bump), `backend/scripts/
-  freeze_phase3_realistic_corpus.py` (F3/F4/F5/F6 fixes), `backend/tests/
-  test_freeze_phase3_realistic_corpus.py` (31 -> 41 tests), `backend/
-  scripts/evaluate_phase3_corpus.py` (one rename only, F5 reuse), `docs/
-  LLM_HANDOFF.md` (this entry, plus the iteration rotation above).
-- STOP -- this remains a checkpoint within an incomplete slice, not a
-  candidate. No annotation pass, adjudication, corpus freeze, baseline
-  evaluation, provider contact, database work, parser change, title
-  normalization, `R`, merge, `M`, or `Q` is authorized by this commit.
-  Waiting for Sol's re-review of the corrected Stage 1 checkpoint.
-
----
-
-## Iteration 2
-
-### Work done
-
-- Date/agent: 2026-09-27, Claude Code (Sonnet 5). Same slice, same
-  authorization (`slice_id: 2026-09-27-realistic-corpus-freeze-evaluation-
-  0dae468`, risk class **H**, `slice_kind: tooling`, `declared_gate: final`).
-  Same branch `phase-3/realistic-corpus-freeze-evaluation`, on top of the
   existing pushed checkpoint `64dd730`, preserved unamended. One bounded
   correction round for Sol's Stage 1 re-review verdict (**CHANGES
   REQUESTED**, four findings, F7/F8/F9/F10, all High). The F3/F4/F5/F6
@@ -323,3 +212,136 @@ that detail.
   evaluation, provider contact, database work, parser change, title
   normalization, `R`, merge, `M`, or `Q` is authorized by this commit.
   Waiting for Sol's re-review of the twice-corrected Stage 1 checkpoint.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-09-27, Claude Code (Sonnet 5). Same slice, same
+  authorization (`slice_id: 2026-09-27-realistic-corpus-freeze-evaluation-
+  0dae468`, risk class **H**, `slice_kind: tooling`, `declared_gate: final`).
+  Same branch `phase-3/realistic-corpus-freeze-evaluation`, on top of the
+  existing pushed checkpoint `d2097b4`, preserved unamended. One bounded
+  correction round for Sol's final Stage 1 re-review verdict (**CHANGES
+  REQUESTED**, three findings, F11/F12 High, F13 Medium). The F3-F10
+  corrections from the prior two rounds were accepted unchanged and are
+  untouched here except where F13 explicitly required fixing a bug
+  introduced by F7's own implementation (the metric rename/semantics
+  below). No annotation pass, adjudication, corpus freeze, baseline
+  evaluation, provider contact, database work, parser-semantic change, or
+  new `compensation_text`/`location_raw` extraction performed. Ending
+  commit: this commit.
+- **F11 (location must describe canonical normalized outputs, not a
+  verbatim copy)**: replaced the prior "copy verbatim" rule (which would
+  have falsely scored "US" as `confidently_wrong` against the classifier's
+  actual `United States` output) with a canonicalization policy — country:
+  one canonical full-English-name form, with an explicit alias table
+  (`US`/`U.S.`/`USA`/`United States` -> `United States`,
+  `UK`/`United Kingdom` -> `United Kingdom`, generalized to "any other
+  country in its own full form"); state: exactly one USPS two-letter code
+  (the one location sub-field with a genuinely closed domain in the
+  current US-only classifier design); city: a deterministic cleaned
+  spelling, with an explicit rule that a *region* ("San Francisco Bay
+  Area") is never silently annotated as a city; postal code: a
+  deterministic normalized textual form (digits-only ZIP5/ZIP5-4 for US,
+  natural form otherwise). Added the explicit rule that `description`
+  evidence may fill a sub-field `location_raw` leaves unstated, but a
+  genuine semantic conflict (not just a spelling difference) between them
+  is `ambiguous`. Documented, as a known and deliberate (not newly
+  discovered) scope boundary, that `location.city` is expected to show
+  `supported_abstention` at or near 100% whenever annotated
+  `present_supported`, since the current classifier never populates
+  `city` at all, for any input, by permanent design (confirmed directly
+  against `app/normalization/location.py`'s own module docstring). Code:
+  `evaluate_phase3_corpus.EXPECTED_VALUE_VALIDATORS["location.state"]`
+  tightened from `_is_non_empty_str` to the closed 50-state+DC USPS set
+  (`_USPS_STATE_CODES`, declared independently, mirroring
+  `app.normalization.location.py`'s own `_STATES` catalog rather than
+  importing parser internals) — `country`/`city`/`postal_code` stay free
+  text, since `docs/DATA_MODEL.md` documents no enum for them (matching
+  the `salary.currency`/`.period` precedent from the prior round).
+- **F12 (no rules for multiple/nested/conditional numeric requirements)**:
+  added a decision table for `experience.minimum`/`.maximum` and
+  `salary.minimum`/`.maximum` covering: independent "and"-joined
+  requirements with no combined figure (`ambiguous` — two co-equal domains,
+  neither is "the" answer); explicit cumulative/additive wording (sum
+  exactly as stated, never invented); nested "including" wording (the
+  general/outer figure only; the narrower nested figure has no dedicated
+  field and is not separately captured -- a scope limitation, not an
+  ambiguity); "or"-joined alternatives (`ambiguous` if both paths are
+  numeric and differ; the numeric path alone is `present_supported` if the
+  other path is non-numeric, e.g. a degree); preferred/ideal vs. required
+  thresholds (annotate the required/gating figure only); and multiple
+  salary ranges tied to different locations/conditions (`ambiguous` unless
+  this record's own stated location selects one band). States plainly:
+  never sum potentially overlapping figures unless the text itself makes
+  them explicitly additive. All examples fabricated.
+- **F13 (gap metric too narrow in scope-description, and had a real
+  rendering bug)**: renamed `provider_mapping_gap` ->
+  `missing_wired_input_gap` everywhere (dataclass field, `MismatchDetail`
+  category, `render_report` line, rubric, docstring) and added an explicit
+  statement that it detects only a *completely absent* wired input, never
+  a non-null-but-incomplete or mis-mapped one -- that requires later,
+  manual mismatch attribution. Fixed the confirmed bug: `_score_component`/
+  `_evaluate_composite`'s `wired_input_present` previously defaulted to
+  `True`, so every scalar/`experience.*` `present_supported` case
+  incremented the gap counter's denominator with `hit=False`, rendering a
+  misleading `"0/N"` instead of the promised `"N/A"`. Changed the parameter
+  to an explicit applicability sentinel, `bool | None`, defaulting to
+  `None` ("not applicable" -- the counter is never touched, so it renders
+  `N/A`); only salary/location's call sites in `_evaluate_records` pass an
+  explicit `True`/`False`. Also fixed a related, previously-undetected gap:
+  a wired input that is present but whitespace-only was being silently
+  counted as "present" even though the real `classify_salary`/
+  `classify_location` abort on it identically to `None` -- added
+  `_is_meaningfully_present()` (non-null and non-blank after `.strip()`)
+  and used it at both call sites.
+- Because the rubric changed a third time before any annotation exists,
+  `RUBRIC_VERSION` bumped `1.0.2 -> 1.0.3`. **Historical, superseded
+  evidence** (none ever annotated against), all three now recorded in the
+  rubric's own superseded-evidence table: `1.0.0` (commit `7644e20`),
+  `1.0.1` (commit `64dd730`), and `1.0.2` (rubric sha256
+  `736d53bb7da78cd558fb6f7cab1c18fc991940416e059f5e60cc3b92e19ea0f9`,
+  `source_packet_hash 08409a3e57dccf84c34127675078106d6c510ff71813860fb23b
+  69fd26bed55a`, commit `d2097b4`). **Current**: rubric sha256
+  `3948ec6a09c188a95b9a2ee1fb9ecd94edda2ab5c48bb39e32826e36f51f7f87`,
+  `source_packet_hash b56b0f65529fc83a8f30c8958ba697544a321a003b323220b92a
+  7c1ac8c6dd1b` (taxonomy/salvage hashes unchanged).
+- Verification: `ruff format --check`/`ruff check` clean on all four
+  touched files; `mypy` clean on both scripts; full backend suite **3121
+  passed** (was 3114; +7 = 6 new/renamed evaluator tests (gap-metric
+  applicability-sentinel coverage, whitespace-only handling, scalar N/A
+  end-to-end, USPS state closed-set accept/reject) + 1 new freeze-builder
+  USPS-state pass-loading test); `check_repo.py` clean; `git diff --check`
+  clean.
+- Adversarial self-review: reproduced the F13 bug directly (temporarily
+  reverted the `None` default back to `True` and reran the affected tests
+  -- confirmed `test_evaluate_corpus_scalar_gap_metric_is_not_applicable`
+  and `test_score_component_wired_input_present_none_is_not_applicable`
+  fail exactly as expected, then restored); confirmed
+  `_is_meaningfully_present` is exercised through the real
+  `classify_salary`/`classify_location` calls (via `evaluate_corpus`), not
+  a mock, against a genuinely whitespace-only `compensation_text`;
+  confirmed tightening `location.state` does not affect any existing test
+  (none hardcoded a non-USPS state value); confirmed the F12 table's
+  "nested including" row and F9's prior "subordinate seniority" row are
+  compatible (a general/outer figure is always annotated when one exists,
+  never zero information) rather than contradictory; confirmed no example
+  anywhere in the rubric quotes or pre-labels any of the 30 real records
+  (F10's requirement, re-checked given how much text F11/F12 added).
+- Files changed: `docs/evaluation/phase3-realistic-annotation-rubric.md`
+  (F11/F12 sections, F13 terminology, `rubric_version` bump),
+  `backend/scripts/evaluate_phase3_corpus.py` (`missing_wired_input_gap`
+  rename + applicability-sentinel fix, `_is_meaningfully_present`,
+  `location.state` closed-set validator, docstring), `backend/tests/
+  test_evaluate_phase3_corpus.py` (70 -> 76 tests), `backend/scripts/
+  freeze_phase3_realistic_corpus.py` (`RUBRIC_VERSION` bump only),
+  `backend/tests/test_freeze_phase3_realistic_corpus.py` (42 -> 43 tests),
+  `docs/LLM_HANDOFF.md` (this entry, plus the iteration rotation above).
+- STOP -- this remains a checkpoint within an incomplete slice, not a
+  candidate. No annotation pass, adjudication, corpus freeze, baseline
+  evaluation, provider contact, database work, parser change, title
+  normalization, `R`, merge, `M`, or `Q` is authorized by this commit.
+  Waiting for Sol's final Stage 1 re-review.

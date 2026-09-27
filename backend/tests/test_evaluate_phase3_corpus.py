@@ -297,6 +297,32 @@ def test_load_corpus_accepts_every_closed_salary_period_value(tmp_path: Path) ->
         assert loaded[0].annotations["salary"]["period"]["expected_value"] == period
 
 
+def test_load_corpus_rejects_a_state_outside_the_usps_closed_domain(tmp_path: Path) -> None:
+    """Sol finding F11: `location.state` has a genuinely closed domain in
+    the current (US-only) classifier design -- USPS two-letter codes --
+    and must be validated against it, not accepted as an arbitrary
+    non-empty string (e.g. a spelled-out state name)."""
+    records = _minimal_corpus()
+    records[0]["annotations"]["location"]["state"] = _annotation(
+        outcome="present_supported",
+        expected_value="Texas",
+        expected_provenance="parsed_description",
+    )
+    path = _write_corpus(tmp_path, records)
+    with pytest.raises(CorpusValidationError, match="not valid for 'location.state'"):
+        load_corpus(path, known_canonical_ids=_KNOWN_IDS)
+
+
+def test_load_corpus_accepts_a_valid_usps_state_code(tmp_path: Path) -> None:
+    records = _minimal_corpus()
+    records[0]["annotations"]["location"]["state"] = _annotation(
+        outcome="present_supported", expected_value="TX", expected_provenance="parsed_description"
+    )
+    path = _write_corpus(tmp_path, records)
+    loaded = load_corpus(path, known_canonical_ids=_KNOWN_IDS)
+    assert loaded[0].annotations["location"]["state"]["expected_value"] == "TX"
+
+
 # ---------------------------------------------------------------------------
 # Timestamps, capture, manual review
 # ---------------------------------------------------------------------------
@@ -1051,11 +1077,14 @@ def test_composite_non_raising_call_scores_each_component_independently() -> Non
 
 
 # ---------------------------------------------------------------------------
-# F7 -- provider/input-mapping gap: a present_supported case must never be
+# F7/F13 -- missing-wired-input gap: a present_supported case must never be
 # scored as parser correctness/abstention/wrong when the parser's actual
-# wired input field was null; it is measured separately.
+# wired input field was completely missing; it is measured separately, via
+# an explicit applicability sentinel (`bool | None`) rather than a default
+# that silently renders a misleading "0/N" for components where the gap
+# concept does not apply at all.
 # ---------------------------------------------------------------------------
-def test_score_component_routes_missing_wired_input_to_provider_mapping_gap() -> None:
+def test_score_component_routes_missing_wired_input_to_the_gap_metric() -> None:
     evaluation = SplitEvaluation()
     _score_component(
         evaluation,
@@ -1071,7 +1100,7 @@ def test_score_component_routes_missing_wired_input_to_provider_mapping_gap() ->
         wired_input_present=False,
     )
     metrics = evaluation.get_component_metrics("salary.minimum")
-    assert metrics.provider_mapping_gap.render() == "1/1"
+    assert metrics.missing_wired_input_gap.render() == "1/1"
     # None of the parser-correctness buckets are touched at all -- not even
     # as a "0" -- since the parser never received this input in the first
     # place; scoring it as an abstention would misattribute a wiring gap as
@@ -1081,12 +1110,10 @@ def test_score_component_routes_missing_wired_input_to_provider_mapping_gap() ->
     assert metrics.supported_correctness.render() == "N/A"
     assert metrics.provenance_correctness.render() == "N/A"
     assert len(evaluation.mismatches) == 1
-    assert evaluation.mismatches[0].category == "provider_mapping_gap"
+    assert evaluation.mismatches[0].category == "missing_wired_input_gap"
 
 
-def test_score_component_with_wired_input_present_is_unaffected_by_the_new_bucket() -> None:
-    """Regression: the default (`wired_input_present=True`) must behave
-    exactly as the pre-F7 scoring did."""
+def test_score_component_with_wired_input_present_true_scores_normally() -> None:
     evaluation = SplitEvaluation()
     _score_component(
         evaluation,
@@ -1099,15 +1126,40 @@ def test_score_component_with_wired_input_present_is_unaffected_by_the_new_bucke
         expected_provenance="parsed_description",
         actual_value=120000,
         actual_provenance="parsed_description",
+        wired_input_present=True,
     )
     metrics = evaluation.get_component_metrics("salary.minimum")
-    assert metrics.provider_mapping_gap.render() == "0/1"
+    assert metrics.missing_wired_input_gap.render() == "0/1"
     assert metrics.supported_correctness.render() == "1/1"
     assert metrics.supported_abstention.render() == "0/1"
     assert metrics.confidently_wrong.render() == "0/1"
 
 
-def test_evaluate_composite_reports_provider_mapping_gap_for_a_null_wired_field() -> None:
+def test_score_component_wired_input_present_none_is_not_applicable() -> None:
+    """Sol finding F13: the *default* (no `wired_input_present` passed --
+    what every scalar/`experience.*` call site does) must render the gap
+    metric `N/A` (never touched), not a misleading `"0/1"`, while still
+    scoring the normal correctness/abstention/wrong path exactly as before
+    this metric existed."""
+    evaluation = SplitEvaluation()
+    _score_component(
+        evaluation,
+        record_id="r1",
+        parser="remote_type",
+        component=None,
+        metrics_key="remote_type",
+        outcome="present_supported",
+        expected_value="remote",
+        expected_provenance="inferred",
+        actual_value="remote",
+        actual_provenance="inferred",
+    )
+    metrics = evaluation.get_component_metrics("remote_type")
+    assert metrics.missing_wired_input_gap.render() == "N/A"
+    assert metrics.supported_correctness.render() == "1/1"
+
+
+def test_evaluate_composite_reports_the_gap_for_a_null_wired_field() -> None:
     """End-to-end through `_evaluate_composite`: the annotation claims
     `present_supported` (ground truth sourced more broadly than the wired
     field, per the rubric) while the actual classifier call -- correctly
@@ -1144,8 +1196,42 @@ def test_evaluate_composite_reports_provider_mapping_gap_for_a_null_wired_field(
         wired_input_present=False,
     )
     metrics = evaluation.get_component_metrics("salary.minimum")
-    assert metrics.provider_mapping_gap.render() == "1/1"
+    assert metrics.missing_wired_input_gap.render() == "1/1"
     assert metrics.supported_abstention.render() == "N/A"
+
+
+def test_evaluate_composite_experience_defaults_to_not_applicable() -> None:
+    """`experience` never passes `wired_input_present` at its one call site
+    in `_evaluate_records` -- confirms the default genuinely is `None`
+    (not-applicable), not the old `True` default that silently rendered a
+    misleading `"0/N"`."""
+    evaluation = SplitEvaluation()
+    annotations = {
+        "minimum": _annotation(
+            outcome="present_supported", expected_value=3, expected_provenance="inferred"
+        ),
+        "maximum": _annotation(outcome="absent"),
+    }
+
+    class _Component:
+        value = 3
+        provenance = type("P", (), {"value": "inferred"})()
+
+    class _Result:
+        minimum = _Component()
+        maximum = _Component()
+
+    _evaluate_composite(
+        evaluation,
+        record_id="r1",
+        parser="experience",
+        annotations=annotations,
+        fn=lambda: _Result(),
+        components=("minimum", "maximum"),
+    )
+    metrics = evaluation.get_component_metrics("experience.minimum")
+    assert metrics.missing_wired_input_gap.render() == "N/A"
+    assert metrics.supported_correctness.render() == "1/1"
 
 
 class _FakeSkillMatch:
@@ -1332,14 +1418,15 @@ def test_render_report_omits_the_template_note_without_records(tmp_path: Path) -
 # ---------------------------------------------------------------------------
 # F7 -- end to end through evaluate_corpus/render_report with real classifiers
 # ---------------------------------------------------------------------------
-def test_evaluate_corpus_reports_provider_mapping_gap_for_null_compensation_text(
+def test_evaluate_corpus_reports_the_gap_for_null_compensation_text(
     tmp_path: Path,
 ) -> None:
     """`_base_record()`'s `compensation_text` is `None` by default -- exactly
     this corpus's real, current situation (all 30 retained records). A
     `present_supported` salary annotation (ground truth sourced more
-    broadly than `compensation_text`, per the rubric) must be reported as a
-    provider_mapping_gap, never as `supported_abstention`/`confidently_wrong`."""
+    broadly than `compensation_text`, per the rubric) must be reported as
+    `missing_wired_input_gap`, never as `supported_abstention`/
+    `confidently_wrong`."""
     from app.normalization.taxonomy import DEFAULT_SKILLS_TAXONOMY_PATH, load_taxonomy
 
     taxonomy = load_taxonomy(DEFAULT_SKILLS_TAXONOMY_PATH)
@@ -1356,10 +1443,63 @@ def test_evaluate_corpus_reports_provider_mapping_gap_for_null_compensation_text
     evaluations = evaluate_corpus(loaded, taxonomy=taxonomy)
 
     dev_metrics = evaluations["dev"].components["salary.minimum"]
-    assert dev_metrics.provider_mapping_gap.render() == "1/1"
+    assert dev_metrics.missing_wired_input_gap.render() == "1/1"
     assert dev_metrics.supported_abstention.render() == "N/A"
     assert dev_metrics.confidently_wrong.render() == "N/A"
     assert dev_metrics.supported_correctness.render() == "N/A"
 
     report = render_report(evaluations, records=loaded)
-    assert "provider_mapping_gap: 1/1" in report
+    assert "missing_wired_input_gap: 1/1" in report
+
+
+def test_evaluate_corpus_treats_whitespace_only_compensation_text_as_a_gap(
+    tmp_path: Path,
+) -> None:
+    """Sol finding F13: a present-but-blank `compensation_text` must be
+    treated identically to `None` -- the real `classify_salary` aborts on
+    it the same way, so silently counting it as "wired input present"
+    would understate the gap."""
+    from app.normalization.taxonomy import DEFAULT_SKILLS_TAXONOMY_PATH, load_taxonomy
+
+    taxonomy = load_taxonomy(DEFAULT_SKILLS_TAXONOMY_PATH)
+    real_ids = taxonomy.canonical_ids()
+    records = _minimal_corpus()
+    records[0]["fields"]["description"] = "   "
+    records[0]["fields"]["compensation_text"] = "   "
+    records[0]["fields"]["compensation_text_source_span"] = [0, 3]
+    records[0]["annotations"]["salary"]["minimum"] = _annotation(
+        outcome="present_supported", expected_value=100000, expected_provenance="parsed_description"
+    )
+    for record in records:
+        record["annotations"]["skills"] = {cid: _skill_annotation() for cid in real_ids}
+    path = _write_corpus(tmp_path, records)
+    loaded = load_corpus(path, known_canonical_ids=real_ids)
+    evaluations = evaluate_corpus(loaded, taxonomy=taxonomy)
+
+    dev_metrics = evaluations["dev"].components["salary.minimum"]
+    assert dev_metrics.missing_wired_input_gap.render() == "1/1"
+    assert dev_metrics.supported_abstention.render() == "N/A"
+
+
+def test_evaluate_corpus_scalar_gap_metric_is_not_applicable(tmp_path: Path) -> None:
+    """A scalar component's `missing_wired_input_gap` must render `N/A`
+    end to end, through the real `evaluate_corpus` pipeline -- never a
+    misleading `"0/N"` (Sol finding F13)."""
+    from app.normalization.taxonomy import DEFAULT_SKILLS_TAXONOMY_PATH, load_taxonomy
+
+    taxonomy = load_taxonomy(DEFAULT_SKILLS_TAXONOMY_PATH)
+    real_ids = taxonomy.canonical_ids()
+    records = _minimal_corpus()
+    records[0]["fields"]["title"] = "Software Engineer (Remote)"
+    records[0]["annotations"]["remote_type"] = _annotation(
+        outcome="present_supported", expected_value="remote", expected_provenance="inferred"
+    )
+    for record in records:
+        record["annotations"]["skills"] = {cid: _skill_annotation() for cid in real_ids}
+    path = _write_corpus(tmp_path, records)
+    loaded = load_corpus(path, known_canonical_ids=real_ids)
+    evaluations = evaluate_corpus(loaded, taxonomy=taxonomy)
+
+    dev_metrics = evaluations["dev"].components["remote_type"]
+    assert dev_metrics.missing_wired_input_gap.render() == "N/A"
+    assert dev_metrics.supported_correctness.render() == "1/1"

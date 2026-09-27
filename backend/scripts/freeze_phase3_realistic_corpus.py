@@ -124,7 +124,7 @@ DEFAULT_CORPUS_OUTPUT_PATH = (
     BACKEND_DIR / "tests" / "fixtures" / "evaluation" / "phase3_realistic_corpus.json"
 )
 
-RUBRIC_VERSION = "1.0.2"
+RUBRIC_VERSION = "1.0.3"
 EXPECTED_SALVAGE_SHA256 = "1273b6eafd42d05898520a783ad94f063da4507e8c00f3c4da86a3273b36fd6a"
 EXPECTED_RECORD_COUNT = 30
 
