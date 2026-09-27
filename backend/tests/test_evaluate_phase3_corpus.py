@@ -13,6 +13,7 @@ from scripts.evaluate_phase3_corpus import (
     _evaluate_composite,
     _evaluate_scalar,
     _evaluate_skills,
+    _is_meaningfully_present,
     _score_component,
     evaluate_corpus,
     load_corpus,
@@ -1467,6 +1468,67 @@ def test_evaluate_corpus_treats_whitespace_only_compensation_text_as_a_gap(
     records[0]["fields"]["description"] = "   "
     records[0]["fields"]["compensation_text"] = "   "
     records[0]["fields"]["compensation_text_source_span"] = [0, 3]
+    records[0]["annotations"]["salary"]["minimum"] = _annotation(
+        outcome="present_supported", expected_value=100000, expected_provenance="parsed_description"
+    )
+    for record in records:
+        record["annotations"]["skills"] = {cid: _skill_annotation() for cid in real_ids}
+    path = _write_corpus(tmp_path, records)
+    loaded = load_corpus(path, known_canonical_ids=real_ids)
+    evaluations = evaluate_corpus(loaded, taxonomy=taxonomy)
+
+    dev_metrics = evaluations["dev"].components["salary.minimum"]
+    assert dev_metrics.missing_wired_input_gap.render() == "1/1"
+    assert dev_metrics.supported_abstention.render() == "N/A"
+
+
+# ---------------------------------------------------------------------------
+# F15 -- a Unicode-format-character-only (category Cf) wired input is not
+# meaningfully present, matching fetch_greenhouse_evaluation_postings.py's
+# own established `_has_meaningful_text` rule (whitespace or Cf, or a mix
+# of both, is never "real" content).
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "value",
+    [
+        "​",  # ZERO WIDTH SPACE, category Cf
+        "﻿",  # ZERO WIDTH NO-BREAK SPACE / BOM, category Cf
+        "᠎",  # MONGOLIAN VOWEL SEPARATOR, category Cf
+        " \t​᠎\n﻿ ",  # ordinary whitespace mixed with Cf only
+    ],
+)
+def test_is_meaningfully_present_rejects_format_character_only_strings(value: str) -> None:
+    assert _is_meaningfully_present(value) is False
+
+
+def test_is_meaningfully_present_accepts_cf_mixed_with_genuine_content() -> None:
+    """Positive control: Cf characters alongside a real, visible character
+    must still count as meaningfully present -- this is a narrow presence
+    check, never a broader text-quality heuristic."""
+    assert _is_meaningfully_present("​$100,000﻿") is True
+
+
+def test_is_meaningfully_present_rejects_none_and_plain_whitespace() -> None:
+    assert _is_meaningfully_present(None) is False
+    assert _is_meaningfully_present("   ") is False
+
+
+def test_evaluate_corpus_treats_format_character_only_compensation_text_as_a_gap(
+    tmp_path: Path,
+) -> None:
+    """End to end: a `compensation_text` containing only Unicode format
+    characters (here U+200B) must route a `present_supported` salary
+    annotation to `missing_wired_input_gap`, never `supported_abstention`
+    -- confirmed against the real `classify_salary`, which returns
+    entirely unavailable results for this input (Sol finding F15)."""
+    from app.normalization.taxonomy import DEFAULT_SKILLS_TAXONOMY_PATH, load_taxonomy
+
+    taxonomy = load_taxonomy(DEFAULT_SKILLS_TAXONOMY_PATH)
+    real_ids = taxonomy.canonical_ids()
+    records = _minimal_corpus()
+    records[0]["fields"]["description"] = "​"
+    records[0]["fields"]["compensation_text"] = "​"
+    records[0]["fields"]["compensation_text_source_span"] = [0, 1]
     records[0]["annotations"]["salary"]["minimum"] = _annotation(
         outcome="present_supported", expected_value=100000, expected_provenance="parsed_description"
     )

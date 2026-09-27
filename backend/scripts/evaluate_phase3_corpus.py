@@ -107,10 +107,13 @@ narrower-than-ground-truth wired input field exists (`compensation_text`
 for `salary.*`, `location_raw` for `location.*` -- annotation ground
 truth is sourced more broadly than that, per the rubric, so this can and
 does differ), every `present_supported` case first splits on whether
-that wired input field was actually present (non-null and not
-whitespace-only -- a blank string aborts the real parser exactly like a
-null does, so it is treated identically, never silently counted as
-"present"): if it was missing, the case contributes only to
+that wired input field was actually present -- non-null and containing
+at least one character that is neither Unicode whitespace nor a Unicode
+format character (category `Cf`, e.g. a zero-width space or BOM); a
+blank, whitespace-only, or format-character-only string aborts the real
+parser exactly like a null does, so all are treated identically, never
+silently counted as "present" (Sol findings F13/F15): if it was missing,
+the case contributes only to
 `missing_wired_input_gap`, a signal distinct from parser correctness;
 only if the wired input was genuinely present does the case contribute
 to `supported_correctness`, `supported_abstention`, and
@@ -145,6 +148,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -990,8 +994,10 @@ class ParserComponentMetrics:
     provenance_correctness: MetricCounter
     # A `present_supported` case where the parser's actual wired input field
     # (`compensation_text` for salary, `location_raw` for location) was
-    # completely missing (null, or present but whitespace-only, which the
-    # real parser aborts on identically) -- the annotation's ground truth is
+    # completely missing (null, or present but containing no meaningful
+    # text -- whitespace/format-character-only, e.g. a zero-width space or
+    # BOM -- which the real parser aborts on identically) -- the
+    # annotation's ground truth is
     # sourced more broadly (may include `description`), so this is a
     # distinct wiring gap, never folded into supported_correctness/
     # supported_abstention/confidently_wrong (which would misattribute it
@@ -1063,12 +1069,21 @@ class SplitEvaluation:
 
 
 def _is_meaningfully_present(value: str | None) -> bool:
-    """Sol finding F13: a wired input field that is present but
-    whitespace-only is functionally identical to `None` for both the real
-    parser (which normalizes and aborts on it identically) and this gap
-    metric -- never silently counted as "present" just because it is
-    non-null."""
-    return value is not None and value.strip() != ""
+    """Sol finding F13/F15: a wired input field that is present but
+    contains no meaningful text is functionally identical to `None` for
+    both the real parser (which normalizes and aborts on it identically)
+    and this gap metric -- never silently counted as "present" just
+    because it is non-null. Mirrors
+    `fetch_greenhouse_evaluation_postings.py`'s own `_has_meaningful_text`:
+    a value is meaningfully present only if it contains at least one
+    character that is neither Unicode whitespace (`str.isspace()`) nor a
+    Unicode format character (category `Cf` -- zero-width space, BOM,
+    etc.), including a mixture of the two (Sol finding F15: a bare
+    `.strip()` check missed this, since `Cf` characters are not
+    whitespace by `str.isspace()`)."""
+    if value is None:
+        return False
+    return any(not char.isspace() and unicodedata.category(char) != "Cf" for char in value)
 
 
 class _CallFailed:

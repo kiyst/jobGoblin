@@ -102,127 +102,6 @@ that detail.
   authorization (`slice_id: 2026-09-27-realistic-corpus-freeze-evaluation-
   0dae468`, risk class **H**, `slice_kind: tooling`, `declared_gate: final`).
   Same branch `phase-3/realistic-corpus-freeze-evaluation`, on top of the
-  existing pushed checkpoint `64dd730`, preserved unamended. One bounded
-  correction round for Sol's Stage 1 re-review verdict (**CHANGES
-  REQUESTED**, four findings, F7/F8/F9/F10, all High). The F3/F4/F5/F6
-  mechanical corrections from the prior round were accepted unchanged and
-  are untouched here. No annotation pass, adjudication, corpus freeze,
-  baseline evaluation, provider contact, database work, parser-semantic
-  change, or new `compensation_text`/`location_raw` extraction performed.
-  Ending commit: this commit.
-- **F7 (source-field rule hid the provider-mapping gap)**: the rubric's
-  source-field table no longer restricts salary/location *ground truth* to
-  `compensation_text`/`location_raw` alone -- both are now pooled with
-  `title` + `description`, so a real salary/location statement in
-  `description` is annotated as `present_supported` even when the narrower
-  wired field is null (documented fact: all 30 retained records have
-  `compensation_text == null`; an offline scan found dollar-figure salary
-  evidence in `description` for 24/30). The **actual parser invocation is
-  unchanged** -- `classify_salary`/`classify_location` still receive only
-  `compensation_text`/`location_raw`, and nothing extracts or backfills
-  either field. `evaluate_phase3_corpus.py` gained a new
-  `ParserComponentMetrics.provider_mapping_gap` counter: a
-  `present_supported` case now first splits on whether the parser's actual
-  wired input was present at all; if not, it is counted only as
-  `provider_mapping_gap` (with its own `MismatchDetail` category) and is
-  **never** folded into `supported_correctness`/`supported_abstention`/
-  `confidently_wrong`, which continue to mean "wired input was present."
-  The rubric states plainly that this corpus can measure today's end-to-end
-  salary gap but not salary-parser correctness on realistic non-null
-  inputs without a separately reviewed extraction/mapping slice.
-- **F8 (domain table substituted schema types for semantics)**: added
-  closed decision tables to the rubric: a numeric range table for
-  `experience.min/max`/`salary.min/max` (single value, closed range,
-  open-ended lower/upper bound, fractional-value unsupported-form, and the
-  "range plus a preferred figure" non-ambiguity case); a currency
-  normalization table (ISO 4217 codes, ambiguous-bare-symbol handling); and
-  a location table (verbatim copy, no abbreviation-expansion/contraction,
-  multiple-location/conflict handling). `salary.period`'s canonical domain
-  is now closed to exactly `hourly`/`daily`/`monthly`/`annual`, matching
-  `docs/DATA_MODEL.md`'s `salary_period` enum -- the one composite
-  sub-field the project already documents a closed domain for; currency/
-  location sub-fields have no project-documented enum and stay free text,
-  stated explicitly rather than left ambiguous. Code: `evaluate_phase3_
-  corpus.EXPECTED_VALUE_VALIDATORS["salary.period"]` changed from
-  `_is_non_empty_str` to the closed-set check (no other validator changed).
-- **F9 (no target-role relevance rule)**: added a "Role-relevance filter"
-  section, applied before any outcome is chosen for any field: a mention
-  only counts if it asserts something about the advertised role or its
-  candidate requirements, never an unrelated person/reporting line,
-  customer/team description, generic benefits boilerplate, company/product
-  description, or passing example. Five synthetic examples included (a
-  benefits-boilerplate `employment_type` non-assertion, a "reports to"
-  non-assertion for `seniority`, a "leads senior/intermediate engineers"
-  non-assertion about the candidate's *own* level, a company-language
-  `skills` non-assertion, and a positive-control genuine requirement).
-- **F10 (real record id/example contaminated blindness)**: the compact
-  schema example's record id `gitlab:8396674002` (a real batch identifier)
-  and its speculative seniority label are replaced with a wholly synthetic
-  id (`examplecorp:0000000001`) and synthetic labels with no correspondence
-  to any real record's actual content; the rubric now states explicitly
-  that no example may pre-label or quote any of the 30 real evaluation
-  records.
-- Because the rubric changed again before any annotation exists,
-  `RUBRIC_VERSION` bumped `1.0.1 -> 1.0.2`. **Historical, superseded
-  evidence** (neither ever annotated against), both now recorded in the
-  rubric's own superseded-evidence table: `1.0.0` (rubric sha256
-  `bb4c8ac44ccb7bf6c0978d36bb4350449076df032e337ef6a8b03a651ee2ade0`,
-  `source_packet_hash 867e5b6d30a4fc858de3146122437ca03a936936c8f88ddc034
-  8ab5dedb92957`, commit `7644e20`) and `1.0.1` (rubric sha256
-  `47f833d80eb37c8046fc6b243e53fbeaa4cdab78c6b71a52748ecb42e7106f2c`,
-  `source_packet_hash 914ebc5700a4baf9f7b15d25e109ea86d647ef9c8d5bd2fb8e04c
-  db608299651`, commit `64dd730`). **Current**: rubric sha256
-  `736d53bb7da78cd558fb6f7cab1c18fc991940416e059f5e60cc3b92e19ea0f9`,
-  `source_packet_hash 08409a3e57dccf84c34127675078106d6c510ff71813860fb23b
-  69fd26bed55a` (taxonomy/salvage hashes unchanged).
-- Verification: `ruff format --check`/`ruff check` clean on all five
-  touched files; `mypy` clean on both scripts; full backend suite **3114
-  passed** (was 3107; +7 = 6 new evaluator tests (2 F8 domain, 3 F7
-  unit/composite, 1 F7 end-to-end via real classifiers) + 1 new freeze-
-  builder F8 pass-loading test); `check_repo.py` clean; `git diff --check`
-  clean.
-- Adversarial self-review: confirmed `provider_mapping_gap`'s denominator
-  is every `present_supported` case for that component (not just the
-  gapped ones), so the rendered ratio is a genuine "N of M present_supported
-  cases had no wired input" signal, not a bare count; confirmed the
-  `supported_abstention`/`confidently_wrong`/`supported_correctness`/
-  `provenance_correctness` block is skipped **entirely** (not scored as 0)
-  when the wired input is absent, so it renders `N/A` rather than a
-  misleadingly clean "0/0"-shaped result; confirmed `experience`'s call
-  site was deliberately left at the `wired_input_present=True` default
-  (title+description is already the full pooled ground-truth input for
-  that parser, so no analogous gap concept applies there); confirmed the
-  end-to-end F7 test exercises the real `classify_salary` via
-  `evaluate_corpus`, not a mock, against a `compensation_text=None` record
-  matching this batch's actual, confirmed (30/30) condition; confirmed
-  `location`'s parallel `wired_input_present` wiring is real but
-  currently inert in this batch specifically because `location_raw` is
-  null in 0/30 real records (checked directly against the salvage file),
-  stated as such rather than left to be discovered later.
-- Files changed: `docs/evaluation/phase3-realistic-annotation-rubric.md`
-  (F1 continuation + F7/F8/F9/F10, `rubric_version` bump), `backend/
-  scripts/evaluate_phase3_corpus.py` (`provider_mapping_gap` metric,
-  `salary.period` closed-set validator, docstring), `backend/tests/
-  test_evaluate_phase3_corpus.py` (64 -> 70 tests), `backend/scripts/
-  freeze_phase3_realistic_corpus.py` (`RUBRIC_VERSION` bump only),
-  `backend/tests/test_freeze_phase3_realistic_corpus.py` (41 -> 42 tests),
-  `docs/LLM_HANDOFF.md` (this entry, plus the iteration rotation above).
-- STOP -- this remains a checkpoint within an incomplete slice, not a
-  candidate. No annotation pass, adjudication, corpus freeze, baseline
-  evaluation, provider contact, database work, parser change, title
-  normalization, `R`, merge, `M`, or `Q` is authorized by this commit.
-  Waiting for Sol's re-review of the twice-corrected Stage 1 checkpoint.
-
----
-
-## Iteration 2
-
-### Work done
-
-- Date/agent: 2026-09-27, Claude Code (Sonnet 5). Same slice, same
-  authorization (`slice_id: 2026-09-27-realistic-corpus-freeze-evaluation-
-  0dae468`, risk class **H**, `slice_kind: tooling`, `declared_gate: final`).
-  Same branch `phase-3/realistic-corpus-freeze-evaluation`, on top of the
   existing pushed checkpoint `d2097b4`, preserved unamended. One bounded
   correction round for Sol's final Stage 1 re-review verdict (**CHANGES
   REQUESTED**, three findings, F11/F12 High, F13 Medium). The F3-F10
@@ -340,6 +219,110 @@ that detail.
   freeze_phase3_realistic_corpus.py` (`RUBRIC_VERSION` bump only),
   `backend/tests/test_freeze_phase3_realistic_corpus.py` (42 -> 43 tests),
   `docs/LLM_HANDOFF.md` (this entry, plus the iteration rotation above).
+- STOP -- this remains a checkpoint within an incomplete slice, not a
+  candidate. No annotation pass, adjudication, corpus freeze, baseline
+  evaluation, provider contact, database work, parser change, title
+  normalization, `R`, merge, `M`, or `Q` is authorized by this commit.
+  Waiting for Sol's final Stage 1 re-review.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-09-27, Claude Code (Sonnet 5). Same slice, same
+  authorization (`slice_id: 2026-09-27-realistic-corpus-freeze-evaluation-
+  0dae468`, risk class **H**, `slice_kind: tooling`, `declared_gate: final`).
+  Same branch `phase-3/realistic-corpus-freeze-evaluation`, on top of the
+  existing pushed checkpoint `80b4672`, preserved unamended. One bounded
+  correction round for Sol's final Stage 1 re-review verdict on that
+  checkpoint (two findings, F14/F15). Every unaffected F11-F13 rule
+  (canonical location forms, the multi-requirement decision table, the
+  gap-metric rename/applicability sentinel, `_is_meaningfully_present`'s
+  whitespace handling) is preserved unchanged. No annotation pass,
+  adjudication, corpus freeze, baseline evaluation, provider contact,
+  database work, or parser-semantic change performed. Ending commit: this
+  commit.
+- **F14 (contradictory non-US `location.state` instructions)**: the
+  canonical-domain table already correctly classified a non-US state/
+  province/region as `present_unsupported_form`, but the location-
+  normalization table's US-state bullet contradicted it, saying to
+  annotate such a value "in its own natural written form" -- a value the
+  loader's closed USPS-code validator would reject outright. Corrected
+  that bullet to state explicitly: `outcome = "present_unsupported_form"`,
+  `expected_value = null`, `expected_provenance = "unavailable"`, and
+  that the region's natural form must never be written into
+  `expected_value`. Added a fabricated synthetic example to the location
+  situation/rule table (`location_raw` = "Toronto, Ontario, Canada" ->
+  `location.state` is `present_unsupported_form`/null/unavailable, while
+  `location.country` = `"Canada"` `present_supported` is unaffected, since
+  country's domain is open free text). Also corrected the adjacent
+  postal-code wording, which described ZIP+4 as "digits only" -- a ZIP+4
+  is exactly five ASCII digits, one hyphen, and four ASCII digits, and the
+  hyphen is a required literal part of the form, not a digit; ZIP5 remains
+  exactly five ASCII digits.
+- **F15 (format-character-only wired inputs silently counted as
+  present)**: `_is_meaningfully_present` previously used a bare
+  `value.strip() != ""` check, which does not strip Unicode format
+  characters (category `Cf`, e.g. U+200B zero-width space, U+FEFF BOM,
+  U+180E Mongolian vowel separator) -- confirmed directly that
+  `classify_salary`/`classify_location` return entirely unavailable
+  results for all three, individually and mixed with ordinary whitespace,
+  yet the old check reported them as "present." Replaced it with the
+  project's own established meaningful-text rule, mirrored from
+  `fetch_greenhouse_evaluation_postings.py`'s `_has_meaningful_text`: a
+  value is meaningfully present only if it contains at least one
+  character that is neither Unicode whitespace (`str.isspace()`) nor
+  category `Cf`. Added `import unicodedata`. Six new regressions: U+200B-
+  only, U+FEFF-only, U+180E-only, and ordinary whitespace mixed with only
+  those three (all four parametrized as "rejected"); a positive control
+  mixing `Cf` characters with genuine visible content (accepted); and one
+  end-to-end test through the real `evaluate_corpus`/`classify_salary`
+  pipeline confirming a U+200B-only `compensation_text` routes a
+  `present_supported` salary annotation to `missing_wired_input_gap`,
+  never `supported_abstention`.
+- Because the annotation contract changed a fourth time before any
+  annotation exists, `RUBRIC_VERSION` bumped `1.0.3 -> 1.0.4`. **Historical,
+  superseded evidence** (none ever annotated against), all four now
+  recorded in the rubric's own superseded-evidence table: `1.0.0` (commit
+  `7644e20`), `1.0.1` (commit `64dd730`), `1.0.2` (commit `d2097b4`), and
+  `1.0.3` (rubric sha256
+  `3948ec6a09c188a95b9a2ee1fb9ecd94edda2ab5c48bb39e32826e36f51f7f87`,
+  `source_packet_hash b56b0f65529fc83a8f30c8958ba697544a321a003b323220b92a
+  7c1ac8c6dd1b`, commit `80b4672`). **Current**: rubric sha256
+  `70961ec18fcbd5a316bb6ae49b4c9edc0cc1b3957aa6f5cd1f59c1684057eeb9`,
+  `source_packet_hash 010a13e0b5040121d4f55df62a0dc3780033469c316380cc1e4
+  15c5a86641f92` (taxonomy/salvage hashes unchanged).
+- Verification: `ruff format --check`/`ruff check` clean on all four
+  touched files; `mypy` clean on both scripts; full backend suite **3128
+  passed** (was 3121; +7 = the F15 regressions above); `check_repo.py`
+  clean; `git diff --check` clean; focused
+  `test_evaluate_phase3_corpus.py` (83 tests) and
+  `test_freeze_phase3_realistic_corpus.py` (43 tests, unchanged -- no
+  freeze-builder logic touched this round beyond the `RUBRIC_VERSION`
+  constant it imports indirectly via the rubric path) both green.
+- Adversarial self-review: independently reproduced Sol's exact claim
+  before fixing anything -- ran `classify_salary` directly against
+  U+200B/U+FEFF/U+180E and a mixed string, confirmed all four return
+  entirely unavailable results, and confirmed `unicodedata.category()`
+  reports `Cf` for all three code points in this environment's Unicode
+  database before trusting the fix's premise; confirmed the new
+  `_is_meaningfully_present` body is character-for-character identical in
+  logic to `fetch_greenhouse_evaluation_postings.py`'s own
+  `_has_meaningful_text`, not a lookalike reimplementation; confirmed the
+  new fabricated location example's `country` sub-field is genuinely
+  unaffected by the `state` fix (open free-text domain, no validator
+  change) rather than assuming it without checking; confirmed no
+  existing test asserted the old (incorrect) "natural written form"
+  behavior anywhere, so no other test needed updating for F14.
+- Files changed: `docs/evaluation/phase3-realistic-annotation-rubric.md`
+  (F14 corrections + synthetic example, `rubric_version` bump),
+  `backend/scripts/evaluate_phase3_corpus.py` (F15 fix, `unicodedata`
+  import, docstring), `backend/tests/test_evaluate_phase3_corpus.py`
+  (76 -> 83 tests), `backend/scripts/freeze_phase3_realistic_corpus.py`
+  (`RUBRIC_VERSION` bump only), `docs/LLM_HANDOFF.md` (this entry, plus
+  the iteration rotation above).
 - STOP -- this remains a checkpoint within an incomplete slice, not a
   candidate. No annotation pass, adjudication, corpus freeze, baseline
   evaluation, provider contact, database work, parser change, title

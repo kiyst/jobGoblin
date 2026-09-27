@@ -1,16 +1,18 @@
 # Phase 3 realistic-corpus annotation rubric
 
-`rubric_version: 1.0.3`
+`rubric_version: 1.0.4`
 
 Status: frozen input to the realistic-corpus annotation stage (Sol-approved
 freeze/evaluation contract, 2026-09-27; corrected 2026-09-27 per Sol's Stage 1
 pre-annotation review, findings F1/F2; corrected again 2026-09-27 per Sol's
 Stage 1 re-review, findings F7/F8/F9/F10; corrected a third time 2026-09-27
-per Sol's final Stage 1 re-review, findings F11/F12/F13). Both independent
-annotation passes (Claude, Sol) receive this exact file, byte-identical,
-alongside the byte-identical sanitized source packet and the committed
-skills taxonomy (`backend/app/taxonomy/skills.yaml`) — nothing else. This
-document, together with that packet and taxonomy, fully determines
+per Sol's final Stage 1 re-review, findings F11/F12/F13; corrected a fourth
+time 2026-09-27 per Sol's final Stage 1 re-review of that correction,
+findings F14/F15). Both independent annotation passes (Claude, Sol) receive
+this exact file, byte-identical, alongside the byte-identical sanitized
+source packet and the committed skills taxonomy
+(`backend/app/taxonomy/skills.yaml`) — nothing else. This document, together
+with that packet and taxonomy, fully determines
 `freeze_phase3_realistic_corpus.py`'s canonical `source_packet_hash` (see that
 script's `compute_source_packet_hash`).
 
@@ -21,6 +23,7 @@ script's `compute_source_packet_hash`).
 | `1.0.0` (commit `7644e20e30fdde6e38a840e3b621b6217b93ce14`) | `bb4c8ac44ccb7bf6c0978d36bb4350449076df032e337ef6a8b03a651ee2ade0` | `867e5b6d30a4fc858de3146122437ca03a936936c8f88ddc0348ab5dedb92957` |
 | `1.0.1` (commit `64dd730`) | `47f833d80eb37c8046fc6b243e53fbeaa4cdab78c6b71a52748ecb42e7106f2c` | `914ebc5700a4baf9f7b15d25e109ea86d647ef9c8d5bd2fb8e04cdb608299651` |
 | `1.0.2` (commit `d2097b4`) | `736d53bb7da78cd558fb6f7cab1c18fc991940416e059f5e60cc3b92e19ea0f9` | `08409a3e57dccf84c34127675078106d6c510ff71813860fb23b69fd26bed55a` |
+| `1.0.3` (commit `80b4672`) | `3948ec6a09c188a95b9a2ee1fb9ecd94edda2ab5c48bb39e32826e36f51f7f87` | `b56b0f65529fc83a8f30c8958ba697544a321a003b323220b92a7c1ac8c6dd1b` |
 
 Editing this file after either pass has been sealed and hashed invalidates
 both passes; a rubric revision requires a fresh `rubric_version` and a fresh
@@ -264,9 +267,14 @@ that as `confidently_wrong` would be false.
 - **US state**: exactly one USPS two-letter code, uppercase, no periods
   (e.g. "Texas" → `TX`, "Calif." → `CA`) — this is the one location
   sub-field with a genuinely closed, mechanically validated domain in the
-  current (US-only) classifier design; a non-US state/province/region has
-  no dedicated canonical form here (annotate it in its own natural written
-  form, and see `present_unsupported_form` in the domain table above).
+  current (US-only) classifier design. **A non-US state/province/region
+  has no dedicated canonical form in this domain at all** — it is
+  `present_unsupported_form`, exactly as the domain table above states:
+  `outcome = "present_unsupported_form"`, `expected_value = null`,
+  `expected_provenance = "unavailable"`. Never write the region's natural
+  form into `expected_value` — the loader's closed USPS-code validator
+  rejects any non-USPS-code value outright, including a genuine, clearly
+  stated non-US region name.
 - **City**: a deterministic cleaned canonical spelling — trim surrounding
   whitespace and punctuation, preserve the source text's own capitalization
   and spelling otherwise (no gazetteer-based renaming). A **region**, not a
@@ -275,9 +283,12 @@ that as `confidently_wrong` would be false.
   not a single city, and are `absent` for `city` (not `present_supported`
   with the region's name standing in for a city) unless the text also
   separately names an actual city within it.
-- **Postal code**: a deterministic normalized textual form — digits only
-  for a US ZIP5 or ZIP5-4 (`"95814"` or `"95814-1234"`, no internal spaces);
-  a non-US postal code is written trimmed, in its own natural form.
+- **Postal code**: a deterministic normalized textual form. A US ZIP5 is
+  exactly five ASCII digits (`"95814"`); a US ZIP+4 is exactly five ASCII
+  digits, one hyphen, and four ASCII digits (`"95814-1234"`) — not "digits
+  only," since the hyphen is a required, literal part of the ZIP+4 form,
+  not a digit. No internal spaces in either form. A non-US postal code is
+  written trimmed, in its own natural form.
 
 **Known, deliberate scope boundary** (not a new discovery, not something
 these examples are working around): the current classifier never
@@ -294,6 +305,7 @@ current classifier coverage, not a bug in this rubric or the evaluator.
 | Text gives a sub-field only implicitly (e.g. a well-known city with no state/country stated) | `absent` for the unstated sub-field — do not infer a state/country from world knowledge of the city |
 | `location_raw` states some but not all sub-fields, and `description` states the rest with no conflict (e.g. `location_raw` = "Austin, TX" with no country stated; `description` separately confirms a US-based role with nothing contradicting Texas) | `description` may fill the missing sub-field (`country = United States`, `inferred`) — this is ordinary pooled-evidence handling, not a special case |
 | `location_raw` and `description` state genuinely different, non-equivalent values for the same sub-field (not just a different spelling of the same value) | `ambiguous` for that sub-field — a true semantic conflict, not resolved silently in either field's favor |
+| `location_raw` clearly and unambiguously states a non-US province/region as the role's location (fabricated example: `location_raw` = "Toronto, Ontario, Canada") | `location.state`: `outcome = "present_unsupported_form"`, `expected_value = null`, `expected_provenance = "unavailable"` — **never** `"Ontario"` in `expected_value`; `location.country`: `present_supported`, `expected_value = "Canada"` (the country sub-field's domain is open free text and is unaffected); `location.city`: `present_supported` per the city rule above, subject to the citywide abstention note |
 
 ## Provenance rule (for every `present_supported` annotation)
 
@@ -391,7 +403,7 @@ fields, no more, no fewer:
 {
   "schema_version": "1",
   "annotator_role": "claude",
-  "rubric_version": "1.0.3",
+  "rubric_version": "1.0.4",
   "source_packet_hash": "<the canonical sha256 hex handed to you with this packet>",
   "frozen_at": "2026-09-27T18:00:00+00:00",
   "records": {
@@ -403,7 +415,7 @@ fields, no more, no fewer:
 - `schema_version` is the fixed string `"1"`.
 - `annotator_role` is exactly `"claude"` or exactly `"sol"` — whichever role
   you were told you are performing. Never anything else.
-- `rubric_version` is exactly `"1.0.3"` (this document's version) — copy it
+- `rubric_version` is exactly `"1.0.4"` (this document's version) — copy it
   verbatim, do not derive or reformat it.
 - `source_packet_hash` is the canonical hash value you were given alongside
   this rubric, the taxonomy, and the sanitized source packet — copy it
@@ -467,7 +479,7 @@ written here could ever be the real one):
 {
   "schema_version": "1",
   "annotator_role": "claude",
-  "rubric_version": "1.0.3",
+  "rubric_version": "1.0.4",
   "source_packet_hash": "<the actual value handed to you with your packet, copied verbatim>",
   "frozen_at": "2026-09-27T18:00:00+00:00",
   "records": {
