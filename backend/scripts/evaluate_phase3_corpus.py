@@ -102,18 +102,45 @@ After loading: an empty `dev` or `holdout` split, or an employer
 appearing in both splits, both fail closed.
 
 **Metrics**: every metric reports numerator and denominator explicitly;
-a zero denominator prints `N/A`, never `0%`. Every `present_supported`
-case with a completed (non-raising) invocation contributes to
-`supported_correctness`, `supported_abstention`, and `confidently_wrong`
-together, sharing one denominator -- an abstention is "incorrect" but
-never also "confidently wrong" (those are mutually exclusive outcomes of
-the same event). Runtime failure is counted exactly once per parser
-*invocation*, never once per composite component. Skill precision/
+a zero denominator prints `N/A`, never `0%`. For components where a
+narrower-than-ground-truth wired input field exists (`compensation_text`
+for `salary.*`, `location_raw` for `location.*` -- annotation ground
+truth is sourced more broadly than that, per the rubric, so this can and
+does differ), every `present_supported` case first splits on whether
+that wired input field was actually present -- non-null and containing
+at least one character that is neither Unicode whitespace nor a Unicode
+format character (category `Cf`, e.g. a zero-width space or BOM); a
+blank, whitespace-only, or format-character-only string aborts the real
+parser exactly like a null does, so all are treated identically, never
+silently counted as "present" (Sol findings F13/F15): if it was missing,
+the case contributes only to
+`missing_wired_input_gap`, a signal distinct from parser correctness;
+only if the wired input was genuinely present does the case contribute
+to `supported_correctness`, `supported_abstention`, and
+`confidently_wrong` together, sharing one denominator -- an abstention
+is "incorrect" but never also "confidently wrong" (those are mutually
+exclusive outcomes of the same event), and neither is conflated with a
+wiring gap (Sol finding F7: a missing wired input is never scored as if
+the parser had seen and failed on that input). `missing_wired_input_gap`
+only detects a **completely absent** wired input -- it does not and
+cannot detect a non-null-but-incomplete or mis-mapped field value; that
+requires later, manual mismatch attribution, not this metric (Sol
+finding F13). For components with no narrower wired input at all (the
+three scalars, `experience.*` -- pooled `title`+`description` already is
+the full ground-truth input, so no gap concept applies) the applicability
+sentinel is `None`: `missing_wired_input_gap` is never incremented for
+these, so it renders `N/A`, not a misleading `"0/N"`. Runtime failure is
+counted exactly once per parser *invocation*, never once per composite
+component. Skill precision/
 recall and the three false-positive categories are derived from the
 same frozen, exhaustive per-canonical-id representation. Deterministic
 mismatch details are reported per record/parser/component, keyed by
-id -- never posting text. Dev, holdout, and combined metrics are
-reported separately.
+id -- never posting text. Dev, holdout, combined, and per-employer
+metrics are reported separately (keyed `"employer:<name>"`). Every
+`template_family` in the currently-supported corpus is the fixed
+literal `"unknown"`, so a per-template breakdown would only ever
+duplicate the combined result -- the report states this explicitly
+instead of computing one.
 """
 
 from __future__ import annotations
@@ -121,6 +148,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -246,7 +274,76 @@ def _is_valid_aware_timestamp(value: Any) -> bool:
 # components, non-empty str for free-text components. Never a bare
 # `isinstance(x, str | int)`, which would silently accept a `bool` (an
 # `int` subtype in Python) or a value from the wrong parser's vocabulary.
-_EXPECTED_VALUE_VALIDATORS: dict[str, Callable[[Any], bool]] = {
+#
+# USPS Appendix B: 50 states + DC. Mirrors app.normalization.location.py's
+# own `_STATES` catalog, declared independently rather than imported --
+# annotation-validation code deliberately does not couple to a parser
+# module's private internals (same precedent as the board-token grammar
+# mirrored elsewhere in this evaluation pipeline). This is the one
+# location sub-field with a genuinely closed domain in the current
+# product design (a US-only classifier; DATA_MODEL.md documents no
+# enum for city/country/postal_code, which stay free text below --
+# Sol finding F11).
+_USPS_STATE_CODES = frozenset(
+    {
+        "AL",
+        "AK",
+        "AZ",
+        "AR",
+        "CA",
+        "CO",
+        "CT",
+        "DE",
+        "FL",
+        "GA",
+        "HI",
+        "ID",
+        "IL",
+        "IN",
+        "IA",
+        "KS",
+        "KY",
+        "LA",
+        "ME",
+        "MD",
+        "MA",
+        "MI",
+        "MN",
+        "MS",
+        "MO",
+        "MT",
+        "NE",
+        "NV",
+        "NH",
+        "NJ",
+        "NM",
+        "NY",
+        "NC",
+        "ND",
+        "OH",
+        "OK",
+        "OR",
+        "PA",
+        "RI",
+        "SC",
+        "SD",
+        "TN",
+        "TX",
+        "UT",
+        "VT",
+        "VA",
+        "WA",
+        "WV",
+        "WI",
+        "WY",
+        "DC",
+    }
+)
+
+# Public (no leading underscore) so `freeze_phase3_realistic_corpus.py` can
+# import and reuse this exact authoritative vocabulary for pass/adjudication
+# validation, rather than maintaining a second, independently-drifting copy.
+EXPECTED_VALUE_VALIDATORS: dict[str, Callable[[Any], bool]] = {
     "remote_type": lambda v: v in {"remote", "hybrid", "onsite"},
     "employment_type": lambda v: v in {"full_time", "part_time", "seasonal", "internship"},
     "seniority": lambda v: v
@@ -256,9 +353,13 @@ _EXPECTED_VALUE_VALIDATORS: dict[str, Callable[[Any], bool]] = {
     "salary.minimum": _is_bool_free_int,
     "salary.maximum": _is_bool_free_int,
     "salary.currency": _is_non_empty_str,
-    "salary.period": _is_non_empty_str,
+    # Closed per docs/DATA_MODEL.md's `salary_period` enum -- the one
+    # composite sub-field this schema already documents a closed domain
+    # for (Sol finding F8); every other free-text sub-field below has no
+    # project-documented enum and stays a bare non-empty-string check.
+    "salary.period": lambda v: v in {"hourly", "daily", "monthly", "annual"},
     "location.city": _is_non_empty_str,
-    "location.state": _is_non_empty_str,
+    "location.state": lambda v: v in _USPS_STATE_CODES,
     "location.country": _is_non_empty_str,
     "location.postal_code": _is_non_empty_str,
 }
@@ -383,7 +484,7 @@ def _validate_scored_label(
         raise CorpusValidationError(
             f"{context}.{outcome_field} must be one of {sorted(_VALID_OUTCOMES)}, got {outcome!r}"
         )
-    validator = _EXPECTED_VALUE_VALIDATORS[value_key]
+    validator = EXPECTED_VALUE_VALIDATORS[value_key]
     if expected_value is not None and not validator(expected_value):
         raise CorpusValidationError(f"{context}.{value_field} is not valid for {value_key!r}")
     if expected_provenance not in _VALID_PROVENANCE_VALUES:
@@ -891,6 +992,26 @@ class ParserComponentMetrics:
     false_positive_unsupported_form: MetricCounter
     false_positive_ambiguous: MetricCounter
     provenance_correctness: MetricCounter
+    # A `present_supported` case where the parser's actual wired input field
+    # (`compensation_text` for salary, `location_raw` for location) was
+    # completely missing (null, or present but containing no meaningful
+    # text -- whitespace/format-character-only, e.g. a zero-width space or
+    # BOM -- which the real parser aborts on identically) -- the
+    # annotation's ground truth is
+    # sourced more broadly (may include `description`), so this is a
+    # distinct wiring gap, never folded into supported_correctness/
+    # supported_abstention/confidently_wrong (which would misattribute it
+    # as a parser grammar failure -- Sol finding F7). Detects only a
+    # completely absent wired input, never a non-null-but-incomplete or
+    # mis-mapped value -- that requires later, manual mismatch attribution
+    # (Sol finding F13). Denominator is every present_supported case for
+    # this component where the applicability sentinel is not `None`;
+    # numerator is the subset where the wired input was missing. Scalar/
+    # `experience.*` components pass `None` (not applicable -- pooled
+    # `title`+`description` already is the full wired input, no gap concept
+    # exists), so this counter is never incremented for them at all and
+    # renders "N/A", never a misleading "0/N" (Sol finding F13).
+    missing_wired_input_gap: MetricCounter
 
     @staticmethod
     def empty() -> ParserComponentMetrics:
@@ -903,6 +1024,7 @@ class ParserComponentMetrics:
             false_positive_unsupported_form=MetricCounter(),
             false_positive_ambiguous=MetricCounter(),
             provenance_correctness=MetricCounter(),
+            missing_wired_input_gap=MetricCounter(),
         )
 
 
@@ -946,6 +1068,24 @@ class SplitEvaluation:
         return self.runtime_failure.setdefault(parser, MetricCounter())
 
 
+def _is_meaningfully_present(value: str | None) -> bool:
+    """Sol finding F13/F15: a wired input field that is present but
+    contains no meaningful text is functionally identical to `None` for
+    both the real parser (which normalizes and aborts on it identically)
+    and this gap metric -- never silently counted as "present" just
+    because it is non-null. Mirrors
+    `fetch_greenhouse_evaluation_postings.py`'s own `_has_meaningful_text`:
+    a value is meaningfully present only if it contains at least one
+    character that is neither Unicode whitespace (`str.isspace()`) nor a
+    Unicode format character (category `Cf` -- zero-width space, BOM,
+    etc.), including a mixture of the two (Sol finding F15: a bare
+    `.strip()` check missed this, since `Cf` characters are not
+    whitespace by `str.isspace()`)."""
+    if value is None:
+        return False
+    return any(not char.isspace() and unicodedata.category(char) != "Cf" for char in value)
+
+
 class _CallFailed:
     __slots__ = ("exception",)
 
@@ -972,33 +1112,62 @@ def _score_component(
     expected_provenance: str | None,
     actual_value: Any,
     actual_provenance: str | None,
+    wired_input_present: bool | None = None,
 ) -> None:
+    """`wired_input_present` is an applicability sentinel (Sol finding F13):
+    `None` means this component has no narrower-than-ground-truth wired
+    input at all (the default -- scalars, `experience.*`), so the
+    `missing_wired_input_gap` counter is never touched and renders `N/A`;
+    `True`/`False` (salary/location only) means the wired input was/was not
+    actually present, and the gap counter's denominator is incremented
+    either way."""
     metrics = evaluation.get_component_metrics(metrics_key)
     metrics.opportunity_matrix[outcome] += 1
     is_present = actual_value is not None
 
     if outcome == "present_supported":
-        # All three share one denominator -- every present_supported case
-        # with a completed invocation contributes to each, mutually
-        # exclusively: abstention (not present), confidently_wrong
-        # (present and wrong), or correctness (present and right).
-        metrics.supported_abstention.add(hit=not is_present)
-        metrics.confidently_wrong.add(hit=is_present and actual_value != expected_value)
-        metrics.supported_correctness.add(hit=is_present and actual_value == expected_value)
-        if not is_present:
+        # Every present_supported case for a component where the gap
+        # concept applies (`wired_input_present is not None`) contributes
+        # to exactly one of two mutually exclusive buckets, split by
+        # whether the parser's actual wired input field existed at all
+        # (Sol finding F7): `missing_wired_input_gap` (input missing -- a
+        # wiring gap, not a grammar failure) versus the original three --
+        # abstention (not present), confidently_wrong (present and wrong),
+        # or correctness (present and right) -- which mean "wired input was
+        # present." A component where the concept does not apply at all
+        # skips the gap counter entirely (never incremented, so it stays
+        # `N/A`, not a misleading "0/N") and always takes the normal path.
+        if wired_input_present is not None:
+            metrics.missing_wired_input_gap.add(hit=not wired_input_present)
+        if wired_input_present is False:
             evaluation.mismatches.append(
                 MismatchDetail(
-                    record_id, parser, component, "supported_abstention", expected_value, None
+                    record_id, parser, component, "missing_wired_input_gap", expected_value, None
                 )
             )
-        elif actual_value != expected_value:
-            evaluation.mismatches.append(
-                MismatchDetail(
-                    record_id, parser, component, "confidently_wrong", expected_value, actual_value
+        else:
+            metrics.supported_abstention.add(hit=not is_present)
+            metrics.confidently_wrong.add(hit=is_present and actual_value != expected_value)
+            metrics.supported_correctness.add(hit=is_present and actual_value == expected_value)
+            if not is_present:
+                evaluation.mismatches.append(
+                    MismatchDetail(
+                        record_id, parser, component, "supported_abstention", expected_value, None
+                    )
                 )
-            )
-        if is_present:
-            metrics.provenance_correctness.add(hit=actual_provenance == expected_provenance)
+            elif actual_value != expected_value:
+                evaluation.mismatches.append(
+                    MismatchDetail(
+                        record_id,
+                        parser,
+                        component,
+                        "confidently_wrong",
+                        expected_value,
+                        actual_value,
+                    )
+                )
+            if is_present:
+                metrics.provenance_correctness.add(hit=actual_provenance == expected_provenance)
     elif outcome == "absent":
         metrics.false_positive_absent.add(hit=is_present)
         if is_present:
@@ -1060,6 +1229,7 @@ def _evaluate_composite(
     annotations: dict[str, Any],
     fn: Any,
     components: tuple[str, ...],
+    wired_input_present: bool | None = None,
 ) -> None:
     result = _safe_call(fn)
     raised = isinstance(result, _CallFailed)
@@ -1085,6 +1255,7 @@ def _evaluate_composite(
             expected_provenance=annotation["expected_provenance"],
             actual_value=component_result.value,
             actual_provenance=component_result.provenance.value,
+            wired_input_present=wired_input_present,
         )
 
 
@@ -1187,6 +1358,7 @@ def _evaluate_records(records: list[CorpusRecord], *, taxonomy: Any) -> SplitEva
             annotations=annotations["salary"],
             fn=lambda c=compensation_text: classify_salary(c),
             components=("minimum", "maximum", "currency", "period"),
+            wired_input_present=_is_meaningfully_present(compensation_text),
         )
         location_raw = record.fields["location_raw"]
         _evaluate_composite(
@@ -1196,6 +1368,7 @@ def _evaluate_records(records: list[CorpusRecord], *, taxonomy: Any) -> SplitEva
             annotations=annotations["location"],
             fn=lambda loc=location_raw: classify_location(loc),
             components=("city", "state", "country", "postal_code"),
+            wired_input_present=_is_meaningfully_present(location_raw),
         )
         _evaluate_skills(
             evaluation,
@@ -1208,22 +1381,42 @@ def _evaluate_records(records: list[CorpusRecord], *, taxonomy: Any) -> SplitEva
     return evaluation
 
 
+def _all_template_families_unknown(records: list[CorpusRecord]) -> bool:
+    return bool(records) and all(r.provenance["template_family"] == "unknown" for r in records)
+
+
 def evaluate_corpus(records: list[CorpusRecord], *, taxonomy: Any) -> dict[str, SplitEvaluation]:
-    """Returns `{"dev": ..., "holdout": ..., "combined": ...}`, each a
-    fully independent `SplitEvaluation` over exactly that subset of
-    records. Never gates, never asserts a threshold -- a report only."""
+    """Returns `{"dev": ..., "holdout": ..., "combined": ..., "employer:<name>": ...}`
+    -- one key per distinct `provenance.employer` value across the whole
+    corpus (evaluated over all records for that employer, irrespective of
+    split), plus the three fixed keys above. Each value is a fully
+    independent `SplitEvaluation` over exactly that subset of records.
+    Never gates, never asserts a threshold -- a report only.
+
+    No per-`template_family` breakdown is computed: see
+    `_all_template_families_unknown` and `render_report`'s explicit note
+    below, which states rather than silently omits this."""
     dev_records = [r for r in records if r.split == "dev"]
     holdout_records = [r for r in records if r.split == "holdout"]
-    return {
+    evaluations: dict[str, SplitEvaluation] = {
         "dev": _evaluate_records(dev_records, taxonomy=taxonomy),
         "holdout": _evaluate_records(holdout_records, taxonomy=taxonomy),
         "combined": _evaluate_records(records, taxonomy=taxonomy),
     }
+    employers = sorted({r.provenance["employer"] for r in records})
+    for employer in employers:
+        employer_records = [r for r in records if r.provenance["employer"] == employer]
+        evaluations[f"employer:{employer}"] = _evaluate_records(employer_records, taxonomy=taxonomy)
+    return evaluations
 
 
-def render_report(evaluations: dict[str, SplitEvaluation]) -> str:
+def render_report(
+    evaluations: dict[str, SplitEvaluation], *, records: list[CorpusRecord] | None = None
+) -> str:
     lines: list[str] = []
-    for split_name in ("dev", "holdout", "combined"):
+    ordered_split_names = [name for name in ("dev", "holdout", "combined") if name in evaluations]
+    ordered_split_names += sorted(name for name in evaluations if name.startswith("employer:"))
+    for split_name in ordered_split_names:
         evaluation = evaluations[split_name]
         lines.append(f"===== split: {split_name} =====")
         for key in sorted(evaluation.components):
@@ -1240,6 +1433,7 @@ def render_report(evaluations: dict[str, SplitEvaluation]) -> str:
             )
             lines.append(f"  false_positive_ambiguous: {metrics.false_positive_ambiguous.render()}")
             lines.append(f"  provenance_correctness: {metrics.provenance_correctness.render()}")
+            lines.append(f"  missing_wired_input_gap: {metrics.missing_wired_input_gap.render()}")
         skills = evaluation.skills
         lines.append("== skills ==")
         lines.append(f"  opportunity matrix: {skills.opportunity_matrix}")
@@ -1266,6 +1460,13 @@ def render_report(evaluations: dict[str, SplitEvaluation]) -> str:
                 f"component={mismatch.component} category={mismatch.category} "
                 f"expected={mismatch.expected!r} actual={mismatch.actual!r}"
             )
+    if records is not None and _all_template_families_unknown(records):
+        lines.append(
+            "note: every record's provenance.template_family is 'unknown' -- a "
+            "per-template breakdown would only ever duplicate the combined result "
+            "above, so it is intentionally omitted; see the per-employer sections "
+            "instead."
+        )
     return "\n".join(lines)
 
 
@@ -1279,7 +1480,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     evaluations = evaluate_corpus(records, taxonomy=taxonomy)
-    print(render_report(evaluations))
+    print(render_report(evaluations, records=records))
     return 0
 
 
