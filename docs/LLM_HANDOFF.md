@@ -302,10 +302,14 @@ that detail.
 
 ```workflow-metadata
 workflow_version: v3.2
-state: pending
+state: published
 slice_id: 2026-09-27-realistic-corpus-freeze-evaluation-0dae468
 slice_kind: tooling
 risk_class: H
 base_sha: 0dae4683645599369d41d0228b0edad1cfad73ce
 declared_gate: final
+executed_gate: final
+candidate_sha: 03609018215285cca21dd31fc126978fe2de8d15
+receipt_id: 338d5c4b-37fd-47dd-a220-f67919ca45de
+receipt_path: docs/verification-receipts/03609018215285cca21dd31fc126978fe2de8d15/338d5c4b-37fd-47dd-a220-f67919ca45de.json
 ```
