@@ -13,8 +13,11 @@ from scripts.evaluate_phase3_corpus import (
     _evaluate_composite,
     _evaluate_scalar,
     _evaluate_skills,
+    _is_meaningfully_present,
+    _score_component,
     evaluate_corpus,
     load_corpus,
+    render_report,
 )
 
 _KNOWN_IDS = frozenset({"python", "golang", "javascript"})
@@ -269,6 +272,56 @@ def test_load_corpus_accepts_a_valid_remote_type_value(tmp_path: Path) -> None:
     path = _write_corpus(tmp_path, records)
     records_loaded = load_corpus(path, known_canonical_ids=_KNOWN_IDS)
     assert records_loaded[0].annotations["remote_type"]["expected_value"] == "remote"
+
+
+def test_load_corpus_rejects_a_salary_period_outside_the_closed_domain(tmp_path: Path) -> None:
+    """Sol finding F8: `salary.period` has a project-documented closed
+    domain (docs/DATA_MODEL.md's `salary_period` enum) and must be
+    validated against it, not accepted as an arbitrary non-empty string."""
+    records = _minimal_corpus()
+    records[0]["annotations"]["salary"]["period"] = _annotation(
+        outcome="present_supported", expected_value="quarterly", expected_provenance="inferred"
+    )
+    path = _write_corpus(tmp_path, records)
+    with pytest.raises(CorpusValidationError, match="not valid for 'salary.period'"):
+        load_corpus(path, known_canonical_ids=_KNOWN_IDS)
+
+
+def test_load_corpus_accepts_every_closed_salary_period_value(tmp_path: Path) -> None:
+    for period in ("hourly", "daily", "monthly", "annual"):
+        records = _minimal_corpus()
+        records[0]["annotations"]["salary"]["period"] = _annotation(
+            outcome="present_supported", expected_value=period, expected_provenance="inferred"
+        )
+        path = _write_corpus(tmp_path, records)
+        loaded = load_corpus(path, known_canonical_ids=_KNOWN_IDS)
+        assert loaded[0].annotations["salary"]["period"]["expected_value"] == period
+
+
+def test_load_corpus_rejects_a_state_outside_the_usps_closed_domain(tmp_path: Path) -> None:
+    """Sol finding F11: `location.state` has a genuinely closed domain in
+    the current (US-only) classifier design -- USPS two-letter codes --
+    and must be validated against it, not accepted as an arbitrary
+    non-empty string (e.g. a spelled-out state name)."""
+    records = _minimal_corpus()
+    records[0]["annotations"]["location"]["state"] = _annotation(
+        outcome="present_supported",
+        expected_value="Texas",
+        expected_provenance="parsed_description",
+    )
+    path = _write_corpus(tmp_path, records)
+    with pytest.raises(CorpusValidationError, match="not valid for 'location.state'"):
+        load_corpus(path, known_canonical_ids=_KNOWN_IDS)
+
+
+def test_load_corpus_accepts_a_valid_usps_state_code(tmp_path: Path) -> None:
+    records = _minimal_corpus()
+    records[0]["annotations"]["location"]["state"] = _annotation(
+        outcome="present_supported", expected_value="TX", expected_provenance="parsed_description"
+    )
+    path = _write_corpus(tmp_path, records)
+    loaded = load_corpus(path, known_canonical_ids=_KNOWN_IDS)
+    assert loaded[0].annotations["location"]["state"]["expected_value"] == "TX"
 
 
 # ---------------------------------------------------------------------------
@@ -1024,6 +1077,164 @@ def test_composite_non_raising_call_scores_each_component_independently() -> Non
     )
 
 
+# ---------------------------------------------------------------------------
+# F7/F13 -- missing-wired-input gap: a present_supported case must never be
+# scored as parser correctness/abstention/wrong when the parser's actual
+# wired input field was completely missing; it is measured separately, via
+# an explicit applicability sentinel (`bool | None`) rather than a default
+# that silently renders a misleading "0/N" for components where the gap
+# concept does not apply at all.
+# ---------------------------------------------------------------------------
+def test_score_component_routes_missing_wired_input_to_the_gap_metric() -> None:
+    evaluation = SplitEvaluation()
+    _score_component(
+        evaluation,
+        record_id="r1",
+        parser="salary",
+        component="minimum",
+        metrics_key="salary.minimum",
+        outcome="present_supported",
+        expected_value=120000,
+        expected_provenance="parsed_description",
+        actual_value=None,
+        actual_provenance="unavailable",
+        wired_input_present=False,
+    )
+    metrics = evaluation.get_component_metrics("salary.minimum")
+    assert metrics.missing_wired_input_gap.render() == "1/1"
+    # None of the parser-correctness buckets are touched at all -- not even
+    # as a "0" -- since the parser never received this input in the first
+    # place; scoring it as an abstention would misattribute a wiring gap as
+    # a grammar failure.
+    assert metrics.supported_abstention.render() == "N/A"
+    assert metrics.confidently_wrong.render() == "N/A"
+    assert metrics.supported_correctness.render() == "N/A"
+    assert metrics.provenance_correctness.render() == "N/A"
+    assert len(evaluation.mismatches) == 1
+    assert evaluation.mismatches[0].category == "missing_wired_input_gap"
+
+
+def test_score_component_with_wired_input_present_true_scores_normally() -> None:
+    evaluation = SplitEvaluation()
+    _score_component(
+        evaluation,
+        record_id="r1",
+        parser="salary",
+        component="minimum",
+        metrics_key="salary.minimum",
+        outcome="present_supported",
+        expected_value=120000,
+        expected_provenance="parsed_description",
+        actual_value=120000,
+        actual_provenance="parsed_description",
+        wired_input_present=True,
+    )
+    metrics = evaluation.get_component_metrics("salary.minimum")
+    assert metrics.missing_wired_input_gap.render() == "0/1"
+    assert metrics.supported_correctness.render() == "1/1"
+    assert metrics.supported_abstention.render() == "0/1"
+    assert metrics.confidently_wrong.render() == "0/1"
+
+
+def test_score_component_wired_input_present_none_is_not_applicable() -> None:
+    """Sol finding F13: the *default* (no `wired_input_present` passed --
+    what every scalar/`experience.*` call site does) must render the gap
+    metric `N/A` (never touched), not a misleading `"0/1"`, while still
+    scoring the normal correctness/abstention/wrong path exactly as before
+    this metric existed."""
+    evaluation = SplitEvaluation()
+    _score_component(
+        evaluation,
+        record_id="r1",
+        parser="remote_type",
+        component=None,
+        metrics_key="remote_type",
+        outcome="present_supported",
+        expected_value="remote",
+        expected_provenance="inferred",
+        actual_value="remote",
+        actual_provenance="inferred",
+    )
+    metrics = evaluation.get_component_metrics("remote_type")
+    assert metrics.missing_wired_input_gap.render() == "N/A"
+    assert metrics.supported_correctness.render() == "1/1"
+
+
+def test_evaluate_composite_reports_the_gap_for_a_null_wired_field() -> None:
+    """End-to-end through `_evaluate_composite`: the annotation claims
+    `present_supported` (ground truth sourced more broadly than the wired
+    field, per the rubric) while the actual classifier call -- correctly
+    given a `None` input, exactly as production wiring does -- abstains."""
+    evaluation = SplitEvaluation()
+    annotations = {
+        "minimum": _annotation(
+            outcome="present_supported",
+            expected_value=100000,
+            expected_provenance="parsed_description",
+        ),
+        "maximum": _annotation(outcome="absent"),
+        "currency": _annotation(outcome="absent"),
+        "period": _annotation(outcome="absent"),
+    }
+
+    class _AllNoneResult:
+        class _Component:
+            value = None
+            provenance = type("P", (), {"value": "unavailable"})()
+
+        minimum = _Component()
+        maximum = _Component()
+        currency = _Component()
+        period = _Component()
+
+    _evaluate_composite(
+        evaluation,
+        record_id="r1",
+        parser="salary",
+        annotations=annotations,
+        fn=lambda: _AllNoneResult(),
+        components=("minimum", "maximum", "currency", "period"),
+        wired_input_present=False,
+    )
+    metrics = evaluation.get_component_metrics("salary.minimum")
+    assert metrics.missing_wired_input_gap.render() == "1/1"
+    assert metrics.supported_abstention.render() == "N/A"
+
+
+def test_evaluate_composite_experience_defaults_to_not_applicable() -> None:
+    """`experience` never passes `wired_input_present` at its one call site
+    in `_evaluate_records` -- confirms the default genuinely is `None`
+    (not-applicable), not the old `True` default that silently rendered a
+    misleading `"0/N"`."""
+    evaluation = SplitEvaluation()
+    annotations = {
+        "minimum": _annotation(
+            outcome="present_supported", expected_value=3, expected_provenance="inferred"
+        ),
+        "maximum": _annotation(outcome="absent"),
+    }
+
+    class _Component:
+        value = 3
+        provenance = type("P", (), {"value": "inferred"})()
+
+    class _Result:
+        minimum = _Component()
+        maximum = _Component()
+
+    _evaluate_composite(
+        evaluation,
+        record_id="r1",
+        parser="experience",
+        annotations=annotations,
+        fn=lambda: _Result(),
+        components=("minimum", "maximum"),
+    )
+    metrics = evaluation.get_component_metrics("experience.minimum")
+    assert metrics.missing_wired_input_gap.render() == "N/A"
+    assert metrics.supported_correctness.render() == "1/1"
+
+
 class _FakeSkillMatch:
     def __init__(self, canonical_id: str) -> None:
         self.canonical_id = canonical_id
@@ -1112,10 +1323,245 @@ def test_evaluate_corpus_reports_dev_holdout_and_combined_separately(tmp_path: P
     loaded = load_corpus(path, known_canonical_ids=real_ids)
     evaluations = evaluate_corpus(loaded, taxonomy=taxonomy)
 
-    assert set(evaluations) == {"dev", "holdout", "combined"}
+    assert set(evaluations) == {
+        "dev",
+        "holdout",
+        "combined",
+        "employer:Acme",
+        "employer:Globex",
+    }
     dev_metrics = evaluations["dev"].components["remote_type"]
     assert dev_metrics.supported_correctness.render() == "1/1"
     holdout_metrics = evaluations["holdout"].components["remote_type"]
     assert holdout_metrics.supported_correctness.render() == "N/A"  # holdout record is "absent"
     combined_metrics = evaluations["combined"].components["remote_type"]
     assert combined_metrics.supported_correctness.render() == "1/1"
+
+
+# ---------------------------------------------------------------------------
+# Per-employer reporting
+# ---------------------------------------------------------------------------
+def test_evaluate_corpus_reports_one_key_per_distinct_employer(tmp_path: Path) -> None:
+    """`_minimal_corpus()`'s dev record is employer "Acme", holdout is
+    "Globex" -- each employer's own key must reflect only its own
+    record(s), matching what a same-employer split subset would show."""
+    from app.normalization.taxonomy import DEFAULT_SKILLS_TAXONOMY_PATH, load_taxonomy
+
+    taxonomy = load_taxonomy(DEFAULT_SKILLS_TAXONOMY_PATH)
+    real_ids = taxonomy.canonical_ids()
+    records = _minimal_corpus()
+    for record in records:
+        record["annotations"]["skills"] = {cid: _skill_annotation() for cid in real_ids}
+    path = _write_corpus(tmp_path, records)
+    loaded = load_corpus(path, known_canonical_ids=real_ids)
+    evaluations = evaluate_corpus(loaded, taxonomy=taxonomy)
+
+    acme_matrix = evaluations["employer:Acme"].components["remote_type"].opportunity_matrix
+    dev_matrix = evaluations["dev"].components["remote_type"].opportunity_matrix
+    assert acme_matrix == dev_matrix
+    globex_matrix = evaluations["employer:Globex"].components["remote_type"].opportunity_matrix
+    holdout_matrix = evaluations["holdout"].components["remote_type"].opportunity_matrix
+    assert globex_matrix == holdout_matrix
+
+
+def test_evaluate_corpus_employer_keys_are_sorted_by_name_in_the_report(tmp_path: Path) -> None:
+    from app.normalization.taxonomy import DEFAULT_SKILLS_TAXONOMY_PATH, load_taxonomy
+
+    taxonomy = load_taxonomy(DEFAULT_SKILLS_TAXONOMY_PATH)
+    real_ids = taxonomy.canonical_ids()
+    records = _minimal_corpus()
+    records[1]["provenance"] = {**records[1]["provenance"], "employer": "Ainbow"}
+    for record in records:
+        record["annotations"]["skills"] = {cid: _skill_annotation() for cid in real_ids}
+    path = _write_corpus(tmp_path, records)
+    loaded = load_corpus(path, known_canonical_ids=real_ids)
+    evaluations = evaluate_corpus(loaded, taxonomy=taxonomy)
+    report = render_report(evaluations, records=loaded)
+
+    assert report.index("===== split: employer:Acme =====") < report.index(
+        "===== split: employer:Ainbow ====="
+    )
+
+
+def test_render_report_states_template_subdivision_is_not_meaningful(tmp_path: Path) -> None:
+    from app.normalization.taxonomy import DEFAULT_SKILLS_TAXONOMY_PATH, load_taxonomy
+
+    taxonomy = load_taxonomy(DEFAULT_SKILLS_TAXONOMY_PATH)
+    real_ids = taxonomy.canonical_ids()
+    records = _minimal_corpus()
+    for record in records:
+        record["annotations"]["skills"] = {cid: _skill_annotation() for cid in real_ids}
+    path = _write_corpus(tmp_path, records)
+    loaded = load_corpus(path, known_canonical_ids=real_ids)
+    evaluations = evaluate_corpus(loaded, taxonomy=taxonomy)
+
+    report = render_report(evaluations, records=loaded)
+    assert "per-template breakdown" in report
+    assert "unknown" in report
+
+
+def test_render_report_omits_the_template_note_without_records(tmp_path: Path) -> None:
+    from app.normalization.taxonomy import DEFAULT_SKILLS_TAXONOMY_PATH, load_taxonomy
+
+    taxonomy = load_taxonomy(DEFAULT_SKILLS_TAXONOMY_PATH)
+    real_ids = taxonomy.canonical_ids()
+    records = _minimal_corpus()
+    for record in records:
+        record["annotations"]["skills"] = {cid: _skill_annotation() for cid in real_ids}
+    path = _write_corpus(tmp_path, records)
+    loaded = load_corpus(path, known_canonical_ids=real_ids)
+    evaluations = evaluate_corpus(loaded, taxonomy=taxonomy)
+
+    report = render_report(evaluations)
+    assert "per-template breakdown" not in report
+
+
+# ---------------------------------------------------------------------------
+# F7 -- end to end through evaluate_corpus/render_report with real classifiers
+# ---------------------------------------------------------------------------
+def test_evaluate_corpus_reports_the_gap_for_null_compensation_text(
+    tmp_path: Path,
+) -> None:
+    """`_base_record()`'s `compensation_text` is `None` by default -- exactly
+    this corpus's real, current situation (all 30 retained records). A
+    `present_supported` salary annotation (ground truth sourced more
+    broadly than `compensation_text`, per the rubric) must be reported as
+    `missing_wired_input_gap`, never as `supported_abstention`/
+    `confidently_wrong`."""
+    from app.normalization.taxonomy import DEFAULT_SKILLS_TAXONOMY_PATH, load_taxonomy
+
+    taxonomy = load_taxonomy(DEFAULT_SKILLS_TAXONOMY_PATH)
+    real_ids = taxonomy.canonical_ids()
+    records = _minimal_corpus()
+    assert records[0]["fields"]["compensation_text"] is None
+    records[0]["annotations"]["salary"]["minimum"] = _annotation(
+        outcome="present_supported", expected_value=100000, expected_provenance="parsed_description"
+    )
+    for record in records:
+        record["annotations"]["skills"] = {cid: _skill_annotation() for cid in real_ids}
+    path = _write_corpus(tmp_path, records)
+    loaded = load_corpus(path, known_canonical_ids=real_ids)
+    evaluations = evaluate_corpus(loaded, taxonomy=taxonomy)
+
+    dev_metrics = evaluations["dev"].components["salary.minimum"]
+    assert dev_metrics.missing_wired_input_gap.render() == "1/1"
+    assert dev_metrics.supported_abstention.render() == "N/A"
+    assert dev_metrics.confidently_wrong.render() == "N/A"
+    assert dev_metrics.supported_correctness.render() == "N/A"
+
+    report = render_report(evaluations, records=loaded)
+    assert "missing_wired_input_gap: 1/1" in report
+
+
+def test_evaluate_corpus_treats_whitespace_only_compensation_text_as_a_gap(
+    tmp_path: Path,
+) -> None:
+    """Sol finding F13: a present-but-blank `compensation_text` must be
+    treated identically to `None` -- the real `classify_salary` aborts on
+    it the same way, so silently counting it as "wired input present"
+    would understate the gap."""
+    from app.normalization.taxonomy import DEFAULT_SKILLS_TAXONOMY_PATH, load_taxonomy
+
+    taxonomy = load_taxonomy(DEFAULT_SKILLS_TAXONOMY_PATH)
+    real_ids = taxonomy.canonical_ids()
+    records = _minimal_corpus()
+    records[0]["fields"]["description"] = "   "
+    records[0]["fields"]["compensation_text"] = "   "
+    records[0]["fields"]["compensation_text_source_span"] = [0, 3]
+    records[0]["annotations"]["salary"]["minimum"] = _annotation(
+        outcome="present_supported", expected_value=100000, expected_provenance="parsed_description"
+    )
+    for record in records:
+        record["annotations"]["skills"] = {cid: _skill_annotation() for cid in real_ids}
+    path = _write_corpus(tmp_path, records)
+    loaded = load_corpus(path, known_canonical_ids=real_ids)
+    evaluations = evaluate_corpus(loaded, taxonomy=taxonomy)
+
+    dev_metrics = evaluations["dev"].components["salary.minimum"]
+    assert dev_metrics.missing_wired_input_gap.render() == "1/1"
+    assert dev_metrics.supported_abstention.render() == "N/A"
+
+
+# ---------------------------------------------------------------------------
+# F15 -- a Unicode-format-character-only (category Cf) wired input is not
+# meaningfully present, matching fetch_greenhouse_evaluation_postings.py's
+# own established `_has_meaningful_text` rule (whitespace or Cf, or a mix
+# of both, is never "real" content).
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "value",
+    [
+        "​",  # ZERO WIDTH SPACE, category Cf
+        "﻿",  # ZERO WIDTH NO-BREAK SPACE / BOM, category Cf
+        "᠎",  # MONGOLIAN VOWEL SEPARATOR, category Cf
+        " \t​᠎\n﻿ ",  # ordinary whitespace mixed with Cf only
+    ],
+)
+def test_is_meaningfully_present_rejects_format_character_only_strings(value: str) -> None:
+    assert _is_meaningfully_present(value) is False
+
+
+def test_is_meaningfully_present_accepts_cf_mixed_with_genuine_content() -> None:
+    """Positive control: Cf characters alongside a real, visible character
+    must still count as meaningfully present -- this is a narrow presence
+    check, never a broader text-quality heuristic."""
+    assert _is_meaningfully_present("​$100,000﻿") is True
+
+
+def test_is_meaningfully_present_rejects_none_and_plain_whitespace() -> None:
+    assert _is_meaningfully_present(None) is False
+    assert _is_meaningfully_present("   ") is False
+
+
+def test_evaluate_corpus_treats_format_character_only_compensation_text_as_a_gap(
+    tmp_path: Path,
+) -> None:
+    """End to end: a `compensation_text` containing only Unicode format
+    characters (here U+200B) must route a `present_supported` salary
+    annotation to `missing_wired_input_gap`, never `supported_abstention`
+    -- confirmed against the real `classify_salary`, which returns
+    entirely unavailable results for this input (Sol finding F15)."""
+    from app.normalization.taxonomy import DEFAULT_SKILLS_TAXONOMY_PATH, load_taxonomy
+
+    taxonomy = load_taxonomy(DEFAULT_SKILLS_TAXONOMY_PATH)
+    real_ids = taxonomy.canonical_ids()
+    records = _minimal_corpus()
+    records[0]["fields"]["description"] = "​"
+    records[0]["fields"]["compensation_text"] = "​"
+    records[0]["fields"]["compensation_text_source_span"] = [0, 1]
+    records[0]["annotations"]["salary"]["minimum"] = _annotation(
+        outcome="present_supported", expected_value=100000, expected_provenance="parsed_description"
+    )
+    for record in records:
+        record["annotations"]["skills"] = {cid: _skill_annotation() for cid in real_ids}
+    path = _write_corpus(tmp_path, records)
+    loaded = load_corpus(path, known_canonical_ids=real_ids)
+    evaluations = evaluate_corpus(loaded, taxonomy=taxonomy)
+
+    dev_metrics = evaluations["dev"].components["salary.minimum"]
+    assert dev_metrics.missing_wired_input_gap.render() == "1/1"
+    assert dev_metrics.supported_abstention.render() == "N/A"
+
+
+def test_evaluate_corpus_scalar_gap_metric_is_not_applicable(tmp_path: Path) -> None:
+    """A scalar component's `missing_wired_input_gap` must render `N/A`
+    end to end, through the real `evaluate_corpus` pipeline -- never a
+    misleading `"0/N"` (Sol finding F13)."""
+    from app.normalization.taxonomy import DEFAULT_SKILLS_TAXONOMY_PATH, load_taxonomy
+
+    taxonomy = load_taxonomy(DEFAULT_SKILLS_TAXONOMY_PATH)
+    real_ids = taxonomy.canonical_ids()
+    records = _minimal_corpus()
+    records[0]["fields"]["title"] = "Software Engineer (Remote)"
+    records[0]["annotations"]["remote_type"] = _annotation(
+        outcome="present_supported", expected_value="remote", expected_provenance="inferred"
+    )
+    for record in records:
+        record["annotations"]["skills"] = {cid: _skill_annotation() for cid in real_ids}
+    path = _write_corpus(tmp_path, records)
+    loaded = load_corpus(path, known_canonical_ids=real_ids)
+    evaluations = evaluate_corpus(loaded, taxonomy=taxonomy)
+
+    dev_metrics = evaluations["dev"].components["remote_type"]
+    assert dev_metrics.missing_wired_input_gap.render() == "N/A"
+    assert dev_metrics.supported_correctness.render() == "1/1"

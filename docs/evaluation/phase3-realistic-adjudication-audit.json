@@ -1,0 +1,1959 @@
+{
+  "audited_agreements": {
+    "anthropic:4017331008|employment_type": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4017331008|experience.maximum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4017331008|experience.minimum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4017331008|location.city": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4017331008|location.postal_code": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4017331008|location.state": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4017331008|salary.currency": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4017331008|salary.maximum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4017331008|salary.minimum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4017331008|salary.period": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4017331008|seniority": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4017331008|skills.c": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4017331008|skills.cpp": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4017331008|skills.csharp": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4017331008|skills.docker": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4017331008|skills.golang": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4017331008|skills.java": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4017331008|skills.javascript": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4017331008|skills.kubernetes": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4017331008|skills.mongodb": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4017331008|skills.mysql": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4017331008|skills.node.js": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4017331008|skills.postgresql": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4017331008|skills.python": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4017331008|skills.rlang": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4017331008|skills.typescript": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4020350008|salary.currency": {
+      "audited_at": "2026-09-28T00:59:45.918727+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4020350008|salary.maximum": {
+      "audited_at": "2026-09-28T00:59:45.918727+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4020350008|salary.minimum": {
+      "audited_at": "2026-09-28T00:59:45.918727+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4020350008|salary.period": {
+      "audited_at": "2026-09-28T00:59:45.918727+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4020350008|skills.python": {
+      "audited_at": "2026-09-28T00:59:45.918727+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4423394008|salary.currency": {
+      "audited_at": "2026-09-28T01:21:10.239093+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4423394008|salary.maximum": {
+      "audited_at": "2026-09-28T01:21:10.239093+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4423394008|salary.minimum": {
+      "audited_at": "2026-09-28T01:21:10.239093+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4423394008|salary.period": {
+      "audited_at": "2026-09-28T01:21:10.239093+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4461444008|salary.currency": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4461444008|salary.maximum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4461444008|salary.minimum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4461444008|salary.period": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4461444008|skills.python": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4461450008|salary.currency": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4461450008|salary.maximum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4461450008|salary.minimum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4461450008|salary.period": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4502508008|salary.currency": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4502508008|salary.maximum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4502508008|salary.minimum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4502508008|salary.period": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4502508008|seniority": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4502508008|skills.golang": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4502508008|skills.python": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4502508008|skills.typescript": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4572744008|salary.currency": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4572744008|salary.maximum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4572744008|salary.minimum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4572744008|salary.period": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4593216008|location.city": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4593216008|location.state": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4593216008|salary.currency": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4593216008|salary.maximum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4593216008|salary.minimum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4593216008|salary.period": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4593216008|skills.docker": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4593216008|skills.kubernetes": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4595463008|salary.currency": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4595463008|salary.maximum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4595463008|salary.minimum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4595463008|salary.period": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4595463008|skills.python": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4610158008|location.city": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4610158008|location.country": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4610158008|salary.currency": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4610158008|salary.maximum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4610158008|salary.minimum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4610158008|salary.period": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4610158008|skills.kubernetes": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "anthropic:4610158008|skills.python": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8214127002|experience.maximum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8214127002|experience.minimum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8214127002|location.city": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8214127002|location.country": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8214127002|location.postal_code": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8214127002|location.state": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8214127002|remote_type": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8214127002|salary.currency": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8214127002|salary.maximum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8214127002|salary.minimum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8214127002|skills.c": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8214127002|skills.cpp": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8214127002|skills.csharp": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8214127002|skills.docker": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8214127002|skills.golang": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8214127002|skills.java": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8214127002|skills.javascript": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8214127002|skills.kubernetes": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8214127002|skills.mongodb": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8214127002|skills.mysql": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8214127002|skills.node.js": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8214127002|skills.postgresql": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8214127002|skills.python": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8214127002|skills.rlang": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8214127002|skills.typescript": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8369347002|remote_type": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8369347002|salary.currency": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8369347002|salary.maximum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8369347002|salary.minimum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8369347002|skills.javascript": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8369347002|skills.python": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8369347002|skills.typescript": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8460791002|remote_type": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8460791002|salary.currency": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8460791002|salary.maximum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8460791002|salary.minimum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8460791002|skills.python": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8460791002|skills.typescript": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8464570002|salary.currency": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8464570002|skills.python": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8464570002|skills.typescript": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8498984002|location.city": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8498984002|location.state": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8498984002|salary.currency": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8498984002|salary.maximum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8498984002|salary.minimum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8498984002|skills.python": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8537955002|salary.currency": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8537955002|salary.maximum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8537955002|salary.minimum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8537955002|seniority": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8537955002|skills.kubernetes": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8537955002|skills.python": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8545675002|location.country": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8545675002|salary.currency": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8545675002|salary.maximum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8545675002|salary.minimum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8545675002|skills.python": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8545675002|skills.typescript": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8571766002|experience.minimum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8571766002|salary.currency": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8571766002|salary.maximum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8571766002|salary.minimum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8575166002|salary.currency": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8575166002|salary.maximum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8575166002|salary.minimum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8581126002|salary.currency": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8581126002|salary.maximum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "discord:8581126002|salary.minimum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8396674002|employment_type": {
+      "audited_at": "2026-09-28T00:41:19.158527+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8396674002|experience.maximum": {
+      "audited_at": "2026-09-28T00:41:19.158527+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8396674002|experience.minimum": {
+      "audited_at": "2026-09-28T00:41:19.158527+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8396674002|location.country": {
+      "audited_at": "2026-09-28T00:41:19.158527+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8396674002|location.postal_code": {
+      "audited_at": "2026-09-28T00:41:19.158527+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8396674002|remote_type": {
+      "audited_at": "2026-09-28T00:41:19.158527+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8396674002|salary.currency": {
+      "audited_at": "2026-09-28T00:41:19.158527+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8396674002|salary.maximum": {
+      "audited_at": "2026-09-28T00:41:19.158527+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8396674002|salary.minimum": {
+      "audited_at": "2026-09-28T00:41:19.158527+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8396674002|seniority": {
+      "audited_at": "2026-09-28T00:41:19.158527+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8396674002|skills.c": {
+      "audited_at": "2026-09-28T00:41:19.158527+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8396674002|skills.cpp": {
+      "audited_at": "2026-09-28T00:41:19.158527+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8396674002|skills.csharp": {
+      "audited_at": "2026-09-28T00:41:19.158527+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8396674002|skills.docker": {
+      "audited_at": "2026-09-28T00:41:19.158527+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8396674002|skills.golang": {
+      "audited_at": "2026-09-28T00:41:19.158527+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8396674002|skills.java": {
+      "audited_at": "2026-09-28T00:41:19.158527+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8396674002|skills.javascript": {
+      "audited_at": "2026-09-28T00:41:19.158527+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8396674002|skills.kubernetes": {
+      "audited_at": "2026-09-28T00:41:19.158527+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8396674002|skills.mongodb": {
+      "audited_at": "2026-09-28T00:41:19.158527+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8396674002|skills.mysql": {
+      "audited_at": "2026-09-28T00:41:19.158527+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8396674002|skills.node.js": {
+      "audited_at": "2026-09-28T00:41:19.158527+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8396674002|skills.postgresql": {
+      "audited_at": "2026-09-28T00:41:19.158527+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8396674002|skills.python": {
+      "audited_at": "2026-09-28T00:41:19.158527+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8396674002|skills.rlang": {
+      "audited_at": "2026-09-28T00:41:19.158527+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8396674002|skills.typescript": {
+      "audited_at": "2026-09-28T00:41:19.158527+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8451512002|location.city": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8451512002|location.country": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8451512002|location.state": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8451512002|remote_type": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8451512002|salary.currency": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8451512002|salary.maximum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8451512002|salary.minimum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8451512002|skills.golang": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8451512002|skills.kubernetes": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8463922002|location.city": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8463922002|location.country": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8463922002|remote_type": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8463922002|salary.currency": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8463922002|salary.maximum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8463922002|salary.minimum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8463922002|salary.period": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8463922002|skills.golang": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8463922002|skills.kubernetes": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8463922002|skills.postgresql": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8476375002|remote_type": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8478405002|location.city": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8478405002|location.country": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8478405002|remote_type": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8490477002|remote_type": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8490477002|salary.currency": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8490477002|salary.maximum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8490477002|salary.minimum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8490477002|skills.golang": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8490477002|skills.kubernetes": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8500014002|remote_type": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8512220002|remote_type": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8512220002|salary.currency": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8512220002|salary.maximum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8512220002|salary.minimum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8512432002|location.country": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8512432002|remote_type": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8512432002|salary.currency": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8512432002|salary.maximum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8512432002|salary.minimum": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8512432002|skills.docker": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8512432002|skills.golang": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8512432002|skills.kubernetes": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8512432002|skills.postgresql": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8512432002|skills.python": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8512432002|skills.typescript": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8514960002|remote_type": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8514960002|skills.golang": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8514960002|skills.kubernetes": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    },
+    "gitlab:8514960002|skills.python": {
+      "audited_at": "2026-09-28T02:24:39.580204+00:00",
+      "audited_by": "user",
+      "result": "confirmed"
+    }
+  },
+  "completed_at": "2026-09-28T02:48:07.718176+00:00",
+  "disagreements": {
+    "anthropic:4017331008|location.country": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "absent",
+        "final_provenance": "unavailable",
+        "final_value": null
+      }
+    },
+    "anthropic:4017331008|remote_type": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "parsed_description",
+        "final_value": "hybrid"
+      }
+    },
+    "anthropic:4020350008|location.country": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T00:59:45.918727+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "absent",
+        "final_provenance": "unavailable",
+        "final_value": null
+      }
+    },
+    "anthropic:4020350008|remote_type": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T00:59:45.918727+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "parsed_description",
+        "final_value": "hybrid"
+      }
+    },
+    "anthropic:4423394008|experience.minimum": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T01:21:10.239093+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "parsed_description",
+        "final_value": 5
+      }
+    },
+    "anthropic:4423394008|location.country": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T01:21:10.239093+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "absent",
+        "final_provenance": "unavailable",
+        "final_value": null
+      }
+    },
+    "anthropic:4423394008|remote_type": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T01:21:10.239093+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "parsed_description",
+        "final_value": "hybrid"
+      }
+    },
+    "anthropic:4461444008|experience.minimum": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "parsed_description",
+        "final_value": 5
+      }
+    },
+    "anthropic:4461444008|location.country": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "absent",
+        "final_provenance": "unavailable",
+        "final_value": null
+      }
+    },
+    "anthropic:4461444008|remote_type": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "parsed_description",
+        "final_value": "hybrid"
+      }
+    },
+    "anthropic:4461450008|experience.minimum": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "parsed_description",
+        "final_value": 4
+      }
+    },
+    "anthropic:4461450008|location.country": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "absent",
+        "final_provenance": "unavailable",
+        "final_value": null
+      }
+    },
+    "anthropic:4461450008|remote_type": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "parsed_description",
+        "final_value": "hybrid"
+      }
+    },
+    "anthropic:4502508008|experience.minimum": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "parsed_description",
+        "final_value": 7
+      }
+    },
+    "anthropic:4502508008|location.country": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "absent",
+        "final_provenance": "unavailable",
+        "final_value": null
+      }
+    },
+    "anthropic:4502508008|remote_type": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "parsed_description",
+        "final_value": "hybrid"
+      }
+    },
+    "anthropic:4572744008|location.country": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "absent",
+        "final_provenance": "unavailable",
+        "final_value": null
+      }
+    },
+    "anthropic:4572744008|remote_type": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "parsed_description",
+        "final_value": "hybrid"
+      }
+    },
+    "anthropic:4572744008|seniority": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "inferred",
+        "final_value": "staff"
+      }
+    },
+    "anthropic:4593216008|experience.minimum": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "parsed_description",
+        "final_value": 8
+      }
+    },
+    "anthropic:4593216008|location.country": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "absent",
+        "final_provenance": "unavailable",
+        "final_value": null
+      }
+    },
+    "anthropic:4593216008|remote_type": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "parsed_description",
+        "final_value": "hybrid"
+      }
+    },
+    "anthropic:4593216008|seniority": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "inferred",
+        "final_value": "staff"
+      }
+    },
+    "anthropic:4595463008|experience.minimum": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "parsed_description",
+        "final_value": 7
+      }
+    },
+    "anthropic:4595463008|location.country": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "absent",
+        "final_provenance": "unavailable",
+        "final_value": null
+      }
+    },
+    "anthropic:4595463008|remote_type": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "parsed_description",
+        "final_value": "hybrid"
+      }
+    },
+    "anthropic:4610158008|location.state": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "absent",
+        "final_provenance": "unavailable",
+        "final_value": null
+      }
+    },
+    "anthropic:4610158008|remote_type": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "parsed_description",
+        "final_value": "hybrid"
+      }
+    },
+    "discord:8214127002|employment_type": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "parsed_description",
+        "final_value": "full_time"
+      }
+    },
+    "discord:8214127002|salary.period": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "inferred",
+        "final_value": "annual"
+      }
+    },
+    "discord:8214127002|seniority": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "inferred",
+        "final_value": "staff"
+      }
+    },
+    "discord:8369347002|employment_type": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "parsed_description",
+        "final_value": "full_time"
+      }
+    },
+    "discord:8369347002|experience.minimum": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "parsed_description",
+        "final_value": 4
+      }
+    },
+    "discord:8369347002|location.country": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "inferred",
+        "final_value": "United States"
+      }
+    },
+    "discord:8369347002|salary.period": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "inferred",
+        "final_value": "annual"
+      }
+    },
+    "discord:8369347002|seniority": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "inferred",
+        "final_value": "senior"
+      }
+    },
+    "discord:8460791002|employment_type": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "parsed_description",
+        "final_value": "full_time"
+      }
+    },
+    "discord:8460791002|experience.minimum": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "parsed_description",
+        "final_value": 5
+      }
+    },
+    "discord:8460791002|location.country": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "inferred",
+        "final_value": "United States"
+      }
+    },
+    "discord:8460791002|salary.period": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "inferred",
+        "final_value": "annual"
+      }
+    },
+    "discord:8460791002|seniority": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "inferred",
+        "final_value": "senior"
+      }
+    },
+    "discord:8464570002|employment_type": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "parsed_description",
+        "final_value": "full_time"
+      }
+    },
+    "discord:8464570002|experience.minimum": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "parsed_description",
+        "final_value": 8
+      }
+    },
+    "discord:8464570002|location.country": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "inferred",
+        "final_value": "United States"
+      }
+    },
+    "discord:8464570002|salary.maximum": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "inferred",
+        "final_value": 279000
+      }
+    },
+    "discord:8464570002|salary.minimum": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "inferred",
+        "final_value": 248000
+      }
+    },
+    "discord:8464570002|salary.period": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "inferred",
+        "final_value": "annual"
+      }
+    },
+    "discord:8464570002|seniority": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "inferred",
+        "final_value": "staff"
+      }
+    },
+    "discord:8498984002|employment_type": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "parsed_description",
+        "final_value": "full_time"
+      }
+    },
+    "discord:8498984002|experience.minimum": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "parsed_description",
+        "final_value": 7
+      }
+    },
+    "discord:8498984002|location.country": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "inferred",
+        "final_value": "United States"
+      }
+    },
+    "discord:8498984002|remote_type": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "inferred",
+        "final_value": "hybrid"
+      }
+    },
+    "discord:8498984002|salary.period": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "inferred",
+        "final_value": "annual"
+      }
+    },
+    "discord:8498984002|seniority": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "inferred",
+        "final_value": "staff"
+      }
+    },
+    "discord:8537955002|employment_type": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "parsed_description",
+        "final_value": "full_time"
+      }
+    },
+    "discord:8537955002|experience.minimum": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "ambiguous",
+        "final_provenance": "unavailable",
+        "final_value": null
+      }
+    },
+    "discord:8537955002|location.country": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "inferred",
+        "final_value": "United States"
+      }
+    },
+    "discord:8537955002|remote_type": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "parsed_description",
+        "final_value": "remote"
+      }
+    },
+    "discord:8537955002|salary.period": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "inferred",
+        "final_value": "annual"
+      }
+    },
+    "discord:8545675002|employment_type": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "parsed_description",
+        "final_value": "full_time"
+      }
+    },
+    "discord:8545675002|experience.minimum": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "parsed_description",
+        "final_value": 5
+      }
+    },
+    "discord:8545675002|salary.period": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "inferred",
+        "final_value": "annual"
+      }
+    },
+    "discord:8545675002|seniority": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "inferred",
+        "final_value": "senior"
+      }
+    },
+    "discord:8571766002|employment_type": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "parsed_description",
+        "final_value": "full_time"
+      }
+    },
+    "discord:8571766002|location.country": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "inferred",
+        "final_value": "United States"
+      }
+    },
+    "discord:8571766002|salary.period": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "inferred",
+        "final_value": "annual"
+      }
+    },
+    "discord:8571766002|seniority": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "inferred",
+        "final_value": "director"
+      }
+    },
+    "discord:8575166002|employment_type": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "parsed_description",
+        "final_value": "full_time"
+      }
+    },
+    "discord:8575166002|experience.minimum": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "parsed_description",
+        "final_value": 2
+      }
+    },
+    "discord:8575166002|location.country": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "inferred",
+        "final_value": "United States"
+      }
+    },
+    "discord:8575166002|salary.period": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "inferred",
+        "final_value": "annual"
+      }
+    },
+    "discord:8575166002|seniority": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "absent",
+        "final_provenance": "unavailable",
+        "final_value": null
+      }
+    },
+    "discord:8581126002|employment_type": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "parsed_description",
+        "final_value": "full_time"
+      }
+    },
+    "discord:8581126002|experience.minimum": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "parsed_description",
+        "final_value": 5
+      }
+    },
+    "discord:8581126002|location.country": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "inferred",
+        "final_value": "United States"
+      }
+    },
+    "discord:8581126002|salary.period": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "inferred",
+        "final_value": "annual"
+      }
+    },
+    "discord:8581126002|seniority": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "inferred",
+        "final_value": "senior"
+      }
+    },
+    "gitlab:8396674002|location.city": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-27T22:58:52.834351+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "parsed_description",
+        "final_value": "San Francisco"
+      }
+    },
+    "gitlab:8396674002|location.state": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-27T22:58:52.834351+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "inferred",
+        "final_value": "CA"
+      }
+    },
+    "gitlab:8396674002|salary.period": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-27T22:58:52.834351+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "inferred",
+        "final_value": "annual"
+      }
+    },
+    "gitlab:8451512002|salary.period": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "inferred",
+        "final_value": "annual"
+      }
+    },
+    "gitlab:8451512002|seniority": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "inferred",
+        "final_value": "senior"
+      }
+    },
+    "gitlab:8451512002|skills.javascript": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported"
+      }
+    },
+    "gitlab:8451512002|skills.python": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported"
+      }
+    },
+    "gitlab:8463922002|seniority": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "inferred",
+        "final_value": "staff"
+      }
+    },
+    "gitlab:8476375002|seniority": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "inferred",
+        "final_value": "senior"
+      }
+    },
+    "gitlab:8478405002|experience.minimum": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "inferred",
+        "final_value": 4
+      }
+    },
+    "gitlab:8490477002|salary.period": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "inferred",
+        "final_value": "annual"
+      }
+    },
+    "gitlab:8490477002|seniority": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "inferred",
+        "final_value": "staff"
+      }
+    },
+    "gitlab:8500014002|seniority": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "inferred",
+        "final_value": "senior"
+      }
+    },
+    "gitlab:8512220002|salary.period": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "inferred",
+        "final_value": "annual"
+      }
+    },
+    "gitlab:8512220002|seniority": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "inferred",
+        "final_value": "senior"
+      }
+    },
+    "gitlab:8512432002|salary.period": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "inferred",
+        "final_value": "annual"
+      }
+    },
+    "gitlab:8512432002|seniority": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "inferred",
+        "final_value": "staff"
+      }
+    },
+    "gitlab:8514960002|seniority": {
+      "adjudication": {
+        "adjudicated_at": "2026-09-28T02:24:39.580204+00:00",
+        "adjudicated_by": "user",
+        "final_outcome": "present_supported",
+        "final_provenance": "inferred",
+        "final_value": "staff"
+      }
+    }
+  },
+  "schema_version": "1"
+}

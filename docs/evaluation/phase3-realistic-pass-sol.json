@@ -1,0 +1,3609 @@
+{
+  "schema_version": "1",
+  "annotator_role": "sol",
+  "rubric_version": "1.0.4",
+  "source_packet_hash": "010a13e0b5040121d4f55df62a0dc3780033469c316380cc1e415c5a86641f92",
+  "frozen_at": "2026-09-27T19:11:53.9046360+00:00",
+  "records": {
+    "gitlab:8396674002": {
+      "remote_type": {
+        "outcome": "present_supported",
+        "expected_value": "remote",
+        "expected_provenance": "parsed_description"
+      },
+      "employment_type": {
+        "outcome": "absent",
+        "expected_value": null,
+        "expected_provenance": "unavailable"
+      },
+      "seniority": {
+        "outcome": "present_unsupported_form",
+        "expected_value": null,
+        "expected_provenance": "unavailable"
+      },
+      "experience": {
+        "minimum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "maximum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "salary": {
+        "minimum": {
+          "outcome": "present_supported",
+          "expected_value": 154200,
+          "expected_provenance": "parsed_description"
+        },
+        "maximum": {
+          "outcome": "present_supported",
+          "expected_value": 231300,
+          "expected_provenance": "parsed_description"
+        },
+        "currency": {
+          "outcome": "present_supported",
+          "expected_value": "USD",
+          "expected_provenance": "parsed_description"
+        },
+        "period": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "location": {
+        "city": {
+          "outcome": "present_supported",
+          "expected_value": "San Francisco",
+          "expected_provenance": "parsed_description"
+        },
+        "state": {
+          "outcome": "present_supported",
+          "expected_value": "CA",
+          "expected_provenance": "inferred"
+        },
+        "country": {
+          "outcome": "present_supported",
+          "expected_value": "United States",
+          "expected_provenance": "inferred"
+        },
+        "postal_code": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "skills": {
+        "python": {
+          "outcome": "absent"
+        },
+        "javascript": {
+          "outcome": "absent"
+        },
+        "typescript": {
+          "outcome": "absent"
+        },
+        "java": {
+          "outcome": "absent"
+        },
+        "cpp": {
+          "outcome": "absent"
+        },
+        "csharp": {
+          "outcome": "absent"
+        },
+        "c": {
+          "outcome": "absent"
+        },
+        "golang": {
+          "outcome": "absent"
+        },
+        "rlang": {
+          "outcome": "absent"
+        },
+        "postgresql": {
+          "outcome": "absent"
+        },
+        "mysql": {
+          "outcome": "absent"
+        },
+        "mongodb": {
+          "outcome": "absent"
+        },
+        "kubernetes": {
+          "outcome": "absent"
+        },
+        "docker": {
+          "outcome": "absent"
+        },
+        "node.js": {
+          "outcome": "absent"
+        }
+      }
+    },
+    "gitlab:8451512002": {
+      "remote_type": {
+        "outcome": "present_supported",
+        "expected_value": "remote",
+        "expected_provenance": "parsed_description"
+      },
+      "employment_type": {
+        "outcome": "absent",
+        "expected_value": null,
+        "expected_provenance": "unavailable"
+      },
+      "seniority": {
+        "outcome": "present_supported",
+        "expected_value": "senior",
+        "expected_provenance": "inferred"
+      },
+      "experience": {
+        "minimum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "maximum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "salary": {
+        "minimum": {
+          "outcome": "present_supported",
+          "expected_value": 117600,
+          "expected_provenance": "parsed_description"
+        },
+        "maximum": {
+          "outcome": "present_supported",
+          "expected_value": 252000,
+          "expected_provenance": "parsed_description"
+        },
+        "currency": {
+          "outcome": "present_supported",
+          "expected_value": "USD",
+          "expected_provenance": "parsed_description"
+        },
+        "period": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "location": {
+        "city": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "state": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "country": {
+          "outcome": "ambiguous",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "postal_code": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "skills": {
+        "python": {
+          "outcome": "present_supported"
+        },
+        "javascript": {
+          "outcome": "present_supported"
+        },
+        "typescript": {
+          "outcome": "absent"
+        },
+        "java": {
+          "outcome": "absent"
+        },
+        "cpp": {
+          "outcome": "absent"
+        },
+        "csharp": {
+          "outcome": "absent"
+        },
+        "c": {
+          "outcome": "absent"
+        },
+        "golang": {
+          "outcome": "present_supported"
+        },
+        "rlang": {
+          "outcome": "absent"
+        },
+        "postgresql": {
+          "outcome": "absent"
+        },
+        "mysql": {
+          "outcome": "absent"
+        },
+        "mongodb": {
+          "outcome": "absent"
+        },
+        "kubernetes": {
+          "outcome": "present_supported"
+        },
+        "docker": {
+          "outcome": "absent"
+        },
+        "node.js": {
+          "outcome": "absent"
+        }
+      }
+    },
+    "gitlab:8463922002": {
+      "remote_type": {
+        "outcome": "present_supported",
+        "expected_value": "remote",
+        "expected_provenance": "parsed_description"
+      },
+      "employment_type": {
+        "outcome": "absent",
+        "expected_value": null,
+        "expected_provenance": "unavailable"
+      },
+      "seniority": {
+        "outcome": "present_supported",
+        "expected_value": "staff",
+        "expected_provenance": "inferred"
+      },
+      "experience": {
+        "minimum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "maximum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "salary": {
+        "minimum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "maximum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "currency": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "period": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "location": {
+        "city": {
+          "outcome": "present_supported",
+          "expected_value": "Bangalore",
+          "expected_provenance": "parsed_description"
+        },
+        "state": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "country": {
+          "outcome": "present_supported",
+          "expected_value": "India",
+          "expected_provenance": "parsed_description"
+        },
+        "postal_code": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "skills": {
+        "python": {
+          "outcome": "absent"
+        },
+        "javascript": {
+          "outcome": "absent"
+        },
+        "typescript": {
+          "outcome": "absent"
+        },
+        "java": {
+          "outcome": "absent"
+        },
+        "cpp": {
+          "outcome": "absent"
+        },
+        "csharp": {
+          "outcome": "absent"
+        },
+        "c": {
+          "outcome": "absent"
+        },
+        "golang": {
+          "outcome": "present_supported"
+        },
+        "rlang": {
+          "outcome": "absent"
+        },
+        "postgresql": {
+          "outcome": "present_supported"
+        },
+        "mysql": {
+          "outcome": "absent"
+        },
+        "mongodb": {
+          "outcome": "absent"
+        },
+        "kubernetes": {
+          "outcome": "present_supported"
+        },
+        "docker": {
+          "outcome": "absent"
+        },
+        "node.js": {
+          "outcome": "absent"
+        }
+      }
+    },
+    "gitlab:8476375002": {
+      "remote_type": {
+        "outcome": "present_supported",
+        "expected_value": "remote",
+        "expected_provenance": "parsed_description"
+      },
+      "employment_type": {
+        "outcome": "absent",
+        "expected_value": null,
+        "expected_provenance": "unavailable"
+      },
+      "seniority": {
+        "outcome": "present_supported",
+        "expected_value": "senior",
+        "expected_provenance": "inferred"
+      },
+      "experience": {
+        "minimum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "maximum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "salary": {
+        "minimum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "maximum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "currency": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "period": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "location": {
+        "city": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "state": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "country": {
+          "outcome": "ambiguous",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "postal_code": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "skills": {
+        "python": {
+          "outcome": "absent"
+        },
+        "javascript": {
+          "outcome": "absent"
+        },
+        "typescript": {
+          "outcome": "absent"
+        },
+        "java": {
+          "outcome": "absent"
+        },
+        "cpp": {
+          "outcome": "absent"
+        },
+        "csharp": {
+          "outcome": "absent"
+        },
+        "c": {
+          "outcome": "absent"
+        },
+        "golang": {
+          "outcome": "absent"
+        },
+        "rlang": {
+          "outcome": "absent"
+        },
+        "postgresql": {
+          "outcome": "absent"
+        },
+        "mysql": {
+          "outcome": "absent"
+        },
+        "mongodb": {
+          "outcome": "absent"
+        },
+        "kubernetes": {
+          "outcome": "absent"
+        },
+        "docker": {
+          "outcome": "absent"
+        },
+        "node.js": {
+          "outcome": "absent"
+        }
+      }
+    },
+    "gitlab:8478405002": {
+      "remote_type": {
+        "outcome": "present_supported",
+        "expected_value": "remote",
+        "expected_provenance": "parsed_description"
+      },
+      "employment_type": {
+        "outcome": "absent",
+        "expected_value": null,
+        "expected_provenance": "unavailable"
+      },
+      "seniority": {
+        "outcome": "present_unsupported_form",
+        "expected_value": null,
+        "expected_provenance": "unavailable"
+      },
+      "experience": {
+        "minimum": {
+          "outcome": "present_supported",
+          "expected_value": 4,
+          "expected_provenance": "inferred"
+        },
+        "maximum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "salary": {
+        "minimum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "maximum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "currency": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "period": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "location": {
+        "city": {
+          "outcome": "present_supported",
+          "expected_value": "Bangalore",
+          "expected_provenance": "parsed_description"
+        },
+        "state": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "country": {
+          "outcome": "present_supported",
+          "expected_value": "India",
+          "expected_provenance": "parsed_description"
+        },
+        "postal_code": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "skills": {
+        "python": {
+          "outcome": "absent"
+        },
+        "javascript": {
+          "outcome": "absent"
+        },
+        "typescript": {
+          "outcome": "absent"
+        },
+        "java": {
+          "outcome": "absent"
+        },
+        "cpp": {
+          "outcome": "absent"
+        },
+        "csharp": {
+          "outcome": "absent"
+        },
+        "c": {
+          "outcome": "absent"
+        },
+        "golang": {
+          "outcome": "absent"
+        },
+        "rlang": {
+          "outcome": "absent"
+        },
+        "postgresql": {
+          "outcome": "absent"
+        },
+        "mysql": {
+          "outcome": "absent"
+        },
+        "mongodb": {
+          "outcome": "absent"
+        },
+        "kubernetes": {
+          "outcome": "absent"
+        },
+        "docker": {
+          "outcome": "absent"
+        },
+        "node.js": {
+          "outcome": "absent"
+        }
+      }
+    },
+    "gitlab:8490477002": {
+      "remote_type": {
+        "outcome": "present_supported",
+        "expected_value": "remote",
+        "expected_provenance": "parsed_description"
+      },
+      "employment_type": {
+        "outcome": "absent",
+        "expected_value": null,
+        "expected_provenance": "unavailable"
+      },
+      "seniority": {
+        "outcome": "present_supported",
+        "expected_value": "staff",
+        "expected_provenance": "inferred"
+      },
+      "experience": {
+        "minimum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "maximum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "salary": {
+        "minimum": {
+          "outcome": "present_supported",
+          "expected_value": 131600,
+          "expected_provenance": "parsed_description"
+        },
+        "maximum": {
+          "outcome": "present_supported",
+          "expected_value": 282000,
+          "expected_provenance": "parsed_description"
+        },
+        "currency": {
+          "outcome": "present_supported",
+          "expected_value": "USD",
+          "expected_provenance": "parsed_description"
+        },
+        "period": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "location": {
+        "city": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "state": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "country": {
+          "outcome": "ambiguous",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "postal_code": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "skills": {
+        "python": {
+          "outcome": "absent"
+        },
+        "javascript": {
+          "outcome": "absent"
+        },
+        "typescript": {
+          "outcome": "absent"
+        },
+        "java": {
+          "outcome": "absent"
+        },
+        "cpp": {
+          "outcome": "absent"
+        },
+        "csharp": {
+          "outcome": "absent"
+        },
+        "c": {
+          "outcome": "absent"
+        },
+        "golang": {
+          "outcome": "present_supported"
+        },
+        "rlang": {
+          "outcome": "absent"
+        },
+        "postgresql": {
+          "outcome": "absent"
+        },
+        "mysql": {
+          "outcome": "absent"
+        },
+        "mongodb": {
+          "outcome": "absent"
+        },
+        "kubernetes": {
+          "outcome": "present_supported"
+        },
+        "docker": {
+          "outcome": "absent"
+        },
+        "node.js": {
+          "outcome": "absent"
+        }
+      }
+    },
+    "gitlab:8500014002": {
+      "remote_type": {
+        "outcome": "present_supported",
+        "expected_value": "remote",
+        "expected_provenance": "parsed_description"
+      },
+      "employment_type": {
+        "outcome": "absent",
+        "expected_value": null,
+        "expected_provenance": "unavailable"
+      },
+      "seniority": {
+        "outcome": "present_supported",
+        "expected_value": "senior",
+        "expected_provenance": "inferred"
+      },
+      "experience": {
+        "minimum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "maximum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "salary": {
+        "minimum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "maximum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "currency": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "period": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "location": {
+        "city": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "state": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "country": {
+          "outcome": "ambiguous",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "postal_code": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "skills": {
+        "python": {
+          "outcome": "absent"
+        },
+        "javascript": {
+          "outcome": "absent"
+        },
+        "typescript": {
+          "outcome": "absent"
+        },
+        "java": {
+          "outcome": "absent"
+        },
+        "cpp": {
+          "outcome": "absent"
+        },
+        "csharp": {
+          "outcome": "absent"
+        },
+        "c": {
+          "outcome": "absent"
+        },
+        "golang": {
+          "outcome": "absent"
+        },
+        "rlang": {
+          "outcome": "absent"
+        },
+        "postgresql": {
+          "outcome": "absent"
+        },
+        "mysql": {
+          "outcome": "absent"
+        },
+        "mongodb": {
+          "outcome": "absent"
+        },
+        "kubernetes": {
+          "outcome": "absent"
+        },
+        "docker": {
+          "outcome": "absent"
+        },
+        "node.js": {
+          "outcome": "absent"
+        }
+      }
+    },
+    "gitlab:8512220002": {
+      "remote_type": {
+        "outcome": "present_supported",
+        "expected_value": "remote",
+        "expected_provenance": "parsed_description"
+      },
+      "employment_type": {
+        "outcome": "absent",
+        "expected_value": null,
+        "expected_provenance": "unavailable"
+      },
+      "seniority": {
+        "outcome": "present_supported",
+        "expected_value": "senior",
+        "expected_provenance": "inferred"
+      },
+      "experience": {
+        "minimum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "maximum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "salary": {
+        "minimum": {
+          "outcome": "present_supported",
+          "expected_value": 139200,
+          "expected_provenance": "parsed_description"
+        },
+        "maximum": {
+          "outcome": "present_supported",
+          "expected_value": 235200,
+          "expected_provenance": "parsed_description"
+        },
+        "currency": {
+          "outcome": "present_supported",
+          "expected_value": "USD",
+          "expected_provenance": "parsed_description"
+        },
+        "period": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "location": {
+        "city": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "state": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "country": {
+          "outcome": "ambiguous",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "postal_code": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "skills": {
+        "python": {
+          "outcome": "absent"
+        },
+        "javascript": {
+          "outcome": "absent"
+        },
+        "typescript": {
+          "outcome": "absent"
+        },
+        "java": {
+          "outcome": "absent"
+        },
+        "cpp": {
+          "outcome": "absent"
+        },
+        "csharp": {
+          "outcome": "absent"
+        },
+        "c": {
+          "outcome": "absent"
+        },
+        "golang": {
+          "outcome": "absent"
+        },
+        "rlang": {
+          "outcome": "absent"
+        },
+        "postgresql": {
+          "outcome": "absent"
+        },
+        "mysql": {
+          "outcome": "absent"
+        },
+        "mongodb": {
+          "outcome": "absent"
+        },
+        "kubernetes": {
+          "outcome": "absent"
+        },
+        "docker": {
+          "outcome": "absent"
+        },
+        "node.js": {
+          "outcome": "absent"
+        }
+      }
+    },
+    "gitlab:8512432002": {
+      "remote_type": {
+        "outcome": "present_supported",
+        "expected_value": "remote",
+        "expected_provenance": "parsed_description"
+      },
+      "employment_type": {
+        "outcome": "absent",
+        "expected_value": null,
+        "expected_provenance": "unavailable"
+      },
+      "seniority": {
+        "outcome": "present_supported",
+        "expected_value": "staff",
+        "expected_provenance": "inferred"
+      },
+      "experience": {
+        "minimum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "maximum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "salary": {
+        "minimum": {
+          "outcome": "present_supported",
+          "expected_value": 254000,
+          "expected_provenance": "parsed_description"
+        },
+        "maximum": {
+          "outcome": "present_supported",
+          "expected_value": 297000,
+          "expected_provenance": "parsed_description"
+        },
+        "currency": {
+          "outcome": "present_supported",
+          "expected_value": "USD",
+          "expected_provenance": "parsed_description"
+        },
+        "period": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "location": {
+        "city": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "state": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "country": {
+          "outcome": "present_supported",
+          "expected_value": "United States",
+          "expected_provenance": "inferred"
+        },
+        "postal_code": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "skills": {
+        "python": {
+          "outcome": "present_supported"
+        },
+        "javascript": {
+          "outcome": "absent"
+        },
+        "typescript": {
+          "outcome": "present_supported"
+        },
+        "java": {
+          "outcome": "absent"
+        },
+        "cpp": {
+          "outcome": "absent"
+        },
+        "csharp": {
+          "outcome": "absent"
+        },
+        "c": {
+          "outcome": "absent"
+        },
+        "golang": {
+          "outcome": "present_supported"
+        },
+        "rlang": {
+          "outcome": "absent"
+        },
+        "postgresql": {
+          "outcome": "present_supported"
+        },
+        "mysql": {
+          "outcome": "absent"
+        },
+        "mongodb": {
+          "outcome": "absent"
+        },
+        "kubernetes": {
+          "outcome": "present_supported"
+        },
+        "docker": {
+          "outcome": "present_supported"
+        },
+        "node.js": {
+          "outcome": "absent"
+        }
+      }
+    },
+    "gitlab:8514960002": {
+      "remote_type": {
+        "outcome": "present_supported",
+        "expected_value": "remote",
+        "expected_provenance": "parsed_description"
+      },
+      "employment_type": {
+        "outcome": "absent",
+        "expected_value": null,
+        "expected_provenance": "unavailable"
+      },
+      "seniority": {
+        "outcome": "present_supported",
+        "expected_value": "staff",
+        "expected_provenance": "inferred"
+      },
+      "experience": {
+        "minimum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "maximum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "salary": {
+        "minimum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "maximum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "currency": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "period": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "location": {
+        "city": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "state": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "country": {
+          "outcome": "ambiguous",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "postal_code": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "skills": {
+        "python": {
+          "outcome": "present_supported"
+        },
+        "javascript": {
+          "outcome": "absent"
+        },
+        "typescript": {
+          "outcome": "absent"
+        },
+        "java": {
+          "outcome": "absent"
+        },
+        "cpp": {
+          "outcome": "absent"
+        },
+        "csharp": {
+          "outcome": "absent"
+        },
+        "c": {
+          "outcome": "absent"
+        },
+        "golang": {
+          "outcome": "present_supported"
+        },
+        "rlang": {
+          "outcome": "absent"
+        },
+        "postgresql": {
+          "outcome": "absent"
+        },
+        "mysql": {
+          "outcome": "absent"
+        },
+        "mongodb": {
+          "outcome": "absent"
+        },
+        "kubernetes": {
+          "outcome": "present_supported"
+        },
+        "docker": {
+          "outcome": "absent"
+        },
+        "node.js": {
+          "outcome": "absent"
+        }
+      }
+    },
+    "anthropic:4017331008": {
+      "remote_type": {
+        "outcome": "present_supported",
+        "expected_value": "hybrid",
+        "expected_provenance": "inferred"
+      },
+      "employment_type": {
+        "outcome": "absent",
+        "expected_value": null,
+        "expected_provenance": "unavailable"
+      },
+      "seniority": {
+        "outcome": "absent",
+        "expected_value": null,
+        "expected_provenance": "unavailable"
+      },
+      "experience": {
+        "minimum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "maximum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "salary": {
+        "minimum": {
+          "outcome": "present_supported",
+          "expected_value": 350000,
+          "expected_provenance": "parsed_description"
+        },
+        "maximum": {
+          "outcome": "present_supported",
+          "expected_value": 850000,
+          "expected_provenance": "parsed_description"
+        },
+        "currency": {
+          "outcome": "present_supported",
+          "expected_value": "USD",
+          "expected_provenance": "parsed_description"
+        },
+        "period": {
+          "outcome": "present_supported",
+          "expected_value": "annual",
+          "expected_provenance": "parsed_description"
+        }
+      },
+      "location": {
+        "city": {
+          "outcome": "ambiguous",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "state": {
+          "outcome": "ambiguous",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "country": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "postal_code": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "skills": {
+        "python": {
+          "outcome": "present_supported"
+        },
+        "javascript": {
+          "outcome": "absent"
+        },
+        "typescript": {
+          "outcome": "absent"
+        },
+        "java": {
+          "outcome": "absent"
+        },
+        "cpp": {
+          "outcome": "absent"
+        },
+        "csharp": {
+          "outcome": "absent"
+        },
+        "c": {
+          "outcome": "absent"
+        },
+        "golang": {
+          "outcome": "absent"
+        },
+        "rlang": {
+          "outcome": "absent"
+        },
+        "postgresql": {
+          "outcome": "absent"
+        },
+        "mysql": {
+          "outcome": "absent"
+        },
+        "mongodb": {
+          "outcome": "absent"
+        },
+        "kubernetes": {
+          "outcome": "absent"
+        },
+        "docker": {
+          "outcome": "absent"
+        },
+        "node.js": {
+          "outcome": "absent"
+        }
+      }
+    },
+    "anthropic:4020350008": {
+      "remote_type": {
+        "outcome": "present_supported",
+        "expected_value": "hybrid",
+        "expected_provenance": "inferred"
+      },
+      "employment_type": {
+        "outcome": "absent",
+        "expected_value": null,
+        "expected_provenance": "unavailable"
+      },
+      "seniority": {
+        "outcome": "absent",
+        "expected_value": null,
+        "expected_provenance": "unavailable"
+      },
+      "experience": {
+        "minimum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "maximum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "salary": {
+        "minimum": {
+          "outcome": "present_supported",
+          "expected_value": 280000,
+          "expected_provenance": "parsed_description"
+        },
+        "maximum": {
+          "outcome": "present_supported",
+          "expected_value": 850000,
+          "expected_provenance": "parsed_description"
+        },
+        "currency": {
+          "outcome": "present_supported",
+          "expected_value": "USD",
+          "expected_provenance": "parsed_description"
+        },
+        "period": {
+          "outcome": "present_supported",
+          "expected_value": "annual",
+          "expected_provenance": "parsed_description"
+        }
+      },
+      "location": {
+        "city": {
+          "outcome": "ambiguous",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "state": {
+          "outcome": "ambiguous",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "country": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "postal_code": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "skills": {
+        "python": {
+          "outcome": "absent"
+        },
+        "javascript": {
+          "outcome": "absent"
+        },
+        "typescript": {
+          "outcome": "absent"
+        },
+        "java": {
+          "outcome": "absent"
+        },
+        "cpp": {
+          "outcome": "absent"
+        },
+        "csharp": {
+          "outcome": "absent"
+        },
+        "c": {
+          "outcome": "absent"
+        },
+        "golang": {
+          "outcome": "absent"
+        },
+        "rlang": {
+          "outcome": "absent"
+        },
+        "postgresql": {
+          "outcome": "absent"
+        },
+        "mysql": {
+          "outcome": "absent"
+        },
+        "mongodb": {
+          "outcome": "absent"
+        },
+        "kubernetes": {
+          "outcome": "absent"
+        },
+        "docker": {
+          "outcome": "absent"
+        },
+        "node.js": {
+          "outcome": "absent"
+        }
+      }
+    },
+    "anthropic:4423394008": {
+      "remote_type": {
+        "outcome": "present_supported",
+        "expected_value": "hybrid",
+        "expected_provenance": "inferred"
+      },
+      "employment_type": {
+        "outcome": "absent",
+        "expected_value": null,
+        "expected_provenance": "unavailable"
+      },
+      "seniority": {
+        "outcome": "absent",
+        "expected_value": null,
+        "expected_provenance": "unavailable"
+      },
+      "experience": {
+        "minimum": {
+          "outcome": "present_supported",
+          "expected_value": 5,
+          "expected_provenance": "inferred"
+        },
+        "maximum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "salary": {
+        "minimum": {
+          "outcome": "present_supported",
+          "expected_value": 222800,
+          "expected_provenance": "parsed_description"
+        },
+        "maximum": {
+          "outcome": "present_supported",
+          "expected_value": 380000,
+          "expected_provenance": "parsed_description"
+        },
+        "currency": {
+          "outcome": "present_supported",
+          "expected_value": "USD",
+          "expected_provenance": "parsed_description"
+        },
+        "period": {
+          "outcome": "present_supported",
+          "expected_value": "annual",
+          "expected_provenance": "parsed_description"
+        }
+      },
+      "location": {
+        "city": {
+          "outcome": "ambiguous",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "state": {
+          "outcome": "ambiguous",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "country": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "postal_code": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "skills": {
+        "python": {
+          "outcome": "absent"
+        },
+        "javascript": {
+          "outcome": "absent"
+        },
+        "typescript": {
+          "outcome": "absent"
+        },
+        "java": {
+          "outcome": "absent"
+        },
+        "cpp": {
+          "outcome": "absent"
+        },
+        "csharp": {
+          "outcome": "absent"
+        },
+        "c": {
+          "outcome": "absent"
+        },
+        "golang": {
+          "outcome": "absent"
+        },
+        "rlang": {
+          "outcome": "absent"
+        },
+        "postgresql": {
+          "outcome": "absent"
+        },
+        "mysql": {
+          "outcome": "absent"
+        },
+        "mongodb": {
+          "outcome": "absent"
+        },
+        "kubernetes": {
+          "outcome": "absent"
+        },
+        "docker": {
+          "outcome": "absent"
+        },
+        "node.js": {
+          "outcome": "absent"
+        }
+      }
+    },
+    "anthropic:4461444008": {
+      "remote_type": {
+        "outcome": "present_supported",
+        "expected_value": "hybrid",
+        "expected_provenance": "inferred"
+      },
+      "employment_type": {
+        "outcome": "absent",
+        "expected_value": null,
+        "expected_provenance": "unavailable"
+      },
+      "seniority": {
+        "outcome": "absent",
+        "expected_value": null,
+        "expected_provenance": "unavailable"
+      },
+      "experience": {
+        "minimum": {
+          "outcome": "present_supported",
+          "expected_value": 5,
+          "expected_provenance": "inferred"
+        },
+        "maximum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "salary": {
+        "minimum": {
+          "outcome": "present_supported",
+          "expected_value": 240000,
+          "expected_provenance": "parsed_description"
+        },
+        "maximum": {
+          "outcome": "present_supported",
+          "expected_value": 315000,
+          "expected_provenance": "parsed_description"
+        },
+        "currency": {
+          "outcome": "present_supported",
+          "expected_value": "USD",
+          "expected_provenance": "parsed_description"
+        },
+        "period": {
+          "outcome": "present_supported",
+          "expected_value": "annual",
+          "expected_provenance": "parsed_description"
+        }
+      },
+      "location": {
+        "city": {
+          "outcome": "ambiguous",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "state": {
+          "outcome": "ambiguous",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "country": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "postal_code": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "skills": {
+        "python": {
+          "outcome": "present_supported"
+        },
+        "javascript": {
+          "outcome": "absent"
+        },
+        "typescript": {
+          "outcome": "absent"
+        },
+        "java": {
+          "outcome": "absent"
+        },
+        "cpp": {
+          "outcome": "absent"
+        },
+        "csharp": {
+          "outcome": "absent"
+        },
+        "c": {
+          "outcome": "absent"
+        },
+        "golang": {
+          "outcome": "absent"
+        },
+        "rlang": {
+          "outcome": "absent"
+        },
+        "postgresql": {
+          "outcome": "absent"
+        },
+        "mysql": {
+          "outcome": "absent"
+        },
+        "mongodb": {
+          "outcome": "absent"
+        },
+        "kubernetes": {
+          "outcome": "absent"
+        },
+        "docker": {
+          "outcome": "absent"
+        },
+        "node.js": {
+          "outcome": "absent"
+        }
+      }
+    },
+    "anthropic:4461450008": {
+      "remote_type": {
+        "outcome": "present_supported",
+        "expected_value": "hybrid",
+        "expected_provenance": "inferred"
+      },
+      "employment_type": {
+        "outcome": "absent",
+        "expected_value": null,
+        "expected_provenance": "unavailable"
+      },
+      "seniority": {
+        "outcome": "absent",
+        "expected_value": null,
+        "expected_provenance": "unavailable"
+      },
+      "experience": {
+        "minimum": {
+          "outcome": "present_supported",
+          "expected_value": 4,
+          "expected_provenance": "inferred"
+        },
+        "maximum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "salary": {
+        "minimum": {
+          "outcome": "present_supported",
+          "expected_value": 222800,
+          "expected_provenance": "parsed_description"
+        },
+        "maximum": {
+          "outcome": "present_supported",
+          "expected_value": 290000,
+          "expected_provenance": "parsed_description"
+        },
+        "currency": {
+          "outcome": "present_supported",
+          "expected_value": "USD",
+          "expected_provenance": "parsed_description"
+        },
+        "period": {
+          "outcome": "present_supported",
+          "expected_value": "annual",
+          "expected_provenance": "parsed_description"
+        }
+      },
+      "location": {
+        "city": {
+          "outcome": "ambiguous",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "state": {
+          "outcome": "ambiguous",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "country": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "postal_code": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "skills": {
+        "python": {
+          "outcome": "absent"
+        },
+        "javascript": {
+          "outcome": "absent"
+        },
+        "typescript": {
+          "outcome": "absent"
+        },
+        "java": {
+          "outcome": "absent"
+        },
+        "cpp": {
+          "outcome": "absent"
+        },
+        "csharp": {
+          "outcome": "absent"
+        },
+        "c": {
+          "outcome": "absent"
+        },
+        "golang": {
+          "outcome": "absent"
+        },
+        "rlang": {
+          "outcome": "absent"
+        },
+        "postgresql": {
+          "outcome": "absent"
+        },
+        "mysql": {
+          "outcome": "absent"
+        },
+        "mongodb": {
+          "outcome": "absent"
+        },
+        "kubernetes": {
+          "outcome": "absent"
+        },
+        "docker": {
+          "outcome": "absent"
+        },
+        "node.js": {
+          "outcome": "absent"
+        }
+      }
+    },
+    "anthropic:4502508008": {
+      "remote_type": {
+        "outcome": "present_supported",
+        "expected_value": "hybrid",
+        "expected_provenance": "inferred"
+      },
+      "employment_type": {
+        "outcome": "absent",
+        "expected_value": null,
+        "expected_provenance": "unavailable"
+      },
+      "seniority": {
+        "outcome": "ambiguous",
+        "expected_value": null,
+        "expected_provenance": "unavailable"
+      },
+      "experience": {
+        "minimum": {
+          "outcome": "present_supported",
+          "expected_value": 7,
+          "expected_provenance": "inferred"
+        },
+        "maximum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "salary": {
+        "minimum": {
+          "outcome": "present_supported",
+          "expected_value": 320000,
+          "expected_provenance": "parsed_description"
+        },
+        "maximum": {
+          "outcome": "present_supported",
+          "expected_value": 485000,
+          "expected_provenance": "parsed_description"
+        },
+        "currency": {
+          "outcome": "present_supported",
+          "expected_value": "USD",
+          "expected_provenance": "parsed_description"
+        },
+        "period": {
+          "outcome": "present_supported",
+          "expected_value": "annual",
+          "expected_provenance": "parsed_description"
+        }
+      },
+      "location": {
+        "city": {
+          "outcome": "ambiguous",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "state": {
+          "outcome": "ambiguous",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "country": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "postal_code": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "skills": {
+        "python": {
+          "outcome": "present_supported"
+        },
+        "javascript": {
+          "outcome": "absent"
+        },
+        "typescript": {
+          "outcome": "present_supported"
+        },
+        "java": {
+          "outcome": "absent"
+        },
+        "cpp": {
+          "outcome": "absent"
+        },
+        "csharp": {
+          "outcome": "absent"
+        },
+        "c": {
+          "outcome": "absent"
+        },
+        "golang": {
+          "outcome": "present_supported"
+        },
+        "rlang": {
+          "outcome": "absent"
+        },
+        "postgresql": {
+          "outcome": "absent"
+        },
+        "mysql": {
+          "outcome": "absent"
+        },
+        "mongodb": {
+          "outcome": "absent"
+        },
+        "kubernetes": {
+          "outcome": "absent"
+        },
+        "docker": {
+          "outcome": "absent"
+        },
+        "node.js": {
+          "outcome": "absent"
+        }
+      }
+    },
+    "anthropic:4572744008": {
+      "remote_type": {
+        "outcome": "present_supported",
+        "expected_value": "hybrid",
+        "expected_provenance": "inferred"
+      },
+      "employment_type": {
+        "outcome": "absent",
+        "expected_value": null,
+        "expected_provenance": "unavailable"
+      },
+      "seniority": {
+        "outcome": "present_supported",
+        "expected_value": "staff",
+        "expected_provenance": "inferred"
+      },
+      "experience": {
+        "minimum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "maximum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "salary": {
+        "minimum": {
+          "outcome": "present_supported",
+          "expected_value": 320000,
+          "expected_provenance": "parsed_description"
+        },
+        "maximum": {
+          "outcome": "present_supported",
+          "expected_value": 405000,
+          "expected_provenance": "parsed_description"
+        },
+        "currency": {
+          "outcome": "present_supported",
+          "expected_value": "USD",
+          "expected_provenance": "parsed_description"
+        },
+        "period": {
+          "outcome": "present_supported",
+          "expected_value": "annual",
+          "expected_provenance": "parsed_description"
+        }
+      },
+      "location": {
+        "city": {
+          "outcome": "ambiguous",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "state": {
+          "outcome": "ambiguous",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "country": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "postal_code": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "skills": {
+        "python": {
+          "outcome": "absent"
+        },
+        "javascript": {
+          "outcome": "absent"
+        },
+        "typescript": {
+          "outcome": "absent"
+        },
+        "java": {
+          "outcome": "absent"
+        },
+        "cpp": {
+          "outcome": "absent"
+        },
+        "csharp": {
+          "outcome": "absent"
+        },
+        "c": {
+          "outcome": "absent"
+        },
+        "golang": {
+          "outcome": "absent"
+        },
+        "rlang": {
+          "outcome": "absent"
+        },
+        "postgresql": {
+          "outcome": "absent"
+        },
+        "mysql": {
+          "outcome": "absent"
+        },
+        "mongodb": {
+          "outcome": "absent"
+        },
+        "kubernetes": {
+          "outcome": "absent"
+        },
+        "docker": {
+          "outcome": "absent"
+        },
+        "node.js": {
+          "outcome": "absent"
+        }
+      }
+    },
+    "anthropic:4593216008": {
+      "remote_type": {
+        "outcome": "present_supported",
+        "expected_value": "hybrid",
+        "expected_provenance": "inferred"
+      },
+      "employment_type": {
+        "outcome": "absent",
+        "expected_value": null,
+        "expected_provenance": "unavailable"
+      },
+      "seniority": {
+        "outcome": "present_supported",
+        "expected_value": "staff",
+        "expected_provenance": "inferred"
+      },
+      "experience": {
+        "minimum": {
+          "outcome": "present_supported",
+          "expected_value": 8,
+          "expected_provenance": "inferred"
+        },
+        "maximum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "salary": {
+        "minimum": {
+          "outcome": "present_supported",
+          "expected_value": 350000,
+          "expected_provenance": "parsed_description"
+        },
+        "maximum": {
+          "outcome": "present_supported",
+          "expected_value": 850000,
+          "expected_provenance": "parsed_description"
+        },
+        "currency": {
+          "outcome": "present_supported",
+          "expected_value": "USD",
+          "expected_provenance": "parsed_description"
+        },
+        "period": {
+          "outcome": "present_supported",
+          "expected_value": "annual",
+          "expected_provenance": "parsed_description"
+        }
+      },
+      "location": {
+        "city": {
+          "outcome": "present_supported",
+          "expected_value": "San Francisco",
+          "expected_provenance": "parsed_description"
+        },
+        "state": {
+          "outcome": "present_supported",
+          "expected_value": "CA",
+          "expected_provenance": "parsed_description"
+        },
+        "country": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "postal_code": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "skills": {
+        "python": {
+          "outcome": "absent"
+        },
+        "javascript": {
+          "outcome": "absent"
+        },
+        "typescript": {
+          "outcome": "absent"
+        },
+        "java": {
+          "outcome": "absent"
+        },
+        "cpp": {
+          "outcome": "absent"
+        },
+        "csharp": {
+          "outcome": "absent"
+        },
+        "c": {
+          "outcome": "absent"
+        },
+        "golang": {
+          "outcome": "absent"
+        },
+        "rlang": {
+          "outcome": "absent"
+        },
+        "postgresql": {
+          "outcome": "absent"
+        },
+        "mysql": {
+          "outcome": "absent"
+        },
+        "mongodb": {
+          "outcome": "absent"
+        },
+        "kubernetes": {
+          "outcome": "present_supported"
+        },
+        "docker": {
+          "outcome": "present_supported"
+        },
+        "node.js": {
+          "outcome": "absent"
+        }
+      }
+    },
+    "anthropic:4595463008": {
+      "remote_type": {
+        "outcome": "present_supported",
+        "expected_value": "hybrid",
+        "expected_provenance": "inferred"
+      },
+      "employment_type": {
+        "outcome": "absent",
+        "expected_value": null,
+        "expected_provenance": "unavailable"
+      },
+      "seniority": {
+        "outcome": "absent",
+        "expected_value": null,
+        "expected_provenance": "unavailable"
+      },
+      "experience": {
+        "minimum": {
+          "outcome": "present_supported",
+          "expected_value": 7,
+          "expected_provenance": "inferred"
+        },
+        "maximum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "salary": {
+        "minimum": {
+          "outcome": "present_supported",
+          "expected_value": 320000,
+          "expected_provenance": "parsed_description"
+        },
+        "maximum": {
+          "outcome": "present_supported",
+          "expected_value": 405000,
+          "expected_provenance": "parsed_description"
+        },
+        "currency": {
+          "outcome": "present_supported",
+          "expected_value": "USD",
+          "expected_provenance": "parsed_description"
+        },
+        "period": {
+          "outcome": "present_supported",
+          "expected_value": "annual",
+          "expected_provenance": "parsed_description"
+        }
+      },
+      "location": {
+        "city": {
+          "outcome": "ambiguous",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "state": {
+          "outcome": "ambiguous",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "country": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "postal_code": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "skills": {
+        "python": {
+          "outcome": "present_supported"
+        },
+        "javascript": {
+          "outcome": "absent"
+        },
+        "typescript": {
+          "outcome": "absent"
+        },
+        "java": {
+          "outcome": "absent"
+        },
+        "cpp": {
+          "outcome": "absent"
+        },
+        "csharp": {
+          "outcome": "absent"
+        },
+        "c": {
+          "outcome": "absent"
+        },
+        "golang": {
+          "outcome": "absent"
+        },
+        "rlang": {
+          "outcome": "absent"
+        },
+        "postgresql": {
+          "outcome": "absent"
+        },
+        "mysql": {
+          "outcome": "absent"
+        },
+        "mongodb": {
+          "outcome": "absent"
+        },
+        "kubernetes": {
+          "outcome": "absent"
+        },
+        "docker": {
+          "outcome": "absent"
+        },
+        "node.js": {
+          "outcome": "absent"
+        }
+      }
+    },
+    "anthropic:4610158008": {
+      "remote_type": {
+        "outcome": "present_supported",
+        "expected_value": "hybrid",
+        "expected_provenance": "inferred"
+      },
+      "employment_type": {
+        "outcome": "absent",
+        "expected_value": null,
+        "expected_provenance": "unavailable"
+      },
+      "seniority": {
+        "outcome": "absent",
+        "expected_value": null,
+        "expected_provenance": "unavailable"
+      },
+      "experience": {
+        "minimum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "maximum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "salary": {
+        "minimum": {
+          "outcome": "present_supported",
+          "expected_value": 260000,
+          "expected_provenance": "parsed_description"
+        },
+        "maximum": {
+          "outcome": "present_supported",
+          "expected_value": 370000,
+          "expected_provenance": "parsed_description"
+        },
+        "currency": {
+          "outcome": "present_supported",
+          "expected_value": "GBP",
+          "expected_provenance": "parsed_description"
+        },
+        "period": {
+          "outcome": "present_supported",
+          "expected_value": "annual",
+          "expected_provenance": "parsed_description"
+        }
+      },
+      "location": {
+        "city": {
+          "outcome": "present_supported",
+          "expected_value": "London",
+          "expected_provenance": "parsed_description"
+        },
+        "state": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "country": {
+          "outcome": "present_supported",
+          "expected_value": "United Kingdom",
+          "expected_provenance": "inferred"
+        },
+        "postal_code": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "skills": {
+        "python": {
+          "outcome": "present_supported"
+        },
+        "javascript": {
+          "outcome": "absent"
+        },
+        "typescript": {
+          "outcome": "absent"
+        },
+        "java": {
+          "outcome": "absent"
+        },
+        "cpp": {
+          "outcome": "absent"
+        },
+        "csharp": {
+          "outcome": "absent"
+        },
+        "c": {
+          "outcome": "absent"
+        },
+        "golang": {
+          "outcome": "absent"
+        },
+        "rlang": {
+          "outcome": "absent"
+        },
+        "postgresql": {
+          "outcome": "absent"
+        },
+        "mysql": {
+          "outcome": "absent"
+        },
+        "mongodb": {
+          "outcome": "absent"
+        },
+        "kubernetes": {
+          "outcome": "present_supported"
+        },
+        "docker": {
+          "outcome": "absent"
+        },
+        "node.js": {
+          "outcome": "absent"
+        }
+      }
+    },
+    "discord:8214127002": {
+      "remote_type": {
+        "outcome": "ambiguous",
+        "expected_value": null,
+        "expected_provenance": "unavailable"
+      },
+      "employment_type": {
+        "outcome": "present_supported",
+        "expected_value": "full_time",
+        "expected_provenance": "inferred"
+      },
+      "seniority": {
+        "outcome": "present_supported",
+        "expected_value": "staff",
+        "expected_provenance": "inferred"
+      },
+      "experience": {
+        "minimum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "maximum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "salary": {
+        "minimum": {
+          "outcome": "present_supported",
+          "expected_value": 279000,
+          "expected_provenance": "parsed_description"
+        },
+        "maximum": {
+          "outcome": "present_supported",
+          "expected_value": 341000,
+          "expected_provenance": "parsed_description"
+        },
+        "currency": {
+          "outcome": "present_supported",
+          "expected_value": "USD",
+          "expected_provenance": "inferred"
+        },
+        "period": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "location": {
+        "city": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "state": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "country": {
+          "outcome": "present_supported",
+          "expected_value": "United States",
+          "expected_provenance": "inferred"
+        },
+        "postal_code": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "skills": {
+        "python": {
+          "outcome": "present_supported"
+        },
+        "javascript": {
+          "outcome": "present_supported"
+        },
+        "typescript": {
+          "outcome": "present_supported"
+        },
+        "java": {
+          "outcome": "absent"
+        },
+        "cpp": {
+          "outcome": "absent"
+        },
+        "csharp": {
+          "outcome": "absent"
+        },
+        "c": {
+          "outcome": "absent"
+        },
+        "golang": {
+          "outcome": "absent"
+        },
+        "rlang": {
+          "outcome": "absent"
+        },
+        "postgresql": {
+          "outcome": "absent"
+        },
+        "mysql": {
+          "outcome": "absent"
+        },
+        "mongodb": {
+          "outcome": "absent"
+        },
+        "kubernetes": {
+          "outcome": "absent"
+        },
+        "docker": {
+          "outcome": "absent"
+        },
+        "node.js": {
+          "outcome": "absent"
+        }
+      }
+    },
+    "discord:8369347002": {
+      "remote_type": {
+        "outcome": "absent",
+        "expected_value": null,
+        "expected_provenance": "unavailable"
+      },
+      "employment_type": {
+        "outcome": "present_supported",
+        "expected_value": "full_time",
+        "expected_provenance": "inferred"
+      },
+      "seniority": {
+        "outcome": "present_supported",
+        "expected_value": "senior",
+        "expected_provenance": "inferred"
+      },
+      "experience": {
+        "minimum": {
+          "outcome": "present_supported",
+          "expected_value": 4,
+          "expected_provenance": "inferred"
+        },
+        "maximum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "salary": {
+        "minimum": {
+          "outcome": "present_supported",
+          "expected_value": 220000,
+          "expected_provenance": "parsed_description"
+        },
+        "maximum": {
+          "outcome": "present_supported",
+          "expected_value": 275000,
+          "expected_provenance": "parsed_description"
+        },
+        "currency": {
+          "outcome": "present_supported",
+          "expected_value": "USD",
+          "expected_provenance": "inferred"
+        },
+        "period": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "location": {
+        "city": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "state": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "country": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "postal_code": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "skills": {
+        "python": {
+          "outcome": "present_supported"
+        },
+        "javascript": {
+          "outcome": "absent"
+        },
+        "typescript": {
+          "outcome": "absent"
+        },
+        "java": {
+          "outcome": "absent"
+        },
+        "cpp": {
+          "outcome": "absent"
+        },
+        "csharp": {
+          "outcome": "absent"
+        },
+        "c": {
+          "outcome": "absent"
+        },
+        "golang": {
+          "outcome": "absent"
+        },
+        "rlang": {
+          "outcome": "absent"
+        },
+        "postgresql": {
+          "outcome": "absent"
+        },
+        "mysql": {
+          "outcome": "absent"
+        },
+        "mongodb": {
+          "outcome": "absent"
+        },
+        "kubernetes": {
+          "outcome": "absent"
+        },
+        "docker": {
+          "outcome": "absent"
+        },
+        "node.js": {
+          "outcome": "absent"
+        }
+      }
+    },
+    "discord:8460791002": {
+      "remote_type": {
+        "outcome": "present_supported",
+        "expected_value": "remote",
+        "expected_provenance": "inferred"
+      },
+      "employment_type": {
+        "outcome": "present_supported",
+        "expected_value": "full_time",
+        "expected_provenance": "inferred"
+      },
+      "seniority": {
+        "outcome": "present_supported",
+        "expected_value": "senior",
+        "expected_provenance": "inferred"
+      },
+      "experience": {
+        "minimum": {
+          "outcome": "present_supported",
+          "expected_value": 5,
+          "expected_provenance": "inferred"
+        },
+        "maximum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "salary": {
+        "minimum": {
+          "outcome": "present_supported",
+          "expected_value": 196000,
+          "expected_provenance": "parsed_description"
+        },
+        "maximum": {
+          "outcome": "present_supported",
+          "expected_value": 220000,
+          "expected_provenance": "parsed_description"
+        },
+        "currency": {
+          "outcome": "present_supported",
+          "expected_value": "USD",
+          "expected_provenance": "inferred"
+        },
+        "period": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "location": {
+        "city": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "state": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "country": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "postal_code": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "skills": {
+        "python": {
+          "outcome": "present_supported"
+        },
+        "javascript": {
+          "outcome": "absent"
+        },
+        "typescript": {
+          "outcome": "present_supported"
+        },
+        "java": {
+          "outcome": "absent"
+        },
+        "cpp": {
+          "outcome": "absent"
+        },
+        "csharp": {
+          "outcome": "absent"
+        },
+        "c": {
+          "outcome": "absent"
+        },
+        "golang": {
+          "outcome": "absent"
+        },
+        "rlang": {
+          "outcome": "absent"
+        },
+        "postgresql": {
+          "outcome": "absent"
+        },
+        "mysql": {
+          "outcome": "absent"
+        },
+        "mongodb": {
+          "outcome": "absent"
+        },
+        "kubernetes": {
+          "outcome": "absent"
+        },
+        "docker": {
+          "outcome": "absent"
+        },
+        "node.js": {
+          "outcome": "absent"
+        }
+      }
+    },
+    "discord:8464570002": {
+      "remote_type": {
+        "outcome": "absent",
+        "expected_value": null,
+        "expected_provenance": "unavailable"
+      },
+      "employment_type": {
+        "outcome": "present_supported",
+        "expected_value": "full_time",
+        "expected_provenance": "inferred"
+      },
+      "seniority": {
+        "outcome": "present_supported",
+        "expected_value": "staff",
+        "expected_provenance": "inferred"
+      },
+      "experience": {
+        "minimum": {
+          "outcome": "present_supported",
+          "expected_value": 8,
+          "expected_provenance": "inferred"
+        },
+        "maximum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "salary": {
+        "minimum": {
+          "outcome": "present_supported",
+          "expected_value": 248000,
+          "expected_provenance": "inferred"
+        },
+        "maximum": {
+          "outcome": "present_supported",
+          "expected_value": 279000,
+          "expected_provenance": "inferred"
+        },
+        "currency": {
+          "outcome": "present_supported",
+          "expected_value": "USD",
+          "expected_provenance": "inferred"
+        },
+        "period": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "location": {
+        "city": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "state": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "country": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "postal_code": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "skills": {
+        "python": {
+          "outcome": "present_supported"
+        },
+        "javascript": {
+          "outcome": "absent"
+        },
+        "typescript": {
+          "outcome": "present_supported"
+        },
+        "java": {
+          "outcome": "absent"
+        },
+        "cpp": {
+          "outcome": "absent"
+        },
+        "csharp": {
+          "outcome": "absent"
+        },
+        "c": {
+          "outcome": "absent"
+        },
+        "golang": {
+          "outcome": "absent"
+        },
+        "rlang": {
+          "outcome": "absent"
+        },
+        "postgresql": {
+          "outcome": "absent"
+        },
+        "mysql": {
+          "outcome": "absent"
+        },
+        "mongodb": {
+          "outcome": "absent"
+        },
+        "kubernetes": {
+          "outcome": "absent"
+        },
+        "docker": {
+          "outcome": "absent"
+        },
+        "node.js": {
+          "outcome": "absent"
+        }
+      }
+    },
+    "discord:8498984002": {
+      "remote_type": {
+        "outcome": "absent",
+        "expected_value": null,
+        "expected_provenance": "unavailable"
+      },
+      "employment_type": {
+        "outcome": "present_supported",
+        "expected_value": "full_time",
+        "expected_provenance": "inferred"
+      },
+      "seniority": {
+        "outcome": "present_supported",
+        "expected_value": "staff",
+        "expected_provenance": "inferred"
+      },
+      "experience": {
+        "minimum": {
+          "outcome": "present_supported",
+          "expected_value": 7,
+          "expected_provenance": "inferred"
+        },
+        "maximum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "salary": {
+        "minimum": {
+          "outcome": "present_supported",
+          "expected_value": 279000,
+          "expected_provenance": "parsed_description"
+        },
+        "maximum": {
+          "outcome": "present_supported",
+          "expected_value": 341000,
+          "expected_provenance": "parsed_description"
+        },
+        "currency": {
+          "outcome": "present_supported",
+          "expected_value": "USD",
+          "expected_provenance": "inferred"
+        },
+        "period": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "location": {
+        "city": {
+          "outcome": "present_supported",
+          "expected_value": "San Francisco",
+          "expected_provenance": "parsed_description"
+        },
+        "state": {
+          "outcome": "present_supported",
+          "expected_value": "CA",
+          "expected_provenance": "parsed_description"
+        },
+        "country": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "postal_code": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "skills": {
+        "python": {
+          "outcome": "absent"
+        },
+        "javascript": {
+          "outcome": "absent"
+        },
+        "typescript": {
+          "outcome": "absent"
+        },
+        "java": {
+          "outcome": "absent"
+        },
+        "cpp": {
+          "outcome": "absent"
+        },
+        "csharp": {
+          "outcome": "absent"
+        },
+        "c": {
+          "outcome": "absent"
+        },
+        "golang": {
+          "outcome": "absent"
+        },
+        "rlang": {
+          "outcome": "absent"
+        },
+        "postgresql": {
+          "outcome": "absent"
+        },
+        "mysql": {
+          "outcome": "absent"
+        },
+        "mongodb": {
+          "outcome": "absent"
+        },
+        "kubernetes": {
+          "outcome": "absent"
+        },
+        "docker": {
+          "outcome": "absent"
+        },
+        "node.js": {
+          "outcome": "absent"
+        }
+      }
+    },
+    "discord:8537955002": {
+      "remote_type": {
+        "outcome": "present_supported",
+        "expected_value": "remote",
+        "expected_provenance": "parsed_description"
+      },
+      "employment_type": {
+        "outcome": "present_supported",
+        "expected_value": "full_time",
+        "expected_provenance": "inferred"
+      },
+      "seniority": {
+        "outcome": "present_unsupported_form",
+        "expected_value": null,
+        "expected_provenance": "unavailable"
+      },
+      "experience": {
+        "minimum": {
+          "outcome": "ambiguous",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "maximum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "salary": {
+        "minimum": {
+          "outcome": "present_supported",
+          "expected_value": 248000,
+          "expected_provenance": "parsed_description"
+        },
+        "maximum": {
+          "outcome": "present_supported",
+          "expected_value": 341000,
+          "expected_provenance": "parsed_description"
+        },
+        "currency": {
+          "outcome": "present_supported",
+          "expected_value": "USD",
+          "expected_provenance": "inferred"
+        },
+        "period": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "location": {
+        "city": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "state": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "country": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "postal_code": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "skills": {
+        "python": {
+          "outcome": "present_supported"
+        },
+        "javascript": {
+          "outcome": "absent"
+        },
+        "typescript": {
+          "outcome": "absent"
+        },
+        "java": {
+          "outcome": "absent"
+        },
+        "cpp": {
+          "outcome": "absent"
+        },
+        "csharp": {
+          "outcome": "absent"
+        },
+        "c": {
+          "outcome": "absent"
+        },
+        "golang": {
+          "outcome": "absent"
+        },
+        "rlang": {
+          "outcome": "absent"
+        },
+        "postgresql": {
+          "outcome": "absent"
+        },
+        "mysql": {
+          "outcome": "absent"
+        },
+        "mongodb": {
+          "outcome": "absent"
+        },
+        "kubernetes": {
+          "outcome": "present_supported"
+        },
+        "docker": {
+          "outcome": "absent"
+        },
+        "node.js": {
+          "outcome": "absent"
+        }
+      }
+    },
+    "discord:8545675002": {
+      "remote_type": {
+        "outcome": "ambiguous",
+        "expected_value": null,
+        "expected_provenance": "unavailable"
+      },
+      "employment_type": {
+        "outcome": "present_supported",
+        "expected_value": "full_time",
+        "expected_provenance": "inferred"
+      },
+      "seniority": {
+        "outcome": "present_supported",
+        "expected_value": "senior",
+        "expected_provenance": "inferred"
+      },
+      "experience": {
+        "minimum": {
+          "outcome": "present_supported",
+          "expected_value": 5,
+          "expected_provenance": "inferred"
+        },
+        "maximum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "salary": {
+        "minimum": {
+          "outcome": "present_supported",
+          "expected_value": 220500,
+          "expected_provenance": "parsed_description"
+        },
+        "maximum": {
+          "outcome": "present_supported",
+          "expected_value": 269500,
+          "expected_provenance": "parsed_description"
+        },
+        "currency": {
+          "outcome": "present_supported",
+          "expected_value": "USD",
+          "expected_provenance": "inferred"
+        },
+        "period": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "location": {
+        "city": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "state": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "country": {
+          "outcome": "present_supported",
+          "expected_value": "United States",
+          "expected_provenance": "inferred"
+        },
+        "postal_code": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "skills": {
+        "python": {
+          "outcome": "present_supported"
+        },
+        "javascript": {
+          "outcome": "absent"
+        },
+        "typescript": {
+          "outcome": "present_supported"
+        },
+        "java": {
+          "outcome": "absent"
+        },
+        "cpp": {
+          "outcome": "absent"
+        },
+        "csharp": {
+          "outcome": "absent"
+        },
+        "c": {
+          "outcome": "absent"
+        },
+        "golang": {
+          "outcome": "absent"
+        },
+        "rlang": {
+          "outcome": "absent"
+        },
+        "postgresql": {
+          "outcome": "absent"
+        },
+        "mysql": {
+          "outcome": "absent"
+        },
+        "mongodb": {
+          "outcome": "absent"
+        },
+        "kubernetes": {
+          "outcome": "absent"
+        },
+        "docker": {
+          "outcome": "absent"
+        },
+        "node.js": {
+          "outcome": "absent"
+        }
+      }
+    },
+    "discord:8571766002": {
+      "remote_type": {
+        "outcome": "absent",
+        "expected_value": null,
+        "expected_provenance": "unavailable"
+      },
+      "employment_type": {
+        "outcome": "present_supported",
+        "expected_value": "full_time",
+        "expected_provenance": "inferred"
+      },
+      "seniority": {
+        "outcome": "present_supported",
+        "expected_value": "director",
+        "expected_provenance": "inferred"
+      },
+      "experience": {
+        "minimum": {
+          "outcome": "ambiguous",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "maximum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "salary": {
+        "minimum": {
+          "outcome": "present_supported",
+          "expected_value": 450000,
+          "expected_provenance": "parsed_description"
+        },
+        "maximum": {
+          "outcome": "present_supported",
+          "expected_value": 550000,
+          "expected_provenance": "parsed_description"
+        },
+        "currency": {
+          "outcome": "present_supported",
+          "expected_value": "USD",
+          "expected_provenance": "inferred"
+        },
+        "period": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "location": {
+        "city": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "state": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "country": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "postal_code": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "skills": {
+        "python": {
+          "outcome": "absent"
+        },
+        "javascript": {
+          "outcome": "absent"
+        },
+        "typescript": {
+          "outcome": "absent"
+        },
+        "java": {
+          "outcome": "absent"
+        },
+        "cpp": {
+          "outcome": "absent"
+        },
+        "csharp": {
+          "outcome": "absent"
+        },
+        "c": {
+          "outcome": "absent"
+        },
+        "golang": {
+          "outcome": "absent"
+        },
+        "rlang": {
+          "outcome": "absent"
+        },
+        "postgresql": {
+          "outcome": "absent"
+        },
+        "mysql": {
+          "outcome": "absent"
+        },
+        "mongodb": {
+          "outcome": "absent"
+        },
+        "kubernetes": {
+          "outcome": "absent"
+        },
+        "docker": {
+          "outcome": "absent"
+        },
+        "node.js": {
+          "outcome": "absent"
+        }
+      }
+    },
+    "discord:8575166002": {
+      "remote_type": {
+        "outcome": "absent",
+        "expected_value": null,
+        "expected_provenance": "unavailable"
+      },
+      "employment_type": {
+        "outcome": "present_supported",
+        "expected_value": "full_time",
+        "expected_provenance": "inferred"
+      },
+      "seniority": {
+        "outcome": "absent",
+        "expected_value": null,
+        "expected_provenance": "unavailable"
+      },
+      "experience": {
+        "minimum": {
+          "outcome": "present_supported",
+          "expected_value": 2,
+          "expected_provenance": "inferred"
+        },
+        "maximum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "salary": {
+        "minimum": {
+          "outcome": "present_supported",
+          "expected_value": 116000,
+          "expected_provenance": "parsed_description"
+        },
+        "maximum": {
+          "outcome": "present_supported",
+          "expected_value": 130500,
+          "expected_provenance": "parsed_description"
+        },
+        "currency": {
+          "outcome": "present_supported",
+          "expected_value": "USD",
+          "expected_provenance": "inferred"
+        },
+        "period": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "location": {
+        "city": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "state": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "country": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "postal_code": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "skills": {
+        "python": {
+          "outcome": "absent"
+        },
+        "javascript": {
+          "outcome": "absent"
+        },
+        "typescript": {
+          "outcome": "absent"
+        },
+        "java": {
+          "outcome": "absent"
+        },
+        "cpp": {
+          "outcome": "absent"
+        },
+        "csharp": {
+          "outcome": "absent"
+        },
+        "c": {
+          "outcome": "absent"
+        },
+        "golang": {
+          "outcome": "absent"
+        },
+        "rlang": {
+          "outcome": "absent"
+        },
+        "postgresql": {
+          "outcome": "absent"
+        },
+        "mysql": {
+          "outcome": "absent"
+        },
+        "mongodb": {
+          "outcome": "absent"
+        },
+        "kubernetes": {
+          "outcome": "absent"
+        },
+        "docker": {
+          "outcome": "absent"
+        },
+        "node.js": {
+          "outcome": "absent"
+        }
+      }
+    },
+    "discord:8581126002": {
+      "remote_type": {
+        "outcome": "absent",
+        "expected_value": null,
+        "expected_provenance": "unavailable"
+      },
+      "employment_type": {
+        "outcome": "present_supported",
+        "expected_value": "full_time",
+        "expected_provenance": "inferred"
+      },
+      "seniority": {
+        "outcome": "present_supported",
+        "expected_value": "senior",
+        "expected_provenance": "inferred"
+      },
+      "experience": {
+        "minimum": {
+          "outcome": "present_supported",
+          "expected_value": 5,
+          "expected_provenance": "inferred"
+        },
+        "maximum": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "salary": {
+        "minimum": {
+          "outcome": "present_supported",
+          "expected_value": 196000,
+          "expected_provenance": "parsed_description"
+        },
+        "maximum": {
+          "outcome": "present_supported",
+          "expected_value": 220500,
+          "expected_provenance": "parsed_description"
+        },
+        "currency": {
+          "outcome": "present_supported",
+          "expected_value": "USD",
+          "expected_provenance": "inferred"
+        },
+        "period": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "location": {
+        "city": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "state": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "country": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        },
+        "postal_code": {
+          "outcome": "absent",
+          "expected_value": null,
+          "expected_provenance": "unavailable"
+        }
+      },
+      "skills": {
+        "python": {
+          "outcome": "absent"
+        },
+        "javascript": {
+          "outcome": "absent"
+        },
+        "typescript": {
+          "outcome": "absent"
+        },
+        "java": {
+          "outcome": "absent"
+        },
+        "cpp": {
+          "outcome": "absent"
+        },
+        "csharp": {
+          "outcome": "absent"
+        },
+        "c": {
+          "outcome": "absent"
+        },
+        "golang": {
+          "outcome": "absent"
+        },
+        "rlang": {
+          "outcome": "absent"
+        },
+        "postgresql": {
+          "outcome": "absent"
+        },
+        "mysql": {
+          "outcome": "absent"
+        },
+        "mongodb": {
+          "outcome": "absent"
+        },
+        "kubernetes": {
+          "outcome": "absent"
+        },
+        "docker": {
+          "outcome": "absent"
+        },
+        "node.js": {
+          "outcome": "absent"
+        }
+      }
+    }
+  }
+}

@@ -507,12 +507,29 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   `backend/scripts/fetch_greenhouse_evaluation_postings.py` performs a bounded,
   two-phase, GET-only fetch against a closed, user-named set of public Greenhouse
   boards; `backend/scripts/evaluate_phase3_corpus.py` is a fail-closed loader plus a
-  minimal, threshold-free evaluator. Implemented on
-  `phase-3/realistic-evaluation-corpus` — **candidate/publication stage, not yet
-  reviewed, not merged.** The live network contact and its resulting real corpus are
-  gated on separate, explicit board-token authorization — see this slice's own
-  `docs/LLM_HANDOFF.md` entry and `docs/DECISIONS/0010-realistic-evaluation-corpus-
-  methodology.md` for exactly what is and is not yet populated.
+  minimal, threshold-free evaluator. Acquisition, sanitization, and the sanitizer
+  double-encoding correction **merged into `main` at `M=41963baf4797b1b2b6fee1f72311
+  dd6b84d7b6a3` / `Q=0dae4683645599369d41d0228b0edad1cfad73ce`.**
+  A tenth slice, the **realistic-corpus freeze and baseline evaluation** (same Class H
+  authorization, base `0dae468`), completed the frozen annotation rubric (version
+  1.0.4), two independent procedurally-blind annotation passes (Claude and Sol, each
+  covering all 30 records x 28 labels), full human adjudication of every genuine
+  disagreement (95) and every required agreement audit (220), the deterministic
+  corpus freeze (`scripts/freeze_phase3_realistic_corpus.py build` — 30 records, 840
+  labels, employer-disjoint 20 dev / 10 holdout split), and a first baseline
+  evaluation report. Durable artifacts: `docs/evaluation/phase3-realistic-pass-
+  claude.json`, `docs/evaluation/phase3-realistic-pass-sol.json`,
+  `docs/evaluation/phase3-realistic-adjudication-audit.json`,
+  `backend/tests/fixtures/evaluation/phase3_realistic_corpus.json`, and
+  `docs/evaluation/phase3-realistic-corpus-baseline-report.md`. Implemented on
+  `phase-3/realistic-corpus-freeze-evaluation` — **candidate/publication stage, not
+  yet reviewed, not merged.** Baseline findings (a `salary.*` wiring gap, several
+  supported-field abstentions, a `skills.golang` recall gap, two `remote_type`
+  ambiguous false positives) are disclosed in the baseline report as a backlog for a
+  separately authorized correction slice — no parser was changed to make this corpus
+  pass. See this slice's own `docs/LLM_HANDOFF.md` entry and
+  `docs/DECISIONS/0010-realistic-evaluation-corpus-methodology.md` for exactly what
+  is and is not yet populated.
 - **Phase 4: two bounded read-only prework proofs merged into `main`; the production
   `AtsScrapersProvider` adapter is not started and Phase 4 is not complete.** The
   Greenhouse live ATS canary (`phase-4/greenhouse-canary`, merged at `64a3534`) and the
