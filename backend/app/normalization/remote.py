@@ -76,6 +76,19 @@ description prose fail in different ways.
   rejecting `"Not remote onsite."`, `"Not remote - onsite."`, `"Not
   remote / onsite."`, and `"Not remote — onsite."` — none of those are a
   comma, so none of them rescue the bare "onsite" candidate.
+- **Office-attendance blocker** (`_OFFICE_ATTENDANCE_BLOCKER_PHRASES`, a
+  Phase 3 baseline-correction addition): the single closed phrase
+  `"required to be in the office"` is collected through this exact same
+  pipeline (masking, negation, coordination, context-exclusion all apply to
+  it identically) but carries **no** `remote`/`hybrid`/`onsite` value of its
+  own — a several-days-a-week office-attendance requirement commonly
+  describes *hybrid* work, not onsite, so it must never itself resolve to
+  `onsite`. `classify_remote_type` uses it only to downgrade an otherwise-
+  final `remote` result to `(None, unavailable)` when both a remote
+  arrangement and an unnegated office-attendance requirement appear in the
+  same posting (a location-conditional arrangement — remote for one group
+  of candidates, in-office for another); it never overrides an
+  independently resolved `hybrid` or `onsite` result.
 
 **Pipeline (`description`; `title` uses its own structural pass above):**
 
@@ -285,6 +298,27 @@ def _build_description_positive_phrases() -> dict[RemoteType, frozenset[tuple[st
 _DESCRIPTION_POSITIVE_PHRASES = _build_description_positive_phrases()
 
 # ---------------------------------------------------------------------------
+# Phase 3 baseline-correction slice: office-attendance blocker. Deliberately
+# *not* a value-bearing phrase in `_DESCRIPTION_POSITIVE_PHRASES` -- it
+# carries no canonical `remote`/`hybrid`/`onsite` value of its own, since a
+# one-to-a-few-days-a-week office-attendance requirement commonly describes
+# *hybrid* work, not onsite (an earlier draft of this correction added it to
+# the onsite catalog and was rejected on review for exactly this reason: it
+# produced a new confidently-wrong `onsite` result on a real hybrid-record
+# baseline example). Instead, it is processed through the exact same
+# candidate/negation/context-exclusion pipeline as every other description
+# phrase in `_extract_description_signal` (so `"not required to be in the
+# office"` is already correctly un-blocked via the existing negation
+# machinery, with no new negation code), but is tagged as a blocker rather
+# than a label, so it can never itself become `survivors`'s label and can
+# never resolve to `onsite`. `classify_remote_type` only ever uses it to
+# downgrade an otherwise-final `remote` result to `(None, unavailable)` --
+# it never overrides an independently, already-resolved `hybrid`/`onsite`
+# result.
+# ---------------------------------------------------------------------------
+_OFFICE_ATTENDANCE_BLOCKER_PHRASES = _compile_all({"required to be in the office"})
+
+# ---------------------------------------------------------------------------
 # Exclusion phrases — domain-collision terms masked entirely (positive or
 # negative signal), in both title and description, as defense in depth on
 # top of title's structural-segment rule and description's positive
@@ -380,7 +414,7 @@ def _is_coordinated(a_start: int, a_end: int, b_start: int, b_end: int, tokens: 
 
 def _is_comma_contrast(
     idx: int,
-    candidates: list[tuple[int, int, RemoteType, bool]],
+    candidates: list[tuple[int, int, RemoteType | None, bool]],
     negation_suppressed: set[int],
     token_spans: list[tuple[str, int, int]],
     sentence: str,
@@ -477,16 +511,29 @@ def _extract_title_signal(text: str | None) -> RemoteType | Literal["conflict"] 
     return _CONFLICT
 
 
-def _extract_description_signal(text: str | None) -> RemoteType | Literal["conflict"] | None:
+def _extract_description_signal(
+    text: str | None,
+) -> tuple[RemoteType | Literal["conflict"] | None, bool]:
     """`description`'s positive catalog is arrangement-bearing phrases only.
     Bare markers are still collected (so negation has something to attach
     to), but they count as signal only via the narrow, separator-exact
-    comma-contrast rule — never on their own."""
+    comma-contrast rule — never on their own.
+
+    Returns `(signal, blocker_present)`. The office-attendance blocker
+    (`_OFFICE_ATTENDANCE_BLOCKER_PHRASES`) is collected as a candidate with
+    label `None` alongside the real value-bearing phrases, so it goes
+    through the identical negation/context-exclusion/coordination
+    suppression pipeline as every other candidate (a negated blocker is
+    therefore already correctly un-blocked, with no separate code path) —
+    but a surviving blocker candidate is tracked in `blocker_present`, never
+    added to `survivors`, so it can never itself become the returned signal
+    or manufacture `onsite`."""
     if text is None or not text.strip():
-        return None
+        return None, False
 
     normalized = _normalize_text(text)
     survivors: set[str] = set()
+    blocker_present = False
     context_cues = _EXCLUSION_CONTEXT_CUES | _DESCRIPTION_ONLY_CONTEXT_CUES
 
     for sentence in _SENTENCE_SPLIT_RE.split(normalized):
@@ -497,11 +544,14 @@ def _extract_description_signal(text: str | None) -> RemoteType | Literal["confl
 
         masked = _mask_exclusions(tokens)
 
-        qualified: list[tuple[int, int, RemoteType]] = []
+        qualified: list[tuple[int, int, RemoteType | None]] = []
         for label, phrases in _DESCRIPTION_POSITIVE_PHRASES.items():
             for phrase in phrases:
                 for start, end in _find_spans(tokens, phrase, masked):
                     qualified.append((start, end, label))
+        for phrase in _OFFICE_ATTENDANCE_BLOCKER_PHRASES:
+            for start, end in _find_spans(tokens, phrase, masked):
+                qualified.append((start, end, None))
 
         bare: list[tuple[int, int, RemoteType]] = []
         for label, phrases in _BARE_TOKEN_PHRASES.items():
@@ -509,7 +559,7 @@ def _extract_description_signal(text: str | None) -> RemoteType | Literal["confl
                 for start, end in _find_spans(tokens, phrase, masked):
                     bare.append((start, end, label))
 
-        candidates: list[tuple[int, int, RemoteType, bool]] = [
+        candidates: list[tuple[int, int, RemoteType | None, bool]] = [
             (s, e, label, True) for s, e, label in qualified
         ] + [(s, e, label, False) for s, e, label in bare]
 
@@ -563,7 +613,7 @@ def _extract_description_signal(text: str | None) -> RemoteType | Literal["confl
         if unresolved_negation:
             continue
 
-        for idx, (_start, _end, label, is_qualified) in enumerate(candidates):
+        for idx, (_start, _end, candidate_label, is_qualified) in enumerate(candidates):
             if idx in suppressed:
                 continue
             # A bare, unqualified candidate with no comma-contrast rescue
@@ -571,13 +621,16 @@ def _extract_description_signal(text: str | None) -> RemoteType | Literal["confl
             if is_qualified or _is_comma_contrast(
                 idx, candidates, negation_suppressed, token_spans, sentence
             ):
-                survivors.add(label)
+                if candidate_label is None:
+                    blocker_present = True
+                else:
+                    survivors.add(candidate_label)
 
     if not survivors:
-        return None
+        return None, blocker_present
     if len(survivors) == 1:
-        return cast(RemoteType, next(iter(survivors)))
-    return _CONFLICT
+        return cast(RemoteType, next(iter(survivors))), blocker_present
+    return _CONFLICT, blocker_present
 
 
 def classify_remote_type(
@@ -587,20 +640,39 @@ def classify_remote_type(
     """Classifies a posting's remote/hybrid/onsite work arrangement from
     free text alone. Pure function — no I/O, no persistence, no
     `parser_version`. See the module docstring for the full algorithm and
-    the field-specific positive-evidence contract."""
-    title_signal = _extract_title_signal(title)
-    description_signal = _extract_description_signal(description)
+    the field-specific positive-evidence contract.
 
-    if title_signal == _CONFLICT or description_signal == _CONFLICT:
-        return NormalizationResult(None, Provenance.UNAVAILABLE)
-    if title_signal is None and description_signal is None:
-        return NormalizationResult(None, Provenance.UNAVAILABLE)
-    if title_signal is not None and description_signal is None:
-        return NormalizationResult(cast(RemoteType, title_signal), Provenance.INFERRED)
-    if title_signal is None and description_signal is not None:
-        return NormalizationResult(
+    **Office-attendance blocker** (Phase 3 baseline-correction addition): if
+    `description` contains an unnegated office-attendance requirement (see
+    `_OFFICE_ATTENDANCE_BLOCKER_PHRASES`) and the result computed below would
+    otherwise be `remote`, the final result is downgraded to
+    `(None, unavailable)` instead — a location-conditional posting that
+    promises remote work for one group of candidates and requires office
+    attendance for another is a genuine conflict, never confidently
+    `remote`. The blocker carries no value of its own: it never manufactures
+    `onsite`, and it never overrides an independently, already-resolved
+    `hybrid` or `onsite` result."""
+    title_signal = _extract_title_signal(title)
+    description_signal, blocker_present = _extract_description_signal(description)
+
+    result: NormalizationResult[RemoteType]
+    if (
+        title_signal == _CONFLICT
+        or description_signal == _CONFLICT
+        or (title_signal is None and description_signal is None)
+    ):
+        result = NormalizationResult(None, Provenance.UNAVAILABLE)
+    elif title_signal is not None and description_signal is None:
+        result = NormalizationResult(cast(RemoteType, title_signal), Provenance.INFERRED)
+    elif title_signal is None and description_signal is not None:
+        result = NormalizationResult(
             cast(RemoteType, description_signal), Provenance.PARSED_DESCRIPTION
         )
-    if title_signal == description_signal:
-        return NormalizationResult(cast(RemoteType, title_signal), Provenance.PARSED_DESCRIPTION)
-    return NormalizationResult(None, Provenance.UNAVAILABLE)
+    elif title_signal == description_signal:
+        result = NormalizationResult(cast(RemoteType, title_signal), Provenance.PARSED_DESCRIPTION)
+    else:
+        result = NormalizationResult(None, Provenance.UNAVAILABLE)
+
+    if blocker_present and result.value == "remote":
+        return NormalizationResult(None, Provenance.UNAVAILABLE)
+    return result

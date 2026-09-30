@@ -77,14 +77,55 @@ which differs by field:
   else.
 - **`description`**: standalone-in-segment is *never* sufficient by
   itself. An ambiguous key only counts inside an explicit,
-  anchor-bounded list region -- see below. Outside any such region, it
-  is always dropped, regardless of punctuation structure
+  anchor-bounded list region -- see below -- **or**, for `"go"` only (a
+  Phase 3 baseline-correction addition; never `"c"`/`"r"`/`"node"`), via
+  the go-only list-neighbor rescue immediately below. Outside either of
+  those, it is always dropped, regardless of punctuation structure
   (`"each node stores data"`, `"/cluster/node/status"`, `"press C, then
   continue"`, and `"Go, see the deployment"` all contribute nothing).
 
 Every other taxonomy entry (anything not `"c"`/`"r"`/`"go"`/`"node"`) is
 unaffected by any of this -- it matches anywhere, in either field, the
 moment its normalized key is found.
+
+**Go-only list-neighbor rescue** (`description` only; a bounded correction
+for a baseline recall gap, never applied to `"c"`/`"r"`/`"node"`): `"go"`
+standing alone in its own segment is recognized without the label anchor
+above when **both** hold, checked against the frozen 30-record realistic
+corpus and disclosed in that slice's own `docs/LLM_HANDOFF.md` entry:
+
+1. the nearest token across the segment delimiter immediately before or
+   after it -- the last token of the immediately preceding segment, or the
+   first token of the immediately following segment, never a segment
+   further away -- is itself an *unambiguous* taxonomy match (e.g.
+   `"...Python, Go, Rust..."`: `"Go"`'s following-segment neighbor is
+   `"Rust"`... no match there, but its *preceding*-segment neighbor ends in
+   `"Python"`, an unambiguous match); and
+2. the cue-scoped sentence containing it (split on a newline or a genuine
+   `.!?` terminator run, never this module's own `,;|:/` segment
+   delimiters) contains one of a closed, reviewed set of candidate-
+   qualification/work-history phrases: `"production-quality coding"`,
+   `"coding ability"`, `"production experience"`, `"hands-on experience"`,
+   `"professional experience"`, `"proficient in"`, `"proficiency in"`,
+   `"fluent in"`, `"fluency in"` -- matched as an exact contiguous token
+   subsequence of that sentence, never a raw substring (so `"encoding
+   ability"` can never satisfy `"coding ability"`). Deliberately **excludes**
+   bare `"programming language(s)"`/`"technology stack"`/`"tech stack"`,
+   which can describe a product or company environment rather than a
+   requirement on the candidate -- `"Our product supports the programming
+   languages Go, Python, and Java."` and `"Our company's technology stack
+   includes Go, Python, and PostgreSQL."` both correctly recognize nothing
+   for `"go"` (`"python"` still matches, as an unambiguous key).
+
+A demonstrated, empirically-verified false-positive boundary: an ambiguous
+key standing alone in its segment but separated from the nearest taxonomy
+neighbor by an ordinary English filler word (`"you can relax, go, and
+enjoy Python"`) never rescues, since the filler word -- not `"Python"` --
+is the actual adjacent token; and a genuinely immediately-adjacent neighbor
+with no qualifying cue in the same sentence (`"trivia, go, Python
+meetups..."`, `"Skills required: Java, Go, Ruby -- must be a great
+communicator..."`) never rescues either, since condition 2 above still
+fails.
 
 **Description anchor grammar** -- the only mechanism that can authorize
 an ambiguous key in `description`:
@@ -213,6 +254,39 @@ _TITLE_ADJACENCY_ELIGIBLE_KEYS = frozenset({"c", "r", "go"})
 _TITLE_ROLE_NOUN_KEYS = frozenset({"developer", "engineer", "programmer"})
 
 _TERMINATOR_RUN_RE = re.compile(r"[.!?]+")
+
+# Phase 3 baseline-correction slice (go-only description rescue): a closed,
+# reviewed set of strong candidate-qualification/work-history phrases. Every
+# entry is deliberately a multi-word construction that describes the
+# candidate's own coding work or proficiency -- never a bare noun like
+# "programming languages" or "technology stack", which can describe a
+# product or company environment instead of a requirement on the candidate
+# (Sol's binding clarification: those two omitted from this slice entirely,
+# not merely deprioritized). Each phrase is tokenized once through this
+# module's own tokenizer, never matched as a raw substring, so a lookalike
+# longer word (e.g. "encoding ability") can never satisfy "coding ability".
+_GO_ROLE_RELEVANCE_CUE_PHRASES_RAW = frozenset(
+    {
+        "production-quality coding",
+        "coding ability",
+        "production experience",
+        "hands-on experience",
+        "professional experience",
+        "proficient in",
+        "proficiency in",
+        "fluent in",
+        "fluency in",
+    }
+)
+_GO_ROLE_RELEVANCE_CUE_PHRASES = frozenset(
+    tuple(_TOKEN_RE.findall(phrase)) for phrase in _GO_ROLE_RELEVANCE_CUE_PHRASES_RAW
+)
+
+# Sentence-boundary scope for the cue check only -- a newline or a genuine
+# `.!?` terminator run (this module's own `_TERMINATOR_RUN_RE`), never the
+# `,;|:/` segment delimiters used elsewhere in this file for a different
+# purpose (enumerated-list structure, not sentence structure).
+_CUE_SENTENCE_SPLIT_RE = re.compile(r"\n|[.!?]+")
 
 _ASCII_UPPER_TO_LOWER = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
 
@@ -425,6 +499,69 @@ def _anchor_regions(text: str) -> list[str]:
     return regions
 
 
+def _segments_with_offsets(text: str) -> list[tuple[int, list[str]]]:
+    """Mirrors `_segments` exactly (same delimiter regex, same per-segment
+    tokenization), but also returns each raw segment's starting character
+    offset in `text` -- needed only by the go-only rescue rule below, to
+    find which cue-scoped sentence a candidate segment belongs to."""
+    result: list[tuple[int, list[str]]] = []
+    last_end = 0
+    for match in _SEGMENT_DELIMITER_RE.finditer(text):
+        result.append((last_end, _tokenize_segment(text[last_end : match.start()])))
+        last_end = match.end()
+    result.append((last_end, _tokenize_segment(text[last_end:])))
+    return result
+
+
+def _cue_sentence_spans(text: str) -> list[tuple[int, int]]:
+    """Splits `text` into cue-scope sentences on a newline or a genuine
+    `.!?` terminator run -- deliberately not this module's `,;|:/` segment
+    delimiters, which mark enumerated-list structure, not sentence
+    structure. Each span's end includes the terminator run itself, mirroring
+    the existing anchor-region convention elsewhere in this module."""
+    spans: list[tuple[int, int]] = []
+    start = 0
+    for match in _CUE_SENTENCE_SPLIT_RE.finditer(text):
+        spans.append((start, match.end()))
+        start = match.end()
+    spans.append((start, len(text)))
+    return spans
+
+
+def _sentence_containing(spans: list[tuple[int, int]], text: str, offset: int) -> str:
+    for start, end in spans:
+        if offset < end:
+            return text[start:end]
+    return text[spans[-1][0] : spans[-1][1]] if spans else text
+
+
+def _strip_trailing_colon(token: str) -> str:
+    """A cue word is frequently followed immediately by a colon introducing
+    the very list it describes (`"programming languages: Python, Go..."`)
+    -- stripped here, specific to cue tokenization only, so that case is
+    never missed merely because the colon glued onto the word."""
+    if token.endswith(":"):
+        return token[:-1]
+    return token
+
+
+def _has_go_role_relevance_cue(sentence: str) -> bool:
+    """True if `sentence` contains one of the closed, reviewed
+    candidate-qualification/work-history phrases above, as an exact
+    contiguous token subsequence (never a raw substring, so a longer
+    lookalike word can never satisfy a shorter cue token)."""
+    casefolded = sentence.translate(_ASCII_UPPER_TO_LOWER)
+    tokens = tuple(
+        _strip_trailing_colon(_strip_terminal_punctuation(t)) for t in _TOKEN_RE.findall(casefolded)
+    )
+    for phrase in _GO_ROLE_RELEVANCE_CUE_PHRASES:
+        phrase_len = len(phrase)
+        for start in range(len(tokens) - phrase_len + 1):
+            if tokens[start : start + phrase_len] == phrase:
+                return True
+    return False
+
+
 def _extract_description_matches(
     text: str | None, taxonomy: TaxonomyIndex
 ) -> dict[str, TaxonomyEntry]:
@@ -456,6 +593,50 @@ def _extract_description_matches(
             normalized_key, entry = found
             if _is_ambiguous_key(normalized_key):
                 matches[entry.canonical_id] = entry
+
+    # Phase 3 baseline-correction pass: `go` *only* (never `c`/`r`/`node`)
+    # standing alone in its own segment is rescued -- without requiring the
+    # label anchor above -- when both hold: (1) the nearest token across the
+    # segment delimiter immediately before or after it is itself an
+    # unambiguous taxonomy match (co-occurrence with a sibling, named
+    # technology in an enumerated list), and (2) the cue-scoped sentence
+    # containing it names a closed, reviewed candidate-qualification/
+    # work-history construction (see `_GO_ROLE_RELEVANCE_CUE_PHRASES`) --
+    # deliberately excluding bare "programming languages"/"technology
+    # stack"/"tech stack", which can describe a product or company
+    # environment rather than a requirement on the candidate. No employer,
+    # record ID, provider, split, or corpus-specific text participates in
+    # this predicate.
+    segments_with_offsets = _segments_with_offsets(text)
+    segment_token_lists = [tokens for _offset, tokens in segments_with_offsets]
+    sentence_spans = _cue_sentence_spans(text)
+    for i, (segment_offset, segment_tokens) in enumerate(segments_with_offsets):
+        if len(segment_tokens) != 1:
+            continue
+        found = _match_token(taxonomy, segment_tokens[0])
+        if found is None:
+            continue
+        normalized_key, entry = found
+        if normalized_key != "go":
+            continue
+
+        neighbor_ok = False
+        if i > 0 and segment_token_lists[i - 1]:
+            prev_found = _match_token(taxonomy, segment_token_lists[i - 1][-1])
+            if prev_found is not None and not _is_ambiguous_key(prev_found[0]):
+                neighbor_ok = True
+        if not neighbor_ok and i + 1 < len(segment_token_lists) and segment_token_lists[i + 1]:
+            next_found = _match_token(taxonomy, segment_token_lists[i + 1][0])
+            if next_found is not None and not _is_ambiguous_key(next_found[0]):
+                neighbor_ok = True
+        if not neighbor_ok:
+            continue
+
+        sentence = _sentence_containing(sentence_spans, text, segment_offset)
+        if not _has_go_role_relevance_cue(sentence):
+            continue
+
+        matches[entry.canonical_id] = entry
 
     return matches
 

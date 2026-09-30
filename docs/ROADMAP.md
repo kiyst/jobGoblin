@@ -521,13 +521,33 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   claude.json`, `docs/evaluation/phase3-realistic-pass-sol.json`,
   `docs/evaluation/phase3-realistic-adjudication-audit.json`,
   `backend/tests/fixtures/evaluation/phase3_realistic_corpus.json`, and
-  `docs/evaluation/phase3-realistic-corpus-baseline-report.md`. Implemented on
-  `phase-3/realistic-corpus-freeze-evaluation` — **candidate/publication stage, not
-  yet reviewed, not merged.** Baseline findings (a `salary.*` wiring gap, several
-  supported-field abstentions, a `skills.golang` recall gap, two `remote_type`
-  ambiguous false positives) are disclosed in the baseline report as a backlog for a
-  separately authorized correction slice — no parser was changed to make this corpus
-  pass. See this slice's own `docs/LLM_HANDOFF.md` entry and
+  `docs/evaluation/phase3-realistic-corpus-baseline-report.md`. **Merged into `main`
+  at `M=fccbf62d2f5f7df10f46b174c1aff96ed18b3ef7` /
+  `Q=25ac578f6e980eb73964de17d8f32ca1f2695867`.** Baseline findings (a `salary.*`
+  wiring gap, several supported-field abstentions, a `skills.golang` recall gap
+  affecting 5 records, two `remote_type` ambiguous false positives) were disclosed in
+  the baseline report as a backlog for separately authorized correction slices — no
+  parser was changed in this slice to make the corpus pass.
+  An eleventh slice, the **first post-baseline Phase 3 correction** (same Class H
+  authorization, base `25ac578`, branch `phase-3/baseline-correction-go-remote`),
+  addresses exactly two of the disclosed findings under a bounded, evidence-driven
+  proposal Sol approved with binding amendments: a go-only, cue-gated list-neighbor
+  rescue in `app/normalization/skills.py` recovers 2 of the 5 `skills.golang` recall
+  misses (`c`/`r`/`node` behavior unchanged), and a non-value-bearing office-
+  attendance blocker in `app/normalization/remote.py` eliminates both `remote_type`
+  ambiguous false positives without ever asserting `onsite` or overriding an
+  independently resolved `hybrid`/`onsite` result. Combined skills recall moves
+  `35/40 -> 37/40`; `remote_type` ambiguous false positives move `2/2 -> 0/2`; every
+  other baseline metric is unchanged (full-report diff against the immutable
+  baseline). The remaining 3 `skills.golang` misses (each requiring free-prose
+  interpretation this slice deliberately excludes) and the `salary.*` wiring gap
+  (Phase 4+ ingestion-layer work, not a Phase 3 parser fix) remain open backlog
+  items. The exposed-GitLab-holdout limitation from the baseline report still applies
+  — this correction's one holdout-record fix (`gitlab:8512432002`) is informational
+  confirmation only, never independent proof of generalization. **Candidate-stage
+  work once implemented, not yet reviewed, not merged.** Title normalization remains
+  the next independent Phase 3 product slice after this correction. See this slice's
+  own `docs/LLM_HANDOFF.md` entry and
   `docs/DECISIONS/0010-realistic-evaluation-corpus-methodology.md` for exactly what
   is and is not yet populated.
 - **Phase 4: two bounded read-only prework proofs merged into `main`; the production

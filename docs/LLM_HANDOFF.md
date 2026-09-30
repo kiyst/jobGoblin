@@ -98,111 +98,6 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-09-27, Claude Code (Sonnet 5). Same slice, same
-  authorization (`slice_id: 2026-09-27-realistic-corpus-freeze-evaluation-
-  0dae468`, risk class **H**, `slice_kind: tooling`, `declared_gate: final`).
-  Same branch `phase-3/realistic-corpus-freeze-evaluation`, on top of the
-  existing pushed checkpoint `80b4672`, preserved unamended. One bounded
-  correction round for Sol's final Stage 1 re-review verdict on that
-  checkpoint (two findings, F14/F15). Every unaffected F11-F13 rule
-  (canonical location forms, the multi-requirement decision table, the
-  gap-metric rename/applicability sentinel, `_is_meaningfully_present`'s
-  whitespace handling) is preserved unchanged. No annotation pass,
-  adjudication, corpus freeze, baseline evaluation, provider contact,
-  database work, or parser-semantic change performed. Ending commit: this
-  commit.
-- **F14 (contradictory non-US `location.state` instructions)**: the
-  canonical-domain table already correctly classified a non-US state/
-  province/region as `present_unsupported_form`, but the location-
-  normalization table's US-state bullet contradicted it, saying to
-  annotate such a value "in its own natural written form" -- a value the
-  loader's closed USPS-code validator would reject outright. Corrected
-  that bullet to state explicitly: `outcome = "present_unsupported_form"`,
-  `expected_value = null`, `expected_provenance = "unavailable"`, and
-  that the region's natural form must never be written into
-  `expected_value`. Added a fabricated synthetic example to the location
-  situation/rule table (`location_raw` = "Toronto, Ontario, Canada" ->
-  `location.state` is `present_unsupported_form`/null/unavailable, while
-  `location.country` = `"Canada"` `present_supported` is unaffected, since
-  country's domain is open free text). Also corrected the adjacent
-  postal-code wording, which described ZIP+4 as "digits only" -- a ZIP+4
-  is exactly five ASCII digits, one hyphen, and four ASCII digits, and the
-  hyphen is a required literal part of the form, not a digit; ZIP5 remains
-  exactly five ASCII digits.
-- **F15 (format-character-only wired inputs silently counted as
-  present)**: `_is_meaningfully_present` previously used a bare
-  `value.strip() != ""` check, which does not strip Unicode format
-  characters (category `Cf`, e.g. U+200B zero-width space, U+FEFF BOM,
-  U+180E Mongolian vowel separator) -- confirmed directly that
-  `classify_salary`/`classify_location` return entirely unavailable
-  results for all three, individually and mixed with ordinary whitespace,
-  yet the old check reported them as "present." Replaced it with the
-  project's own established meaningful-text rule, mirrored from
-  `fetch_greenhouse_evaluation_postings.py`'s `_has_meaningful_text`: a
-  value is meaningfully present only if it contains at least one
-  character that is neither Unicode whitespace (`str.isspace()`) nor
-  category `Cf`. Added `import unicodedata`. Seven new regressions: U+200B-
-  only, U+FEFF-only, U+180E-only, and ordinary whitespace mixed with only
-  those three (all four parametrized as "rejected"); a positive control
-  mixing `Cf` characters with genuine visible content (accepted); and one
-  end-to-end test through the real `evaluate_corpus`/`classify_salary`
-  pipeline confirming a U+200B-only `compensation_text` routes a
-  `present_supported` salary annotation to `missing_wired_input_gap`,
-  never `supported_abstention`.
-- Because the annotation contract changed a fourth time before any
-  annotation exists, `RUBRIC_VERSION` bumped `1.0.3 -> 1.0.4`. **Historical,
-  superseded evidence** (none ever annotated against), all four now
-  recorded in the rubric's own superseded-evidence table: `1.0.0` (commit
-  `7644e20`), `1.0.1` (commit `64dd730`), `1.0.2` (commit `d2097b4`), and
-  `1.0.3` (rubric sha256
-  `3948ec6a09c188a95b9a2ee1fb9ecd94edda2ab5c48bb39e32826e36f51f7f87`,
-  `source_packet_hash b56b0f65529fc83a8f30c8958ba697544a321a003b323220b92a
-  7c1ac8c6dd1b`, commit `80b4672`). **Current**: rubric sha256
-  `70961ec18fcbd5a316bb6ae49b4c9edc0cc1b3957aa6f5cd1f59c1684057eeb9`,
-  `source_packet_hash 010a13e0b5040121d4f55df62a0dc3780033469c316380cc1e4
-  15c5a86641f92` (taxonomy/salvage hashes unchanged).
-- Verification: `ruff format --check`/`ruff check` clean on all four
-  touched files; `mypy` clean on both scripts; full backend suite **3128
-  passed** (was 3121; +7 = the F15 regressions above); `check_repo.py`
-  clean; `git diff --check` clean; focused
-  `test_evaluate_phase3_corpus.py` (83 tests) and
-  `test_freeze_phase3_realistic_corpus.py` (43 tests, unchanged -- no
-  freeze-builder logic touched this round beyond the `RUBRIC_VERSION`
-  constant it imports indirectly via the rubric path) both green.
-- Adversarial self-review: independently reproduced Sol's exact claim
-  before fixing anything -- ran `classify_salary` directly against
-  U+200B/U+FEFF/U+180E and a mixed string, confirmed all four return
-  entirely unavailable results, and confirmed `unicodedata.category()`
-  reports `Cf` for all three code points in this environment's Unicode
-  database before trusting the fix's premise; confirmed the new
-  `_is_meaningfully_present` body is character-for-character identical in
-  logic to `fetch_greenhouse_evaluation_postings.py`'s own
-  `_has_meaningful_text`, not a lookalike reimplementation; confirmed the
-  new fabricated location example's `country` sub-field is genuinely
-  unaffected by the `state` fix (open free-text domain, no validator
-  change) rather than assuming it without checking; confirmed no
-  existing test asserted the old (incorrect) "natural written form"
-  behavior anywhere, so no other test needed updating for F14.
-- Files changed: `docs/evaluation/phase3-realistic-annotation-rubric.md`
-  (F14 corrections + synthetic example, `rubric_version` bump),
-  `backend/scripts/evaluate_phase3_corpus.py` (F15 fix, `unicodedata`
-  import, docstring), `backend/tests/test_evaluate_phase3_corpus.py`
-  (76 -> 83 tests), `backend/scripts/freeze_phase3_realistic_corpus.py`
-  (`RUBRIC_VERSION` bump only), `docs/LLM_HANDOFF.md` (this entry, plus
-  the iteration rotation above).
-- STOP -- this remained a checkpoint within an incomplete slice, not a
-  candidate, when written. Sol's final Stage 1 re-review subsequently
-  approved this checkpoint with no further findings (reported by the
-  user); Stage 1 concluded and annotation began. See Iteration 2 for the
-  completed annotation, adjudication, corpus freeze, and baseline
-  evaluation, and this slice's first candidate/publication record.
-
----
-
-## Iteration 2
-
-### Work done
-
 - Date/agent: 2026-09-28, Claude Code (Sonnet 5). Same slice, same
   authorization (`slice_id: 2026-09-27-realistic-corpus-freeze-evaluation-
   0dae468`, risk class **H**, `slice_kind: tooling`, `declared_gate: final`).
@@ -416,3 +311,140 @@ findings: none
   baseline-driven parser corrections, title-normalization work, provider
   contact, database access, or another slice without separate explicit
   user authorization.
+
+---
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-09-30, Claude Code (Sonnet 5). First post-baseline
+  Phase 3 correction slice (`slice_id: 2026-09-30-phase3-baseline-
+  correction-go-remote-25ac578`, risk class **H**, `slice_kind: parser`,
+  `declared_gate: final`), branch `phase-3/baseline-correction-go-remote`,
+  base `25ac578f6e980eb73964de17d8f32ca1f2695867` (main tip immediately
+  after the freeze/evaluation slice's `Q`). Implements exactly the
+  bounded proposal Sol approved with binding amendments (A1-A4 plus the
+  five review findings on that amendment table): a `go`-only, cue-gated
+  list-neighbor rescue in `skills.py`, and a non-value-bearing office-
+  attendance blocker in `remote.py`. No rubric, taxonomy, corpus fixture,
+  provider mapping, or unrelated parser touched. Ending commit: this
+  commit.
+- Outcome: `skills.py`'s `_extract_description_matches` gains one new
+  rescue path, restricted to `normalized_key == "go"` only (never `c`/
+  `r`/`node`), requiring all three: (1) `go` alone in its own delimiter-
+  split segment, (2) the nearest token across the segment boundary
+  immediately before or after it is an unambiguous taxonomy match, (3)
+  the cue-scoped sentence (split on newline or a genuine `.!?`
+  terminator, never this module's `,;|:/` segment delimiters) contains
+  one of exactly nine closed cue phrases (`production-quality coding`,
+  `coding ability`, `production experience`, `hands-on experience`,
+  `professional experience`, `proficient in`, `proficiency in`,
+  `fluent in`, `fluency in`) as an exact token subsequence, never a raw
+  substring. Per Sol's binding review clarification, bare `programming
+  language(s)`/`technology stack`/`tech stack` are deliberately excluded
+  from the cue set (they can describe a product or company environment,
+  not a candidate requirement) -- proven by dedicated negative-control
+  fixtures, including colon-delimited variants that isolate the cue
+  check from the standalone/adjacency checks. `remote.py`'s
+  `_extract_description_signal` gains one new closed phrase, `"required
+  to be in the office"`, processed through the *same* candidate/
+  negation/context-exclusion pipeline as every other description phrase
+  but tagged as a non-value blocker (never enters `survivors`, can never
+  itself become `onsite`); `classify_remote_type` downgrades an
+  otherwise-final `remote` result to `(None, unavailable)` when the
+  blocker is present, and never touches an independently resolved
+  `hybrid`/`onsite` result. Conventions applied: fixture-driven test
+  cases in the established `tests/fixtures/normalization/*.json` format;
+  closed, reviewed phrase catalogs (never open-ended/free-form matching)
+  matching this project's existing style throughout both modules.
+- Files changed: `backend/app/normalization/skills.py` (go-only rescue +
+  docstring addendum), `backend/app/normalization/remote.py`
+  (office-attendance blocker + docstring addendum),
+  `backend/tests/fixtures/normalization/skill_cases.json` (72 -> 86
+  cases), `backend/tests/fixtures/normalization/remote_type_cases.json`
+  (70 -> 77 cases), `docs/ROADMAP.md` (bounded correction: recorded the
+  freeze/evaluation slice's actual `M`/`Q` SHAs, replacing the stale
+  "not yet reviewed, not merged" clause; recorded this slice's own
+  outcome and remaining backlog), `docs/LLM_HANDOFF.md` (this entry plus
+  the iteration rotation above).
+- Verification: `ruff format --check`/`ruff check` clean (171 files);
+  `mypy` clean (171 source files); focused suite (`test_normalization_
+  skills.py` + `test_normalization_remote.py`) **216 passed** (was 195);
+  full backend suite **3149 passed** (was 3128; +21 = 14 new skill
+  fixtures + 7 new remote fixtures); `check_repo.py` clean; `git diff
+  --check` clean. Full-report diff of `python -m scripts.
+  evaluate_phase3_corpus` against the immutable baseline report matches
+  Sol's binding expected-delta table exactly: `dev` skills precision/
+  recall `21/21,21/22 -> 22/22,22/22`, mismatches `124 -> 121`; `holdout`
+  skills precision/recall `14/14,14/18 -> 15/15,15/18`, mismatches
+  `39 -> 38`; `combined` skills precision/recall `35/35,35/40 ->
+  37/37,37/40`, `remote_type` ambiguous false positives `2/2 -> 0/2`,
+  mismatches `163 -> 159`; `employer:Anthropic` skills `9/9,9/10 ->
+  10/10,10/10`, mismatches `60 -> 59`; `employer:Discord` ambiguous false
+  positives `2/2 -> 0/2`, mismatches `64 -> 62`; `employer:GitLab` skills
+  `14/14,14/18 -> 15/15,15/18`, mismatches `39 -> 38`. No other line in
+  the report changed. Exactly the two named `golang` recoveries
+  (`anthropic:4502508008`, `gitlab:8512432002`) and the two named
+  `remote_type` corrections (`discord:8214127002`, `discord:8545675002`)
+  changed; the three disclosed unfixed `golang` misses
+  (`gitlab:8463922002`, `gitlab:8490477002`, `gitlab:8514960002`) and
+  `discord:8498984002` (the real hybrid record used as the negative
+  control that rejected an earlier, unsafe draft of the remote fix)
+  remain byte-identical to the baseline.
+- Adversarial self-review: 8 independent mutation proofs performed
+  directly against this commit's own code (mutate -> confirm the
+  targeted fixture fails -> restore -> confirm it passes again), one per
+  safety conjunct Sol required: (1) `go`-only restriction removed ->
+  `description_c_not_rescued_despite_neighbor_and_cue` and the `r`
+  equivalent both fail; (2) standalone-segment enforcement removed ->
+  `description_go_no_rescue_not_standalone_imperative_verb_usage` fails;
+  (3) adjacent-neighbor enforcement removed ->
+  `description_go_no_rescue_no_taxonomy_neighbor_despite_cue` fails; (4)
+  broad product/company cues (`programming language(s)`/`technology
+  stack`/`tech stack`) accepted -> both colon-variant guard fixtures
+  fail (this also surfaced and fixed a real token-boundary gap: a cue
+  word glued to an immediately following colon, e.g. `"languages:"`,
+  wasn't recognized as the cue token `"languages"` -- added
+  `_strip_trailing_colon`, confirmed zero change to the real corpus
+  report); (5) blocker detection disabled ->
+  `description_office_attendance_blocker_location_conditional_two_
+  sentences` fails; (6) blocker bypasses negation ->
+  `description_office_attendance_blocker_downgrades_qualified_remote`
+  fails; (7) blocker manufactures `onsite` -> both bare-blocker fixtures
+  fail; (8) blocker downgrades an independently-resolved `hybrid`/
+  `onsite` -> both "does not override" fixtures fail. All 8 restored
+  cleanly (216/216 passing, full corpus report byte-identical to the
+  verified-correct version after every restoration). Confirmed the
+  full-corpus regression check (all 30 records, both parsers) shows
+  *only* the four intended changes, matching the fixture-level
+  mutation-proof scope exactly -- no record-specific text participates
+  in either production predicate. Remaining limitation: the three
+  disclosed `golang` misses and the `salary.*` wiring gap are
+  unaddressed by design, per the approved, bounded scope.
+- Deviations/known limitations: none beyond what was already disclosed
+  in the approved proposal and its amendment table (three residual
+  `golang` misses; `salary.*` wiring gap deferred to Phase 4+; the
+  `gitlab:8512432002` holdout fix is informational confirmation only,
+  never independent proof of generalization).
+- STOP -- this commit is candidate `C` for this slice (see
+  `workflow-metadata` below, `state: pending`). Per the explicit
+  authorization for this round ("approval authorizes only the bounded
+  implementation... it does not authorize publication `A`, review `R`,
+  merge `M`, or post-merge `Q`"), the receipt-eligible verification run
+  and `A` publication are deliberately **not** performed in this commit
+  -- that requires separate authorization, same as `R`, merge, `M`, `Q`,
+  provider contact, database access, title normalization, or another
+  slice. Waiting for Sol's independent review of the actual diff.
+
+```workflow-metadata
+workflow_version: v3.2
+state: pending
+slice_id: 2026-09-30-phase3-baseline-correction-go-remote-25ac578
+slice_kind: parser
+risk_class: H
+base_sha: 25ac578f6e980eb73964de17d8f32ca1f2695867
+declared_gate: final
+fixture_path: backend/tests/fixtures/normalization/skill_cases.json
+fixture_count: 86
+```
