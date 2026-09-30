@@ -375,3 +375,44 @@ gate: final
 verdict: approved
 findings: none
 ```
+
+### Merge record
+
+- Date: 2026-09-30. Merged `phase-3/realistic-corpus-freeze-evaluation`
+  at approved, reviewed commit `babc74fff16b5575f482bbb37fa947f11429f1bf`
+  (`R`; Sol's "approved, findings: none" verdict on `C=0360901`/
+  `A=1ec12a6`, above) into `main` via `git merge --no-ff`. Merge commit:
+  `fccbf62d2f5f7df10f46b174c1aff96ed18b3ef7`. Pre-merge `main`/
+  `origin/main` tip (rollback boundary):
+  `0dae4683645599369d41d0228b0edad1cfad73ce`.
+- Pre-merge checks: freshly fetched `origin`; confirmed the feature
+  branch and its origin both sat at `babc74f`, and `main`/`origin/main`
+  were both clean and synchronized at `0dae468` before merging;
+  re-confirmed `validate_c_a_r_chain(C, A, R)` and
+  `check_merge_eligibility(C, A, R)` both still returned `approved`
+  immediately beforehand, with no unexpected advancement or divergence
+  on either ref.
+- Followed the documented `M -> Q` release sequence: `M` was created
+  locally, not pushed; zero content difference between `M` and `R`
+  confirmed (`git diff babc74f fccbf62`, empty); `verification_
+  coordinator.run_post_merge_verification` was run against `M` in a
+  disposable detached worktree (always full/final) -- artifact
+  `175e0726-8d9c-4d0a-abf7-83fecd886540`, all 11 steps PASS, full pytest
+  suite **3128 passed**, all 34 mutation witnesses pass, no migration
+  triggered, cleanup PASS. `Q` was authored as `M`'s direct mainline
+  child, bundling that artifact with this append-only merge record in
+  one commit -- this entry itself.
+- Post-merge evidence status: `docs/post-merge/
+  fccbf62d2f5f7df10f46b174c1aff96ed18b3ef7/
+  175e0726-8d9c-4d0a-abf7-83fecd886540.json`, referencing original
+  receipt `338d5c4b-37fd-47dd-a220-f67919ca45de` (`docs/
+  verification-receipts/03609018215285cca21dd31fc126978fe2de8d15/
+  338d5c4b-37fd-47dd-a220-f67919ca45de.json`). `check_review.
+  validate_published(C, A, R, M, Q)` and `verification_coordinator.
+  confirm_main_unchanged` are run immediately before push; see the
+  agent's final report for their results rather than restating them here
+  ahead of time.
+- STOP -- report the synchronized final `main` SHA and stop. No
+  baseline-driven parser corrections, title-normalization work, provider
+  contact, database access, or another slice without separate explicit
+  user authorization.
