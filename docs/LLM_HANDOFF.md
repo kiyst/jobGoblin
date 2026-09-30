@@ -313,3 +313,65 @@ candidate_sha: 03609018215285cca21dd31fc126978fe2de8d15
 receipt_id: 338d5c4b-37fd-47dd-a220-f67919ca45de
 receipt_path: docs/verification-receipts/03609018215285cca21dd31fc126978fe2de8d15/338d5c4b-37fd-47dd-a220-f67919ca45de.json
 ```
+
+### Work review
+
+- Date/reviewer: 2026-09-30, Sol. Diff reviewed: `C..A`
+  (`0360901..1ec12a6`) on `phase-3/realistic-corpus-freeze-evaluation`,
+  against the approved two-annotator pilot contract and its closed
+  affected-file list only -- the separate, unapproved future
+  three-annotator proposal's requirements (release manifest, lineage
+  sidecar terminology) were explicitly not applied.
+- Independent verification performed: confirmed `A` is `C`'s direct
+  single-parent child; confirmed `C..A` changes only the one new receipt
+  file plus the `workflow-metadata` block's `pending` -> `published`
+  transition in `docs/LLM_HANDOFF.md`, no other byte or path; independently
+  recomputed the receipt's schema validity and `approval_eligible: true`;
+  confirmed `docs/evaluation/phase3-realistic-pass-claude.json` and
+  `docs/evaluation/phase3-realistic-pass-sol.json` are byte-identical to
+  their sealed `.evaluation-staging/` originals; confirmed
+  `docs/evaluation/phase3-realistic-adjudication-audit.json` is
+  byte-identical to the validated working artifact and contains exactly
+  95 completed disagreements and 220 completed required agreement audits;
+  confirmed the frozen corpus has 30 records x 28 labels = 840 labels
+  with valid embedded lineage; independently rebuilt the corpus and its
+  SHA-256 matched the committed
+  `1863541bb784419be16bf4ffcf88bf1b4408c951a03b12008e9645e9f18e6930`
+  exactly; confirmed the employer-disjoint split is 20 dev (Anthropic +
+  Discord) / 10 holdout (GitLab); independently reran
+  `python -m scripts.evaluate_phase3_corpus` and its output matched
+  `docs/evaluation/phase3-realistic-corpus-baseline-report.md`'s embedded
+  report byte-for-byte; confirmed the report accurately discloses the
+  baseline findings (salary wiring gap, supported-field abstentions, one
+  skills recall gap, two remote_type ambiguous false positives) and the
+  exposed-holdout limitation; confirmed no classifier, taxonomy, provider
+  mapping, rubric label, corpus decision, or file outside the closed
+  affected-file list changed; confirmed the deferred F15 "six"->"seven"
+  wording correction is accurate and bounded.
+- Findings by severity with exact references: none.
+- Missing/inconclusive checks: focused tests' first attempt failed only
+  on an inaccessible inherited Windows temp directory (environmental, not
+  a defect in the candidate); a rerun with an isolated writable base
+  passed 126/126. No other check was inconclusive.
+- Verdict: **approved**.
+- Exact bounded correction: none required.
+- STOP -- record-only. No merge, `M`, `Q`, executable-file modification,
+  parser correction, provider contact, database access, or new slice is
+  authorized by this review.
+
+```workflow-review-metadata
+schema_version: 2
+slice_id: 2026-09-27-realistic-corpus-freeze-evaluation-0dae468
+risk_class: H
+reviewer: Sol
+reviewer_role: primary
+reviewer_model: Sol Medium
+reviewed_at: 2026-09-30T00:56:08.703120+00:00
+candidate_sha: 03609018215285cca21dd31fc126978fe2de8d15
+publication_commit_sha: 1ec12a68d933ed8addc0d7f930c8799de3c93d4b
+receipt_path: docs/verification-receipts/03609018215285cca21dd31fc126978fe2de8d15/338d5c4b-37fd-47dd-a220-f67919ca45de.json
+receipt_id: 338d5c4b-37fd-47dd-a220-f67919ca45de
+gate: final
+verdict: approved
+findings: none
+```
