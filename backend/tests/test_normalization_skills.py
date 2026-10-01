@@ -12,8 +12,10 @@ from app.normalization.skills import (
     _has_go_role_relevance_cue,
     _is_covered_terminator_boundary,
     _is_region_ending_boundary,
+    _segment_token_offsets,
     _segments_with_offsets,
     _sentence_containing,
+    _sentence_index_at,
     classify_skills,
 )
 from app.normalization.taxonomy import DEFAULT_SKILLS_TAXONOMY_PATH, TaxonomyIndex, load_taxonomy
@@ -223,6 +225,35 @@ def test_segments_with_offsets_offsets_point_at_raw_segment_start() -> None:
     offsets = [offset for offset, _tokens in segments]
     assert offsets == [0, 7, 11]
     assert text[offsets[1] :].startswith(" Go")
+
+
+def test_segment_token_offsets_point_at_tokens_not_segment_starts() -> None:
+    """The second raw segment of `"Python,\\n   Go"` starts on the newline;
+    its token offset must point at `"G"` itself, after the newline and the
+    covered spaces."""
+    text = "Python,\n   Go, Java"
+    offsets = _segment_token_offsets(text)
+    assert offsets == [[0], [11], [15]]
+    assert text[offsets[1][0] :].startswith("Go")
+    assert text[offsets[2][0] :].startswith("Java")
+
+
+def test_segment_token_offsets_align_with_segments_including_empty() -> None:
+    text = "Python,,Go"
+    segments = _segments_with_offsets(text)
+    offsets = _segment_token_offsets(text)
+    assert len(offsets) == len(segments)
+    assert [len(o) for o in offsets] == [len(tokens) for _offset, tokens in segments]
+    assert offsets == [[0], [], [8]]
+
+
+def test_sentence_index_at_places_token_after_newline_in_next_sentence() -> None:
+    text = "Production experience with Python,\nGo, Java."
+    spans = _cue_sentence_spans(text)
+    newline_index = text.index("\n")
+    go_offset = text.index("Go")
+    assert _sentence_index_at(spans, newline_index) == 0
+    assert _sentence_index_at(spans, go_offset) == 1
 
 
 def test_cue_sentence_spans_splits_on_newline_and_terminator_only() -> None:

@@ -1277,5 +1277,124 @@
       }
     ],
     "note": "Mutation-proof fixture for the same-cue-scoped-sentence requirement: the role-relevance cue is in the previous sentence (separated by a genuine '.' terminator), not the go-segment's own sentence."
+  },
+  {
+    "id": "description_go_no_rescue_comma_immediately_before_newline",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "Production experience with Python,\nGo, Java.",
+    "expected_matches": [
+      {
+        "canonical_id": "java",
+        "display_name": "Java",
+        "provenance": "parsed_description"
+      },
+      {
+        "canonical_id": "python",
+        "display_name": "Python",
+        "provenance": "parsed_description"
+      }
+    ],
+    "note": "Sol P1 regression: the 'Go' segment starts on the newline directly after the comma, but the 'Go' token itself is on the next line, which has no cue. Sentence membership must come from the token's own offset, never the raw segment start."
+  },
+  {
+    "id": "description_go_no_rescue_comma_before_newline_with_indentation",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "Production experience with Python,\n   Go, Java.",
+    "expected_matches": [
+      {
+        "canonical_id": "java",
+        "display_name": "Java",
+        "provenance": "parsed_description"
+      },
+      {
+        "canonical_id": "python",
+        "display_name": "Python",
+        "provenance": "parsed_description"
+      }
+    ],
+    "note": "Sol P1 regression: covered spaces between the newline and 'Go' must not change the result -- the token is still on the cue-free second line."
+  },
+  {
+    "id": "description_go_no_rescue_semicolon_immediately_before_newline",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "Production experience with Python;\nGo, Java.",
+    "expected_matches": [
+      {
+        "canonical_id": "java",
+        "display_name": "Java",
+        "provenance": "parsed_description"
+      },
+      {
+        "canonical_id": "python",
+        "display_name": "Python",
+        "provenance": "parsed_description"
+      }
+    ],
+    "note": "Sol P1 regression: same defect through a semicolon delimiter rather than a comma."
+  },
+  {
+    "id": "description_go_rescue_same_line_positive_control",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "Production experience with Python, Go, Java.",
+    "expected_matches": [
+      {
+        "canonical_id": "golang",
+        "display_name": "Go",
+        "provenance": "parsed_description"
+      },
+      {
+        "canonical_id": "java",
+        "display_name": "Java",
+        "provenance": "parsed_description"
+      },
+      {
+        "canonical_id": "python",
+        "display_name": "Python",
+        "provenance": "parsed_description"
+      }
+    ],
+    "note": "Positive control for the P1 fix: cue, 'Go', and both neighbors on one line -- still rescued."
+  },
+  {
+    "id": "description_go_rescue_cue_line_after_unrelated_line",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "We are hiring across several teams.\nProduction experience with Python, Go, Java.",
+    "expected_matches": [
+      {
+        "canonical_id": "golang",
+        "display_name": "Go",
+        "provenance": "parsed_description"
+      },
+      {
+        "canonical_id": "java",
+        "display_name": "Java",
+        "provenance": "parsed_description"
+      },
+      {
+        "canonical_id": "python",
+        "display_name": "Python",
+        "provenance": "parsed_description"
+      }
+    ],
+    "note": "Positive control for the P1 fix: an unrelated preceding line does not disable a complete, cue-bearing, eligible line after the newline."
+  },
+  {
+    "id": "description_go_no_rescue_only_neighbor_on_following_line",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "Production experience: Go,\nPython.",
+    "expected_matches": [
+      {
+        "canonical_id": "python",
+        "display_name": "Python",
+        "provenance": "parsed_description"
+      }
+    ],
+    "note": "Same-sentence requirement for structural evidence: the cue and 'Go' share the first line, but the only taxonomy neighbor (python) is on the next line, so it cannot authorize the rescue."
   }
 ]

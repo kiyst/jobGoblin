@@ -100,11 +100,16 @@ anchor when **all** hold:
 2. the token touching the shared boundary of the immediately preceding
    or immediately following raw segment -- never a segment further away,
    and never skipping an empty segment to reach one beyond it -- is
-   itself an *unambiguous* taxonomy match; a match anywhere else inside
-   that adjacent segment, not touching the boundary, does not count; and
+   itself an *unambiguous* taxonomy match, and sits in the same cue-scope
+   sentence as the `"go"` token (condition 3's sentence); a match anywhere
+   else inside that adjacent segment, not touching the boundary, does not
+   count; and
 3. a closed, reviewed set of strong candidate-qualification/work-history
    cue phrases appears in the *same cue-scoped sentence* as the `"go"`
-   segment -- a sentence boundary is a newline or a genuine `.!?`
+   token itself -- located by that token's own source offset, never its
+   raw segment's start offset, so `"...Python,\\nGo, Java."` (segment
+   starting on the newline) never inherits a cue from the line before --
+   and a sentence boundary is a newline or a genuine `.!?`
    terminator run (this module's own convention, never this module's
    `,;|:/` segment delimiters, and never a Unicode-aware fuzzy sentence
    splitter): `"production-quality coding"`, `"coding ability"`,
@@ -524,6 +529,26 @@ def _segments_with_offsets(text: str) -> list[tuple[int, list[str]]]:
     return result
 
 
+def _segment_token_offsets(text: str) -> list[list[int]]:
+    """For each raw segment produced by `_segments_with_offsets` (same
+    delimiter regex, same order, same empty-segment entries), the absolute
+    source offset in `text` of every token in that segment, index-aligned
+    with `_tokenize_segment`'s own output (one `_TOKEN_RE` match per token).
+    A raw segment's *start* offset can sit on a newline or covered
+    whitespace that precedes its token (`"Python,\\n   Go"`'s second
+    segment starts at the newline) -- the go-only rescue must locate the
+    token itself, never the segment start, when deciding which sentence it
+    belongs to."""
+    result: list[list[int]] = []
+    last_end = 0
+    for match in _SEGMENT_DELIMITER_RE.finditer(text):
+        segment = text[last_end : match.start()]
+        result.append([last_end + m.start() for m in _TOKEN_RE.finditer(segment)])
+        last_end = match.end()
+    result.append([last_end + m.start() for m in _TOKEN_RE.finditer(text[last_end:])])
+    return result
+
+
 def _cue_sentence_spans(text: str) -> list[tuple[int, int]]:
     """Splits `text` into cue-scope sentences on a newline or a genuine
     `.!?` terminator run -- deliberately not this module's `,;|:/` segment
@@ -546,6 +571,16 @@ def _sentence_containing(spans: list[tuple[int, int]], text: str, offset: int) -
         if offset < end:
             return text[start:end]
     return text[spans[-1][0] : spans[-1][1]] if spans else text
+
+
+def _sentence_index_at(spans: list[tuple[int, int]], offset: int) -> int:
+    """Index of the cue-scope sentence span containing `offset` -- the
+    same lookup rule `_sentence_containing` uses, returned as an index so
+    two offsets can be compared for same-sentence membership."""
+    for index, (_start, end) in enumerate(spans):
+        if offset < end:
+            return index
+    return len(spans) - 1
 
 
 def _strip_trailing_colon(token: str) -> str:
@@ -585,13 +620,21 @@ def _go_list_neighbor_rescue(text: str, taxonomy: TaxonomyIndex) -> dict[str, Ta
     (never a segment further away, never skipping an empty segment), with
     a closed role-relevance cue phrase in the same cue-scoped sentence.
     Never applied to `"c"`/`"r"`/`"node"`; never touches the anchored-
-    region mechanism elsewhere in this module."""
+    region mechanism elsewhere in this module.
+
+    Sentence membership is decided by each token's own source offset
+    (`_segment_token_offsets`), never a raw segment's start offset: the
+    `"go"` token, the cue, and the accepted boundary-touching neighbor
+    token must all sit in one cue-scope sentence, so a delimiter directly
+    before a newline (`"Python,\\nGo"`) can never let `"go"` inherit a cue
+    or a neighbor from the preceding line."""
     matches: dict[str, TaxonomyEntry] = {}
     segments_with_offsets = _segments_with_offsets(text)
     segment_token_lists = [tokens for _offset, tokens in segments_with_offsets]
+    token_offsets = _segment_token_offsets(text)
     sentence_spans = _cue_sentence_spans(text)
 
-    for i, (segment_offset, segment_tokens) in enumerate(segments_with_offsets):
+    for i, (_segment_offset, segment_tokens) in enumerate(segments_with_offsets):
         if len(segment_tokens) != 1:
             continue
         found = _match_token(taxonomy, segment_tokens[0])
@@ -601,20 +644,30 @@ def _go_list_neighbor_rescue(text: str, taxonomy: TaxonomyIndex) -> dict[str, Ta
         if normalized_key != "go":
             continue
 
+        go_sentence = _sentence_index_at(sentence_spans, token_offsets[i][0])
+
         neighbor_ok = False
         if i > 0 and segment_token_lists[i - 1]:
             prev_found = _match_token(taxonomy, segment_token_lists[i - 1][-1])
-            if prev_found is not None and not _is_ambiguous_key(prev_found[0]):
+            if (
+                prev_found is not None
+                and not _is_ambiguous_key(prev_found[0])
+                and _sentence_index_at(sentence_spans, token_offsets[i - 1][-1]) == go_sentence
+            ):
                 neighbor_ok = True
         if not neighbor_ok and i + 1 < len(segment_token_lists) and segment_token_lists[i + 1]:
             next_found = _match_token(taxonomy, segment_token_lists[i + 1][0])
-            if next_found is not None and not _is_ambiguous_key(next_found[0]):
+            if (
+                next_found is not None
+                and not _is_ambiguous_key(next_found[0])
+                and _sentence_index_at(sentence_spans, token_offsets[i + 1][0]) == go_sentence
+            ):
                 neighbor_ok = True
         if not neighbor_ok:
             continue
 
-        sentence = _sentence_containing(sentence_spans, text, segment_offset)
-        if not _has_go_role_relevance_cue(sentence):
+        start, end = sentence_spans[go_sentence]
+        if not _has_go_role_relevance_cue(text[start:end]):
             continue
 
         matches[entry.canonical_id] = entry
