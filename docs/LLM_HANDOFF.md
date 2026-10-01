@@ -459,12 +459,16 @@ findings: none
 
 ```workflow-metadata
 workflow_version: v3.2
-state: pending
+state: published
 slice_id: 2026-09-30-phase3-baseline-correction-go-remote-25ac578
 slice_kind: parser
 risk_class: H
 base_sha: 25ac578f6e980eb73964de17d8f32ca1f2695867
 declared_gate: final
+executed_gate: final
+candidate_sha: 467ec75273c3bee00e939c720cba072b2b7754d1
+receipt_id: 24a31360-502b-4c35-8be3-a35374679077
+receipt_path: docs/verification-receipts/467ec75273c3bee00e939c720cba072b2b7754d1/24a31360-502b-4c35-8be3-a35374679077.json
 fixture_path: backend/tests/fixtures/normalization/skill_cases.json
 fixture_count: 92
 ```
