@@ -521,13 +521,24 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   claude.json`, `docs/evaluation/phase3-realistic-pass-sol.json`,
   `docs/evaluation/phase3-realistic-adjudication-audit.json`,
   `backend/tests/fixtures/evaluation/phase3_realistic_corpus.json`, and
-  `docs/evaluation/phase3-realistic-corpus-baseline-report.md`. Implemented on
-  `phase-3/realistic-corpus-freeze-evaluation` — **candidate/publication stage, not
-  yet reviewed, not merged.** Baseline findings (a `salary.*` wiring gap, several
-  supported-field abstentions, a `skills.golang` recall gap, two `remote_type`
-  ambiguous false positives) are disclosed in the baseline report as a backlog for a
-  separately authorized correction slice — no parser was changed to make this corpus
-  pass. See this slice's own `docs/LLM_HANDOFF.md` entry and
+  `docs/evaluation/phase3-realistic-corpus-baseline-report.md`. **Merged into `main`
+  at `M=fccbf62d2f5f7df10f46b174c1aff96ed18b3ef7` /
+  `Q=25ac578f6e980eb73964de17d8f32ca1f2695867`.** Baseline findings (a `salary.*`
+  wiring gap, several supported-field abstentions, a `skills.golang` recall gap
+  affecting 5 records, two `remote_type` ambiguous false positives) were disclosed in
+  the baseline report as a backlog for separately authorized correction slices — no
+  parser was changed in this slice to make the corpus pass.
+  An eleventh slice, the **first post-baseline Phase 3 correction** (same Class H
+  authorization, base `25ac578`, branch
+  `phase-3/baseline-correction-go-remote-v2`) — **candidate stage, not yet reviewed,
+  not merged; see this slice's own `docs/LLM_HANDOFF.md` entry for the exact
+  candidate `C` commit.** Recovers exactly 2 of the 5 disclosed `skills.golang`
+  recall misses (`anthropic:4502508008`, `gitlab:8512432002`) and corrects both
+  disclosed `remote_type` ambiguous false positives (`discord:8214127002`,
+  `discord:8545675002`). The remaining 3 `skills.golang` misses stay open backlog
+  items. The `gitlab:8512432002` recovery uses already-exposed GitLab holdout
+  evidence and is informational confirmation only, never fresh generalization
+  evidence. See this slice's own `docs/LLM_HANDOFF.md` entry and
   `docs/DECISIONS/0010-realistic-evaluation-corpus-methodology.md` for exactly what
   is and is not yet populated.
 - **Phase 4: two bounded read-only prework proofs merged into `main`; the production
