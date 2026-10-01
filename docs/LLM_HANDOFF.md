@@ -450,3 +450,66 @@ receipt_path: docs/verification-receipts/14083dd27c73609e67bdaac2793f3769bdb367e
 fixture_path: backend/tests/fixtures/normalization/skill_cases.json
 fixture_count: 98
 ```
+
+### Work review
+
+- Date/reviewer: 2026-10-01, Sol. Diff reviewed: candidate `C3`
+  (`14083dd`) and its publication `A3` (`5ec94f3`) on
+  `phase-3/baseline-correction-go-remote-v2`, against the frozen
+  correction contract, Sol's prior P1/P2 findings, and the closed
+  affected-file list.
+- Dispositions:
+  - P1 candidate-offset correction: accepted. `_go_list_neighbor_rescue`
+    now resolves the `go` token's sentence from its own token offset, so a
+    relevance cue can no longer be borrowed across a newline.
+  - Same-sentence neighbour enforcement: accepted as enforcement of the
+    frozen contract's same-sentence requirement, not new semantics.
+  - P2 corrected evaluator allowlist: accepted, including the five
+    `false_positive_outside_frozen_set` denominator changes.
+  - Residual lone-CR / U+2028 sentence-boundary disclosure: accepted as a
+    disclosed limitation.
+  - Inherited `remote_type` office-attendance correction: accepted
+    unchanged.
+  - Exact-path `remote_type_cases.json` fixture ownership mapping:
+    accepted unchanged.
+  - Fresh `C3` receipt and the `A3` `pending` -> `published` transition:
+    accepted.
+  - Git structure (single-parent `C3` -> `A3`) and affected-file
+    boundaries: accepted.
+- Independent verification performed: 326 focused tests passed; the
+  defective candidate-offset mutant made all three newline regressions
+  fail; removing the same-sentence neighbour check made its dedicated
+  regression fail; restored targeted probes passed; `check_repo.py` and
+  `check_handoff.py` passed; candidate and publication `git diff --check`
+  passed; `require_single_parent(A3, C3)` and
+  `validate_c_to_a_transition(C3, A3)` passed.
+- Relied on, not repeated: the genuine receipt's 3187-test full suite and
+  34/34 mutation witnesses. The six earlier skills mutation runs were
+  inspected but not repeated. The five `remote_type` mutations were not
+  rerun because that surface is byte-identical and unreachable from the
+  skills change.
+- Findings by severity with exact references: none.
+- Missing/inconclusive checks: none beyond the relied-on receipt evidence
+  stated above.
+- Verdict: **approved** -- no executable findings.
+- Exact bounded correction: none required.
+- STOP -- record-only. No merge, `M`, `Q`, executable-file modification,
+  provider contact, production-data access, title normalization, or new
+  slice is authorized by this review.
+
+```workflow-review-metadata
+schema_version: 2
+slice_id: 2026-09-30-phase3-baseline-correction-go-remote-25ac578
+risk_class: H
+reviewer: Sol
+reviewer_role: primary
+reviewer_model: Sol Medium
+reviewed_at: 2026-10-01T18:41:07.778740+00:00
+candidate_sha: 14083dd27c73609e67bdaac2793f3769bdb367e7
+publication_commit_sha: 5ec94f376bc13cfb00b00152ce822184f8bed4f1
+receipt_path: docs/verification-receipts/14083dd27c73609e67bdaac2793f3769bdb367e7/dcbb1847-7130-4f78-a833-b51732754965.json
+receipt_id: dcbb1847-7130-4f78-a833-b51732754965
+gate: final
+verdict: approved
+findings: none
+```
