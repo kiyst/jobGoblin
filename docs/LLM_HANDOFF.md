@@ -468,3 +468,67 @@ declared_gate: final
 fixture_path: backend/tests/fixtures/normalization/skill_cases.json
 fixture_count: 92
 ```
+
+### C2 correction (ownership-mapping gap)
+
+- Original candidate `C = 70e0e9258006bbd7da77317fe06b41d0281e70b9` (above)
+  is preserved **unamended** -- not rebased, not force-pushed. Running
+  the receipt-eligible Workflow v3.2 coordinator against `C` with
+  `--gate final` failed before any test executed, with:
+  `scripts.verification_scope.OwnerMappingRequiredError:
+  'backend/tests/fixtures/normalization/remote_type_cases.json' is a
+  non-Python path under backend/tests/ with no declared exact rule --
+  owner mapping required before verification can proceed`. Diagnosis:
+  `backend/tests/fixtures/normalization/skill_cases.json` has long been
+  registered in `scripts/verification_scope.py`'s `_SKILL_FIXTURE_FILES`,
+  but the sibling `remote_type_cases.json` fixture (which already existed
+  at 70 cases before this slice) was never registered anywhere -- a
+  pre-existing ownership-mapping gap this slice's own diff was the first
+  to expose by actually changing that file through the receipt-eligible
+  path, not a defect this slice introduced.
+- `C2 = this commit` adds exactly one narrowly bounded correction, in
+  exactly three files (`backend/scripts/verification_scope.py`,
+  `backend/tests/test_verification_scope.py`, this entry in
+  `docs/LLM_HANDOFF.md`): a new, dedicated `_REMOTE_FIXTURE_FILES` exact-
+  path table (never folded into `_SKILL_FIXTURE_FILES`), mapping
+  `backend/tests/fixtures/normalization/remote_type_cases.json` to the
+  distinct category `test-fixture:remote-classifier`, integrated into
+  both existing exact-map iteration sites
+  (`_validate_configuration`'s duplicate-detection list and
+  `classify_path`'s own exact-map tuple) -- the identical pattern already
+  used for `_SKILL_FIXTURE_FILES`/`_TAXONOMY_FIXTURE_FILES`/
+  `_EVALUATION_FIXTURE_FILES`. No wildcard or directory-wide fallback; an
+  unrelated unmapped non-Python path under the same `normalization/`
+  fixtures directory still fails closed with `OwnerMappingRequiredError`
+  (directly tested). The new category follows the existing `test-
+  fixture:*` naming convention, so it automatically falls outside
+  `required_contract_families`'s `parser`/`adapter`/`contract-record`
+  kinds (no location/salary/experience coverage requirement) and is
+  never flagged `directly_execute` (never a literal pytest `--focus`
+  target) -- both confirmed by dedicated tests, with no change to either
+  function's own logic. **No parser semantics, fixture content, or
+  evaluator behavior changed by this correction** -- `skills.py`/
+  `remote.py`/both fixture JSON files/the frozen corpus are byte-
+  identical to `C`.
+- Verification: `ruff format --check`/`ruff check` clean (171 files);
+  `mypy` clean (171 source files); focused `test_verification_scope.py`
+  **79 passed** (was 72); combined focused (`test_normalization_skills.py`
+  + `test_normalization_remote.py` + `test_verification_scope.py`)
+  **317 passed**; full backend suite **3178 passed**
+  (was 3171 at `C`; +7 new verification-scope tests); `check_repo.py`
+  clean; `git diff --check` clean. Realistic-corpus evaluator output
+  reconfirmed byte-identical to `C`'s own approved output.
+- Adversarial self-review: direct fault injection
+  (`test_remote_fixture_mapping_is_load_bearing`, mirroring the existing
+  `test_duplicate_exact_rule_is_rejected_at_configuration_time` pattern)
+  temporarily clears `_REMOTE_FIXTURE_FILES`, confirms
+  `classify_path` raises `OwnerMappingRequiredError` on the exact
+  previously-failing path, restores the table, and confirms
+  classification passes again -- proving the new mapping, not some
+  other fallback, is what fixes the original failure.
+- STOP -- `C2` is the corrected candidate for this slice. Waiting for the
+  receipt-eligible coordinator to be rerun against `C2` and, only if it
+  passes, for publication `A2` (separately authorized). No `R`, merge,
+  `M`, `Q`, broader verification-tooling change, parser change, fixture-
+  content change, provider contact, database access, or title
+  normalization is authorized here.

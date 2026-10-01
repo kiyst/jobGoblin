@@ -46,6 +46,10 @@ def test_nested_test_file_classified_as_generic_changed_test() -> None:
             "test-fixture:skill-classifier",
         ),
         (
+            "backend/tests/fixtures/normalization/remote_type_cases.json",
+            "test-fixture:remote-classifier",
+        ),
+        (
             "backend/tests/fixtures/evaluation/phase3_realistic_corpus.json",
             "test-fixture:phase3-evaluation",
         ),
@@ -125,6 +129,62 @@ def test_skill_fixture_file_is_mapped_never_owner_mapping_required() -> None:
 def test_skill_fixture_category_never_requires_contract_family_coverage() -> None:
     classifications = [vs.classify_path(path) for path in vs._SKILL_FIXTURE_FILES]
     assert vs.required_contract_families(classifications) == frozenset()
+
+
+def test_remote_fixture_file_is_mapped_never_owner_mapping_required() -> None:
+    for path in vs._REMOTE_FIXTURE_FILES:
+        assert vs.classify_path(path).category == "test-fixture:remote-classifier"
+
+
+def test_remote_fixture_category_never_requires_contract_family_coverage() -> None:
+    classifications = [vs.classify_path(path) for path in vs._REMOTE_FIXTURE_FILES]
+    assert vs.required_contract_families(classifications) == frozenset()
+
+
+def test_remote_fixture_is_a_dedicated_table_distinct_from_skill_fixture_table() -> None:
+    """The remote fixture must never be folded into `_SKILL_FIXTURE_FILES`
+    (which would misclassify it as a skill-classifier fixture) -- it has
+    its own dedicated table, and the two tables share no keys."""
+    assert vs._REMOTE_FIXTURE_FILES is not vs._SKILL_FIXTURE_FILES
+    assert set(vs._REMOTE_FIXTURE_FILES).isdisjoint(set(vs._SKILL_FIXTURE_FILES))
+    for path in vs._REMOTE_FIXTURE_FILES:
+        assert path not in vs._SKILL_FIXTURE_FILES
+
+
+def test_remote_fixture_is_never_a_literal_pytest_focus_target() -> None:
+    for path in vs._REMOTE_FIXTURE_FILES:
+        c = vs.classify_path(path)
+        assert c.directly_execute is False
+
+
+def test_unrelated_non_python_normalization_fixture_still_fails_closed() -> None:
+    """Adding the exact `remote_type_cases.json` rule must not create a
+    directory-wide or wildcard fallback for
+    `backend/tests/fixtures/normalization/` -- a different, genuinely
+    unmapped non-Python path in that same directory must still raise
+    `OwnerMappingRequiredError`."""
+    with pytest.raises(vs.OwnerMappingRequiredError, match="owner mapping required"):
+        vs.classify_path("backend/tests/fixtures/normalization/unrelated_cases.json")
+
+
+def test_remote_fixture_mapping_is_load_bearing() -> None:
+    """Direct fault injection (same pattern as
+    `test_duplicate_exact_rule_is_rejected_at_configuration_time`):
+    temporarily disabling the exact mapping must cause the remote
+    fixture's classification to fail closed with
+    `OwnerMappingRequiredError`, proving the mapping -- not some other
+    fallback -- is what makes it pass; then it is restored and the
+    classification is confirmed to pass again."""
+    original = dict(vs._REMOTE_FIXTURE_FILES)
+    path = next(iter(vs._REMOTE_FIXTURE_FILES))
+    try:
+        vs._REMOTE_FIXTURE_FILES.clear()
+        with pytest.raises(vs.OwnerMappingRequiredError, match="owner mapping required"):
+            vs.classify_path(path)
+    finally:
+        vs._REMOTE_FIXTURE_FILES.clear()
+        vs._REMOTE_FIXTURE_FILES.update(original)
+    assert vs.classify_path(path).category == "test-fixture:remote-classifier"
 
 
 def test_evaluation_fixture_file_is_mapped_never_owner_mapping_required() -> None:
