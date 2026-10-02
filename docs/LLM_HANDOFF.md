@@ -243,3 +243,55 @@ receipt_path: docs/verification-receipts/4c6f933fb3112357f6a96f751115776e74831d7
 fixture_path: backend/tests/fixtures/normalization/title_cases.json
 fixture_count: 200
 ```
+
+### Work review
+
+- Date/reviewer: 2026-10-02, Sol (primary). Reviewed the title-classifier slice: the
+  original candidate `C` (`e2573bc`) and its publication `A` (`d1c63e0`), then the
+  bounded evidence correction `C2` (`4c6f933`) and its publication `A2` (`795ed58`),
+  on `phase-3/title-normalization`, against the proposal, the A1-A12 amendment table,
+  and the corrected A2/A4/A5 fragment with the final 12-witness inventory.
+- Prior finding, now resolved: P2 (evidence specification). Frozen witness 02 could
+  not isolate `PREFIX_BLOCKERS` because `recruiter` is also a
+  `PREFIX_ROLE_DESIGNATOR`. It was corrected in `C2` with no executable change.
+- Points verified:
+  - `C2` is `A`'s sole child, and `A2` is `C2`'s sole child.
+  - `C2` changes exactly the three authorized evidence-correction files.
+  - All production code, including `titles.py`, is byte-identical to the original `C`.
+  - The fixture still has 200 cases; only two note/designation fields changed.
+  - Corrected witness 02 (`Data and Software Engineer`) isolates `PREFIX_BLOCKERS`
+    on its own, and both positive controls (`Lead Software Engineer`, `Senior
+    Software Engineer`) are stable.
+  - Witnesses 01 and 03-12 are unchanged; the inventory is 12/12 proven.
+  - Realistic results are still 22 MATCHED / 6 UNSUPPORTED / 2 AMBIGUOUS.
+  - Evaluator output is byte-identical (SHA-256
+    `87a92187a2d37d5150fe998d06042449f6b74d540cecd15d1bba97dd94801de6`).
+  - `C2` -> `A2` contains only the permitted publication transition and the fresh
+    receipt.
+- Sol's own checks: the focused verification (362 tests) passed. Sol did not rerun
+  the full suite.
+- Relied on from the genuine `C2` receipt (`1541f94b-45fe-49ef-af52-2afd39fcb367`):
+  3,470 full-suite tests and 34/34 registered contract witnesses. The receipt is
+  valid, bound to `C2`, and independently recomputes `approval_eligible=true`.
+- Findings by severity with exact references: none.
+- Verdict: **approved** -- no executable findings.
+- Exact bounded correction: none required.
+- STOP -- record-only. No merge, `M`, `Q`, executable-file change, Phase 3 exit
+  audit, or Phase 4 work is authorized by this review.
+
+```workflow-review-metadata
+schema_version: 2
+slice_id: 2026-10-02-phase3-title-normalization-aed2694
+risk_class: H
+reviewer: Sol
+reviewer_role: primary
+reviewer_model: Sol Medium
+reviewed_at: 2026-10-02T23:03:00.637705+00:00
+candidate_sha: 4c6f933fb3112357f6a96f751115776e74831d73
+publication_commit_sha: 795ed58573f3994f432ee013c8ae5510ea200e95
+receipt_path: docs/verification-receipts/4c6f933fb3112357f6a96f751115776e74831d73/1541f94b-45fe-49ef-af52-2afd39fcb367.json
+receipt_id: 1541f94b-45fe-49ef-af52-2afd39fcb367
+gate: final
+verdict: approved
+findings: none
+```
