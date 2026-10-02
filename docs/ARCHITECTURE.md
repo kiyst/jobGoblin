@@ -274,8 +274,9 @@ jobGoblin/
 │   │   │   └── persistence.py          # the ONLY module issuing Job/JobOccurrence SQLAlchemy writes
 │   │   │
 │   │   ├── normalization/
-│   │   │   ├── titles.py               # planned — title classifier, not started; needs its own
-│   │   │   │                            # (likely hierarchical) taxonomy design, not this slice's
+│   │   │   ├── titles.py               # title classifier (Phase 3, twelfth slice) — candidate
+│   │   │   │                            # stage (see docs/ROADMAP.md); frozen code-defined
+│   │   │   │                            # nine-title vocabulary, no titles.yaml
 │   │   │   ├── skills.py               # skill-mention classifier (Phase 3, seventh parser slice) —
 │   │   │   │                            # merged into main (see docs/ROADMAP.md)
 │   │   │   ├── taxonomy.py             # skill-taxonomy loader/lookup (Phase 3, skill-taxonomy-
@@ -300,7 +301,9 @@ jobGoblin/
 │   │   │   ├── skills.yaml              # skill-taxonomy-foundation slice — 15 seed entries,
 │   │   │   │                            # merged into main (see docs/ROADMAP.md); loaded/
 │   │   │   │                            # validated by normalization/taxonomy.py above
-│   │   │   ├── titles.yaml
+│   │   │   ├── titles.yaml              # planned future enrichment, not created — titles.py's
+│   │   │   │                            # v1 vocabulary is code-defined; saved-search title
+│   │   │   │                            # alias expansion is deferred to a future matching phase
 │   │   │   ├── industries.yaml
 │   │   │   ├── seniority.yaml           # planned future enrichment — normalization/seniority.py's
 │   │   │   │                            # Phase 3 v1 slice is code-defined (small closed vocabulary,
