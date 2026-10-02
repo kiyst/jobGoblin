@@ -50,6 +50,10 @@ def test_nested_test_file_classified_as_generic_changed_test() -> None:
             "test-fixture:remote-classifier",
         ),
         (
+            "backend/tests/fixtures/normalization/title_cases.json",
+            "test-fixture:title-classifier",
+        ),
+        (
             "backend/tests/fixtures/evaluation/phase3_realistic_corpus.json",
             "test-fixture:phase3-evaluation",
         ),
@@ -185,6 +189,67 @@ def test_remote_fixture_mapping_is_load_bearing() -> None:
         vs._REMOTE_FIXTURE_FILES.clear()
         vs._REMOTE_FIXTURE_FILES.update(original)
     assert vs.classify_path(path).category == "test-fixture:remote-classifier"
+
+
+def test_title_fixture_file_has_exact_category() -> None:
+    assert vs._TITLE_FIXTURE_FILES == {
+        "backend/tests/fixtures/normalization/title_cases.json": "test-fixture:title-classifier",
+    }
+    for path in vs._TITLE_FIXTURE_FILES:
+        assert vs.classify_path(path).category == "test-fixture:title-classifier"
+
+
+def test_title_fixture_category_never_requires_contract_family_coverage() -> None:
+    classifications = [vs.classify_path(path) for path in vs._TITLE_FIXTURE_FILES]
+    assert vs.required_contract_families(classifications) == frozenset()
+
+
+def test_title_fixture_is_a_dedicated_table_disjoint_from_every_other_fixture_table() -> None:
+    """The title fixture must never be folded into another fixture table
+    (which would misclassify it) -- it has its own dedicated table, sharing
+    no key with any other exact-path fixture table."""
+    others = (
+        vs._TAXONOMY_FIXTURE_FILES,
+        vs._SKILL_FIXTURE_FILES,
+        vs._REMOTE_FIXTURE_FILES,
+        vs._EVALUATION_FIXTURE_FILES,
+    )
+    for other in others:
+        assert vs._TITLE_FIXTURE_FILES is not other
+        assert set(vs._TITLE_FIXTURE_FILES).isdisjoint(set(other))
+
+
+def test_title_fixture_is_never_a_literal_pytest_focus_target() -> None:
+    for path in vs._TITLE_FIXTURE_FILES:
+        assert vs.classify_path(path).directly_execute is False
+
+
+def test_unrelated_non_python_fixture_still_fails_closed_beside_title_fixture() -> None:
+    """Adding the exact `title_cases.json` rule must not create a
+    directory-wide or wildcard fallback -- a different, genuinely unmapped
+    non-Python path in that same directory must still raise
+    `OwnerMappingRequiredError`."""
+    with pytest.raises(vs.OwnerMappingRequiredError, match="owner mapping required"):
+        vs.classify_path("backend/tests/fixtures/normalization/unrelated_cases.json")
+    with pytest.raises(vs.OwnerMappingRequiredError, match="owner mapping required"):
+        vs.classify_path("backend/tests/fixtures/normalization/title_cases.yaml")
+
+
+def test_title_fixture_mapping_is_load_bearing() -> None:
+    """Direct fault injection: clearing this exact map must make the title
+    fixture's classification fail closed with `OwnerMappingRequiredError`
+    -- proving this mapping, not some other fallback, is what makes it
+    pass -- and restoring it must make classification pass again."""
+    original = dict(vs._TITLE_FIXTURE_FILES)
+    path = next(iter(vs._TITLE_FIXTURE_FILES))
+    try:
+        vs._TITLE_FIXTURE_FILES.clear()
+        with pytest.raises(vs.OwnerMappingRequiredError, match="owner mapping required"):
+            vs.classify_path(path)
+    finally:
+        vs._TITLE_FIXTURE_FILES.clear()
+        vs._TITLE_FIXTURE_FILES.update(original)
+    assert vs.classify_path(path).category == "test-fixture:title-classifier"
 
 
 def test_evaluation_fixture_file_is_mapped_never_owner_mapping_required() -> None:

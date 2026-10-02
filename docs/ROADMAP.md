@@ -469,7 +469,7 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   external lookups, no taxonomy — all Phase 4+ or explicitly out-of-scope concerns.
   All six Phase 3 classifier parsers (remote, employment, seniority, experience, salary,
   location) are now merged into `main` — this is still not a Phase 3 completion claim.
-  Title parser has not been started.
+  Title parser had not been started at that point (see the twelfth slice below).
   A seventh slice, the **skill-taxonomy foundation** (Class H; risk classified high
   because ambiguous-alias false matches are Phase 3's own named primary risk, and this
   is novel infrastructure two future parsers depend on, not a "repeated established
@@ -530,10 +530,10 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   parser was changed in this slice to make the corpus pass.
   An eleventh slice, the **first post-baseline Phase 3 correction** (same Class H
   authorization, base `25ac578`, branch
-  `phase-3/baseline-correction-go-remote-v2`) — **candidate stage, not yet reviewed,
-  not merged; see this slice's own `docs/LLM_HANDOFF.md` entry for the exact
-  candidate `C` commit.** Recovers exactly 2 of the 5 disclosed `skills.golang`
-  recall misses (`anthropic:4502508008`, `gitlab:8512432002`) and corrects both
+  `phase-3/baseline-correction-go-remote-v2`) — **merged into `main` at
+  `M=689f94c65ebdb278dba0c8bb20bb6b1c272b9716` /
+  `Q=aed2694720b0344ae54feeef1916805f91e6b508`.** Recovers exactly 2 of the 5
+  disclosed `skills.golang` recall misses (`anthropic:4502508008`, `gitlab:8512432002`) and corrects both
   disclosed `remote_type` ambiguous false positives (`discord:8214127002`,
   `discord:8545675002`). The remaining 3 `skills.golang` misses stay open backlog
   items. The `gitlab:8512432002` recovery uses already-exposed GitLab holdout
@@ -541,6 +541,25 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   evidence. See this slice's own `docs/LLM_HANDOFF.md` entry and
   `docs/DECISIONS/0010-realistic-evaluation-corpus-methodology.md` for exactly what
   is and is not yet populated.
+  A twelfth slice, the **title classifier** (Class H, base `aed2694`, branch
+  `phase-3/title-normalization`) — **candidate stage at the time of this entry, not
+  reviewed or merged; `docs/LLM_HANDOFF.md` records its current state.**
+  `app/normalization/titles.py`'s `classify_title(title)` returns a `TitleResult`: a
+  `canonical_title` and its `role_family`, each a `NormalizationResult` that is always
+  `INFERRED` when present, plus a closed `TitleOutcome` (`matched`/`no_title`/
+  `unsupported`/`ambiguous`). A frozen, code-defined nine-title vocabulary (seven role
+  families) with import-time table validation — no `taxonomy/titles.yaml` is created,
+  and saved-search title alias expansion is deferred to a future matching phase.
+  Conservative suffix-alias matching under a bounded per-code-point character policy;
+  any doubt yields `(None, UNAVAILABLE)`. Seniority is not extracted here. Not wired
+  into ingestion/persistence; no `jobs.normalized_title`/`job_family` write of any
+  kind. The 30 frozen-corpus titles are included as byte-identical,
+  primary-reviewer-approved smoke/regression expectations (22 matched, 6 unsupported,
+  2 ambiguous) — never accuracy, holdout, coverage, precision, recall, or
+  generalization evidence; the frozen corpus, its annotations, and the evaluator are
+  unchanged. The 3 remaining `skills.golang` misses and the `salary.*` missing-wired-
+  input gap remain outside this slice (the latter is future provider-composition
+  work).
 - **Phase 4: two bounded read-only prework proofs merged into `main`; the production
   `AtsScrapersProvider` adapter is not started and Phase 4 is not complete.** The
   Greenhouse live ATS canary (`phase-4/greenhouse-canary`, merged at `64a3534`) and the

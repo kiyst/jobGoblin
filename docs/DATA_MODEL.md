@@ -418,8 +418,9 @@ is still silently dropped on commit; see the model's own docstring and
 ### `saved_search_titles`
 **Implemented** (`backend/app/db/models/saved_search_title.py`; migration `0007`,
 `down_revision = "0006"`). Split out (rather than an array column on `saved_searches`)
-because titles need per-entry alias expansion against `taxonomy/titles.yaml` in Phase 3,
-and because a title can independently carry "this is the primary title" vs. "this is an
+because titles need per-entry alias expansion against a title vocabulary — deferred to a
+future matching phase (Phase 3's title classifier, `normalization/titles.py`, uses a
+code-defined vocabulary and creates no `taxonomy/titles.yaml`) — and because a title can independently carry "this is the primary title" vs. "this is an
 acceptable alias."
 
 | column | type | notes |
