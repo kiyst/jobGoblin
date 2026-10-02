@@ -295,3 +295,36 @@ gate: final
 verdict: approved
 findings: none
 ```
+
+### Merge record
+
+- Date: 2026-10-02. Merged `phase-3/title-normalization` at the approved,
+  reviewed commit `71176ccba8204058b80552ef70d7b2e25b72a9bc` (`R`; Sol's "approved -- no executable findings" verdict on
+  `C2=4c6f933`/`A2=795ed58`, above) into `main` via `git merge --no-ff`. Merge
+  commit: `a3c1c12053e7990b88e2c01f6736425cb59f3453`. Pre-merge `main`/`origin/main` tip (rollback boundary): `aed2694720b0344ae54feeef1916805f91e6b508`.
+- Pre-merge checks: freshly fetched `origin`. The feature branch and its origin both
+  sat at `71176cc`, and `main`/`origin/main` were both clean and synchronized at
+  `aed2694`. `validate_c_a_r_chain(C2, A2, R)` and `check_merge_eligibility(C2, A2,
+  R)` still returned `approved`, `findings: none`, `reviewer_model: Sol Medium`.
+  Receipt `1541f94b-45fe-49ef-af52-2afd39fcb367` remained schema-valid, bound to `C2`, and independently
+  recomputed as approval-eligible.
+- Release sequence: `M` was created locally and not pushed. `R..M` has zero content
+  difference, and `check_review.validate_merge(R, M, aed2694)` confirmed `M`'s exact
+  two-parent shape. `verification_coordinator.run_post_merge_verification` ran
+  against `M` in a disposable detached worktree (always full/final):
+  - artifact `bb3ce6d0-5c3f-4791-a5a9-fcd61fb6a56e`, all 11 steps PASS;
+  - full pytest suite **3470 passed**, all 34 registered mutation witnesses
+    pass;
+  - no migration triggered;
+  - worktree initial/final snapshots identical, no residual worktree entry, cleanup
+    PASS.
+  `Q` is `M`'s direct mainline child: that artifact plus this append-only merge
+  record, in one commit (this entry itself).
+- Post-merge evidence: `docs/post-merge/a3c1c12053e7990b88e2c01f6736425cb59f3453/bb3ce6d0-5c3f-4791-a5a9-fcd61fb6a56e.json`, referencing original receipt `1541f94b-45fe-49ef-af52-2afd39fcb367`
+  (`docs/verification-receipts/4c6f933fb3112357f6a96f751115776e74831d73/1541f94b-45fe-49ef-af52-2afd39fcb367.json`). `check_review.validate_published(C2, A2, R, M, Q)` and
+  `verification_coordinator.confirm_main_unchanged` run immediately before the push;
+  their results are in the agent's final report rather than restated here ahead of
+  time.
+- STOP -- report the synchronized final `main` SHA and stop. No Phase 3 exit audit,
+  Phase 4, persistence wiring, provider contact, production database work, or another
+  correction slice without separate explicit user authorization.
