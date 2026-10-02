@@ -513,3 +513,47 @@ gate: final
 verdict: approved
 findings: none
 ```
+
+### Merge record
+
+- Date: 2026-10-01. Merged `phase-3/baseline-correction-go-remote-v2`
+  at approved, reviewed commit `3629be3b3bd267358f3b515cfeae14179a74cce2`
+  (`R`; Sol's "approved -- no executable findings" verdict on
+  `C3=14083dd`/`A3=5ec94f3`, above) into `main` via `git merge --no-ff`.
+  Merge commit: `689f94c65ebdb278dba0c8bb20bb6b1c272b9716`. Pre-merge
+  `main`/`origin/main` tip (rollback boundary):
+  `25ac578f6e980eb73964de17d8f32ca1f2695867`.
+- Pre-merge checks: freshly fetched `origin`; confirmed the feature
+  branch and its origin both sat at `3629be3`, and `main`/`origin/main`
+  were both clean and synchronized at `25ac578` before merging;
+  re-confirmed `validate_c_a_r_chain(C3, A3, R)` and
+  `check_merge_eligibility(C3, A3, R)` both still returned `approved`
+  with `findings: none` and `reviewer_model: Sol Medium`, and that
+  receipt `dcbb1847-7130-4f78-a833-b51732754965` remained schema-valid,
+  bound to `C3`, and independently recomputed as approval-eligible.
+- Followed the documented `M -> Q` release sequence: `M` was created
+  locally, not pushed; zero content difference between `M` and `R`
+  confirmed (`git diff 3629be3 689f94c`, empty); `check_review.
+  validate_merge(R, M, 25ac578)` confirmed `M`'s exact two-parent shape;
+  `verification_coordinator.run_post_merge_verification` was run against
+  `M` in a disposable detached worktree (always full/final) -- artifact
+  `6cf79e0d-73d9-4035-971d-1defbca18cf3`, all 11 steps PASS, full pytest
+  suite **3187 passed**, all 34 mutation witnesses pass, no migration
+  triggered, worktree initial/final snapshots identical with no residual
+  worktree entry, cleanup PASS. `Q` was authored as `M`'s direct mainline
+  child, bundling that artifact with this append-only merge record in
+  one commit -- this entry itself.
+- Post-merge evidence status: `docs/post-merge/
+  689f94c65ebdb278dba0c8bb20bb6b1c272b9716/
+  6cf79e0d-73d9-4035-971d-1defbca18cf3.json`, referencing original
+  receipt `dcbb1847-7130-4f78-a833-b51732754965` (`docs/
+  verification-receipts/14083dd27c73609e67bdaac2793f3769bdb367e7/
+  dcbb1847-7130-4f78-a833-b51732754965.json`). `check_review.
+  validate_published(C3, A3, R, M, Q)` and `verification_coordinator.
+  confirm_main_unchanged` are run immediately before push; see the
+  agent's final report for their results rather than restating them here
+  ahead of time.
+- STOP -- report the synchronized final `main` SHA and stop. No title
+  normalization, provider integration, persistence wiring, API/
+  tool-calling work, another parser correction, or any new slice without
+  separate explicit user authorization.
