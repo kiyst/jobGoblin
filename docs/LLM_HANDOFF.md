@@ -403,12 +403,16 @@ findings: none
 
 ```workflow-metadata
 workflow_version: v3.2
-state: pending
+state: published
 slice_id: 2026-10-02-phase3-title-normalization-aed2694
 slice_kind: parser
 risk_class: H
 base_sha: aed2694720b0344ae54feeef1916805f91e6b508
 declared_gate: final
+executed_gate: final
+candidate_sha: e2573bc9792e74f60b59fd2b2974141a1a32302b
+receipt_id: d8ea060c-298d-473e-93a6-aa6d32b7c7d7
+receipt_path: docs/verification-receipts/e2573bc9792e74f60b59fd2b2974141a1a32302b/d8ea060c-298d-473e-93a6-aa6d32b7c7d7.json
 fixture_path: backend/tests/fixtures/normalization/title_cases.json
 fixture_count: 200
 ```
