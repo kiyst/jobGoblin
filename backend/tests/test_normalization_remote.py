@@ -5,7 +5,11 @@ from typing import Any, cast
 
 import pytest
 
-from app.normalization.remote import classify_remote_type
+from app.normalization.remote import (
+    _OFFICE_ATTENDANCE_BLOCKER_PHRASES,
+    _extract_description_signal,
+    classify_remote_type,
+)
 from app.normalization.types import Provenance
 
 _FIXTURES_PATH = (
@@ -51,6 +55,34 @@ def test_classify_remote_type_is_deterministic() -> None:
         first = classify_remote_type(case["title"], case["description"])
         second = classify_remote_type(case["title"], case["description"])
         assert first == second
+
+
+# ---------------------------------------------------------------------------
+# Office-attendance blocker -- unit-level, direct coverage supplementing the
+# fixture-driven end-to-end cases above.
+# ---------------------------------------------------------------------------
+def test_office_attendance_blocker_phrase_catalog_is_exactly_one_closed_phrase() -> None:
+    assert len(_OFFICE_ATTENDANCE_BLOCKER_PHRASES) == 1
+    (phrase,) = _OFFICE_ATTENDANCE_BLOCKER_PHRASES
+    assert phrase == ("required", "to", "be", "in", "the", "office")
+
+
+def test_extract_description_signal_returns_signal_and_blocker_tuple() -> None:
+    signal, blocker_present = _extract_description_signal(
+        "Employees are required to be in the office two days per week."
+    )
+    assert signal is None
+    assert blocker_present is True
+
+
+def test_extract_description_signal_blocker_absent_when_phrase_absent() -> None:
+    signal, blocker_present = _extract_description_signal("You can work remotely.")
+    assert signal == "remote"
+    assert blocker_present is False
+
+
+def test_extract_description_signal_none_text_returns_false_blocker() -> None:
+    assert _extract_description_signal(None) == (None, False)
 
 
 def _imported_module_names(source: str) -> list[str]:

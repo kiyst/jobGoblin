@@ -628,5 +628,68 @@
     "expected_value": "remote",
     "expected_provenance": "inferred",
     "note": "Positive control proving a properly paired bracket marker ([Remote]) is still accepted as a structural marker, distinct from the two crossed-delimiter regressions above."
+  },
+  {
+    "id": "description_office_attendance_blocker_bare_two_days",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "Employees are required to be in the office two days per week.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Binding clarification (Sol): an office-attendance requirement must never independently resolve to onsite (two days a week commonly describes hybrid work) -- the blocker carries no value of its own."
+  },
+  {
+    "id": "description_office_attendance_blocker_bare_three_days",
+    "origin": "synthetic_adversarial",
+    "title": null,
+    "description": "Employees are required to be in the office three days per week.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "Same as the two-day case, at a different day count -- the blocker must never become onsite regardless of the specific number, since this slice deliberately does not interpret day counts."
+  },
+  {
+    "id": "description_office_attendance_blocker_negated_alone",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "You are not required to be in the office.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "The blocker phrase is negated via the existing negation pipeline (no new negation code) -- with no other signal present, the result is unavailable either way."
+  },
+  {
+    "id": "description_office_attendance_blocker_downgrades_qualified_remote",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "You can work remotely, and you are not required to be in the office.",
+    "expected_value": "remote",
+    "expected_provenance": "parsed_description",
+    "note": "The blocker is itself negated in this sentence, so it never suppresses the qualified 'work remotely' phrase -- proves the blocker respects negation rather than blindly firing whenever its literal text is present."
+  },
+  {
+    "id": "description_office_attendance_blocker_location_conditional_two_sentences",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "Candidates in Denver can work remotely. Candidates in Austin are required to be in the office three days per week.",
+    "expected_value": null,
+    "expected_provenance": "unavailable",
+    "note": "The general shape of the two real baseline false positives: a location-conditional posting promising remote work for one group and an unnegated office-attendance requirement for another -- fails closed instead of confidently 'remote'."
+  },
+  {
+    "id": "description_office_attendance_blocker_does_not_override_existing_hybrid",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "This is a hybrid role. Employees are required to be in the office two days per week.",
+    "expected_value": "hybrid",
+    "expected_provenance": "parsed_description",
+    "note": "Binding clarification (Sol): explicit existing hybrid evidence must retain its current behavior -- the blocker only ever downgrades an otherwise-final 'remote', never 'hybrid'."
+  },
+  {
+    "id": "description_office_attendance_blocker_does_not_override_existing_onsite",
+    "origin": "synthetic_representative",
+    "title": null,
+    "description": "This is an onsite role. Employees are required to be in the office two days per week.",
+    "expected_value": "onsite",
+    "expected_provenance": "parsed_description",
+    "note": "Binding clarification (Sol): explicit existing onsite evidence must retain its current behavior -- redundant with the independent onsite phrase, but must not break."
   }
 ]

@@ -98,104 +98,231 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-09-27, Claude Code (Sonnet 5). Same slice, same
-  authorization (`slice_id: 2026-09-27-realistic-corpus-freeze-evaluation-
-  0dae468`, risk class **H**, `slice_kind: tooling`, `declared_gate: final`).
-  Same branch `phase-3/realistic-corpus-freeze-evaluation`, on top of the
-  existing pushed checkpoint `80b4672`, preserved unamended. One bounded
-  correction round for Sol's final Stage 1 re-review verdict on that
-  checkpoint (two findings, F14/F15). Every unaffected F11-F13 rule
-  (canonical location forms, the multi-requirement decision table, the
-  gap-metric rename/applicability sentinel, `_is_meaningfully_present`'s
-  whitespace handling) is preserved unchanged. No annotation pass,
-  adjudication, corpus freeze, baseline evaluation, provider contact,
-  database work, or parser-semantic change performed. Ending commit: this
-  commit.
-- **F14 (contradictory non-US `location.state` instructions)**: the
-  canonical-domain table already correctly classified a non-US state/
-  province/region as `present_unsupported_form`, but the location-
-  normalization table's US-state bullet contradicted it, saying to
-  annotate such a value "in its own natural written form" -- a value the
-  loader's closed USPS-code validator would reject outright. Corrected
-  that bullet to state explicitly: `outcome = "present_unsupported_form"`,
-  `expected_value = null`, `expected_provenance = "unavailable"`, and
-  that the region's natural form must never be written into
-  `expected_value`. Added a fabricated synthetic example to the location
-  situation/rule table (`location_raw` = "Toronto, Ontario, Canada" ->
-  `location.state` is `present_unsupported_form`/null/unavailable, while
-  `location.country` = `"Canada"` `present_supported` is unaffected, since
-  country's domain is open free text). Also corrected the adjacent
-  postal-code wording, which described ZIP+4 as "digits only" -- a ZIP+4
-  is exactly five ASCII digits, one hyphen, and four ASCII digits, and the
-  hyphen is a required literal part of the form, not a digit; ZIP5 remains
-  exactly five ASCII digits.
-- **F15 (format-character-only wired inputs silently counted as
-  present)**: `_is_meaningfully_present` previously used a bare
-  `value.strip() != ""` check, which does not strip Unicode format
-  characters (category `Cf`, e.g. U+200B zero-width space, U+FEFF BOM,
-  U+180E Mongolian vowel separator) -- confirmed directly that
-  `classify_salary`/`classify_location` return entirely unavailable
-  results for all three, individually and mixed with ordinary whitespace,
-  yet the old check reported them as "present." Replaced it with the
-  project's own established meaningful-text rule, mirrored from
-  `fetch_greenhouse_evaluation_postings.py`'s `_has_meaningful_text`: a
-  value is meaningfully present only if it contains at least one
-  character that is neither Unicode whitespace (`str.isspace()`) nor
-  category `Cf`. Added `import unicodedata`. Seven new regressions: U+200B-
-  only, U+FEFF-only, U+180E-only, and ordinary whitespace mixed with only
-  those three (all four parametrized as "rejected"); a positive control
-  mixing `Cf` characters with genuine visible content (accepted); and one
-  end-to-end test through the real `evaluate_corpus`/`classify_salary`
-  pipeline confirming a U+200B-only `compensation_text` routes a
-  `present_supported` salary annotation to `missing_wired_input_gap`,
-  never `supported_abstention`.
-- Because the annotation contract changed a fourth time before any
-  annotation exists, `RUBRIC_VERSION` bumped `1.0.3 -> 1.0.4`. **Historical,
-  superseded evidence** (none ever annotated against), all four now
-  recorded in the rubric's own superseded-evidence table: `1.0.0` (commit
-  `7644e20`), `1.0.1` (commit `64dd730`), `1.0.2` (commit `d2097b4`), and
-  `1.0.3` (rubric sha256
-  `3948ec6a09c188a95b9a2ee1fb9ecd94edda2ab5c48bb39e32826e36f51f7f87`,
-  `source_packet_hash b56b0f65529fc83a8f30c8958ba697544a321a003b323220b92a
-  7c1ac8c6dd1b`, commit `80b4672`). **Current**: rubric sha256
-  `70961ec18fcbd5a316bb6ae49b4c9edc0cc1b3957aa6f5cd1f59c1684057eeb9`,
-  `source_packet_hash 010a13e0b5040121d4f55df62a0dc3780033469c316380cc1e4
-  15c5a86641f92` (taxonomy/salvage hashes unchanged).
-- Verification: `ruff format --check`/`ruff check` clean on all four
-  touched files; `mypy` clean on both scripts; full backend suite **3128
-  passed** (was 3121; +7 = the F15 regressions above); `check_repo.py`
-  clean; `git diff --check` clean; focused
-  `test_evaluate_phase3_corpus.py` (83 tests) and
-  `test_freeze_phase3_realistic_corpus.py` (43 tests, unchanged -- no
-  freeze-builder logic touched this round beyond the `RUBRIC_VERSION`
-  constant it imports indirectly via the rubric path) both green.
-- Adversarial self-review: independently reproduced Sol's exact claim
-  before fixing anything -- ran `classify_salary` directly against
-  U+200B/U+FEFF/U+180E and a mixed string, confirmed all four return
-  entirely unavailable results, and confirmed `unicodedata.category()`
-  reports `Cf` for all three code points in this environment's Unicode
-  database before trusting the fix's premise; confirmed the new
-  `_is_meaningfully_present` body is character-for-character identical in
-  logic to `fetch_greenhouse_evaluation_postings.py`'s own
-  `_has_meaningful_text`, not a lookalike reimplementation; confirmed the
-  new fabricated location example's `country` sub-field is genuinely
-  unaffected by the `state` fix (open free-text domain, no validator
-  change) rather than assuming it without checking; confirmed no
-  existing test asserted the old (incorrect) "natural written form"
-  behavior anywhere, so no other test needed updating for F14.
-- Files changed: `docs/evaluation/phase3-realistic-annotation-rubric.md`
-  (F14 corrections + synthetic example, `rubric_version` bump),
-  `backend/scripts/evaluate_phase3_corpus.py` (F15 fix, `unicodedata`
-  import, docstring), `backend/tests/test_evaluate_phase3_corpus.py`
-  (76 -> 83 tests), `backend/scripts/freeze_phase3_realistic_corpus.py`
-  (`RUBRIC_VERSION` bump only), `docs/LLM_HANDOFF.md` (this entry, plus
-  the iteration rotation above).
-- STOP -- this remained a checkpoint within an incomplete slice, not a
-  candidate, when written. Sol's final Stage 1 re-review subsequently
-  approved this checkpoint with no further findings (reported by the
-  user); Stage 1 concluded and annotation began. See Iteration 2 for the
-  completed annotation, adjudication, corpus freeze, and baseline
-  evaluation, and this slice's first candidate/publication record.
+- Date/agent: 2026-09-30, Claude Code (Sonnet 5). First post-baseline
+  Phase 3 correction slice (`slice_id: 2026-09-30-phase3-baseline-
+  correction-go-remote-25ac578`, risk class **H**, `slice_kind: parser`,
+  `declared_gate: final`), branch
+  `phase-3/baseline-correction-go-remote-v2`, base
+  `25ac578f6e980eb73964de17d8f32ca1f2695867` (main tip immediately after
+  the freeze/evaluation slice's `Q`, reconfirmed against `origin/main`
+  immediately before branching). Implements the frozen implementation
+  contract (original proposal + A1-A4 amendment table + Sol's six
+  further binding implementation amendments on the mechanics and
+  affected-file list) for exactly the two disclosed baseline defects:
+  the `skills.golang` recall gap and the `remote_type` location-
+  conditional ambiguous false positives. No rubric, taxonomy, corpus
+  fixture, provider mapping, or unrelated parser touched. This replaces
+  (on a fresh branch from the same base) an earlier implementation
+  attempt on `phase-3/baseline-correction-go-remote` that predated
+  Sol's six mechanical-precision amendments; that earlier branch is
+  superseded and not merged. Ending commit: this commit.
+- Outcome: `skills.py` gains a new `_go_list_neighbor_rescue` function,
+  restricted to `normalized_key == "go"` only (never `c`/`r`/`node`),
+  requiring all three: (1) `go` is the sole token in its own raw
+  delimiter-split segment; (2) the token touching the shared boundary of
+  the immediately preceding or immediately following raw segment --
+  never a segment further away, never reached by skipping an empty or
+  intervening segment, and never a match elsewhere inside that adjacent
+  segment -- is an unambiguous taxonomy match; (3) the cue-scoped
+  sentence containing it (split on a newline or a genuine `.!?`
+  terminator run, this module's own ASCII/covered-whitespace
+  conventions throughout, no Unicode-aware fuzzy matching anywhere in
+  the new code) contains one of exactly nine closed, strong candidate-
+  qualification/work-history cue phrases. Per Sol's binding
+  clarification, bare `programming language(s)`/`technology stack`/
+  `tech stack` are deliberately excluded from the cue set (they can
+  describe a product or company environment, not a candidate
+  requirement) -- proven by dedicated colon-delimited and literal
+  negative-control fixtures that isolate the cue check from the
+  standalone/adjacency checks. The existing anchored-region mechanism
+  is untouched. `remote.py` gains one new closed phrase, `"required to
+  be in the office"`, processed through the *same* candidate/negation/
+  context-exclusion pipeline as every other description phrase but
+  tagged as a non-value blocker (never enters `survivors`, can never
+  itself become `onsite`); `classify_remote_type` downgrades an
+  otherwise-final `remote` result to `(None, unavailable)` when the
+  blocker is present, and never touches an independently resolved
+  `hybrid`/`onsite` result.
+- Files changed (exactly the closed affected-file list, no other path):
+  `backend/app/normalization/skills.py`,
+  `backend/tests/test_normalization_skills.py`,
+  `backend/tests/fixtures/normalization/skill_cases.json` (72 -> 92
+  cases), `backend/app/normalization/remote.py`,
+  `backend/tests/test_normalization_remote.py`,
+  `backend/tests/fixtures/normalization/remote_type_cases.json` (70 ->
+  77 cases), `docs/ROADMAP.md` (bounded: recorded the freeze/evaluation
+  slice's actual `M`/`Q`, this slice's candidate status and recovered/
+  remaining defect counts, the GitLab-holdout-exposure caveat -- no
+  broader rewrite), `docs/LLM_HANDOFF.md` (this entry plus the
+  iteration rotation above).
+- Verification: `ruff format --check`/`ruff check` clean (171 files);
+  `mypy` clean (171 source files); focused suite (`test_normalization_
+  skills.py` + `test_normalization_remote.py`) **238 passed** (was 195;
+  +43 = 20 new/adjusted skill fixtures + 12 direct unit tests on the new
+  helper functions + 7 new remote fixtures + 4 direct unit tests on the
+  blocker); full backend suite **3171 passed** (was 3128; the local
+  disposable Postgres test database was briefly down for an earlier run
+  of this same suite, producing environment-only connection-refused
+  errors unrelated to this slice's pure-function parser changes; brought
+  back up via `docker compose up -d postgres` and the full suite reran
+  clean); `check_repo.py` clean; `git diff --check` clean. Full-report
+  diff of `python -m scripts.evaluate_phase3_corpus` against the
+  immutable baseline report matches the frozen contract's exact
+  allowlist -- **corrected at `C3` per Sol P2:** the original wording
+  here ("no other line changed") was inaccurate; the precise rule is
+  that no output line changes outside the complete approved metric/
+  record allowlist plus five mechanically derived
+  `false_positive_outside_frozen_set` denominator changes that this
+  entry originally omitted (dev `0/21 -> 0/22`, holdout `0/14 -> 0/15`,
+  combined `0/35 -> 0/37`, Anthropic `0/9 -> 0/10`, GitLab `0/14 ->
+  0/15`): `dev` skills precision/recall
+  `21/21,21/22 -> 22/22,22/22`, mismatches `124 -> 121`; `holdout`
+  skills precision/recall `14/14,14/18 -> 15/15,15/18`, mismatches
+  `39 -> 38`; `combined` skills precision/recall `35/35,35/40 ->
+  37/37,37/40`, `remote_type` ambiguous false positives `2/2 -> 0/2`,
+  mismatches `163 -> 159`; `employer:Anthropic` skills `9/9,9/10 ->
+  10/10,10/10`, mismatches `60 -> 59`; `employer:Discord` ambiguous
+  false positives `2/2 -> 0/2`, mismatches `64 -> 62`;
+  `employer:GitLab` skills `14/14,14/18 -> 15/15,15/18`, mismatches
+  `39 -> 38`. Exactly the two named `golang` recoveries
+  (`anthropic:4502508008`, `gitlab:8512432002`) and the two named
+  `remote_type` corrections (`discord:8214127002`, `discord:8545675002`)
+  changed; every other record, including `discord:8498984002` (the real
+  hybrid record used throughout as the negative control that rejected
+  an earlier, unsafe draft of the remote fix) and the three disclosed
+  unfixed `golang` misses, is byte-identical to the baseline.
+- Adversarial self-review: 11 independent mutation proofs performed
+  directly against this commit's own code (mutate -> confirm the
+  targeted isolating witness fails -> restore -> confirm it passes
+  again), one per safety conjunct: (1) `go`-only scope removed -- `c`/
+  `r`/`node` guard fixtures fail; (2) weak cues (`programming
+  language(s)`/`technology stack`/`tech stack`) accepted -- both
+  colon-variant guard fixtures fail; (3) same-cue-scoped-sentence
+  boundary removed (cue search widened to the whole text) -- both
+  cross-sentence guard fixtures fail; (4) standalone-segment
+  enforcement removed -- the imperative-verb-usage guard fixture fails;
+  (5) empty/intervening-segment skip permitted -- the no-skip guard
+  fixture fails; (6) boundary-touching-token-only requirement loosened
+  to "anywhere in the adjacent segment" -- the boundary-vs-elsewhere
+  guard fixtures fail; (7) blocker's downgrade-of-`remote` disabled --
+  the location-conditional guard fixture fails; (8) blocker allowed to
+  manufacture `onsite` -- both bare-blocker guard fixtures fail; (9)
+  blocker allowed to downgrade an independently-resolved `hybrid` --
+  that guard fixture fails; (10) blocker allowed to downgrade an
+  independently-resolved `onsite` -- that guard fixture fails; (11)
+  blocker bypasses negation (checked directly against unmasked tokens
+  outside the candidate pipeline) -- the negated-blocker-plus-qualified-
+  remote guard fixture fails. All 11 restored cleanly (238/238 passing,
+  full corpus report byte-identical to the verified-correct version
+  after every restoration). Contract-conformance pass: walked every
+  numbered mechanical requirement in the frozen contract and confirmed
+  each is enforced by one of the 11 mutation proofs above or by direct
+  code inspection (ASCII-only casefold via `_ASCII_UPPER_TO_LOWER`,
+  never `re.IGNORECASE`/`.lower()`, confirmed by reading every new
+  function; existing anchored-region code path confirmed untouched by
+  diff). Counterexample pass: constructed fresh adversarial inputs not
+  drawn from the fixture corpus -- a cue-bearing sentence whose only
+  candidate neighbors are non-taxonomy words (`"...Elixir, Go, Crystal,
+  and Nim."`) correctly stays empty; an all-uppercase cue and candidate
+  (`"PRODUCTION EXPERIENCE with Python, GO, Java."`) still correctly
+  rescues, confirming the ASCII-casefold cue check is case-insensitive
+  by design, not merely by fixture coincidence; a hyphenated `"Go-lang"`
+  token correctly fails to match at all (pre-existing exact-match
+  taxonomy lookup behavior, not a new gap). No new defect found by
+  either pass.
+- Deviations/known limitations: none beyond what was already disclosed
+  in the approved contract (three residual `golang` misses; `salary.*`
+  wiring gap deferred to Phase 4+; the `gitlab:8512432002` holdout fix
+  is informational confirmation only, never independent proof of
+  generalization).
+- STOP -- this commit is candidate `C` for this slice (see
+  `workflow-metadata` below, `state: pending`). Per the explicit
+  authorization for this round, this covers implementation,
+  verification, adversarial self-review, creation and push of candidate
+  `C` only -- it does not authorize publication `A`, review `R`, merge
+  `M`, post-merge `Q`, provider contact, database access, title
+  normalization, persistence integration, or another product slice.
+  Waiting for Sol's independent review of the actual diff.
+
+```workflow-metadata
+workflow_version: v3.2
+state: published
+slice_id: 2026-09-30-phase3-baseline-correction-go-remote-25ac578
+slice_kind: parser
+risk_class: H
+base_sha: 25ac578f6e980eb73964de17d8f32ca1f2695867
+declared_gate: final
+executed_gate: final
+candidate_sha: 467ec75273c3bee00e939c720cba072b2b7754d1
+receipt_id: 24a31360-502b-4c35-8be3-a35374679077
+receipt_path: docs/verification-receipts/467ec75273c3bee00e939c720cba072b2b7754d1/24a31360-502b-4c35-8be3-a35374679077.json
+fixture_path: backend/tests/fixtures/normalization/skill_cases.json
+fixture_count: 92
+```
+
+### C2 correction (ownership-mapping gap)
+
+- Original candidate `C = 70e0e9258006bbd7da77317fe06b41d0281e70b9` (above)
+  is preserved **unamended** -- not rebased, not force-pushed. Running
+  the receipt-eligible Workflow v3.2 coordinator against `C` with
+  `--gate final` failed before any test executed, with:
+  `scripts.verification_scope.OwnerMappingRequiredError:
+  'backend/tests/fixtures/normalization/remote_type_cases.json' is a
+  non-Python path under backend/tests/ with no declared exact rule --
+  owner mapping required before verification can proceed`. Diagnosis:
+  `backend/tests/fixtures/normalization/skill_cases.json` has long been
+  registered in `scripts/verification_scope.py`'s `_SKILL_FIXTURE_FILES`,
+  but the sibling `remote_type_cases.json` fixture (which already existed
+  at 70 cases before this slice) was never registered anywhere -- a
+  pre-existing ownership-mapping gap this slice's own diff was the first
+  to expose by actually changing that file through the receipt-eligible
+  path, not a defect this slice introduced.
+- `C2 = this commit` adds exactly one narrowly bounded correction, in
+  exactly three files (`backend/scripts/verification_scope.py`,
+  `backend/tests/test_verification_scope.py`, this entry in
+  `docs/LLM_HANDOFF.md`): a new, dedicated `_REMOTE_FIXTURE_FILES` exact-
+  path table (never folded into `_SKILL_FIXTURE_FILES`), mapping
+  `backend/tests/fixtures/normalization/remote_type_cases.json` to the
+  distinct category `test-fixture:remote-classifier`, integrated into
+  both existing exact-map iteration sites
+  (`_validate_configuration`'s duplicate-detection list and
+  `classify_path`'s own exact-map tuple) -- the identical pattern already
+  used for `_SKILL_FIXTURE_FILES`/`_TAXONOMY_FIXTURE_FILES`/
+  `_EVALUATION_FIXTURE_FILES`. No wildcard or directory-wide fallback; an
+  unrelated unmapped non-Python path under the same `normalization/`
+  fixtures directory still fails closed with `OwnerMappingRequiredError`
+  (directly tested). The new category follows the existing `test-
+  fixture:*` naming convention, so it automatically falls outside
+  `required_contract_families`'s `parser`/`adapter`/`contract-record`
+  kinds (no location/salary/experience coverage requirement) and is
+  never flagged `directly_execute` (never a literal pytest `--focus`
+  target) -- both confirmed by dedicated tests, with no change to either
+  function's own logic. **No parser semantics, fixture content, or
+  evaluator behavior changed by this correction** -- `skills.py`/
+  `remote.py`/both fixture JSON files/the frozen corpus are byte-
+  identical to `C`.
+- Verification: `ruff format --check`/`ruff check` clean (171 files);
+  `mypy` clean (171 source files); focused `test_verification_scope.py`
+  **79 passed** (was 72); combined focused (`test_normalization_skills.py`
+  + `test_normalization_remote.py` + `test_verification_scope.py`)
+  **317 passed**; full backend suite **3178 passed**
+  (was 3171 at `C`; +7 new verification-scope tests); `check_repo.py`
+  clean; `git diff --check` clean. Realistic-corpus evaluator output
+  reconfirmed byte-identical to `C`'s own approved output.
+- Adversarial self-review: direct fault injection
+  (`test_remote_fixture_mapping_is_load_bearing`, mirroring the existing
+  `test_duplicate_exact_rule_is_rejected_at_configuration_time` pattern)
+  temporarily clears `_REMOTE_FIXTURE_FILES`, confirms
+  `classify_path` raises `OwnerMappingRequiredError` on the exact
+  previously-failing path, restores the table, and confirms
+  classification passes again -- proving the new mapping, not some
+  other fallback, is what fixes the original failure.
+- STOP -- `C2` is the corrected candidate for this slice. Waiting for the
+  receipt-eligible coordinator to be rerun against `C2` and, only if it
+  passes, for publication `A2` (separately authorized). No `R`, merge,
+  `M`, `Q`, broader verification-tooling change, parser change, fixture-
+  content change, provider contact, database access, or title
+  normalization is authorized here.
 
 ---
 
@@ -203,216 +330,186 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-09-28, Claude Code (Sonnet 5). Same slice, same
-  authorization (`slice_id: 2026-09-27-realistic-corpus-freeze-evaluation-
-  0dae468`, risk class **H**, `slice_kind: tooling`, `declared_gate: final`).
-  Same branch `phase-3/realistic-corpus-freeze-evaluation`, base
-  `0dae4683645599369d41d0228b0edad1cfad73ce` (unchanged, reconfirmed
-  against freshly-fetched `origin/main` immediately before this commit).
-  Completes the remainder of the approved 8-item freeze/evaluation
-  contract: two procedurally-blind independent annotation passes (Claude
-  and Sol, each 30 records x 28 labels against rubric 1.0.4, sealed and
-  hashed before either was revealed to the other), the full human
-  adjudication/audit interview (95 genuine disagreements + 220 required
-  agreement audits, every decision made and recorded by the user
-  personally, none by an agent), the deterministic corpus freeze, and the
-  first baseline evaluation. Ending commit: this commit.
-- Base -> ending commit: `0dae4683645599369d41d0228b0edad1cfad73ce` ->
-  this commit.
-- Outcome: publishes durable, tracked copies of the two sealed annotation
-  passes and the adjudication/audit evidence, the frozen corpus fixture,
-  and a tracked baseline evaluation report -- exactly the closed set of
-  outputs authorized for this completion. No release manifest is created:
-  that concept traces only to a separate, unapproved future
-  three-annotator proposal, not to this slice's actual contract, per
-  explicit user clarification this round. Conventions applied:
-  deterministic employer-sorted dev/holdout split (`Anthropic`+`Discord`
-  dev, `GitLab` holdout -- `GitLab` is lexicographically last);
-  adjudication/audit identity is exactly `user` throughout, never an
-  agent/model identity; create-only/atomic writes for every new sealed or
-  durable artifact. No new semantic decision -- this is mechanical
-  completion and publication-preparation of the already-frozen,
-  previously-approved contract; no rubric, taxonomy, classifier, or
-  provider-mapping change of any kind.
-- Files changed: `docs/evaluation/phase3-realistic-pass-claude.json`
-  (new, durable byte-identical copy of the sealed Claude pass, sha256
-  `f732c9d0f1fa0f19609dc84c7346fab69d84d0f3646ac18a87b44ad5b87bc71d`);
-  `docs/evaluation/phase3-realistic-pass-sol.json` (new, durable
-  byte-identical copy of the sealed Sol pass, sha256
-  `b6ce0ff33a94aa8afcc4332f26596ec548f264a6429f643ae696d5b1042227e1`);
-  `docs/evaluation/phase3-realistic-adjudication-audit.json` (new,
-  schema-conformant adjudication/audit artifact mechanically derived from
-  the completed pending-adjudication working file, sha256
-  `8de5a3faf48e662fc13cad7b5d8c1d8958061cbf06f04e38862358ff300f8ad9`);
-  `backend/tests/fixtures/evaluation/phase3_realistic_corpus.json` (new,
-  frozen corpus, 30 records/840 labels, 20 dev/10 holdout, sha256
-  `1863541bb784419be16bf4ffcf88bf1b4408c951a03b12008e9645e9f18e6930`);
-  `docs/evaluation/phase3-realistic-corpus-baseline-report.md` (new,
-  tracked baseline report embedding the verbatim deterministic evaluator
-  output plus source/lineage hashes); `docs/ROADMAP.md` (Phase 3 status
-  was stale -- still named the superseded branch and claimed "not yet
-  reviewed, not merged" for the prior slice, which is in fact already
-  merged at `M=41963baf4797b1b2b6fee1f72311dd6b84d7b6a3`/
-  `Q=0dae4683645599369d41d0228b0edad1cfad73ce`; corrected and recorded
-  this slice's own completed work); `docs/LLM_HANDOFF.md` (this entry,
-  Iteration 1's F15 "six"->"seven" wording correction, its corrected STOP
-  note, and the iteration rotation).
-- Verification: `ruff format --check`/`ruff check` clean (171 files, no
-  Python file touched this round); `mypy` clean (171 source files); full
-  backend suite **3128 passed** (unchanged from the prior checkpoint --
-  no test file touched this round); `check_repo.py` clean; `git diff
-  --check` clean. Receipt-eligible `--gate final` verification via
-  `scripts.verification_coordinator.run_receipt_eligible_verification`,
-  run against this exact candidate commit from a disposable detached
-  worktree: receipt id/path and executed-gate confirmation recorded in
-  this same block's `published` transition on the direct child commit.
-- Adversarial self-review (tooling-slice abbreviated pass): confirmed the
-  "release manifest"/"lineage sidecar" terms the initiating message used
-  trace only to the separate, unapproved future three-annotator proposal
-  (grepped this session's own record), never to this slice's actual
-  8-item contract or to `verification_scope.py`'s one pre-registered
-  fixture path -- raised this discrepancy to the user before writing
-  anything, rather than silently importing unauthorized future-workflow
-  vocabulary; confirmed by direct byte/string comparison (not merely
-  re-hashing) that all three durable `docs/evaluation/` copies are
-  identical to their sealed `.evaluation-staging/` originals and that the
-  baseline report's embedded evaluator output is byte-for-byte identical
-  to the actual deterministic run (reproduced twice, identical both
-  times); confirmed `docs/ROADMAP.md`'s Phase 3 paragraph was genuinely
-  stale before editing it, rather than assuming staleness; confirmed the
-  F15 handoff wording defect (a stated regression-test count of "six"
-  against Iteration 1's own recorded 76 -> 83 = +7 delta) is exactly the
-  harmless discrepancy previously noted and deferred, not a substantive
-  count error. No regression test applicable this round -- no executable
-  code changed. Remaining limitation: the baseline report's disclosed
-  findings (a `salary.*` wiring gap, several supported-field abstentions,
-  one `skills.golang` recall gap, two `remote_type` ambiguous false
-  positives) are intentionally left uncorrected, per contract, pending a
-  separately authorized future correction slice.
-- Deviations/known limitations: none beyond what the baseline report
-  itself discloses (see that report's own "Headline result"/"Holdout
-  exposure" sections). No release manifest was created -- confirmed with
-  the user this was never part of this slice's actual contract.
-- STOP -- candidate `C` for this slice (see `workflow-metadata` below,
-  `state: pending`). No `R`, merge, `M`, or `Q` is authorized by this
-  commit. Do not fix any baseline finding, rerun classifiers for
-  correction purposes, contact providers, access the database, or begin
-  title normalization. Waiting for Sol's independent review of this
-  candidate.
+- Date/agent: 2026-10-01, Claude Code (Opus 5.5). Same slice
+  (`slice_id: 2026-09-30-phase3-baseline-correction-go-remote-25ac578`,
+  risk class **H**, `slice_kind: parser`, `declared_gate: final`), same
+  branch `phase-3/baseline-correction-go-remote-v2`, same base
+  `25ac578f6e980eb73964de17d8f32ca1f2695867`. One bounded `C3`/`A3`
+  correction cycle for Sol's two findings against `C2`/`A2`. `C`
+  (`70e0e92`), `C2` (`467ec75`) and `A2` (`be89084`) are preserved
+  unamended; `C3` is `A2`'s direct child. **`A2`'s receipt
+  (`24a31360-502b-4c35-8be3-a35374679077`) is superseded and must not be
+  reused** -- a fresh receipt is required for `C3`. Sol accepted the
+  remote office-attendance blocker, the exact `remote_type_cases.json`
+  owner mapping, the Git scope, and `A2`'s receipt structure; those are
+  byte-for-byte unchanged here. Not approved: awaiting Sol's re-review.
+  Ending commit: this commit.
+- **Sol P1 (go rescue crossed a newline)**: confirmed reproduction at
+  `C2` -- `"Production experience with Python,\nGo, Java."` returned
+  `golang`/`java`/`python`. Root cause: `_go_list_neighbor_rescue` looked
+  up the cue sentence by the raw *segment's* start offset, and the
+  segment after `"Python,"` starts on the newline itself, which belongs
+  to the first line's sentence span. Fix: a new `_segment_token_offsets`
+  helper gives each token's own absolute source offset (index-aligned
+  with `_tokenize_segment`), and `_sentence_index_at` places the `Go`
+  *token* in its sentence. The same audit found a second instance of
+  the defect class that Sol did not list: the accepted neighbor could
+  also come from another line (`"Production experience: Go,\nPython."`
+  returned `golang`), contrary to the frozen contract's existing rule
+  that the cue, `go`, and its structural evidence share one sentence.
+  The neighbor token's own offset must now also fall in `Go`'s sentence.
+  Every prior structural guard is unchanged: `go`-only scope, sole-token
+  segment, same-sentence cue, immediate raw-segment adjacency, no
+  skipping empty/intervening segments, boundary-touching unambiguous
+  neighbor, strong-cue requirement, weak-cue exclusion, anchored-region
+  behavior, and `c`/`r`/`node` behavior.
+- **Sol P2 (exhaustive allowlist record was incomplete)**: the evaluator
+  output diff also changes five `false_positive_outside_frozen_set`
+  denominators (dev `0/21 -> 0/22`, holdout `0/14 -> 0/15`, combined
+  `0/35 -> 0/37`, Anthropic `0/9 -> 0/10`, GitLab `0/14 -> 0/15`), which
+  follow mechanically from the precision denominators. The inaccurate
+  "no other line changed" claim in Iteration 1 is replaced in place with
+  the precise rule: no output line changes outside the complete approved
+  metric/record allowlist plus these five denominator changes. The
+  headline precision/recall, mismatch counts, the four corrected records,
+  and the absence of new false-positive/confidently-wrong results were
+  already correct. No baseline report, corpus, evaluator, label, or
+  taxonomy changed.
+- Files changed (closed correction list):
+  `backend/app/normalization/skills.py` (token-offset sentence lookup,
+  same-sentence neighbor, docstring), `backend/tests/
+  test_normalization_skills.py` (3 direct unit tests for the new
+  helpers), `backend/tests/fixtures/normalization/skill_cases.json`
+  (92 -> 98 cases), `docs/LLM_HANDOFF.md` (this entry, the P2
+  correction in Iteration 1, and the rotation above). New regression
+  cases: comma immediately before newline, comma before newline plus
+  indentation, semicolon immediately before newline (all: `python`,
+  `java`, no `golang`); same-line positive control and cue-bearing line
+  after an unrelated line (both: `golang`, `java`, `python`); only
+  neighbor on the following line (`python` only).
+- Verification: `ruff format --check`/`ruff check` clean; `mypy` clean
+  (171 source files); focused skills + remote + verification-scope
+  **326 passed** (was 317; remote and verification-scope suites
+  unchanged); full backend suite **3187 passed** (was 3178 at `C2`; +6
+  fixtures, +3 unit tests);
+  `check_repo.py` clean; `git diff --check` clean. `python -m
+  scripts.evaluate_phase3_corpus` output is byte-identical to the
+  approved `C2` output, and a mechanical line-by-line check of its diff
+  against the immutable baseline matches the corrected exhaustive
+  allowlist exactly (36 removed / 24 added lines, none unexpected, none
+  missing).
+- Mutation proofs: **P1** -- restoring the defective segment-start offset
+  makes the three delimiter-before-newline regressions fail by returning
+  a spurious `golang`, while both positive controls still pass;
+  restoring the fix passes all. **Neighbor same-sentence guard** --
+  removing the neighbor sentence check makes the following-line-neighbor
+  regression fail; restored, it passes. Because the offset change sits
+  inside the same function as the other skills guards, all six earlier
+  skills guard mutations (go-only scope, strong-cue relevance,
+  same-sentence cue, standalone segment, no empty-segment skip,
+  boundary-touching neighbor) were re-run against `C3`'s code: each
+  isolating witness fails under its mutant and passes after
+  restoration. The five remote guard mutations were not re-run:
+  `remote.py`, its tests, and its fixture are byte-identical to `C2`,
+  and `skills.py` shares no code with `remote.py` (its import-boundary
+  test forbids cross-parser imports), so no change here can reach them;
+  the remote focused suite stays green.
+- Adversarial review (offsets, delimiters before newlines, leading
+  whitespace, empty segments, sentence topology): correct for CRLF before
+  `Go`, an empty segment before a newline, a cue later on `Go`'s own
+  line, blank lines, tab indentation, a parenthesized `Go` on either side
+  of a newline, a terminator followed by a newline, `Go` first in the
+  text, and a neighbor separated from `Go` by a terminator. Residual,
+  unchanged by design: a lone CR or U+2028 is not a sentence boundary in
+  this module (only `\n` and `.!?` runs are, matching the existing
+  anchor grammar and the contract's no-Unicode-fuzzy-matching rule); the
+  HTML converter already normalizes CR/CRLF to `\n` upstream.
+- Deviations/known limitations: the same-sentence neighbor check goes
+  beyond Sol's literal P1 text but enforces an already-approved contract
+  rule within the closed file list; disclosed here for review. The three
+  residual `golang` misses, the `salary.*` wiring gap, and the
+  exposed-holdout caveat on `gitlab:8512432002` are unchanged.
+- STOP -- this commit is candidate `C3` (see `workflow-metadata` below,
+  `state: pending`). Next: a fresh receipt-eligible `--gate final`
+  coordinator run against `C3` and, only if it passes, publication `A3`.
+  No `R`, merge, `M`, `Q`, remote or verification-mapping change,
+  provider contact, production data access, or title normalization.
 
 ```workflow-metadata
 workflow_version: v3.2
 state: published
-slice_id: 2026-09-27-realistic-corpus-freeze-evaluation-0dae468
-slice_kind: tooling
+slice_id: 2026-09-30-phase3-baseline-correction-go-remote-25ac578
+slice_kind: parser
 risk_class: H
-base_sha: 0dae4683645599369d41d0228b0edad1cfad73ce
+base_sha: 25ac578f6e980eb73964de17d8f32ca1f2695867
 declared_gate: final
 executed_gate: final
-candidate_sha: 03609018215285cca21dd31fc126978fe2de8d15
-receipt_id: 338d5c4b-37fd-47dd-a220-f67919ca45de
-receipt_path: docs/verification-receipts/03609018215285cca21dd31fc126978fe2de8d15/338d5c4b-37fd-47dd-a220-f67919ca45de.json
+candidate_sha: 14083dd27c73609e67bdaac2793f3769bdb367e7
+receipt_id: dcbb1847-7130-4f78-a833-b51732754965
+receipt_path: docs/verification-receipts/14083dd27c73609e67bdaac2793f3769bdb367e7/dcbb1847-7130-4f78-a833-b51732754965.json
+fixture_path: backend/tests/fixtures/normalization/skill_cases.json
+fixture_count: 98
 ```
 
 ### Work review
 
-- Date/reviewer: 2026-09-30, Sol. Diff reviewed: `C..A`
-  (`0360901..1ec12a6`) on `phase-3/realistic-corpus-freeze-evaluation`,
-  against the approved two-annotator pilot contract and its closed
-  affected-file list only -- the separate, unapproved future
-  three-annotator proposal's requirements (release manifest, lineage
-  sidecar terminology) were explicitly not applied.
-- Independent verification performed: confirmed `A` is `C`'s direct
-  single-parent child; confirmed `C..A` changes only the one new receipt
-  file plus the `workflow-metadata` block's `pending` -> `published`
-  transition in `docs/LLM_HANDOFF.md`, no other byte or path; independently
-  recomputed the receipt's schema validity and `approval_eligible: true`;
-  confirmed `docs/evaluation/phase3-realistic-pass-claude.json` and
-  `docs/evaluation/phase3-realistic-pass-sol.json` are byte-identical to
-  their sealed `.evaluation-staging/` originals; confirmed
-  `docs/evaluation/phase3-realistic-adjudication-audit.json` is
-  byte-identical to the validated working artifact and contains exactly
-  95 completed disagreements and 220 completed required agreement audits;
-  confirmed the frozen corpus has 30 records x 28 labels = 840 labels
-  with valid embedded lineage; independently rebuilt the corpus and its
-  SHA-256 matched the committed
-  `1863541bb784419be16bf4ffcf88bf1b4408c951a03b12008e9645e9f18e6930`
-  exactly; confirmed the employer-disjoint split is 20 dev (Anthropic +
-  Discord) / 10 holdout (GitLab); independently reran
-  `python -m scripts.evaluate_phase3_corpus` and its output matched
-  `docs/evaluation/phase3-realistic-corpus-baseline-report.md`'s embedded
-  report byte-for-byte; confirmed the report accurately discloses the
-  baseline findings (salary wiring gap, supported-field abstentions, one
-  skills recall gap, two remote_type ambiguous false positives) and the
-  exposed-holdout limitation; confirmed no classifier, taxonomy, provider
-  mapping, rubric label, corpus decision, or file outside the closed
-  affected-file list changed; confirmed the deferred F15 "six"->"seven"
-  wording correction is accurate and bounded.
+- Date/reviewer: 2026-10-01, Sol. Diff reviewed: candidate `C3`
+  (`14083dd`) and its publication `A3` (`5ec94f3`) on
+  `phase-3/baseline-correction-go-remote-v2`, against the frozen
+  correction contract, Sol's prior P1/P2 findings, and the closed
+  affected-file list.
+- Dispositions:
+  - P1 candidate-offset correction: accepted. `_go_list_neighbor_rescue`
+    now resolves the `go` token's sentence from its own token offset, so a
+    relevance cue can no longer be borrowed across a newline.
+  - Same-sentence neighbour enforcement: accepted as enforcement of the
+    frozen contract's same-sentence requirement, not new semantics.
+  - P2 corrected evaluator allowlist: accepted, including the five
+    `false_positive_outside_frozen_set` denominator changes.
+  - Residual lone-CR / U+2028 sentence-boundary disclosure: accepted as a
+    disclosed limitation.
+  - Inherited `remote_type` office-attendance correction: accepted
+    unchanged.
+  - Exact-path `remote_type_cases.json` fixture ownership mapping:
+    accepted unchanged.
+  - Fresh `C3` receipt and the `A3` `pending` -> `published` transition:
+    accepted.
+  - Git structure (single-parent `C3` -> `A3`) and affected-file
+    boundaries: accepted.
+- Independent verification performed: 326 focused tests passed; the
+  defective candidate-offset mutant made all three newline regressions
+  fail; removing the same-sentence neighbour check made its dedicated
+  regression fail; restored targeted probes passed; `check_repo.py` and
+  `check_handoff.py` passed; candidate and publication `git diff --check`
+  passed; `require_single_parent(A3, C3)` and
+  `validate_c_to_a_transition(C3, A3)` passed.
+- Relied on, not repeated: the genuine receipt's 3187-test full suite and
+  34/34 mutation witnesses. The six earlier skills mutation runs were
+  inspected but not repeated. The five `remote_type` mutations were not
+  rerun because that surface is byte-identical and unreachable from the
+  skills change.
 - Findings by severity with exact references: none.
-- Missing/inconclusive checks: focused tests' first attempt failed only
-  on an inaccessible inherited Windows temp directory (environmental, not
-  a defect in the candidate); a rerun with an isolated writable base
-  passed 126/126. No other check was inconclusive.
-- Verdict: **approved**.
+- Missing/inconclusive checks: none beyond the relied-on receipt evidence
+  stated above.
+- Verdict: **approved** -- no executable findings.
 - Exact bounded correction: none required.
 - STOP -- record-only. No merge, `M`, `Q`, executable-file modification,
-  parser correction, provider contact, database access, or new slice is
-  authorized by this review.
+  provider contact, production-data access, title normalization, or new
+  slice is authorized by this review.
 
 ```workflow-review-metadata
 schema_version: 2
-slice_id: 2026-09-27-realistic-corpus-freeze-evaluation-0dae468
+slice_id: 2026-09-30-phase3-baseline-correction-go-remote-25ac578
 risk_class: H
 reviewer: Sol
 reviewer_role: primary
 reviewer_model: Sol Medium
-reviewed_at: 2026-09-30T00:56:08.703120+00:00
-candidate_sha: 03609018215285cca21dd31fc126978fe2de8d15
-publication_commit_sha: 1ec12a68d933ed8addc0d7f930c8799de3c93d4b
-receipt_path: docs/verification-receipts/03609018215285cca21dd31fc126978fe2de8d15/338d5c4b-37fd-47dd-a220-f67919ca45de.json
-receipt_id: 338d5c4b-37fd-47dd-a220-f67919ca45de
+reviewed_at: 2026-10-01T18:41:07.778740+00:00
+candidate_sha: 14083dd27c73609e67bdaac2793f3769bdb367e7
+publication_commit_sha: 5ec94f376bc13cfb00b00152ce822184f8bed4f1
+receipt_path: docs/verification-receipts/14083dd27c73609e67bdaac2793f3769bdb367e7/dcbb1847-7130-4f78-a833-b51732754965.json
+receipt_id: dcbb1847-7130-4f78-a833-b51732754965
 gate: final
 verdict: approved
 findings: none
 ```
-
-### Merge record
-
-- Date: 2026-09-30. Merged `phase-3/realistic-corpus-freeze-evaluation`
-  at approved, reviewed commit `babc74fff16b5575f482bbb37fa947f11429f1bf`
-  (`R`; Sol's "approved, findings: none" verdict on `C=0360901`/
-  `A=1ec12a6`, above) into `main` via `git merge --no-ff`. Merge commit:
-  `fccbf62d2f5f7df10f46b174c1aff96ed18b3ef7`. Pre-merge `main`/
-  `origin/main` tip (rollback boundary):
-  `0dae4683645599369d41d0228b0edad1cfad73ce`.
-- Pre-merge checks: freshly fetched `origin`; confirmed the feature
-  branch and its origin both sat at `babc74f`, and `main`/`origin/main`
-  were both clean and synchronized at `0dae468` before merging;
-  re-confirmed `validate_c_a_r_chain(C, A, R)` and
-  `check_merge_eligibility(C, A, R)` both still returned `approved`
-  immediately beforehand, with no unexpected advancement or divergence
-  on either ref.
-- Followed the documented `M -> Q` release sequence: `M` was created
-  locally, not pushed; zero content difference between `M` and `R`
-  confirmed (`git diff babc74f fccbf62`, empty); `verification_
-  coordinator.run_post_merge_verification` was run against `M` in a
-  disposable detached worktree (always full/final) -- artifact
-  `175e0726-8d9c-4d0a-abf7-83fecd886540`, all 11 steps PASS, full pytest
-  suite **3128 passed**, all 34 mutation witnesses pass, no migration
-  triggered, cleanup PASS. `Q` was authored as `M`'s direct mainline
-  child, bundling that artifact with this append-only merge record in
-  one commit -- this entry itself.
-- Post-merge evidence status: `docs/post-merge/
-  fccbf62d2f5f7df10f46b174c1aff96ed18b3ef7/
-  175e0726-8d9c-4d0a-abf7-83fecd886540.json`, referencing original
-  receipt `338d5c4b-37fd-47dd-a220-f67919ca45de` (`docs/
-  verification-receipts/03609018215285cca21dd31fc126978fe2de8d15/
-  338d5c4b-37fd-47dd-a220-f67919ca45de.json`). `check_review.
-  validate_published(C, A, R, M, Q)` and `verification_coordinator.
-  confirm_main_unchanged` are run immediately before push; see the
-  agent's final report for their results rather than restating them here
-  ahead of time.
-- STOP -- report the synchronized final `main` SHA and stop. No
-  baseline-driven parser corrections, title-normalization work, provider
-  contact, database access, or another slice without separate explicit
-  user authorization.
