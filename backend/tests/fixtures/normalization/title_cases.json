@@ -1251,7 +1251,7 @@
     "expected_outcome": "ambiguous",
     "expected_canonical_title": null,
     "expected_role_family": null,
-    "note": "Witness 2."
+    "note": "Overlap coverage: `recruiter` is both a prefix blocker and a role designator."
   },
   {
     "id": "collision_prefix_blocker_and_only",
@@ -1262,7 +1262,7 @@
     "expected_outcome": "ambiguous",
     "expected_canonical_title": null,
     "expected_role_family": null,
-    "note": "`and` is a prefix blocker only (not a designator or signal)."
+    "note": "Witness 2: `and` is a prefix blocker only (not a designator or signal)."
   },
   {
     "id": "collision_prefix_blocker_for_only",

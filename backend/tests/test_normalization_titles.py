@@ -180,8 +180,8 @@ def test_witness_01_head_segment_precedence() -> None:
     _assert_absent(classify_title("Recruiter / Software Engineer"), TitleOutcome.AMBIGUOUS)
 
 
-def test_witness_02_original_prefix_blockers() -> None:
-    _assert_absent(classify_title("Technical Recruiter Software Engineer"), TitleOutcome.AMBIGUOUS)
+def test_witness_02_prefix_blockers_isolating() -> None:
+    _assert_absent(classify_title("Data and Software Engineer"), TitleOutcome.AMBIGUOUS)
 
 
 def test_witness_03_prefix_role_designators() -> None:

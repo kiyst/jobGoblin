@@ -98,238 +98,6 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-10-01, Claude Code (Opus 5.5). Same slice
-  (`slice_id: 2026-09-30-phase3-baseline-correction-go-remote-25ac578`,
-  risk class **H**, `slice_kind: parser`, `declared_gate: final`), same
-  branch `phase-3/baseline-correction-go-remote-v2`, same base
-  `25ac578f6e980eb73964de17d8f32ca1f2695867`. One bounded `C3`/`A3`
-  correction cycle for Sol's two findings against `C2`/`A2`. `C`
-  (`70e0e92`), `C2` (`467ec75`) and `A2` (`be89084`) are preserved
-  unamended; `C3` is `A2`'s direct child. **`A2`'s receipt
-  (`24a31360-502b-4c35-8be3-a35374679077`) is superseded and must not be
-  reused** -- a fresh receipt is required for `C3`. Sol accepted the
-  remote office-attendance blocker, the exact `remote_type_cases.json`
-  owner mapping, the Git scope, and `A2`'s receipt structure; those are
-  byte-for-byte unchanged here. Not approved: awaiting Sol's re-review.
-  Ending commit: this commit.
-- **Sol P1 (go rescue crossed a newline)**: confirmed reproduction at
-  `C2` -- `"Production experience with Python,\nGo, Java."` returned
-  `golang`/`java`/`python`. Root cause: `_go_list_neighbor_rescue` looked
-  up the cue sentence by the raw *segment's* start offset, and the
-  segment after `"Python,"` starts on the newline itself, which belongs
-  to the first line's sentence span. Fix: a new `_segment_token_offsets`
-  helper gives each token's own absolute source offset (index-aligned
-  with `_tokenize_segment`), and `_sentence_index_at` places the `Go`
-  *token* in its sentence. The same audit found a second instance of
-  the defect class that Sol did not list: the accepted neighbor could
-  also come from another line (`"Production experience: Go,\nPython."`
-  returned `golang`), contrary to the frozen contract's existing rule
-  that the cue, `go`, and its structural evidence share one sentence.
-  The neighbor token's own offset must now also fall in `Go`'s sentence.
-  Every prior structural guard is unchanged: `go`-only scope, sole-token
-  segment, same-sentence cue, immediate raw-segment adjacency, no
-  skipping empty/intervening segments, boundary-touching unambiguous
-  neighbor, strong-cue requirement, weak-cue exclusion, anchored-region
-  behavior, and `c`/`r`/`node` behavior.
-- **Sol P2 (exhaustive allowlist record was incomplete)**: the evaluator
-  output diff also changes five `false_positive_outside_frozen_set`
-  denominators (dev `0/21 -> 0/22`, holdout `0/14 -> 0/15`, combined
-  `0/35 -> 0/37`, Anthropic `0/9 -> 0/10`, GitLab `0/14 -> 0/15`), which
-  follow mechanically from the precision denominators. The inaccurate
-  "no other line changed" claim in Iteration 1 is replaced in place with
-  the precise rule: no output line changes outside the complete approved
-  metric/record allowlist plus these five denominator changes. The
-  headline precision/recall, mismatch counts, the four corrected records,
-  and the absence of new false-positive/confidently-wrong results were
-  already correct. No baseline report, corpus, evaluator, label, or
-  taxonomy changed.
-- Files changed (closed correction list):
-  `backend/app/normalization/skills.py` (token-offset sentence lookup,
-  same-sentence neighbor, docstring), `backend/tests/
-  test_normalization_skills.py` (3 direct unit tests for the new
-  helpers), `backend/tests/fixtures/normalization/skill_cases.json`
-  (92 -> 98 cases), `docs/LLM_HANDOFF.md` (this entry, the P2
-  correction in Iteration 1, and the rotation above). New regression
-  cases: comma immediately before newline, comma before newline plus
-  indentation, semicolon immediately before newline (all: `python`,
-  `java`, no `golang`); same-line positive control and cue-bearing line
-  after an unrelated line (both: `golang`, `java`, `python`); only
-  neighbor on the following line (`python` only).
-- Verification: `ruff format --check`/`ruff check` clean; `mypy` clean
-  (171 source files); focused skills + remote + verification-scope
-  **326 passed** (was 317; remote and verification-scope suites
-  unchanged); full backend suite **3187 passed** (was 3178 at `C2`; +6
-  fixtures, +3 unit tests);
-  `check_repo.py` clean; `git diff --check` clean. `python -m
-  scripts.evaluate_phase3_corpus` output is byte-identical to the
-  approved `C2` output, and a mechanical line-by-line check of its diff
-  against the immutable baseline matches the corrected exhaustive
-  allowlist exactly (36 removed / 24 added lines, none unexpected, none
-  missing).
-- Mutation proofs: **P1** -- restoring the defective segment-start offset
-  makes the three delimiter-before-newline regressions fail by returning
-  a spurious `golang`, while both positive controls still pass;
-  restoring the fix passes all. **Neighbor same-sentence guard** --
-  removing the neighbor sentence check makes the following-line-neighbor
-  regression fail; restored, it passes. Because the offset change sits
-  inside the same function as the other skills guards, all six earlier
-  skills guard mutations (go-only scope, strong-cue relevance,
-  same-sentence cue, standalone segment, no empty-segment skip,
-  boundary-touching neighbor) were re-run against `C3`'s code: each
-  isolating witness fails under its mutant and passes after
-  restoration. The five remote guard mutations were not re-run:
-  `remote.py`, its tests, and its fixture are byte-identical to `C2`,
-  and `skills.py` shares no code with `remote.py` (its import-boundary
-  test forbids cross-parser imports), so no change here can reach them;
-  the remote focused suite stays green.
-- Adversarial review (offsets, delimiters before newlines, leading
-  whitespace, empty segments, sentence topology): correct for CRLF before
-  `Go`, an empty segment before a newline, a cue later on `Go`'s own
-  line, blank lines, tab indentation, a parenthesized `Go` on either side
-  of a newline, a terminator followed by a newline, `Go` first in the
-  text, and a neighbor separated from `Go` by a terminator. Residual,
-  unchanged by design: a lone CR or U+2028 is not a sentence boundary in
-  this module (only `\n` and `.!?` runs are, matching the existing
-  anchor grammar and the contract's no-Unicode-fuzzy-matching rule); the
-  HTML converter already normalizes CR/CRLF to `\n` upstream.
-- Deviations/known limitations: the same-sentence neighbor check goes
-  beyond Sol's literal P1 text but enforces an already-approved contract
-  rule within the closed file list; disclosed here for review. The three
-  residual `golang` misses, the `salary.*` wiring gap, and the
-  exposed-holdout caveat on `gitlab:8512432002` are unchanged.
-- STOP -- this commit is candidate `C3` (see `workflow-metadata` below,
-  `state: pending`). Next: a fresh receipt-eligible `--gate final`
-  coordinator run against `C3` and, only if it passes, publication `A3`.
-  No `R`, merge, `M`, `Q`, remote or verification-mapping change,
-  provider contact, production data access, or title normalization.
-
-```workflow-metadata
-workflow_version: v3.2
-state: published
-slice_id: 2026-09-30-phase3-baseline-correction-go-remote-25ac578
-slice_kind: parser
-risk_class: H
-base_sha: 25ac578f6e980eb73964de17d8f32ca1f2695867
-declared_gate: final
-executed_gate: final
-candidate_sha: 14083dd27c73609e67bdaac2793f3769bdb367e7
-receipt_id: dcbb1847-7130-4f78-a833-b51732754965
-receipt_path: docs/verification-receipts/14083dd27c73609e67bdaac2793f3769bdb367e7/dcbb1847-7130-4f78-a833-b51732754965.json
-fixture_path: backend/tests/fixtures/normalization/skill_cases.json
-fixture_count: 98
-```
-
-### Work review
-
-- Date/reviewer: 2026-10-01, Sol. Diff reviewed: candidate `C3`
-  (`14083dd`) and its publication `A3` (`5ec94f3`) on
-  `phase-3/baseline-correction-go-remote-v2`, against the frozen
-  correction contract, Sol's prior P1/P2 findings, and the closed
-  affected-file list.
-- Dispositions:
-  - P1 candidate-offset correction: accepted. `_go_list_neighbor_rescue`
-    now resolves the `go` token's sentence from its own token offset, so a
-    relevance cue can no longer be borrowed across a newline.
-  - Same-sentence neighbour enforcement: accepted as enforcement of the
-    frozen contract's same-sentence requirement, not new semantics.
-  - P2 corrected evaluator allowlist: accepted, including the five
-    `false_positive_outside_frozen_set` denominator changes.
-  - Residual lone-CR / U+2028 sentence-boundary disclosure: accepted as a
-    disclosed limitation.
-  - Inherited `remote_type` office-attendance correction: accepted
-    unchanged.
-  - Exact-path `remote_type_cases.json` fixture ownership mapping:
-    accepted unchanged.
-  - Fresh `C3` receipt and the `A3` `pending` -> `published` transition:
-    accepted.
-  - Git structure (single-parent `C3` -> `A3`) and affected-file
-    boundaries: accepted.
-- Independent verification performed: 326 focused tests passed; the
-  defective candidate-offset mutant made all three newline regressions
-  fail; removing the same-sentence neighbour check made its dedicated
-  regression fail; restored targeted probes passed; `check_repo.py` and
-  `check_handoff.py` passed; candidate and publication `git diff --check`
-  passed; `require_single_parent(A3, C3)` and
-  `validate_c_to_a_transition(C3, A3)` passed.
-- Relied on, not repeated: the genuine receipt's 3187-test full suite and
-  34/34 mutation witnesses. The six earlier skills mutation runs were
-  inspected but not repeated. The five `remote_type` mutations were not
-  rerun because that surface is byte-identical and unreachable from the
-  skills change.
-- Findings by severity with exact references: none.
-- Missing/inconclusive checks: none beyond the relied-on receipt evidence
-  stated above.
-- Verdict: **approved** -- no executable findings.
-- Exact bounded correction: none required.
-- STOP -- record-only. No merge, `M`, `Q`, executable-file modification,
-  provider contact, production-data access, title normalization, or new
-  slice is authorized by this review.
-
-```workflow-review-metadata
-schema_version: 2
-slice_id: 2026-09-30-phase3-baseline-correction-go-remote-25ac578
-risk_class: H
-reviewer: Sol
-reviewer_role: primary
-reviewer_model: Sol Medium
-reviewed_at: 2026-10-01T18:41:07.778740+00:00
-candidate_sha: 14083dd27c73609e67bdaac2793f3769bdb367e7
-publication_commit_sha: 5ec94f376bc13cfb00b00152ce822184f8bed4f1
-receipt_path: docs/verification-receipts/14083dd27c73609e67bdaac2793f3769bdb367e7/dcbb1847-7130-4f78-a833-b51732754965.json
-receipt_id: dcbb1847-7130-4f78-a833-b51732754965
-gate: final
-verdict: approved
-findings: none
-```
-
-### Merge record
-
-- Date: 2026-10-01. Merged `phase-3/baseline-correction-go-remote-v2`
-  at approved, reviewed commit `3629be3b3bd267358f3b515cfeae14179a74cce2`
-  (`R`; Sol's "approved -- no executable findings" verdict on
-  `C3=14083dd`/`A3=5ec94f3`, above) into `main` via `git merge --no-ff`.
-  Merge commit: `689f94c65ebdb278dba0c8bb20bb6b1c272b9716`. Pre-merge
-  `main`/`origin/main` tip (rollback boundary):
-  `25ac578f6e980eb73964de17d8f32ca1f2695867`.
-- Pre-merge checks: freshly fetched `origin`; confirmed the feature
-  branch and its origin both sat at `3629be3`, and `main`/`origin/main`
-  were both clean and synchronized at `25ac578` before merging;
-  re-confirmed `validate_c_a_r_chain(C3, A3, R)` and
-  `check_merge_eligibility(C3, A3, R)` both still returned `approved`
-  with `findings: none` and `reviewer_model: Sol Medium`, and that
-  receipt `dcbb1847-7130-4f78-a833-b51732754965` remained schema-valid,
-  bound to `C3`, and independently recomputed as approval-eligible.
-- Followed the documented `M -> Q` release sequence: `M` was created
-  locally, not pushed; zero content difference between `M` and `R`
-  confirmed (`git diff 3629be3 689f94c`, empty); `check_review.
-  validate_merge(R, M, 25ac578)` confirmed `M`'s exact two-parent shape;
-  `verification_coordinator.run_post_merge_verification` was run against
-  `M` in a disposable detached worktree (always full/final) -- artifact
-  `6cf79e0d-73d9-4035-971d-1defbca18cf3`, all 11 steps PASS, full pytest
-  suite **3187 passed**, all 34 mutation witnesses pass, no migration
-  triggered, worktree initial/final snapshots identical with no residual
-  worktree entry, cleanup PASS. `Q` was authored as `M`'s direct mainline
-  child, bundling that artifact with this append-only merge record in
-  one commit -- this entry itself.
-- Post-merge evidence status: `docs/post-merge/
-  689f94c65ebdb278dba0c8bb20bb6b1c272b9716/
-  6cf79e0d-73d9-4035-971d-1defbca18cf3.json`, referencing original
-  receipt `dcbb1847-7130-4f78-a833-b51732754965` (`docs/
-  verification-receipts/14083dd27c73609e67bdaac2793f3769bdb367e7/
-  dcbb1847-7130-4f78-a833-b51732754965.json`). `check_review.
-  validate_published(C3, A3, R, M, Q)` and `verification_coordinator.
-  confirm_main_unchanged` are run immediately before push; see the
-  agent's final report for their results rather than restating them here
-  ahead of time.
-- STOP -- report the synchronized final `main` SHA and stop. No title
-  normalization, provider integration, persistence wiring, API/
-  tool-calling work, another parser correction, or any new slice without
-  separate explicit user authorization.
-
-## Iteration 2
-
-### Work done
-
 - Date/agent: 2026-10-02, Claude (implementer). Branch `phase-3/title-normalization`,
   base `aed2694720b0344ae54feeef1916805f91e6b508` (Q of the Go/remote correction).
   Ending commit: this commit (candidate `C`).
@@ -413,6 +181,61 @@ executed_gate: final
 candidate_sha: e2573bc9792e74f60b59fd2b2974141a1a32302b
 receipt_id: d8ea060c-298d-473e-93a6-aa6d32b7c7d7
 receipt_path: docs/verification-receipts/e2573bc9792e74f60b59fd2b2974141a1a32302b/d8ea060c-298d-473e-93a6-aa6d32b7c7d7.json
+fixture_path: backend/tests/fixtures/normalization/title_cases.json
+fixture_count: 200
+```
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-10-02, Claude (implementer). Branch `phase-3/title-normalization`.
+  Bounded C2 correction as the direct child of `A = d1c63e0ce9995bd36f981e350b3d8efbd850178d`.
+  `C = e2573bc9792e74f60b59fd2b2974141a1a32302b` and `A` are preserved unamended (no
+  rebase, amend, or force-push). Ending commit: this commit (candidate `C2`).
+- Sol's P2 finding (evidence specification): frozen witness 02 (`Technical Recruiter
+  Software Engineer`) cannot isolate `PREFIX_BLOCKERS`, because `recruiter` is also in
+  `PREFIX_ROLE_DESIGNATORS`, so it stays `AMBIGUOUS` with the blocker guard disabled.
+  The guard itself is load-bearing; this is not an implementation failure. Correction
+  authorized by the user within a three-file envelope.
+- Files (exactly three): `backend/tests/test_normalization_titles.py` (witness 02
+  renamed to `test_witness_02_prefix_blockers_isolating`, input `Data and Software
+  Engineer`, expected `AMBIGUOUS`); `backend/tests/fixtures/normalization/title_cases.json`
+  (the witness-02 designation moved from `collision_prefix_blocker_recruiter`, which is
+  kept unchanged as overlap coverage apart from its note, to
+  `collision_prefix_blocker_and_only`; only those two `note` fields changed); this file.
+  No production file, vocabulary, rule, Unicode policy, output type, realistic
+  expectation, evaluator output, fixture count (still 200), ownership mapping, or other
+  doc changed. `titles.py` is byte-identical to `C` (SHA-256 `9550ad31...cd05e`).
+- Corrected witness-02 proof (only `PREFIX_BLOCKERS` disabled, via
+  `if _prefix_has_blocker(prefix):` -> `if False:`):
+  - normal implementation: `Data and Software Engineer` -> `ambiguous`;
+  - under the mutant: `matched`, `software-engineer`, so the witness fails;
+  - after restoration: `ambiguous`, so the witness passes;
+  - `Lead Software Engineer` and `Senior Software Engineer` stay `matched` /
+    `software-engineer` under both configurations.
+- Corrected final inventory: **12/12 witnesses proven**. All 12 mutants were rerun in
+  one harness pass, and the source was restored byte-for-byte (SHA-256 verified).
+  Witnesses 01 and 03-12 are unchanged in definition and result.
+- Checks: 362 focused tests passed (title 276, verification-scope 86). Realistic
+  titles: 22 matched / 6 unsupported / 2 ambiguous, unchanged. Evaluator output is
+  byte-identical to the base-approved output (1366 lines).
+- Receipt supersession: `A`'s receipt
+  `docs/verification-receipts/e2573bc9792e74f60b59fd2b2974141a1a32302b/d8ea060c-298d-473e-93a6-aa6d32b7c7d7.json`
+  is **superseded and non-reusable** for this slice's approval. It is bound to `C`,
+  not `C2`, and is left unmodified and undeleted. `C2` needs its own fresh
+  `gate=final` receipt, recorded in `A2`.
+- STOP after `A2` for Sol's re-review. No `R`, merge, `M`/`Q`, production change,
+  Phase 3 exit audit, or Phase 4 work.
+
+```workflow-metadata
+workflow_version: v3.2
+state: pending
+slice_id: 2026-10-02-phase3-title-normalization-aed2694
+slice_kind: parser
+risk_class: H
+base_sha: aed2694720b0344ae54feeef1916805f91e6b508
+declared_gate: final
 fixture_path: backend/tests/fixtures/normalization/title_cases.json
 fixture_count: 200
 ```
