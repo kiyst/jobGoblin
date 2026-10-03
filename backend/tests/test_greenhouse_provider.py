@@ -417,22 +417,55 @@ async def test_t04_one_fresh_transport_per_discover_and_closed() -> None:
     provider = make_provider(fake, boards=(ACME, BETA))
     await discover(provider)
     assert fake.factory_calls == 1
-    assert fake.closed >= 1
+    assert fake.closed == 1
     await discover(provider)
     assert fake.factory_calls == 2
-    assert fake.closed >= 2
+    assert fake.closed == 2
     assert [r.url.path for r in fake.requests] == [
         "/v1/boards/acme-synthetic/jobs",
         "/v1/boards/beta-synthetic/jobs",
     ] * 2
 
 
-async def test_t04_transport_closed_when_a_programmer_error_propagates() -> None:
+async def test_t04_transport_closed_exactly_once_on_anticipated_failure() -> None:
+    fake = single_board(httpx.Response(404))
+    result = await discover(make_provider(fake))
+    assert result.source_stats[0].completed is False
+    assert fake.factory_calls == 1
+    assert fake.closed == 1
+
+
+async def test_t04_transport_closed_exactly_once_when_a_programmer_error_propagates() -> None:
     fake = single_board(RuntimeError("bug inside transport"))
     with pytest.raises(RuntimeError):
         await discover(make_provider(fake))
     assert fake.factory_calls == 1
-    assert fake.closed >= 1
+    assert fake.closed == 1
+
+
+async def test_t04_non_idempotent_transport_close_is_not_repeated() -> None:
+    """A valid transport may refuse a second close; a successful empty
+    discovery must never turn into an uncategorized exception."""
+    closes: list[int] = []
+
+    class CloseOnceTransport(httpx.MockTransport):
+        async def aclose(self) -> None:
+            if closes:
+                raise RuntimeError("transport closed twice")
+            closes.append(1)
+
+    payload = json_response({"jobs": [], "meta": {"total": 0}})
+    provider = GreenhouseJobBoardProvider(
+        [ACME],
+        transport_factory=lambda: CloseOnceTransport(lambda request: payload),
+        sleep=Sleeps(),
+        monotonic=lambda: 0.0,
+        now=lambda: FIXED_NOW,
+    )
+    result = await discover(provider)
+    stats = result.source_stats[0]
+    assert (stats.completed, stats.jobs_found, stats.incomplete_results) == (True, 0, False)
+    assert closes == [1]
 
 
 async def test_t04_redirect_is_not_followed() -> None:
@@ -924,7 +957,60 @@ async def test_t14_retry_after_above_cap_stops_retrying() -> None:
     assert error.retryable is True
 
 
-@pytest.mark.parametrize("value", ["Wed, 21 Oct 2026 07:28:00 GMT", "-5", "1.5", "soon", ""])
+async def test_t14_arbitrarily_long_delta_above_cap_stops_retrying() -> None:
+    sleeps = Sleeps()
+    fake = single_board(httpx.Response(429, headers={"retry-after": "9" * 5000}))
+    result = await discover(make_provider(fake, sleeps=sleeps))
+    assert len(fake.requests) == 1
+    assert sleeps.calls == []
+    stats = result.source_stats[0]
+    assert (stats.completed, stats.rate_limited, stats.retry_count) == (False, True, 0)
+    (error,) = result.errors
+    assert error.category is ProviderErrorCategory.RATE_LIMITED
+    assert error.retryable is True
+    assert error.detail == (
+        "greenhouse board=acme-synthetic failure=http_status status=429 attempts=1"
+    )
+
+
+@pytest.mark.parametrize(
+    ("value", "expected_sleeps", "attempts"),
+    [
+        pytest.param("0" * 5000 + "30", [30.0], 2, id="long-leading-zeroes-at-cap"),
+        pytest.param("0" * 5000 + "31", [], 1, id="long-leading-zeroes-above-cap"),
+        pytest.param("0" * 5000, [0.0], 2, id="long-zero"),
+        pytest.param("007", [7.0], 2, id="short-leading-zeroes"),
+    ],
+)
+async def test_t14_leading_zeroes_are_compared_numerically(
+    value: str, expected_sleeps: list[float], attempts: int
+) -> None:
+    sleeps = Sleeps()
+    fake = single_board(
+        httpx.Response(429, headers={"retry-after": value}),
+        json_response(envelope([synthetic_record()])),
+    )
+    await discover(make_provider(fake, sleeps=sleeps))
+    assert sleeps.calls == expected_sleeps
+    assert len(fake.requests) == attempts
+
+
+async def test_t14_fractional_cap_is_compared_numerically() -> None:
+    settings = GreenhouseClientSettings(max_retry_after=30.5)
+    for value, expected in (("30", [30.0]), ("31", [])):
+        sleeps = Sleeps()
+        fake = single_board(
+            httpx.Response(503, headers={"retry-after": value}),
+            json_response(envelope([synthetic_record()])),
+        )
+        await discover(make_provider(fake, settings=settings, sleeps=sleeps))
+        assert sleeps.calls == expected
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["Wed, 21 Oct 2026 07:28:00 GMT", "-5", "+5", "1.5", "5 seconds", "1e3", "soon", ""],
+)
 async def test_t14_non_delta_retry_after_falls_back_to_backoff(value: str) -> None:
     sleeps = Sleeps()
     fake = single_board(

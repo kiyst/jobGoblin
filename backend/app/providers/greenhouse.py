@@ -383,7 +383,10 @@ class _AttemptFailure:
     category: ProviderErrorCategory
     retryable: bool
     status: int | None = None
-    retry_after: int | None = None
+    # The header's ASCII digits, kept as text: an upstream delta can be
+    # arbitrarily long, so it is only ever compared against the cap via
+    # `_bounded_retry_after`, never converted unconditionally.
+    retry_after_digits: str | None = None
 
 
 @dataclass
@@ -405,10 +408,26 @@ def _failure_detail(board: GreenhouseBoard, kind: str, status: int | None, attem
     )
 
 
-def _parse_retry_after(value: str | None) -> int | None:
+def _parse_retry_after(value: str | None) -> str | None:
+    """The delta-seconds digits of a `Retry-After` header, or `None` for an
+    absent, HTTP-date, or otherwise non-digit value (normal backoff applies)."""
     if value is None or not _RETRY_AFTER_RE.fullmatch(value):
         return None
-    return int(value)
+    return value
+
+
+def _bounded_retry_after(digits: str, cap: float) -> int | None:
+    """Seconds to wait when the delta is numerically at or below `cap`,
+    otherwise `None` (stop retrying). Leading zeroes are ignored. A delta with
+    more significant digits than the cap's integer part is above the cap
+    without being converted, so no header length can raise here."""
+    significant = digits.lstrip("0") or "0"
+    if len(significant) > len(str(math.floor(cap))):
+        return None
+    seconds = int(significant)
+    if seconds > cap:
+        return None
+    return seconds
 
 
 def _status_failure(status: int, retry_after: str | None) -> _AttemptFailure:
@@ -419,7 +438,7 @@ def _status_failure(status: int, retry_after: str | None) -> _AttemptFailure:
         category=category,
         retryable=status in _RETRYABLE_STATUSES,
         status=status,
-        retry_after=_parse_retry_after(retry_after),
+        retry_after_digits=_parse_retry_after(retry_after),
     )
 
 
@@ -511,17 +530,16 @@ class GreenhouseJobBoardProvider:
             else httpx.AsyncHTTPTransport()
         )
         board_results: list[_BoardResult] = []
-        try:
-            async with httpx.AsyncClient(
-                transport=transport,
-                timeout=self._settings.timeout(),
-                follow_redirects=False,
-                trust_env=False,
-            ) as client:
-                for board in self._boards:
-                    board_results.append(await self._discover_board(client, board))
-        finally:
-            await transport.aclose()
+        # The client context is the transport's sole owner: exiting it closes
+        # both the client and the transport exactly once, on every exit path.
+        async with httpx.AsyncClient(
+            transport=transport,
+            timeout=self._settings.timeout(),
+            follow_redirects=False,
+            trust_env=False,
+        ) as client:
+            for board in self._boards:
+                board_results.append(await self._discover_board(client, board))
 
         return self._aggregate(board_results, started_at, start)
 
@@ -612,10 +630,11 @@ class GreenhouseJobBoardProvider:
             return None
         if attempts >= self._settings.max_attempts:
             return None
-        if failure.retry_after is not None:
-            if failure.retry_after > self._settings.max_retry_after:
-                return None
-            return float(failure.retry_after)
+        if failure.retry_after_digits is not None:
+            seconds = _bounded_retry_after(
+                failure.retry_after_digits, self._settings.max_retry_after
+            )
+            return float(seconds) if seconds is not None else None
         return float(
             min(self._settings.backoff_base * 2 ** (attempts - 1), self._settings.backoff_cap)
         )

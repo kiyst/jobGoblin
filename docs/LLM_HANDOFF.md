@@ -306,9 +306,11 @@ findings: none
 
 - Date/agent: 2026-10-03, Claude (implementer). Branch `phase-4/greenhouse-provider-s1`,
   base `2a72471b95c61b7a1a3e2ae1f944ed40036671b8` (`Q` of the throughput-pilot merge).
-  Ending commit: this commit, the **immutable pre-publication advisory candidate** for
-  Sol Medium's advisory implementation review. It is not final `C`: no coordinator run,
-  receipt, `A`, or formal review exists.
+  The first immutable pre-publication advisory candidate was
+  `1f4bb4e87a2a7db317da3497f152b068773e94ff`; it is preserved unamended. Ending commit:
+  this commit, the advisory correction (its direct single-parent child), for Sol
+  Medium's narrow advisory re-review. Neither is final `C`: no coordinator run, receipt,
+  `A`, or formal review exists.
 - Slice: Phase 4 S1, an offline direct `GreenhouseJobBoardProvider` plus
   [ADR 0013](DECISIONS/0013-direct-greenhouse-job-board-provider.md). Pilot product
   slice 1 of 3 under [ADR 0012](DECISIONS/0012-workflow-throughput-protocol-pilot.md).
@@ -349,7 +351,8 @@ findings: none
   detail, warning, and raised message is a fixed template. Not registered or reachable
   at runtime; no live request, persistence, parser-input mapping, HTML conversion,
   salary behavior, API route, migration, or normalization change.
-- Verification at this candidate (no receipt-producing coordinator run):
+- Verification at the first advisory candidate `1f4bb4e` (no receipt-producing
+  coordinator run):
   - `tests/test_greenhouse_provider.py`: **193 passed**, with zero socket contact and no
     wall-clock retry waiting;
   - the ten provider-related modules (canary, evaluation fetch, Greenhouse provider,
@@ -360,9 +363,9 @@ findings: none
   - Phase 3 evaluator `python -m scripts.evaluate_phase3_corpus`: SHA-256
     `87a92187a2d37d5150fe998d06042449f6b74d540cecd15d1bba97dd94801de6`, 91,994 bytes,
     1,366 CRLF lines, unchanged;
-  - `check_handoff`, `check_repo`, `git diff --check`, and tracked-path scope: see the
-    agent's report for this commit.
-- Mutation experiments (A12, exactly 16; recorded, not registered in `tests/contracts`).
+  - `check_handoff`, `check_repo`, `git diff --check`, and nine-path scope: passed.
+- Mutation experiments at `1f4bb4e` (A12, exactly 16; recorded, not registered in
+  `tests/contracts`).
   Each anchor occurred exactly once; baseline witness and controls passed; the witness
   failed under the single mutation while its named controls passed; the source was
   restored byte-identically (SHA-256 `04226b7be1a66f1dbbf029070855a7446cbdb5b077b093bbfb4ef8df4d90e965`
@@ -397,18 +400,60 @@ findings: none
   - The socket backups are installed and removed inside the async fixture's own
     lifetime, because pytest-asyncio's Windows teardown loop connects a loopback
     `socketpair`. A first test run exposed this; no production code changed for it.
+- Advisory review round 1 (Sol Medium, pre-publication advisory review, not formal
+  review). Reviewed `1f4bb4e` against frozen contract `ad3daa68…82a3c`; verdict
+  "advisory changes requested". Findings and dispositions:
+  - **P1, `Retry-After` escapes the boundary.** A digit-only header was passed to
+    `int()`, so a 5,000-digit value raised `ValueError` out of `discover()` instead of a
+    categorized one-attempt `RATE_LIMITED` failure. *Accepted and corrected:* the header
+    is kept as its digit string; `_bounded_retry_after` strips leading zeroes and treats
+    any delta with more significant digits than the cap's integer part as above the cap
+    without converting it, so conversion is bounded by the cap's own digit count. Values
+    at or below the cap keep their wait; values above it stop retrying; non-digit forms
+    keep exponential backoff.
+  - **P1, transport closed twice.** `AsyncClient.__aexit__` closes the transport and a
+    `finally` block closed it again; tests asserted `closed >= 1` and masked it.
+    *Accepted and corrected:* the client context is now the transport's sole owner, and
+    tests assert exactly one close on success, anticipated failure, and a propagated
+    programming error, plus a close-once transport that raises on a second close.
+  - **P2, stale retry claim.** The SOURCE_CONNECTORS Greenhouse row still credited "the
+    library's built-in backoff". *Accepted and corrected:* it now says the direct
+    adapter applies its own bounded deterministic retry/backoff policy.
+
+  The correction envelope was exactly four paths: `greenhouse.py`, its test module,
+  `docs/SOURCE_CONNECTORS.md`, and this file. No ADR, dependency, fixture, registry,
+  schema, persistence, normalization, or tooling change. The cumulative base..candidate
+  scope is still the same nine paths. The frozen contract is unchanged.
+- Verification at this correction (no receipt-producing coordinator run):
+  - `tests/test_greenhouse_provider.py`: **204 passed** (11 added). The eight new
+    regression tests (exact closure ×3, close-once transport, 5,000-digit delta, and
+    three long leading-zero cases) fail against `1f4bb4e`'s adapter and pass here;
+  - the same ten-module selection: **622 passed**;
+  - `ruff format --check`, `ruff check`, `mypy` on both Python files: clean;
+  - Phase 3 evaluator: SHA-256 `87a92187…01de6`, 91,994 bytes, 1,366 CRLF lines,
+    unchanged;
+  - `check_handoff`, `check_repo`, `git diff --check`, nine-path cumulative scope: see
+    the agent's report for this commit;
+  - all 16 mutation experiments re-run (not only W11): all passed with byte-identical
+    restoration; adapter SHA-256
+    `2b5703362f90e719239c45457cac73b7e69e48fdc4026319795c570dc7ae68f0` before and after.
+    W11's anchor moved with the fix to the `seconds > cap` comparison in
+    `_bounded_retry_after`, with the same witness and controls; the other 15 anchors are
+    byte-identical. No seventeenth frozen witness was added.
 - Unresolved issues: none known. Limitations: transitive versions unpinned; the OSV
   check is point-in-time; Greenhouse API terms of use remain unreviewed (an S5 blocker).
 - Pilot metrics so far: proposal-review rounds 1 (Sol, consolidated, approved with
-  A1–A15); advisory-review rounds 0; executable findings 0 so far; pre-`A` correction
-  commits 0; full-suite executions 0; receipt-producing executions 0; user relays for
-  S1 so far 4 (decisions, authorization, an identical re-paste of the authorization,
-  and the Sol-review relay with the 16-witness correction), including one stop because Sol's amendment text was
-  not yet available in the repository or runtime area. Implementation time: branch
-  created 2026-10-03T20:28:40Z; candidate committed shortly after 20:41Z.
-- STOP after pushing this candidate for Sol Medium's pre-publication advisory review.
-  No final `C`, coordinator receipt, `A`, formal `R`, merge, `M`/`Q`, Greenhouse
-  contact, database access beyond existing local tests, or S2–S5.
+  A1–A15); advisory-review rounds 1 (changes requested); executable findings 2 (both
+  P1) plus 1 documentation finding (P2); pre-`A` correction commits 1 (this commit);
+  post-`A` correction commits 0; full-suite executions 0; receipt-producing executions
+  0; user relays for S1 so far 5 (decisions, authorization, an identical re-paste of the
+  authorization, the Sol-review relay with the 16-witness correction, and the advisory
+  findings), including one stop because Sol's amendment text was not yet available in
+  the repository or runtime area. Implementation time: branch created
+  2026-10-03T20:28:40Z; first candidate committed shortly after 20:41Z.
+- STOP after pushing this correction for Sol Medium's narrow advisory re-review. No
+  final `C`, coordinator receipt, `A`, formal `R`, merge, `M`/`Q`, Greenhouse contact,
+  database access beyond existing local tests, or S2–S5.
 
 ```workflow-metadata
 workflow_version: v3.2
