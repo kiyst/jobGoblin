@@ -348,10 +348,14 @@ findings: none
 
 ```workflow-metadata
 workflow_version: v3.2
-state: pending
+state: published
 slice_id: 2026-10-03-workflow-throughput-protocol-pilot-6b4d9ea
 slice_kind: docs
 risk_class: D
 base_sha: 6b4d9ea1a2503553c18ef5efd684fc354adf515a
 declared_gate: final
+executed_gate: final
+candidate_sha: c8c18e18545a9b127875040352cc4abf1a638481
+receipt_id: e8ef9fe9-b555-40f8-add9-85e12707acde
+receipt_path: docs/verification-receipts/c8c18e18545a9b127875040352cc4abf1a638481/e8ef9fe9-b555-40f8-add9-85e12707acde.json
 ```
