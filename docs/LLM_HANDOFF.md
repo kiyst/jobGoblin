@@ -455,6 +455,8 @@ findings: none
   final `C`, coordinator receipt, `A`, formal `R`, merge, `M`/`Q`, Greenhouse contact,
   database access beyond existing local tests, or S2–S5.
 
+**Pre-publication advisory re-review — approved (Sol Medium, advisory only; not formal R).** Reviewed corrected advisory candidate `4a28c5d5e0f713d0d66d6d8c7ee7d0eb7b411212` against frozen-contract SHA-256 `ad3daa68fd34a58aac1fc7f6b77ab7a9afcb1cec7c81a14eed634a8edac82a3c`; all material changes through that SHA were reviewed. The Retry-After overflow, duplicate transport close, and stale connector wording findings are resolved within the authorized four-file correction scope, while cumulative base-to-candidate scope remains the original nine paths. Independent review confirmed 204 focused tests, clean Ruff/mypy and repository checks, unchanged Phase 3 evaluator output, exact one-time transport closure, bounded Retry-After behavior including long digits, leading zeroes and fractional caps, the corrected source hash and unique W11 anchor; the recorded 622-test run, old-implementation substitution, and all 16 mutation experiments with byte-identical restoration were inspected and accepted. The candidate is ready to be designated final C and undergo genuine candidate-bound final verification. This advisory approval is not formal R or merge authorization; formal R retains unrestricted authority.
+
 ```workflow-metadata
 workflow_version: v3.2
 state: pending
