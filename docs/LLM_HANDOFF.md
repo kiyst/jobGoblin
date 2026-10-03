@@ -322,10 +322,14 @@ findings: none
 
 ```workflow-metadata
 workflow_version: v3.2
-state: pending
+state: published
 slice_id: 2026-10-02-phase3-exit-audit-b319168
 slice_kind: docs
 risk_class: D
 base_sha: b31916827c07715bb59f430ad52dd0193561c35b
 declared_gate: docs
+executed_gate: docs
+candidate_sha: 78cfd2077b4370b2d6da3d30843eb9252657ea82
+receipt_id: 90d6c6b4-b669-4de2-b36d-4d0470891cd1
+receipt_path: docs/verification-receipts/78cfd2077b4370b2d6da3d30843eb9252657ea82/90d6c6b4-b669-4de2-b36d-4d0470891cd1.json
 ```

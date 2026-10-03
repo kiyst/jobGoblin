@@ -1,0 +1,110 @@
+{
+  "schema_version": "1",
+  "receipt_id": "90d6c6b4-b669-4de2-b36d-4d0470891cd1",
+  "slice_id": "2026-10-02-phase3-exit-audit-b319168",
+  "risk_class": "D",
+  "base_sha": "b31916827c07715bb59f430ad52dd0193561c35b",
+  "candidate_sha": "78cfd2077b4370b2d6da3d30843eb9252657ea82",
+  "gate": "docs",
+  "created_at": "2026-10-03T02:44:32Z",
+  "coordinator": {
+    "authoring_checkout_head_at_start": "78cfd2077b4370b2d6da3d30843eb9252657ea82",
+    "worktree_initial_snapshot": {
+      "tracked_tree_sha": "af180da097f45fa46710e905ce8905256f96c5bd",
+      "untracked_present": false
+    },
+    "run_cache_redirect": {
+      "pytest_basetemp_redirected": true,
+      "ruff_cache_redirected": true,
+      "mypy_cache_redirected": true,
+      "pycache_redirected": true
+    },
+    "worktree_final_snapshot": {
+      "tracked_tree_sha": "af180da097f45fa46710e905ce8905256f96c5bd",
+      "untracked_present": false
+    },
+    "worktree_removed": true,
+    "worktree_leak_check": "no residual .git/worktrees entry, no residual directory",
+    "authoring_checkout_head_at_receipt": "78cfd2077b4370b2d6da3d30843eb9252657ea82",
+    "authoring_checkout_clean_at_receipt": true
+  },
+  "verifier_hash": "736e2afaa1140840b90f004ceeb7c459f172156f62c53b2c73448fe1e4c77ba4",
+  "checker_hash": "905f3dec22485a1945e0ff64abf75e8fc03e59c88831a5ef4d56f582bec12514",
+  "dependency_and_config_inputs": [
+    {
+      "repo_relative_path": "backend/pyproject.toml",
+      "sha256": "0ccdeb00e26457ca1f5d1c45e2f6171e64b57e3033e72be311294deb3895d0b0"
+    }
+  ],
+  "environment_descriptor": {
+    "python_version": "3.12.13 (main, Aug  7 2026, 02:26:41) [MSC v.1944 64 bit (AMD64)]",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "postgresql_version": null,
+    "installed_distributions_digest": "09454b9fcb81d58d73b301b3c138f4d1f511779b15bce3438c0f343f98715c9a"
+  },
+  "steps": [
+    {
+      "name": "ruff format --check",
+      "status": "PASS",
+      "duration_seconds": 0.5779999999940628
+    },
+    {
+      "name": "ruff check",
+      "status": "PASS",
+      "duration_seconds": 0.2340000000112923
+    },
+    {
+      "name": "mypy",
+      "status": "PASS",
+      "duration_seconds": 49.671999999991385
+    },
+    {
+      "name": "check_repo.py",
+      "status": "PASS",
+      "duration_seconds": 3.75
+    },
+    {
+      "name": "git diff --check",
+      "status": "PASS",
+      "duration_seconds": 0.07800000000861473
+    },
+    {
+      "name": "handoff metadata validation",
+      "status": "PASS",
+      "duration_seconds": 0.0
+    },
+    {
+      "name": "temporary-directory cleanup",
+      "status": "PASS",
+      "duration_seconds": 0.0
+    }
+  ],
+  "full_suite": {
+    "status": "not_run"
+  },
+  "focused_tests": {
+    "status": "not_run"
+  },
+  "mutation_witnesses": {
+    "status": "not_run"
+  },
+  "affected_surface": {
+    "base_sha": "b31916827c07715bb59f430ad52dd0193561c35b",
+    "computed_categories": [
+      "docs-only",
+      "handoff-transition"
+    ],
+    "required_contract_families": [],
+    "required_guard_refs": [],
+    "directly_executed_tests": [],
+    "not_applicable_reason": "docs_only_within_executable_slice"
+  },
+  "migration_matrix": {
+    "triggered": false
+  },
+  "cleanup": {
+    "attempted": true,
+    "status": "PASS"
+  },
+  "approval_eligible": true
+}
