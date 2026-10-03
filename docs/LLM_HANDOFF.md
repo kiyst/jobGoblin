@@ -231,10 +231,33 @@ receipt_path: docs/verification-receipts/78cfd2077b4370b2d6da3d30843eb9252657ea8
 - Receipt supersession: `A`'s receipt
   `docs/verification-receipts/78cfd2077b4370b2d6da3d30843eb9252657ea82/90d6c6b4-b669-4de2-b36d-4d0470891cd1.json`
   is **superseded and non-reusable** for this slice's approval. It is bound to `C`, not
-  `C2`, and is left unmodified and undeleted. `C2` needs its own fresh `gate=docs`
-  receipt, recorded in `A2`.
-- STOP after `A2` for Sol's re-review. No `R`, merge, `M`/`Q`, Phase 4, or executable
-  change.
+  `C2`, and is left unmodified and undeleted. No `A2` exists. The fresh receipt for this
+  correction is bound to `C3` and recorded in `A3` (see below).
+- **C3 gate-escalation correction (user-authorized; one file, this one).**
+  - `C3` is `C2`'s direct single-parent child
+    (`C2 = 358234799d4ce9f7478cad162af46a0b93a06c91`). `C`, `A`, and `C2` are preserved
+    unamended. Ending commit: this commit (candidate `C3`). `C2` and `C3` together form
+    this correction's candidate, and `C3` is the commit verified and published.
+  - What happened. The attempted `gate=docs` coordinator run against `C2` stopped during
+    its pre-verification affected-surface check. The cumulative `base..C2` diff includes
+    `A`'s immutable receipt under `docs/verification-receipts/**`, which
+    `scripts/verification_scope.py` classifies as `unmapped`, and an `unmapped` path
+    forces `gate=final`.
+  - That attempt ran no verification step, created no receipt, and created no temporary
+    verification worktree. It was a scope refusal, not a failed verification run.
+  - The pending metadata below therefore declares `gate: final`. Risk class stays D and
+    `slice_kind` stays `docs`.
+  - Final-gate escalation is conservative verification only. It is not executable work
+    and not a risk reclassification, and it changes nothing in the Phase 3 closure
+    contract. F001, F002, ADR 0011, ROADMAP, ARCHITECTURE, DATA_MODEL, the evidence
+    totals, D1, D2, the closure wording, and the Phase 4 obligations are unchanged from
+    `C2`.
+  - Deferred workflow backlog, requiring separate authorization: classification of
+    committed receipt paths during docs-gate correction cycles. Today any correction
+    round on a `gate=docs` slice is forced to `gate=final`. This slice does not change
+    any verification tooling.
+- STOP after `A3` for Sol's re-review. No `R`, merge, `M`/`Q`, Phase 4, tooling fix, or
+  executable change.
 
 ```workflow-metadata
 workflow_version: v3.2
@@ -243,5 +266,5 @@ slice_id: 2026-10-02-phase3-exit-audit-b319168
 slice_kind: docs
 risk_class: D
 base_sha: b31916827c07715bb59f430ad52dd0193561c35b
-declared_gate: docs
+declared_gate: final
 ```
