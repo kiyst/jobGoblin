@@ -261,10 +261,14 @@ receipt_path: docs/verification-receipts/78cfd2077b4370b2d6da3d30843eb9252657ea8
 
 ```workflow-metadata
 workflow_version: v3.2
-state: pending
+state: published
 slice_id: 2026-10-02-phase3-exit-audit-b319168
 slice_kind: docs
 risk_class: D
 base_sha: b31916827c07715bb59f430ad52dd0193561c35b
 declared_gate: final
+executed_gate: final
+candidate_sha: c92b9923b25badde06f5a70f05bc0098c3ff2656
+receipt_id: d67a0497-6061-4809-9dac-55f6d03cd5f7
+receipt_path: docs/verification-receipts/c92b9923b25badde06f5a70f05bc0098c3ff2656/d67a0497-6061-4809-9dac-55f6d03cd5f7.json
 ```
