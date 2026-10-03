@@ -274,8 +274,8 @@ jobGoblin/
 │   │   │   └── persistence.py          # the ONLY module issuing Job/JobOccurrence SQLAlchemy writes
 │   │   │
 │   │   ├── normalization/
-│   │   │   ├── titles.py               # title classifier (Phase 3, twelfth slice) — candidate
-│   │   │   │                            # stage (see docs/ROADMAP.md); frozen code-defined
+│   │   │   ├── titles.py               # title classifier (Phase 3, twelfth slice) — merged
+│   │   │   │                            # into main (see docs/ROADMAP.md); frozen code-defined
 │   │   │   │                            # nine-title vocabulary, no titles.yaml
 │   │   │   ├── skills.py               # skill-mention classifier (Phase 3, seventh parser slice) —
 │   │   │   │                            # merged into main (see docs/ROADMAP.md)
@@ -406,6 +406,17 @@ Hard rules that don't fit neatly into the table:
   [DECISIONS/0006](DECISIONS/0006-userjob-workflow-invariants.md) — so the
   status/applied_at consistency invariant can't be violated by a code path that forgets
   the pairing.
+- **Pre-existing exception to the `db/` row:** `app/db/models/company.py` imports
+  `app.normalization.company.normalize_domain`, the Phase 1 domain-canonicalization
+  helper (see DATA_MODEL.md's `companies` section). It is not one of the eight Phase 3
+  parsers, and [ADR 0011](DECISIONS/0011-phase-3-exit-audit.md) records it as outside the
+  Phase 3 exit gate. The Phase 3 parsers themselves import only the standard library,
+  `app.normalization.types`/`taxonomy`, and `app.schemas.identifiers`. The only
+  third-party import is `yaml`, used by the taxonomy loader.
+- **Phase 3 parsers are not yet composed into ingestion.** `ingestion/` may import
+  `normalization/` per the table above, but today it uses only `normalization/url.py`.
+  Wiring the parsers in, defining and threading a parser version, and persisting
+  normalized values are deferred, binding integration work (ADR 0011, D1/D2).
 
 ---
 
@@ -1583,8 +1594,15 @@ validation):**
      provider's `ProviderCapabilities.sources`.
 2. `ingestion/pipeline.py` calls `FixtureProvider.discover()`, writes one
    `RawJobIngestion` row per successfully-fetched payload (raw payload = the fixture
-   JSON, `parser_version` set), then runs normalization, `ingestion/identity.py`'s
-   resolution (§8), and `ingestion/persistence.py`'s upsert logic.
+   JSON), then runs `ingestion/identity.py`'s resolution (§8) and
+   `ingestion/persistence.py`'s upsert logic. **Current state:** the pipeline runs no
+   Phase 3 classifier and never sets `raw_job_ingestions.parser_version`, which stays
+   `NULL`. Its only normalization is identity-key canonicalization through
+   `normalization/url.py`. Composing the Phase 3 parsers into ingestion, defining and
+   threading a parser version, and persisting normalized values with `field_provenance`
+   are deferred integration work. They are bound by the D1/D2 preconditions in
+   [ADR 0011](DECISIONS/0011-phase-3-exit-audit.md) and are not authorized by Phase 3
+   closure.
 3. `persistence.py` resolves each `DiscoveredJob` to a `Job` (creating one if no
    deterministic match) and a `JobOccurrence`, linking back to its `RawJobIngestion` via
    `raw_job_ingestions.job_occurrence_id` (§9 — no reverse pointer). For the two conflict
