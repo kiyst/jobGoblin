@@ -562,3 +562,82 @@ gate: final
 verdict: approved
 findings: none
 ```
+
+### Merge record
+
+- Date: 2026-10-03. Merged `phase-4/greenhouse-provider-s1` into `main` with
+  `git merge --no-ff`, at the approved, reviewed commit
+  `a84459f54419a9f786d3793cc79631889bd71fbe` (`R`). `R` is Sol Medium's
+  "approved -- no findings" formal verdict on
+  `C=d9813b492121b78e2fee35113f033eecd59f0a6e` /
+  `A=dbcb687e5b94d2d629b3411a3cf8f1be3f956e6f`.
+  - Merge commit `M`: `48cc5c7204ec34ad911d7d9ce9839d9cc49777ea`.
+  - Rollback boundary (the pre-merge `main`/`origin/main` tip):
+    `2a72471b95c61b7a1a3e2ae1f944ed40036671b8`.
+  - Full lineage: base `2a72471` -> advisory candidate `1f4bb4e` -> advisory correction
+    `4a28c5d` -> `C` `d9813b4` -> `A` `dbcb687` -> `R` `a84459f` -> `M` `48cc5c7` ->
+    `Q` (this commit).
+- Pre-merge checks, after a fresh fetch of `origin`:
+  - the feature branch and its origin both sat at `R`, and `R`'s sole parent is `A`;
+  - `main`/`origin/main`/remote `main` were clean and synchronized at the rollback
+    boundary;
+  - `validate_c_a_r_chain(C, A, R)` and `check_merge_eligibility(C, A, R)` returned
+    `approved`, `findings: none`, `reviewer_model: Sol Medium`,
+    `published_slice_kind: tooling`;
+  - receipt `6489709d-6ab6-4def-ad56-a9da7729de52` was bound to `C` and independently
+    recomputed as approval-eligible.
+- Release sequence:
+  - `M` was created locally and not pushed. It has two parents (the rollback boundary,
+    then `R`), `R..M` has zero content difference, and
+    `check_review.validate_merge(R, M, 2a72471)` passed.
+  - `verification_coordinator.run_post_merge_verification` ran against `M` in a
+    disposable detached worktree (always full/final). It produced artifact
+    `f788f2db-78ca-46db-8847-7c6fd696728a`:
+    - all 11 steps PASS;
+    - full pytest suite: **3674 passed**;
+    - all 34 registered mutation witnesses passed;
+    - no migration triggered;
+    - identical worktree snapshots, worktree removed with no residual entry or
+      directory, and cleanup PASS.
+
+    No test made a live Greenhouse request; every provider test uses an in-process
+    mock transport behind the fixed network guard.
+  - `Q` is `M`'s direct mainline child. It contains that artifact plus this append-only
+    merge record, in one commit (this entry).
+- Post-merge evidence:
+  `docs/post-merge/48cc5c7204ec34ad911d7d9ce9839d9cc49777ea/f788f2db-78ca-46db-8847-7c6fd696728a.json`
+  (SHA-256 of the artifact file as written:
+  `d0bd9d7b4ceb38556626cde95dfa96ce423a4957fc51ac06a694412f56c037e6`). It references
+  original receipt `6489709d-6ab6-4def-ad56-a9da7729de52`
+  (`docs/verification-receipts/d9813b492121b78e2fee35113f033eecd59f0a6e/6489709d-6ab6-4def-ad56-a9da7729de52.json`).
+  `check_review.validate_published(C, A, R, M, Q)` and
+  `verification_coordinator.confirm_main_unchanged` run immediately before the push.
+  Their results are in the agent's final report rather than restated here in advance.
+- S1 status: merged. S1 adds an offline provider adapter
+  (`GreenhouseJobBoardProvider`) that is not registered or reachable from any runtime
+  entry point, plus [ADR 0013](DECISIONS/0013-direct-greenhouse-job-board-provider.md).
+  - It does not enable live collection, persist anything, or map provider fields into
+    parser inputs.
+  - It does not satisfy ADR 0011's D1 or D2.
+  - S2 remains unstarted and requires separate authorization. S3–S5 likewise.
+  - Phase 4 is not complete.
+- Retained limitations: transitive dependencies are not locked; the OSV advisory
+  evidence is point-in-time; Greenhouse's API terms of use remain unreviewed; the
+  adapter is not runtime-reachable; no D1/D2 satisfaction.
+- Pilot metrics through merge (ADR 0012, pilot product slice 1 of 3):
+  - proposal-review rounds: 1; advisory-review rounds: 2; formal-review rounds: 1;
+  - findings: 2 executable (P1) and 1 documentation (P2), all resolved before `A`;
+  - semantic pre-`A` correction commits: 1; handoff-only finalization commits: 1;
+    post-`A` corrections: 0;
+  - receipt-producing executions: 1 (the clean-path target); full-suite executions:
+    2 (the `C` receipt run and the post-merge run at `M`);
+  - user relays: 6 through `A` publication, plus the formal-review relay and the merge
+    authorization (8 through merge);
+  - escaped post-merge defects: none known at merge; newly reachable runtime product
+    behavior: none, by design.
+
+  These are measurements, not conclusions; the pilot's exit comparison happens after
+  the third slice.
+- STOP -- report the synchronized final `main` SHA and stop. No S2, Greenhouse contact,
+  runtime provider wiring, production data access, migration, or another slice without
+  separate explicit user authorization.
