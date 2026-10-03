@@ -66,6 +66,11 @@ network dependency.
 External types never leak past the adapter; raw payload preserved; failures degrade to
 `ProviderHealth(healthy=False)` without affecting other providers.
 
+For Greenhouse, [ADR 0013](DECISIONS/0013-direct-greenhouse-job-board-provider.md)
+supersedes the `ats-scrapers` wrapper: Phase 4 uses a direct
+`GreenhouseJobBoardProvider` against the official public Job Board API, with `httpx`
+confined to that adapter. The remaining requirements above are unchanged.
+
 ## Phase 5 — Matching
 Deterministic weighted scoring (`matching/scorer.py`, `weights.py`) producing
 `MatchResult` with per-component scores and explanations. Hard filters evaluated
@@ -593,6 +598,15 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   merged at `907b3f0`) both exist; neither is the production `DiscoveryProvider`-wrapping
   `AtsScrapersProvider` adapter described in this section's own header, which remains
   unstarted.
+- **Phase 4 S1 (`phase-4/greenhouse-provider-s1`): offline direct
+  `GreenhouseJobBoardProvider` plus
+  [ADR 0013](DECISIONS/0013-direct-greenhouse-job-board-provider.md).** Pilot product
+  slice 1 of 3 under ADR 0012. Converts captured-shape Greenhouse responses into
+  `DiscoveryResult`/`DiscoveredJob` with whole-record `raw`, bounded retries and
+  timeouts, and categorical errors, tested offline only. It is not registered or
+  reachable at runtime, makes no live request, persists nothing, maps no parser input,
+  and leaves salary unproven. ADR 0011's D1 and D2 are not satisfied by it. S2–S5
+  remain unauthorized; Phase 4 is not complete.
 - **Phases 5-14: not started.** Begin each phase only after completing its preflight in
   [PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md) and receiving approval for the next
   smallest slice.

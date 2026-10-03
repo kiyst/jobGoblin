@@ -98,200 +98,6 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-10-02, Claude (implementer). Branch `phase-3/exit-audit`. Bounded
-  C2 documentation correction as the direct child of
-  `A = 0de449434242f6172cd0c9740f68a0727f6f7d62`.
-  `C = 78cfd2077b4370b2d6da3d30843eb9252657ea82` and `A` are preserved unamended (no
-  rebase, amend, or force-push). Ending commit: this commit (candidate `C2`).
-- Sol's findings, with the correction authorized by the user in a three-file envelope:
-  - **F001 (evidence description).** ADR 0011 described the two-input sweep as `(s,
-    None)` and `(s, s)`. The approved, independently reproduced method is `(s, None)`
-    and `(None, s)`, which isolates title and description independently.
-  - **F002 (overbroad wording).** "no parser-version identifier exists" in ADR 0011 and
-    ROADMAP was overbroad, because `RawJobIngestion.parser_version` already exists as
-    storage. It is replaced with exactly "no Phase 3 normalization-version identifier or
-    threading exists".
-- Files (exactly three):
-  - `docs/DECISIONS/0011-phase-3-exit-audit.md`: the sweep-method sentence (F001) and
-    one production-readiness bullet (F002);
-  - `docs/ROADMAP.md`: one closure-entry bullet (F002);
-  - this file.
-
-  No other wording or evidence changed. The D1 ruling, the nullable `parser_version`
-  storage statement, the binding precondition, the combined-pipeline-version allowance,
-  D2, the limitations, the evidence totals, the evaluator hash, the `M`/`Q` history, and
-  the Phase 4 obligations are unchanged. `docs/ARCHITECTURE.md`, `docs/DATA_MODEL.md`,
-  ADR 0010, and all executable content are byte-identical to `A`.
-- Corrected sweep method. The five title/description parsers were called with `(s,
-  None)` (title only) and `(None, s)` (description only) for each of the 940 strings.
-  `classify_salary`, `classify_location`, and `classify_title` were called once per
-  string. The implementer reproduced it read-only with the project venv and no file
-  writes. Totals are unchanged and match Sol's independent reproduction:
-  - 940 distinct strings;
-  - 12,220 parser invocations;
-  - 0 exceptions;
-  - 0 returned `explicit_source`;
-  - 0 returned `structured_metadata`.
-- Receipt supersession: `A`'s receipt
-  `docs/verification-receipts/78cfd2077b4370b2d6da3d30843eb9252657ea82/90d6c6b4-b669-4de2-b36d-4d0470891cd1.json`
-  is **superseded and non-reusable** for this slice's approval. It is bound to `C`, not
-  `C2`, and is left unmodified and undeleted. No `A2` exists. The fresh receipt for this
-  correction is bound to `C3` and recorded in `A3` (see below).
-- **C3 gate-escalation correction (user-authorized; one file, this one).**
-  - `C3` is `C2`'s direct single-parent child
-    (`C2 = 358234799d4ce9f7478cad162af46a0b93a06c91`). `C`, `A`, and `C2` are preserved
-    unamended. Ending commit: this commit (candidate `C3`). `C2` and `C3` together form
-    this correction's candidate, and `C3` is the commit verified and published.
-  - What happened. The attempted `gate=docs` coordinator run against `C2` stopped during
-    its pre-verification affected-surface check. The cumulative `base..C2` diff includes
-    `A`'s immutable receipt under `docs/verification-receipts/**`, which
-    `scripts/verification_scope.py` classifies as `unmapped`, and an `unmapped` path
-    forces `gate=final`.
-  - That attempt ran no verification step, created no receipt, and created no temporary
-    verification worktree. It was a scope refusal, not a failed verification run.
-  - The pending metadata below therefore declares `gate: final`. Risk class stays D and
-    `slice_kind` stays `docs`.
-  - Final-gate escalation is conservative verification only. It is not executable work
-    and not a risk reclassification, and it changes nothing in the Phase 3 closure
-    contract. F001, F002, ADR 0011, ROADMAP, ARCHITECTURE, DATA_MODEL, the evidence
-    totals, D1, D2, the closure wording, and the Phase 4 obligations are unchanged from
-    `C2`.
-  - Deferred workflow backlog, requiring separate authorization: classification of
-    committed receipt paths during docs-gate correction cycles. Today any correction
-    round on a `gate=docs` slice is forced to `gate=final`. This slice does not change
-    any verification tooling.
-- STOP after `A3` for Sol's re-review. No `R`, merge, `M`/`Q`, Phase 4, tooling fix, or
-  executable change.
-
-```workflow-metadata
-workflow_version: v3.2
-state: published
-slice_id: 2026-10-02-phase3-exit-audit-b319168
-slice_kind: docs
-risk_class: D
-base_sha: b31916827c07715bb59f430ad52dd0193561c35b
-declared_gate: final
-executed_gate: final
-candidate_sha: c92b9923b25badde06f5a70f05bc0098c3ff2656
-receipt_id: d67a0497-6061-4809-9dac-55f6d03cd5f7
-receipt_path: docs/verification-receipts/c92b9923b25badde06f5a70f05bc0098c3ff2656/d67a0497-6061-4809-9dac-55f6d03cd5f7.json
-```
-
-### Work review
-
-- Date/reviewer: 2026-10-03, Sol (primary). Reviewed the Phase 3 exit-audit correction
-  chain on `phase-3/exit-audit`: `C2` (`3582347`), the gate-escalation correction
-  `C3` (`c92b9923b25badde06f5a70f05bc0098c3ff2656`), and its publication `A3`
-  (`00d977bc8c02719df19dc30f35ae697c6d9271c2`), against the frozen exit-audit contract,
-  the F001/F002 correction envelope, and the authorized C3 escalation.
-- Verified by Sol against Git and committed content:
-  - the original `C` (`78cfd20`) / `A` (`0de4494`) and `C2` remain unamended;
-  - `C3` is `C2`'s sole child, and `A3` is `C3`'s sole child;
-  - `C2` -> `C3` changes only the latest correction entry in `docs/LLM_HANDOFF.md`;
-  - ADR 0011, ROADMAP, ARCHITECTURE, DATA_MODEL, F001/F002, D1/D2, the closure wording,
-    the evidence totals, and the Phase 4 obligations are byte-identical to `C2`;
-  - the earlier `gate=docs` attempt against `C2` was a scope refusal at the
-    pre-verification affected-surface check, before any verification step or worktree
-    creation; it produced no receipt and is not a failed verification run;
-  - `C3` keeps risk class D and `slice_kind: docs`, declares `gate: final`, and
-    contains no `executed_gate`;
-  - `A3` changes only the permitted pending -> published transition (adding
-    `executed_gate: final`) and adds the fresh receipt;
-  - receipt `d67a0497-6061-4809-9dac-55f6d03cd5f7` is schema-valid and bound to `C3`,
-    and its verifier, checker, and configuration hashes match the committed files;
-  - its affected surface correctly records `docs-only`, `handoff-transition`, and the
-    expected `unmapped` classification of the prior receipt;
-  - approval eligibility independently recomputes `true`;
-  - transition, handoff, repository, and diff validations passed.
-- Relied on from the genuine `C3` receipt, not rerun by Sol:
-  - all 11 final-gate steps passed;
-  - full suite: 3,470 passed;
-  - registered mutation witnesses: 34/34 passed;
-  - focused tests correctly not run, because no focused target was computed;
-  - migration not triggered;
-  - identical tracked-tree snapshots, with no untracked files and no leaked worktree;
-  - cleanup passed.
-- Findings by severity with exact references: none.
-- Verdict: **approved** -- no executable findings.
-- Exact bounded correction: none required.
-- STOP -- record-only. No merge, `M`, `Q`, executable-file change, verification-tooling
-  change, or Phase 4 work is authorized by this review.
-
-```workflow-review-metadata
-schema_version: 2
-slice_id: 2026-10-02-phase3-exit-audit-b319168
-risk_class: D
-reviewer: Sol
-reviewer_role: primary
-reviewer_model: Sol Medium
-reviewed_at: 2026-10-03T03:40:01.908673+00:00
-candidate_sha: c92b9923b25badde06f5a70f05bc0098c3ff2656
-publication_commit_sha: 00d977bc8c02719df19dc30f35ae697c6d9271c2
-receipt_path: docs/verification-receipts/c92b9923b25badde06f5a70f05bc0098c3ff2656/d67a0497-6061-4809-9dac-55f6d03cd5f7.json
-receipt_id: d67a0497-6061-4809-9dac-55f6d03cd5f7
-gate: final
-verdict: approved
-findings: none
-```
-
-### Merge record
-
-- Date: 2026-10-03. Merged `phase-3/exit-audit` into `main` with `git merge --no-ff`,
-  at the approved, reviewed commit `b3f35ff4b7047f571805d8afd6a98569119261ae` (`R`):
-  Sol's "approved -- no executable findings" verdict on
-  `C3=c92b9923b25badde06f5a70f05bc0098c3ff2656` /
-  `A3=00d977bc8c02719df19dc30f35ae697c6d9271c2`.
-  - Merge commit `M`: `5dba60c649b6ffae450114a0f33437866e8efa47`.
-  - Rollback boundary (the pre-merge `main`/`origin/main` tip):
-    `b31916827c07715bb59f430ad52dd0193561c35b`.
-  - Full lineage: base `b319168` -> `C` `78cfd20` -> `A` `0de4494` -> `C2` `3582347` ->
-    `C3` `c92b992` -> `A3` `00d977b` -> `R` `b3f35ff` -> `M` `5dba60c` -> `Q` (this
-    commit). No `A2` exists, and `A`'s receipt is superseded.
-- Pre-merge checks, after a fresh fetch of `origin`:
-  - the feature branch and its origin both sat at `R`, and `main`/`origin/main` were both
-    clean and synchronized at the rollback boundary;
-  - `validate_c_a_r_chain(C3, A3, R)` and `check_merge_eligibility(C3, A3, R)` returned
-    `approved`, `findings: none`, `reviewer_model: Sol Medium`;
-  - receipt `d67a0497-6061-4809-9dac-55f6d03cd5f7` was schema-valid, bound to `C3`, had
-    matching committed verifier/checker/configuration hashes, and recomputed as
-    approval-eligible.
-- Release sequence:
-  - `M` was created locally and not pushed. It has two parents (the rollback boundary,
-    then `R`), `R..M` has zero content difference, and
-    `check_review.validate_merge(R, M, b319168)` passed.
-  - `verification_coordinator.run_post_merge_verification` ran against `M` in a
-    disposable detached worktree (always full/final): artifact
-    `74fd572f-0c6a-41bd-bdba-088a9bc180b4`, all 11 steps PASS, full pytest suite **3470
-    passed**, all 34 registered mutation witnesses passed, no migration triggered,
-    identical worktree snapshots, no leftover worktree, and cleanup PASS.
-  - `Q` is `M`'s direct mainline child. It contains that artifact plus this append-only
-    merge record, in one commit (this entry).
-- Post-merge evidence:
-  `docs/post-merge/5dba60c649b6ffae450114a0f33437866e8efa47/74fd572f-0c6a-41bd-bdba-088a9bc180b4.json`,
-  which references original receipt `d67a0497-6061-4809-9dac-55f6d03cd5f7`
-  (`docs/verification-receipts/c92b9923b25badde06f5a70f05bc0098c3ff2656/d67a0497-6061-4809-9dac-55f6d03cd5f7.json`).
-  `check_review.validate_published(C3, A3, R, M, Q)` and
-  `verification_coordinator.confirm_main_unchanged` run immediately before the push.
-  Their results are in the agent's final report rather than restated here in advance.
-- Phase 3 status: **closed within the approved conservative scope recorded in
-  [ADR 0011](DECISIONS/0011-phase-3-exit-audit.md).**
-  - Closed means parser-contract completion. It is not production readiness: no Phase 3
-    parser is wired into ingestion or persistence, no Phase 3 normalization-version
-    identifier or threading exists, providers do not map fields into parser inputs, and
-    realistic-text coverage is low.
-  - ADR 0011's D1 (deterministic parser-version identifier) and D2 (executable
-    realistic-output protection) preconditions remain binding on any future
-    normalized-persistence slice.
-  - Phase 4, normalized persistence, and provider integration remain unstarted and
-    unauthorized.
-- STOP -- report the synchronized final `main` SHA and stop. No Phase 4, normalized
-  persistence, provider contact, workflow-tooling correction, or another slice without
-  separate explicit user authorization.
-
-## Iteration 2
-
-### Work done
-
 - Date/agent: 2026-10-03, Claude (implementer). Branch
   `workflow/throughput-protocol-pilot`, base `6b4d9ea1a2503553c18ef5efd684fc354adf515a`
   (`Q` of the Phase 3 exit-audit merge `M=5dba60c`). Ending commit: this commit
@@ -493,3 +299,266 @@ findings: none
 - STOP -- report the synchronized final `main` SHA and stop. No Phase 4 work,
   normalized persistence, provider contact, policy or tooling change, or another slice
   without separate explicit user authorization.
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-10-03, Claude (implementer). Branch `phase-4/greenhouse-provider-s1`,
+  base `2a72471b95c61b7a1a3e2ae1f944ed40036671b8` (`Q` of the throughput-pilot merge).
+  The first immutable pre-publication advisory candidate was
+  `1f4bb4e87a2a7db317da3497f152b068773e94ff`; it is preserved unamended. Ending commit:
+  this commit, the advisory correction (its direct single-parent child), for Sol
+  Medium's narrow advisory re-review. Neither is final `C`: no coordinator run, receipt,
+  `A`, or formal review exists.
+- Slice: Phase 4 S1, an offline direct `GreenhouseJobBoardProvider` plus
+  [ADR 0013](DECISIONS/0013-direct-greenhouse-job-board-provider.md). Pilot product
+  slice 1 of 3 under [ADR 0012](DECISIONS/0012-workflow-throughput-protocol-pilot.md).
+  Risk class H, `declared_gate: final`. `slice_kind: tooling` is the conservative
+  compatibility label required by the current closed schema (`parser | tooling | docs`
+  has no provider kind). It is not a claim that provider code is process tooling. No
+  schema or validator was changed.
+- Contract identity (gitignored runtime packets, not committed):
+  - frozen contract `.claude/runtime/phase4-s1-frozen-contract.md`, SHA-256
+    `ad3daa68fd34a58aac1fc7f6b77ab7a9afcb1cec7c81a14eed634a8edac82a3c`. It integrates
+    the consolidated proposal with Sol Medium's binding proposal review (A1–A15 and
+    explicit rulings) and the user's 16-witness reconciliation;
+  - Sol's review relay `.claude/runtime/phase4-s1-sol-review.md`, SHA-256
+    `5ee125df5ac97bf42fe7f40abcbd9b523022e97bb589756322e0ef3d27d6726c`.
+- Dependency-advisory preflight (A14, separately user-authorized, run before branching):
+  closure derived from installed metadata (httpx 0.28.1, httpcore 1.0.9, anyio 4.14.2,
+  h11 0.16.0, idna 3.19, certifi 2026.7.22, typing-extensions 4.16.0); one read-only OSV
+  query per exact PyPI version on 2026-10-03; **zero advisories**. Evidence
+  `.claude/runtime/phase4-s1-dependency-advisory-evidence.json`, SHA-256
+  `527cdae0f0f244eb6869842b81041d8d2dfd4ffa837dfedf1eb2b951056830e0`. Only `httpx` is
+  project-pinned; the transitives are observed versions (no lockfile). ADR 0013 records
+  licenses and Sol's exact MPL-2.0 wording.
+- Files (exact closed nine-path list):
+  - `backend/app/providers/greenhouse.py` (new);
+  - `backend/tests/test_greenhouse_provider.py` (new);
+  - `backend/pyproject.toml`: `httpx==0.28.1` moved from `dev` to runtime, same pin;
+  - `docs/DECISIONS/0013-direct-greenhouse-job-board-provider.md` (new);
+  - `docs/ROADMAP.md`, `docs/PHASE_RISK_CHECKLIST.md`, `docs/ARCHITECTURE.md`,
+    `docs/SOURCE_CONNECTORS.md`: pointers to ADR 0013 only;
+  - this file: rotation. The exit-audit iteration was removed and the pilot-activation
+    iteration retained byte-for-byte as Iteration 1.
+- Material behavior: A1–A3 board classification and aggregate stats; A4 observed
+  health; A5–A7 record, duplicate-identity, and URL validation; A8 media type,
+  non-finite JSON, and `meta.total`; A9 one fresh transport and client per `discover`;
+  closed retry taxonomy (429/502/503/504, timeouts, connect errors), bounded
+  `Retry-After`, streamed size cap, attempt deadline; 225-second conservative default
+  bound per board (A11). `raw` is a deep copy of the whole record. No logger; every
+  detail, warning, and raised message is a fixed template. Not registered or reachable
+  at runtime; no live request, persistence, parser-input mapping, HTML conversion,
+  salary behavior, API route, migration, or normalization change.
+- Verification at the first advisory candidate `1f4bb4e` (no receipt-producing
+  coordinator run):
+  - `tests/test_greenhouse_provider.py`: **193 passed**, with zero socket contact and no
+    wall-clock retry waiting;
+  - the ten provider-related modules (canary, evaluation fetch, Greenhouse provider,
+    ingestion pipeline, live-proof adapter, orchestrator, provider registry, query
+    planner, taxonomy, db safety): **611 passed**. The pipeline and orchestrator modules
+    use the existing local `jobgoblin_test` database as they always do;
+  - `ruff format --check`, `ruff check`, and `mypy` on both new Python files: clean;
+  - Phase 3 evaluator `python -m scripts.evaluate_phase3_corpus`: SHA-256
+    `87a92187a2d37d5150fe998d06042449f6b74d540cecd15d1bba97dd94801de6`, 91,994 bytes,
+    1,366 CRLF lines, unchanged;
+  - `check_handoff`, `check_repo`, `git diff --check`, and nine-path scope: passed.
+- Mutation experiments at `1f4bb4e` (A12, exactly 16; recorded, not registered in
+  `tests/contracts`).
+  Each anchor occurred exactly once; baseline witness and controls passed; the witness
+  failed under the single mutation while its named controls passed; the source was
+  restored byte-identically (SHA-256 `04226b7be1a66f1dbbf029070855a7446cbdb5b077b093bbfb4ef8df4d90e965`
+  before and after every experiment); the witness then passed. Witness test names drop
+  the `test_` prefix:
+  - W01 whole-record raw (allowlisted subset) → `t07_raw_is_the_whole_record_structurally`;
+  - W02 size cap disabled → `t15_size_cap_stops_reading_the_stream`;
+  - W03 `follow_redirects=True` → `t04_redirect_is_not_followed`;
+  - W04 HTTP 500 made retryable → `t13_ineligible_failures_make_exactly_one_attempt`;
+  - W05 attempt bound off by one → `t13_eligible_failures_stop_at_max_attempts`;
+  - W06 `completed=True` always → `t11_all_boards_failed_is_not_completed`;
+  - W07 URL boundary reduced to a type check → `t06_url_boundary_rejections_skip_the_record`;
+  - W08 timezone check removed → `t06_invalid_timestamps_skip_the_record`;
+  - W09 company from `company_name` → `t05_maps_synthetic_record_and_takes_company_from_configuration`;
+  - W10 body appended to envelope detail → `t17_envelope_failure_detail_never_contains_the_body`;
+  - W11 `Retry-After` cap removed → `t14_retry_after_above_cap_stops_retrying`;
+  - W12 deadline check disabled → `t15_attempt_deadline_uses_injected_clock`;
+  - W13 source validation disabled → `t03_unsupported_sources_raise_before_transport`;
+  - W14 wrong-type optional text treated as absent → `t06_wrong_type_optional_fields_skip_the_record`;
+  - W15 duplicate identity `== 1` to `>= 1` → `t20_canonical_duplicates_are_all_skipped`;
+  - W16 all-invalid guard removed → `t11_all_invalid_nonempty_response_is_failure_not_successful_empty`.
+
+  Deep-copy/no-alias behavior is T07 regression coverage
+  (`t07_raw_is_deep_copied_without_aliasing`), not a mutation witness. The 34
+  registered witnesses and their registry are unchanged.
+- Deviations and disclosed interpretations (frozen contract, marked for Sol):
+  - `sources=[]` creates no transport or client, because no board is queried;
+  - a non-object `location` and a whitespace-only `first_published` are malformed;
+  - `meta.total` is compared with the number of returned records;
+  - "usable hostname" is ASCII dot-separated LDH labels;
+  - T20 lists the A6 duplicate-identity tests separately.
+  - The socket backups are installed and removed inside the async fixture's own
+    lifetime, because pytest-asyncio's Windows teardown loop connects a loopback
+    `socketpair`. A first test run exposed this; no production code changed for it.
+- Advisory review round 1 (Sol Medium, pre-publication advisory review, not formal
+  review). Reviewed `1f4bb4e` against frozen contract `ad3daa68…82a3c`; verdict
+  "advisory changes requested". Findings and dispositions:
+  - **P1, `Retry-After` escapes the boundary.** A digit-only header was passed to
+    `int()`, so a 5,000-digit value raised `ValueError` out of `discover()` instead of a
+    categorized one-attempt `RATE_LIMITED` failure. *Accepted and corrected:* the header
+    is kept as its digit string; `_bounded_retry_after` strips leading zeroes and treats
+    any delta with more significant digits than the cap's integer part as above the cap
+    without converting it, so conversion is bounded by the cap's own digit count. Values
+    at or below the cap keep their wait; values above it stop retrying; non-digit forms
+    keep exponential backoff.
+  - **P1, transport closed twice.** `AsyncClient.__aexit__` closes the transport and a
+    `finally` block closed it again; tests asserted `closed >= 1` and masked it.
+    *Accepted and corrected:* the client context is now the transport's sole owner, and
+    tests assert exactly one close on success, anticipated failure, and a propagated
+    programming error, plus a close-once transport that raises on a second close.
+  - **P2, stale retry claim.** The SOURCE_CONNECTORS Greenhouse row still credited "the
+    library's built-in backoff". *Accepted and corrected:* it now says the direct
+    adapter applies its own bounded deterministic retry/backoff policy.
+
+  The correction envelope was exactly four paths: `greenhouse.py`, its test module,
+  `docs/SOURCE_CONNECTORS.md`, and this file. No ADR, dependency, fixture, registry,
+  schema, persistence, normalization, or tooling change. The cumulative base..candidate
+  scope is still the same nine paths. The frozen contract is unchanged.
+- Verification at this correction (no receipt-producing coordinator run):
+  - `tests/test_greenhouse_provider.py`: **204 passed** (11 added). The eight new
+    regression tests (exact closure ×3, close-once transport, 5,000-digit delta, and
+    three long leading-zero cases) fail against `1f4bb4e`'s adapter and pass here;
+  - the same ten-module selection: **622 passed**;
+  - `ruff format --check`, `ruff check`, `mypy` on both Python files: clean;
+  - Phase 3 evaluator: SHA-256 `87a92187…01de6`, 91,994 bytes, 1,366 CRLF lines,
+    unchanged;
+  - `check_handoff`, `check_repo`, `git diff --check`, nine-path cumulative scope: see
+    the agent's report for this commit;
+  - all 16 mutation experiments re-run (not only W11): all passed with byte-identical
+    restoration; adapter SHA-256
+    `2b5703362f90e719239c45457cac73b7e69e48fdc4026319795c570dc7ae68f0` before and after.
+    W11's anchor moved with the fix to the `seconds > cap` comparison in
+    `_bounded_retry_after`, with the same witness and controls; the other 15 anchors are
+    byte-identical. No seventeenth frozen witness was added.
+- Unresolved issues: none known. Limitations: transitive versions unpinned; the OSV
+  check is point-in-time; Greenhouse API terms of use remain unreviewed (an S5 blocker).
+- Pilot metrics so far: proposal-review rounds 1 (Sol, consolidated, approved with
+  A1–A15); advisory-review rounds 1 (changes requested); executable findings 2 (both
+  P1) plus 1 documentation finding (P2); pre-`A` correction commits 1 (this commit);
+  post-`A` correction commits 0; full-suite executions 0; receipt-producing executions
+  0; user relays for S1 so far 5 (decisions, authorization, an identical re-paste of the
+  authorization, the Sol-review relay with the 16-witness correction, and the advisory
+  findings), including one stop because Sol's amendment text was not yet available in
+  the repository or runtime area. Implementation time: branch created
+  2026-10-03T20:28:40Z; first candidate committed shortly after 20:41Z.
+- STOP after pushing this correction for Sol Medium's narrow advisory re-review. No
+  final `C`, coordinator receipt, `A`, formal `R`, merge, `M`/`Q`, Greenhouse contact,
+  database access beyond existing local tests, or S2–S5.
+
+**Pre-publication advisory re-review — approved (Sol Medium, advisory only; not formal R).** Reviewed corrected advisory candidate `4a28c5d5e0f713d0d66d6d8c7ee7d0eb7b411212` against frozen-contract SHA-256 `ad3daa68fd34a58aac1fc7f6b77ab7a9afcb1cec7c81a14eed634a8edac82a3c`; all material changes through that SHA were reviewed. The Retry-After overflow, duplicate transport close, and stale connector wording findings are resolved within the authorized four-file correction scope, while cumulative base-to-candidate scope remains the original nine paths. Independent review confirmed 204 focused tests, clean Ruff/mypy and repository checks, unchanged Phase 3 evaluator output, exact one-time transport closure, bounded Retry-After behavior including long digits, leading zeroes and fractional caps, the corrected source hash and unique W11 anchor; the recorded 622-test run, old-implementation substitution, and all 16 mutation experiments with byte-identical restoration were inspected and accepted. The candidate is ready to be designated final C and undergo genuine candidate-bound final verification. This advisory approval is not formal R or merge authorization; formal R retains unrestricted authority.
+
+```workflow-metadata
+workflow_version: v3.2
+state: published
+slice_id: 2026-10-03-phase4-greenhouse-provider-s1-2a72471
+slice_kind: tooling
+risk_class: H
+base_sha: 2a72471b95c61b7a1a3e2ae1f944ed40036671b8
+declared_gate: final
+executed_gate: final
+candidate_sha: d9813b492121b78e2fee35113f033eecd59f0a6e
+receipt_id: 6489709d-6ab6-4def-ad56-a9da7729de52
+receipt_path: docs/verification-receipts/d9813b492121b78e2fee35113f033eecd59f0a6e/6489709d-6ab6-4def-ad56-a9da7729de52.json
+```
+
+### Work review
+
+- Date/reviewer: 2026-10-03, Sol (primary, Sol Medium). Formal review of Phase 4 S1, the
+  offline direct `GreenhouseJobBoardProvider`, on `phase-4/greenhouse-provider-s1`:
+  - base `2a72471b95c61b7a1a3e2ae1f944ed40036671b8`;
+  - final candidate `C` = `d9813b492121b78e2fee35113f033eecd59f0a6e`;
+  - publication `A` = `dbcb687e5b94d2d629b3411a3cf8f1be3f956e6f`.
+
+  Reviewed against the frozen contract (SHA-256
+  `ad3daa68fd34a58aac1fc7f6b77ab7a9afcb1cec7c81a14eed634a8edac82a3c`), which integrates
+  Sol's binding amendments A1–A15 and explicit rulings. Sol's two earlier
+  pre-publication advisory reviews were advisory only; this is the formal review.
+- Independently checked by Sol:
+  - **Ancestry and refs:** `C`'s sole parent is `4a28c5d`, `A`'s sole parent is `C`, the
+    local and remote branch both equal `A`, the worktree is clean, and
+    `main`/`origin/main` remain at the base.
+  - **Scope:** `base..C` changes exactly the nine authorized paths. `4a28c5d..C` is the
+    handoff-only finalization: the advisory re-review paragraph inserted verbatim before
+    valid `state: pending` metadata. `C..A` adds only the C-bound receipt and the
+    permitted pending -> published metadata transition.
+  - **Implementation identity:** the adapter at `C` has SHA-256
+    `2b5703362f90e719239c45457cac73b7e69e48fdc4026319795c570dc7ae68f0`.
+  - **Receipt:** receipt `6489709d-6ab6-4def-ad56-a9da7729de52` is schema-valid; bound
+    to `C`, the base, gate `final`, the slice, and risk class H; consistent with the
+    committed verifier, checker, and configuration hashes; consistent with an
+    independently recomputed affected surface and migration determination; covers the
+    complete active witness inventory; and recomputes as approval-eligible (`true`).
+  - **Focused and static checks:** the 204 provider tests were rerun and passed; Ruff,
+    mypy, and repository checks are clean; full-suite collection is exactly 3,674 tests.
+  - **Evaluator:** Phase 3 evaluator evidence is unchanged.
+  - **Mutation evidence:** the 16 manual S1 mutation definitions and their
+    byte-identical restoration evidence were inspected.
+  - **Contract:** A1–A15 remain satisfied, and the three advisory findings (unbounded
+    `Retry-After` conversion, duplicate transport close, stale connector wording) remain
+    resolved.
+  - **Boundaries:** no registry or composition-root wiring, live access, persistence,
+    parser-input mapping, salary behavior, API route, schema change, or migration.
+- Relied upon from the genuine `C` receipt, not rerun by Sol:
+  - execution of all 3,674 full-suite tests and the 204 focused tests;
+  - the disposable test-database URL validation and reachability checks;
+  - execution of 34/34 registered mutation witnesses;
+  - isolated-worktree integrity (identical snapshots), cache redirection, and cleanup;
+  - worktree removal and leak checks;
+  - the recorded environment descriptor and installed-distribution digest.
+
+  The coordinator did not run the 16 manual S1 mutation experiments; they remain
+  advisory-candidate evidence and are not registered witnesses.
+- Limitations retained:
+  - transitive dependencies are not locked (no lockfile);
+  - the OSV advisory evidence is point-in-time;
+  - Greenhouse's API terms of use remain unreviewed;
+  - the adapter is not reachable at runtime;
+  - S1 does not satisfy ADR 0011's D1 or D2;
+  - S1 does not complete Phase 4.
+- Pilot metrics (ADR 0012, pilot product slice 1 of 3), accepted as recorded:
+  - proposal-review rounds: 1;
+  - advisory-review rounds: 2;
+  - findings: 2 executable (P1) and 1 documentation (P2);
+  - semantic pre-`A` correction commits: 1;
+  - handoff-only finalization commits: 1;
+  - post-`A` corrections: 0;
+  - full-suite executions through `A`: 1;
+  - receipt-producing executions: 1;
+  - user relays through `A` publication: 6.
+
+  The relay for this formal review occurred after `A` was published and is outside that
+  six-relay boundary.
+- Findings by severity with exact references: none.
+- Verdict: **approved** -- no findings. "No unresolved defects currently known" is a
+  status statement, not proof of equivalent assurance.
+- Exact bounded correction: none required.
+- STOP -- record-only. This review authorizes no merge, `M`, `Q`, Greenhouse contact,
+  production data access, S2, or change to executable code, policy, validators, schemas,
+  dependencies, fixtures, or evidence. Merge requires separate user authorization.
+
+```workflow-review-metadata
+schema_version: 2
+slice_id: 2026-10-03-phase4-greenhouse-provider-s1-2a72471
+risk_class: H
+reviewer: Sol
+reviewer_role: primary
+reviewer_model: Sol Medium
+reviewed_at: 2026-10-03T23:06:46+00:00
+candidate_sha: d9813b492121b78e2fee35113f033eecd59f0a6e
+publication_commit_sha: dbcb687e5b94d2d629b3411a3cf8f1be3f956e6f
+receipt_path: docs/verification-receipts/d9813b492121b78e2fee35113f033eecd59f0a6e/6489709d-6ab6-4def-ad56-a9da7729de52.json
+receipt_id: 6489709d-6ab6-4def-ad56-a9da7729de52
+gate: final
+verdict: approved
+findings: none
+```

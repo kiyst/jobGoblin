@@ -182,7 +182,10 @@ Entry checks:
 
 Required prevention:
 
-- Pin the dependency and import it only inside `AtsScrapersProvider`.
+- Pin the dependency and import it only inside `AtsScrapersProvider`. For Greenhouse,
+  [ADR 0013](DECISIONS/0013-direct-greenhouse-job-board-provider.md) supersedes this:
+  the pinned dependency is `httpx`, imported only inside the direct
+  `GreenhouseJobBoardProvider` (`app/providers/greenhouse.py`).
 - Convert immediately to `DiscoveryResult`/`DiscoveredJob` and preserve `raw`.
 - Add captured-response contract fixtures for each enabled ATS.
 - Configure timeout, retries, concurrency, and request rate per source.
