@@ -459,10 +459,14 @@ findings: none
 
 ```workflow-metadata
 workflow_version: v3.2
-state: pending
+state: published
 slice_id: 2026-10-03-phase4-greenhouse-provider-s1-2a72471
 slice_kind: tooling
 risk_class: H
 base_sha: 2a72471b95c61b7a1a3e2ae1f944ed40036671b8
 declared_gate: final
+executed_gate: final
+candidate_sha: d9813b492121b78e2fee35113f033eecd59f0a6e
+receipt_id: 6489709d-6ab6-4def-ad56-a9da7729de52
+receipt_path: docs/verification-receipts/d9813b492121b78e2fee35113f033eecd59f0a6e/6489709d-6ab6-4def-ad56-a9da7729de52.json
 ```
