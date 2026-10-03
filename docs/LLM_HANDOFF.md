@@ -470,3 +470,95 @@ candidate_sha: d9813b492121b78e2fee35113f033eecd59f0a6e
 receipt_id: 6489709d-6ab6-4def-ad56-a9da7729de52
 receipt_path: docs/verification-receipts/d9813b492121b78e2fee35113f033eecd59f0a6e/6489709d-6ab6-4def-ad56-a9da7729de52.json
 ```
+
+### Work review
+
+- Date/reviewer: 2026-10-03, Sol (primary, Sol Medium). Formal review of Phase 4 S1, the
+  offline direct `GreenhouseJobBoardProvider`, on `phase-4/greenhouse-provider-s1`:
+  - base `2a72471b95c61b7a1a3e2ae1f944ed40036671b8`;
+  - final candidate `C` = `d9813b492121b78e2fee35113f033eecd59f0a6e`;
+  - publication `A` = `dbcb687e5b94d2d629b3411a3cf8f1be3f956e6f`.
+
+  Reviewed against the frozen contract (SHA-256
+  `ad3daa68fd34a58aac1fc7f6b77ab7a9afcb1cec7c81a14eed634a8edac82a3c`), which integrates
+  Sol's binding amendments A1–A15 and explicit rulings. Sol's two earlier
+  pre-publication advisory reviews were advisory only; this is the formal review.
+- Independently checked by Sol:
+  - **Ancestry and refs:** `C`'s sole parent is `4a28c5d`, `A`'s sole parent is `C`, the
+    local and remote branch both equal `A`, the worktree is clean, and
+    `main`/`origin/main` remain at the base.
+  - **Scope:** `base..C` changes exactly the nine authorized paths. `4a28c5d..C` is the
+    handoff-only finalization: the advisory re-review paragraph inserted verbatim before
+    valid `state: pending` metadata. `C..A` adds only the C-bound receipt and the
+    permitted pending -> published metadata transition.
+  - **Implementation identity:** the adapter at `C` has SHA-256
+    `2b5703362f90e719239c45457cac73b7e69e48fdc4026319795c570dc7ae68f0`.
+  - **Receipt:** receipt `6489709d-6ab6-4def-ad56-a9da7729de52` is schema-valid; bound
+    to `C`, the base, gate `final`, the slice, and risk class H; consistent with the
+    committed verifier, checker, and configuration hashes; consistent with an
+    independently recomputed affected surface and migration determination; covers the
+    complete active witness inventory; and recomputes as approval-eligible (`true`).
+  - **Focused and static checks:** the 204 provider tests were rerun and passed; Ruff,
+    mypy, and repository checks are clean; full-suite collection is exactly 3,674 tests.
+  - **Evaluator:** Phase 3 evaluator evidence is unchanged.
+  - **Mutation evidence:** the 16 manual S1 mutation definitions and their
+    byte-identical restoration evidence were inspected.
+  - **Contract:** A1–A15 remain satisfied, and the three advisory findings (unbounded
+    `Retry-After` conversion, duplicate transport close, stale connector wording) remain
+    resolved.
+  - **Boundaries:** no registry or composition-root wiring, live access, persistence,
+    parser-input mapping, salary behavior, API route, schema change, or migration.
+- Relied upon from the genuine `C` receipt, not rerun by Sol:
+  - execution of all 3,674 full-suite tests and the 204 focused tests;
+  - the disposable test-database URL validation and reachability checks;
+  - execution of 34/34 registered mutation witnesses;
+  - isolated-worktree integrity (identical snapshots), cache redirection, and cleanup;
+  - worktree removal and leak checks;
+  - the recorded environment descriptor and installed-distribution digest.
+
+  The coordinator did not run the 16 manual S1 mutation experiments; they remain
+  advisory-candidate evidence and are not registered witnesses.
+- Limitations retained:
+  - transitive dependencies are not locked (no lockfile);
+  - the OSV advisory evidence is point-in-time;
+  - Greenhouse's API terms of use remain unreviewed;
+  - the adapter is not reachable at runtime;
+  - S1 does not satisfy ADR 0011's D1 or D2;
+  - S1 does not complete Phase 4.
+- Pilot metrics (ADR 0012, pilot product slice 1 of 3), accepted as recorded:
+  - proposal-review rounds: 1;
+  - advisory-review rounds: 2;
+  - findings: 2 executable (P1) and 1 documentation (P2);
+  - semantic pre-`A` correction commits: 1;
+  - handoff-only finalization commits: 1;
+  - post-`A` corrections: 0;
+  - full-suite executions through `A`: 1;
+  - receipt-producing executions: 1;
+  - user relays through `A` publication: 6.
+
+  The relay for this formal review occurred after `A` was published and is outside that
+  six-relay boundary.
+- Findings by severity with exact references: none.
+- Verdict: **approved** -- no findings. "No unresolved defects currently known" is a
+  status statement, not proof of equivalent assurance.
+- Exact bounded correction: none required.
+- STOP -- record-only. This review authorizes no merge, `M`, `Q`, Greenhouse contact,
+  production data access, S2, or change to executable code, policy, validators, schemas,
+  dependencies, fixtures, or evidence. Merge requires separate user authorization.
+
+```workflow-review-metadata
+schema_version: 2
+slice_id: 2026-10-03-phase4-greenhouse-provider-s1-2a72471
+risk_class: H
+reviewer: Sol
+reviewer_role: primary
+reviewer_model: Sol Medium
+reviewed_at: 2026-10-03T23:06:46+00:00
+candidate_sha: d9813b492121b78e2fee35113f033eecd59f0a6e
+publication_commit_sha: dbcb687e5b94d2d629b3411a3cf8f1be3f956e6f
+receipt_path: docs/verification-receipts/d9813b492121b78e2fee35113f033eecd59f0a6e/6489709d-6ab6-4def-ad56-a9da7729de52.json
+receipt_id: 6489709d-6ab6-4def-ad56-a9da7729de52
+gate: final
+verdict: approved
+findings: none
+```
