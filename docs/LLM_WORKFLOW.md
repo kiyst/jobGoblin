@@ -409,7 +409,9 @@ Status: active, adopted per ADR 0008's accepted principles and activated per ADR
 explicitly superseded below continues to apply — the Definition of Ready, risk classes,
 revision discipline, adversarial self-review, and the closed historical-pilot section
 above remain in force. This section adds the durable-evidence and gate mechanism ADR 0008
-deferred to a separately authorized slice.
+deferred to a separately authorized slice. A bounded operational pilot layered on top of
+it, which changes only review timing and ordering, is defined in "Workflow Throughput
+Protocol pilot (ADR 0012)" below.
 
 ### Reviewer roles (ADR 0008 principles 3–4)
 
@@ -540,6 +542,267 @@ an empty finding list.
 
 A receipt, an `approved` verdict, or any mechanically-satisfied gate never substitutes for
 the user's own merge authorization — unchanged from v3 and v3.1.
+
+### Workflow Throughput Protocol pilot (ADR 0012)
+
+Status: a bounded operational pilot, recorded in
+[ADR 0012](DECISIONS/0012-workflow-throughput-protocol-pilot.md). It takes effect only
+once its own activation slice reaches `Q` on `main`. It then applies to the next three
+product-oriented implementation slices. Astra approved the policy with binding amendments
+A1–A10, and Sol approved it as compatible with the current validators. Both were policy
+consultations, not formal `R` reviews.
+
+**Precedence.** The pilot changes operational ordering and review timing only. These
+remain controlling:
+
+- the existing validators and transition rules;
+- reviewer-role requirements;
+- gate selection;
+- receipt binding;
+- metadata schemas;
+- handoff retention;
+- safety policy.
+
+When pilot text conflicts with an existing validator-enforced rule, the existing rule wins
+until it is separately amended. Nothing here weakens any other requirement in this file.
+
+**Product priority.** Pilot slices prioritize reachable product behavior. That priority
+never authorizes:
+
+- skipping ADR 0011's D1/D2 prerequisites;
+- enlarging slices;
+- bypassing safety or evidence work;
+- suppressing findings;
+- avoiding necessary migrations, database checks, or provider safeguards.
+
+Bounded D1/D2 work counts as product progress. Safety and evidence blockers may interrupt
+the sequence; cosmetic cleanup ordinarily may not.
+
+**Retained unchanged:**
+
+- explicit authorization;
+- one active implementation slice;
+- a clean, synchronized base;
+- closed affected-file scope;
+- immutable commits, with no force-push or amended workflow history;
+- fail-closed affected-surface classification;
+- candidate-bound verification;
+- focused tests and relevant evaluator evidence;
+- mutation evidence for changed safety-critical invariants;
+- reviewer independence and identity rules;
+- genuine receipt publication;
+- `C -> A -> R` validation;
+- an approved `R` before merge;
+- a `--no-ff` `M`;
+- full post-merge verification against `M`;
+- a `Q` containing only the permitted artifact and merge record;
+- combined remote publication of `M` and `Q`;
+- explicit authorization for provider, network, database, migration, credential, and
+  production-write effects;
+- ADR 0011's provenance, versioning, and realistic-output requirements.
+
+**Pre-publication advisory review.** For executable or semantic slices, the operational
+ordering becomes:
+
+`contract -> immutable advisory candidate -> advisory review -> corrected final C ->
+receipt/A -> formal R -> M/Q`
+
+1. Freeze the reviewed contract.
+2. Implement an immutable advisory-review candidate.
+3. Run focused tests, static checks, relevant evaluator comparisons, and targeted
+   mutation experiments.
+4. The assigned primary reviewer inspects the actual candidate.
+5. Record the reviewed SHA, frozen-contract identity, findings, dispositions, and later
+   reviewed changes as durable ordinary prose or a durable decision pointer.
+6. Correct all accepted findings.
+7. The reviewer examines all material changes through final `C`.
+8. Run the genuine coordinator against final `C` and publish `A`.
+9. Perform formal `R`.
+10. Merge and publish `M`/`Q` normally.
+
+Material changes include:
+
+- production code;
+- tests and fixtures;
+- configuration;
+- dependencies;
+- schemas;
+- behavioral or semantic documentation;
+- evidence that materially affects approval.
+
+If final `C` materially differs from the last commit the advisory reviewer inspected, the
+reviewer inspects the changed portion before final verification.
+
+Advisory review is never `workflow-review-metadata`, never called formal approval, never
+an `A -> R` transition, and never merge authorization.
+
+**Formal `R` remains authoritative.** It may reject `C`/`A` for:
+
+- new or previously missed defects;
+- contradictory evidence;
+- invalid or insufficient checks;
+- unresolved findings;
+- incorrect affected-surface classification;
+- lineage or receipt problems;
+- any other concrete blocker.
+
+Advisory clearance is reusable evidence, never an approval guarantee. A formal reviewer
+who did not perform the advisory review independently assesses enough of the
+implementation to own the approval.
+
+**Reviewer assignment is unchanged.** Sol Medium remains the required formal primary
+reviewer wherever current policy or `scripts/check_review.py` requires it, including
+every Class H, parser, and tooling slice. Astra may lead policy analysis or escalation
+review but cannot replace that role without a separately authorized policy and validator
+change. No reviewer independently approves their own implementation or substantive
+correction.
+
+**Verification-run target.** For a normal successful executable slice, the target is one
+candidate-bound final coordinator run at final `C` plus one always-full post-merge run at
+`M`. This is a target, not a cap or quota. Additional runs remain required for:
+
+- failed verification;
+- a replacement candidate;
+- executable or material evidence changes;
+- invalid evidence;
+- newly discovered defects;
+- migrations;
+- provider or persistence risk;
+- dependency changes;
+- database requirements;
+- security requirements;
+- any other applicable check.
+
+A passing receipt never covers a different SHA. Authoritative affected surface is still
+computed across the complete configured base-to-candidate range. A direct-parent diff
+alone never omits inherited changes.
+
+**Consolidated findings.** Reviewers should return everything reasonably discoverable in
+one severity-ranked response:
+
+- one verdict;
+- concrete findings;
+- reproductions or counterexamples;
+- one complete binding amendment table when amendments are needed;
+- exact replacement language for ambiguous rules;
+- positive and negative cases;
+- intended mutation witnesses;
+- user decisions still required.
+
+This is an efficiency expectation, not a limit. A defect is reported whenever it is
+discovered, including one missed earlier. Avoidable churn is measured, never suppressed.
+
+**Blocking versus preference.** A blocking finding identifies at least one of:
+
+- a violated frozen requirement;
+- reproducible incorrect behavior;
+- missing load-bearing evidence;
+- invalid lineage or receipt;
+- an unsafe boundary;
+- internally contradictory documentation;
+- a concrete maintainability defect likely to affect correctness.
+
+Style preferences, alternative designs, speculative extensibility, and harmless behavior
+outside the frozen domain are non-blocking unless the authorized contract includes them.
+
+**Mutation-witness timing.** During design, freeze the protected invariant, intended
+mutation, proposed witness behavior, and positive controls. Before final `C` is
+published:
+
+1. record normal behavior;
+2. disable only the intended guard;
+3. prove the named witness fails;
+4. verify positive controls stay stable;
+5. restore the implementation;
+6. prove the witness passes;
+7. confirm byte-identical restoration where applicable.
+
+A case also caught by another guard is overlap coverage, not an isolating witness.
+Existing registered guards remain mandatory. Witnesses are added or revised only where
+the slice changes the protected invariant.
+
+**Correction classes.**
+
+- *Executable or semantic* (parser or schema behavior, fixtures, safety invariants,
+  executable verification logic) requires a corrected candidate, focused verification,
+  renewed review of the affected material, and candidate-bound final evidence.
+- *Evidence integrity* (false totals, incorrect invocations, bad hashes, wrong receipt
+  binding, incorrect reported results) requires a corrected candidate, verification
+  appropriate to that evidence, independent re-review, and exact candidate binding.
+- *Genuinely harmless editorial* prose alters no contract, reported evidence, scope,
+  authorization, instruction, interpretation, candidate identity, or approval meaning.
+  - Fix it before `A` whenever possible.
+  - After `A`, it may remain as a disclosed non-blocking issue when meaning and evidence
+    remain correct.
+  - Never silently change `C`, `A`, or their meaning.
+  - A specific transition validator overrides any general mechanical-edit allowance,
+    including "Standing rule for mechanical documentation fixes" above.
+
+**Repository-first handoff.** The repository is the canonical handoff. The compact
+current-slice entry still carries:
+
+- all required workflow metadata;
+- objective and contract identity;
+- base and candidate SHA;
+- exact changed paths;
+- material behavior changes;
+- deviations and unresolved issues;
+- focused verification;
+- evaluator differences;
+- advisory-review SHA, findings, and dispositions;
+- receipt and publication state;
+- durable pointers to external decisions.
+
+Reviewers inspect the branch, diff, tests, handoff, and receipts directly. The user
+normally relays only the branch, candidate SHA, requested reviewer role, and external
+decisions not already preserved durably. The latest-two-iterations rule in
+`docs/LLM_HANDOFF.md` is unchanged.
+
+**Docs-correction receipt limitation.** A prior receipt inside the cumulative
+base-to-candidate scope can classify as `unmapped` and conservatively force `gate=final`
+during a docs correction round. During the pilot:
+
+- review substantive documentation before `A`;
+- keep the fail-closed final-gate workaround when it occurs;
+- never change verification tooling inside an unrelated product slice.
+
+Direct-parent-only authoritative scope calculation is prohibited. Any future optimization
+must validate full lineage and inherited changes against valid prior evidence, as its own
+separately authorized proposal with tests, a final gate, and independent review.
+
+**Metrics.** Record separately for each pilot slice:
+
+- proposal-review, advisory-review, and formal-review rounds;
+- executable findings;
+- pre-`A` and post-`A` correction commits;
+- full-suite and receipt-producing executions;
+- active implementation, active review, machine verification, and waiting/relay time;
+- user copy/paste handoffs;
+- first-pass semantic clearance;
+- escaped post-merge defects;
+- newly reachable product behavior.
+
+Clean-path targets: one consolidated proposal review, no normal post-`A` executable
+correction, one pre-merge final receipt, one post-merge full run, and compact user relay.
+Failures and extra runs are reported honestly and are not policy violations. Compare
+similarly risky slices; three defect-free slices do not by themselves prove unchanged
+assurance.
+
+**Exit and rollback.** After the third pilot slice, compare its metrics with similarly
+risky Phase 3 work and decide separately whether to retain, revise, or end the pilot. To
+roll back, stop using the pilot and return to the prior ordering, where review follows
+receipt publication. Historical commits are never rewritten.
+
+**Deferred and unauthorized** (each needs its own proposal):
+
+- special classification of immutable prior receipt paths;
+- lineage-aware verification-scope optimization;
+- advisory-review metadata or schema support;
+- allowing Astra to replace Sol in formal roles;
+- automated cross-session relay;
+- changed handoff retention;
+- changed review schemas;
+- validator or verification-tooling changes.
 
 ## Established conventions are defaults
 
