@@ -83,6 +83,24 @@ _SKILL_FIXTURE_FILES: dict[str, str] = {
     "backend/tests/fixtures/normalization/skill_cases.json": "test-fixture:skill-classifier",
 }
 
+# The remote-classifier slice's own JSON regression corpus -- a distinct,
+# dedicated table (never folded into `_SKILL_FIXTURE_FILES`, which would
+# misclassify it as a skill-classifier fixture); same reasoning as
+# `_TAXONOMY_FIXTURE_FILES`/`_SKILL_FIXTURE_FILES` above (not a
+# contract-record, no contract-harness guard/family involvement).
+_REMOTE_FIXTURE_FILES: dict[str, str] = {
+    "backend/tests/fixtures/normalization/remote_type_cases.json": "test-fixture:remote-classifier",
+}
+
+# The title-classifier slice's own JSON regression corpus -- a distinct,
+# dedicated table (never folded into `_SKILL_FIXTURE_FILES` or
+# `_REMOTE_FIXTURE_FILES`, which would misclassify it); same reasoning as
+# `_TAXONOMY_FIXTURE_FILES`/`_SKILL_FIXTURE_FILES` above (not a
+# contract-record, no contract-harness guard/family involvement).
+_TITLE_FIXTURE_FILES: dict[str, str] = {
+    "backend/tests/fixtures/normalization/title_cases.json": "test-fixture:title-classifier",
+}
+
 # The realistic Phase 3 evaluation corpus -- not a contract-record (same
 # reasoning as `_TAXONOMY_FIXTURE_FILES`/`_SKILL_FIXTURE_FILES` above).
 # Declared here regardless of whether the file exists yet on disk (a
@@ -182,6 +200,8 @@ def _validate_configuration() -> None:
         _RECORD_FILES,
         _TAXONOMY_FIXTURE_FILES,
         _SKILL_FIXTURE_FILES,
+        _REMOTE_FIXTURE_FILES,
+        _TITLE_FIXTURE_FILES,
         _EVALUATION_FIXTURE_FILES,
     ]
     exact_sets: list[frozenset[str]] = [
@@ -246,6 +266,8 @@ def classify_path(path: str) -> Classification:
         _RECORD_FILES,
         _TAXONOMY_FIXTURE_FILES,
         _SKILL_FIXTURE_FILES,
+        _REMOTE_FIXTURE_FILES,
+        _TITLE_FIXTURE_FILES,
         _EVALUATION_FIXTURE_FILES,
     ):
         if path in exact_map:

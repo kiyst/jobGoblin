@@ -411,7 +411,29 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   `tests/test_ingestion_pipeline.py`. This closure was reviewed and approved by Codex,
   merged into `main` at `d4bd606` (merge record committed at `199eb00`), and **Phase 2
   is officially complete.**
-- **Phase 3: first slice (remote/hybrid/onsite classifier) merged into `main` at
+- **Phase 3: closed (2026-10-02) by the read-only exit audit recorded in
+  [DECISIONS/0011](DECISIONS/0011-phase-3-exit-audit.md).**
+
+  > Phase 3 deterministic parser contracts are complete within their approved conservative scope. Production normalization composition, parser-version persistence, provider-field mapping, and useful live-data coverage are not complete. Closure does not authorize Phase 4 implementation or normalized persistence; the recorded integration preconditions remain binding.
+
+  All eight parser areas named by the Phase 3 exit gate are merged into `main`: title,
+  salary, location, remote type, employment, seniority, experience, and skills. Closure
+  means parser-contract completion only, not Phase 4 or product readiness:
+  - no parser is wired into ingestion or persistence;
+  - no parser-version identifier exists;
+  - providers do not map fields into parser inputs;
+  - realistic-text coverage is low.
+
+  ADR 0011 records the requirement-to-evidence matrix and the accepted conservative
+  limitations: low realistic coverage, three exposed `skills.golang` holdout misses,
+  deliberate `location.city` abstention, the `salary.*` input gap, three country-provenance
+  label differences, burned holdout, and no automated realistic-output enforcement for
+  seven parsers. It also records two binding integration preconditions that any future
+  normalized-persistence slice must satisfy first: D1 (deterministic parser-version
+  identifier) and D2 (executable realistic-output protection). Phase 4 still requires its
+  own entry review, proposal, and separate authorization.
+  The slice-by-slice history below is retained as written; each entry is a point-in-time
+  record. **First slice (remote/hybrid/onsite classifier) merged into `main` at
   `1bc8247` (approval commit `fecbcec`, merge record in
   [LLM_HANDOFF.md](LLM_HANDOFF.md)) — not a Phase 3 completion claim.**
   `app/normalization/remote.py`'s deterministic remote/hybrid/onsite classifier and
@@ -469,7 +491,7 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   external lookups, no taxonomy — all Phase 4+ or explicitly out-of-scope concerns.
   All six Phase 3 classifier parsers (remote, employment, seniority, experience, salary,
   location) are now merged into `main` — this is still not a Phase 3 completion claim.
-  Title parser has not been started.
+  Title parser had not been started at that point (see the twelfth slice below).
   A seventh slice, the **skill-taxonomy foundation** (Class H; risk classified high
   because ambiguous-alias false matches are Phase 3's own named primary risk, and this
   is novel infrastructure two future parsers depend on, not a "repeated established
@@ -482,7 +504,9 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   implement a skill classifier — that slice unblocked a future `classify_skill`-style
   parser only. Title normalization is **not** unblocked: job titles are free-form
   multi-word phrases needing their own, likely hierarchical taxonomy schema, entirely
-  unstarted. Seeded with 15 explicitly reviewed, non-exhaustive entries (see the slice's
+  unstarted. (Point-in-time statement, superseded: title normalization was later
+  implemented and merged with a code-defined vocabulary and no title taxonomy — see the
+  twelfth slice below.) Seeded with 15 explicitly reviewed, non-exhaustive entries (see the slice's
   own proposal record for the frozen table and each alias's rationale).
   An eighth slice, the **skill classifier** (Class H, same primary-risk reasoning as the
   taxonomy foundation above), consumes that taxonomy: `app/normalization/skills.py`'s
@@ -521,15 +545,47 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   claude.json`, `docs/evaluation/phase3-realistic-pass-sol.json`,
   `docs/evaluation/phase3-realistic-adjudication-audit.json`,
   `backend/tests/fixtures/evaluation/phase3_realistic_corpus.json`, and
-  `docs/evaluation/phase3-realistic-corpus-baseline-report.md`. Implemented on
-  `phase-3/realistic-corpus-freeze-evaluation` — **candidate/publication stage, not
-  yet reviewed, not merged.** Baseline findings (a `salary.*` wiring gap, several
-  supported-field abstentions, a `skills.golang` recall gap, two `remote_type`
-  ambiguous false positives) are disclosed in the baseline report as a backlog for a
-  separately authorized correction slice — no parser was changed to make this corpus
-  pass. See this slice's own `docs/LLM_HANDOFF.md` entry and
+  `docs/evaluation/phase3-realistic-corpus-baseline-report.md`. **Merged into `main`
+  at `M=fccbf62d2f5f7df10f46b174c1aff96ed18b3ef7` /
+  `Q=25ac578f6e980eb73964de17d8f32ca1f2695867`.** Baseline findings (a `salary.*`
+  wiring gap, several supported-field abstentions, a `skills.golang` recall gap
+  affecting 5 records, two `remote_type` ambiguous false positives) were disclosed in
+  the baseline report as a backlog for separately authorized correction slices — no
+  parser was changed in this slice to make the corpus pass.
+  An eleventh slice, the **first post-baseline Phase 3 correction** (same Class H
+  authorization, base `25ac578`, branch
+  `phase-3/baseline-correction-go-remote-v2`) — **merged into `main` at
+  `M=689f94c65ebdb278dba0c8bb20bb6b1c272b9716` /
+  `Q=aed2694720b0344ae54feeef1916805f91e6b508`.** Recovers exactly 2 of the 5
+  disclosed `skills.golang` recall misses (`anthropic:4502508008`, `gitlab:8512432002`) and corrects both
+  disclosed `remote_type` ambiguous false positives (`discord:8214127002`,
+  `discord:8545675002`). The remaining 3 `skills.golang` misses stay open backlog
+  items. The `gitlab:8512432002` recovery uses already-exposed GitLab holdout
+  evidence and is informational confirmation only, never fresh generalization
+  evidence. See this slice's own `docs/LLM_HANDOFF.md` entry and
   `docs/DECISIONS/0010-realistic-evaluation-corpus-methodology.md` for exactly what
   is and is not yet populated.
+  A twelfth slice, the **title classifier** (Class H, base `aed2694`, branch
+  `phase-3/title-normalization`) — **merged into `main` at
+  `M=a3c1c12053e7990b88e2c01f6736425cb59f3453` /
+  `Q=b31916827c07715bb59f430ad52dd0193561c35b`** (Sol Medium approved `C2=4c6f933` /
+  `A2=795ed58` with no findings; merge record in [LLM_HANDOFF.md](LLM_HANDOFF.md)).
+  `app/normalization/titles.py`'s `classify_title(title)` returns a `TitleResult`: a
+  `canonical_title` and its `role_family`, each a `NormalizationResult` that is always
+  `INFERRED` when present, plus a closed `TitleOutcome` (`matched`/`no_title`/
+  `unsupported`/`ambiguous`). A frozen, code-defined nine-title vocabulary (seven role
+  families) with import-time table validation — no `taxonomy/titles.yaml` is created,
+  and saved-search title alias expansion is deferred to a future matching phase.
+  Conservative suffix-alias matching under a bounded per-code-point character policy;
+  any doubt yields `(None, UNAVAILABLE)`. Seniority is not extracted here. Not wired
+  into ingestion/persistence; no `jobs.normalized_title`/`job_family` write of any
+  kind. The 30 frozen-corpus titles are included as byte-identical,
+  primary-reviewer-approved smoke/regression expectations (22 matched, 6 unsupported,
+  2 ambiguous) — never accuracy, holdout, coverage, precision, recall, or
+  generalization evidence; the frozen corpus, its annotations, and the evaluator are
+  unchanged. The 3 remaining `skills.golang` misses and the `salary.*` missing-wired-
+  input gap remain outside this slice (the latter is future provider-composition
+  work).
 - **Phase 4: two bounded read-only prework proofs merged into `main`; the production
   `AtsScrapersProvider` adapter is not started and Phase 4 is not complete.** The
   Greenhouse live ATS canary (`phase-4/greenhouse-canary`, merged at `64a3534`) and the

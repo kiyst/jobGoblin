@@ -7,8 +7,15 @@ import pytest
 
 from app.normalization.skills import (
     SkillMatch,
+    _cue_sentence_spans,
+    _go_list_neighbor_rescue,
+    _has_go_role_relevance_cue,
     _is_covered_terminator_boundary,
     _is_region_ending_boundary,
+    _segment_token_offsets,
+    _segments_with_offsets,
+    _sentence_containing,
+    _sentence_index_at,
     classify_skills,
 )
 from app.normalization.taxonomy import DEFAULT_SKILLS_TAXONOMY_PATH, TaxonomyIndex, load_taxonomy
@@ -195,6 +202,139 @@ def test_region_ending_boundary_ordinary_letter_and_digit_are_non_terminating() 
     fixture-level positive controls."""
     assert _is_region_ending_boundary("e.g.Python", 2) is False  # '.' before 'g'
     assert _is_region_ending_boundary("v1.2Python", 3) is False  # '.' before '2'
+
+
+# ---------------------------------------------------------------------------
+# Go-only list-neighbor rescue -- unit-level, direct coverage of each
+# mechanical conjunct in isolation, supplementing the fixture-driven
+# end-to-end cases above.
+# ---------------------------------------------------------------------------
+def test_segments_with_offsets_preserves_empty_segment_without_skipping() -> None:
+    """A double delimiter (`",,"`) must produce a real, empty entry at its
+    own position -- never be silently collapsed or skipped -- so the
+    rescue rule's neighbor lookup can see "the immediately adjacent
+    segment is empty" rather than reaching past it."""
+    text = "Python,,Go"
+    segments = _segments_with_offsets(text)
+    assert [tokens for _offset, tokens in segments] == [["Python"], [], ["Go"]]
+
+
+def test_segments_with_offsets_offsets_point_at_raw_segment_start() -> None:
+    text = "Python, Go, Java"
+    segments = _segments_with_offsets(text)
+    offsets = [offset for offset, _tokens in segments]
+    assert offsets == [0, 7, 11]
+    assert text[offsets[1] :].startswith(" Go")
+
+
+def test_segment_token_offsets_point_at_tokens_not_segment_starts() -> None:
+    """The second raw segment of `"Python,\\n   Go"` starts on the newline;
+    its token offset must point at `"G"` itself, after the newline and the
+    covered spaces."""
+    text = "Python,\n   Go, Java"
+    offsets = _segment_token_offsets(text)
+    assert offsets == [[0], [11], [15]]
+    assert text[offsets[1][0] :].startswith("Go")
+    assert text[offsets[2][0] :].startswith("Java")
+
+
+def test_segment_token_offsets_align_with_segments_including_empty() -> None:
+    text = "Python,,Go"
+    segments = _segments_with_offsets(text)
+    offsets = _segment_token_offsets(text)
+    assert len(offsets) == len(segments)
+    assert [len(o) for o in offsets] == [len(tokens) for _offset, tokens in segments]
+    assert offsets == [[0], [], [8]]
+
+
+def test_sentence_index_at_places_token_after_newline_in_next_sentence() -> None:
+    text = "Production experience with Python,\nGo, Java."
+    spans = _cue_sentence_spans(text)
+    newline_index = text.index("\n")
+    go_offset = text.index("Go")
+    assert _sentence_index_at(spans, newline_index) == 0
+    assert _sentence_index_at(spans, go_offset) == 1
+
+
+def test_cue_sentence_spans_splits_on_newline_and_terminator_only() -> None:
+    text = "First sentence. Second sentence\nThird line"
+    spans = _cue_sentence_spans(text)
+    assert [text[start:end] for start, end in spans] == [
+        "First sentence.",
+        " Second sentence\n",
+        "Third line",
+    ]
+
+
+def test_cue_sentence_spans_never_splits_on_segment_delimiters() -> None:
+    """A comma, pipe, colon, or slash must never end a cue-scope sentence
+    -- only a newline or a genuine `.!?` terminator run does."""
+    text = "Skills: Python, Go | Java / Ruby"
+    spans = _cue_sentence_spans(text)
+    assert len(spans) == 1
+    assert spans[0] == (0, len(text))
+
+
+def test_sentence_containing_returns_the_correct_span() -> None:
+    text = "First sentence. Second sentence."
+    spans = _cue_sentence_spans(text)
+    assert _sentence_containing(spans, text, 0) == "First sentence."
+    assert _sentence_containing(spans, text, len("First sentence.")) == " Second sentence."
+    assert _sentence_containing(spans, text, len(text) - 1) == " Second sentence."
+
+
+def test_has_go_role_relevance_cue_accepts_exact_token_subsequence() -> None:
+    assert _has_go_role_relevance_cue("We value production experience here.") is True
+    assert _has_go_role_relevance_cue("Strong coding ability is required.") is True
+    assert _has_go_role_relevance_cue("Please be fluent in our tooling.") is True
+
+
+def test_has_go_role_relevance_cue_rejects_substring_lookalike() -> None:
+    """'encoding ability' must never satisfy the 'coding ability' cue --
+    this is an exact token-subsequence match, never a raw substring
+    search."""
+    assert _has_go_role_relevance_cue("Our encoding ability is excellent.") is False
+
+
+def test_has_go_role_relevance_cue_rejects_weak_product_company_phrases() -> None:
+    assert _has_go_role_relevance_cue("Our product supports these programming languages.") is False
+    assert _has_go_role_relevance_cue("Our technology stack is modern.") is False
+    assert _has_go_role_relevance_cue("Our tech stack includes many tools.") is False
+
+
+def test_has_go_role_relevance_cue_handles_trailing_colon() -> None:
+    """A cue word immediately followed by a colon (introducing the list it
+    describes) must still be recognized -- the colon is stripped, specific
+    to cue tokenization only."""
+    assert _has_go_role_relevance_cue("Required: production experience: five years.") is True
+
+
+def test_go_list_neighbor_rescue_unit_level_boundary_vs_elsewhere_in_segment() -> None:
+    """Direct, isolated proof (supplementing the fixture-level case) that
+    only the boundary-touching token of an adjacent segment is ever
+    consulted -- a match elsewhere in that same segment never counts."""
+    taxonomy = load_taxonomy(DEFAULT_SKILLS_TAXONOMY_PATH)
+    text = "Production experience with Ruby, Go, great Python skills a plus."
+    result = _go_list_neighbor_rescue(text, taxonomy)
+    assert "golang" not in result
+
+
+def test_go_list_neighbor_rescue_unit_level_cross_sentence_cue_rejected() -> None:
+    """Direct, isolated proof that a cue in a different cue-scoped sentence
+    never authorizes the rescue, even with a genuine boundary-adjacent
+    neighbor in the go-segment's own sentence."""
+    taxonomy = load_taxonomy(DEFAULT_SKILLS_TAXONOMY_PATH)
+    text = "We value production experience. Our team enjoys trivia, Go, Python meetups."
+    result = _go_list_neighbor_rescue(text, taxonomy)
+    assert "golang" not in result
+
+
+def test_go_list_neighbor_rescue_never_applies_to_c_r_or_node() -> None:
+    taxonomy = load_taxonomy(DEFAULT_SKILLS_TAXONOMY_PATH)
+    for ambiguous_word in ("C", "R", "Node"):
+        text = f"Production experience with Python, {ambiguous_word}, and Java."
+        result = _go_list_neighbor_rescue(text, taxonomy)
+        assert result == {}, f"{ambiguous_word} must never be rescued by this go-only rule"
 
 
 # ---------------------------------------------------------------------------

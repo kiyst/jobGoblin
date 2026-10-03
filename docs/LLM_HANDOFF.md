@@ -98,280 +98,238 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-09-27, Claude Code (Sonnet 5). Same slice, same
-  authorization (`slice_id: 2026-09-27-realistic-corpus-freeze-evaluation-
-  0dae468`, risk class **H**, `slice_kind: tooling`, `declared_gate: final`).
-  Same branch `phase-3/realistic-corpus-freeze-evaluation`, on top of the
-  existing pushed checkpoint `80b4672`, preserved unamended. One bounded
-  correction round for Sol's final Stage 1 re-review verdict on that
-  checkpoint (two findings, F14/F15). Every unaffected F11-F13 rule
-  (canonical location forms, the multi-requirement decision table, the
-  gap-metric rename/applicability sentinel, `_is_meaningfully_present`'s
-  whitespace handling) is preserved unchanged. No annotation pass,
-  adjudication, corpus freeze, baseline evaluation, provider contact,
-  database work, or parser-semantic change performed. Ending commit: this
-  commit.
-- **F14 (contradictory non-US `location.state` instructions)**: the
-  canonical-domain table already correctly classified a non-US state/
-  province/region as `present_unsupported_form`, but the location-
-  normalization table's US-state bullet contradicted it, saying to
-  annotate such a value "in its own natural written form" -- a value the
-  loader's closed USPS-code validator would reject outright. Corrected
-  that bullet to state explicitly: `outcome = "present_unsupported_form"`,
-  `expected_value = null`, `expected_provenance = "unavailable"`, and
-  that the region's natural form must never be written into
-  `expected_value`. Added a fabricated synthetic example to the location
-  situation/rule table (`location_raw` = "Toronto, Ontario, Canada" ->
-  `location.state` is `present_unsupported_form`/null/unavailable, while
-  `location.country` = `"Canada"` `present_supported` is unaffected, since
-  country's domain is open free text). Also corrected the adjacent
-  postal-code wording, which described ZIP+4 as "digits only" -- a ZIP+4
-  is exactly five ASCII digits, one hyphen, and four ASCII digits, and the
-  hyphen is a required literal part of the form, not a digit; ZIP5 remains
-  exactly five ASCII digits.
-- **F15 (format-character-only wired inputs silently counted as
-  present)**: `_is_meaningfully_present` previously used a bare
-  `value.strip() != ""` check, which does not strip Unicode format
-  characters (category `Cf`, e.g. U+200B zero-width space, U+FEFF BOM,
-  U+180E Mongolian vowel separator) -- confirmed directly that
-  `classify_salary`/`classify_location` return entirely unavailable
-  results for all three, individually and mixed with ordinary whitespace,
-  yet the old check reported them as "present." Replaced it with the
-  project's own established meaningful-text rule, mirrored from
-  `fetch_greenhouse_evaluation_postings.py`'s `_has_meaningful_text`: a
-  value is meaningfully present only if it contains at least one
-  character that is neither Unicode whitespace (`str.isspace()`) nor
-  category `Cf`. Added `import unicodedata`. Seven new regressions: U+200B-
-  only, U+FEFF-only, U+180E-only, and ordinary whitespace mixed with only
-  those three (all four parametrized as "rejected"); a positive control
-  mixing `Cf` characters with genuine visible content (accepted); and one
-  end-to-end test through the real `evaluate_corpus`/`classify_salary`
-  pipeline confirming a U+200B-only `compensation_text` routes a
-  `present_supported` salary annotation to `missing_wired_input_gap`,
-  never `supported_abstention`.
-- Because the annotation contract changed a fourth time before any
-  annotation exists, `RUBRIC_VERSION` bumped `1.0.3 -> 1.0.4`. **Historical,
-  superseded evidence** (none ever annotated against), all four now
-  recorded in the rubric's own superseded-evidence table: `1.0.0` (commit
-  `7644e20`), `1.0.1` (commit `64dd730`), `1.0.2` (commit `d2097b4`), and
-  `1.0.3` (rubric sha256
-  `3948ec6a09c188a95b9a2ee1fb9ecd94edda2ab5c48bb39e32826e36f51f7f87`,
-  `source_packet_hash b56b0f65529fc83a8f30c8958ba697544a321a003b323220b92a
-  7c1ac8c6dd1b`, commit `80b4672`). **Current**: rubric sha256
-  `70961ec18fcbd5a316bb6ae49b4c9edc0cc1b3957aa6f5cd1f59c1684057eeb9`,
-  `source_packet_hash 010a13e0b5040121d4f55df62a0dc3780033469c316380cc1e4
-  15c5a86641f92` (taxonomy/salvage hashes unchanged).
-- Verification: `ruff format --check`/`ruff check` clean on all four
-  touched files; `mypy` clean on both scripts; full backend suite **3128
-  passed** (was 3121; +7 = the F15 regressions above); `check_repo.py`
-  clean; `git diff --check` clean; focused
-  `test_evaluate_phase3_corpus.py` (83 tests) and
-  `test_freeze_phase3_realistic_corpus.py` (43 tests, unchanged -- no
-  freeze-builder logic touched this round beyond the `RUBRIC_VERSION`
-  constant it imports indirectly via the rubric path) both green.
-- Adversarial self-review: independently reproduced Sol's exact claim
-  before fixing anything -- ran `classify_salary` directly against
-  U+200B/U+FEFF/U+180E and a mixed string, confirmed all four return
-  entirely unavailable results, and confirmed `unicodedata.category()`
-  reports `Cf` for all three code points in this environment's Unicode
-  database before trusting the fix's premise; confirmed the new
-  `_is_meaningfully_present` body is character-for-character identical in
-  logic to `fetch_greenhouse_evaluation_postings.py`'s own
-  `_has_meaningful_text`, not a lookalike reimplementation; confirmed the
-  new fabricated location example's `country` sub-field is genuinely
-  unaffected by the `state` fix (open free-text domain, no validator
-  change) rather than assuming it without checking; confirmed no
-  existing test asserted the old (incorrect) "natural written form"
-  behavior anywhere, so no other test needed updating for F14.
-- Files changed: `docs/evaluation/phase3-realistic-annotation-rubric.md`
-  (F14 corrections + synthetic example, `rubric_version` bump),
-  `backend/scripts/evaluate_phase3_corpus.py` (F15 fix, `unicodedata`
-  import, docstring), `backend/tests/test_evaluate_phase3_corpus.py`
-  (76 -> 83 tests), `backend/scripts/freeze_phase3_realistic_corpus.py`
-  (`RUBRIC_VERSION` bump only), `docs/LLM_HANDOFF.md` (this entry, plus
-  the iteration rotation above).
-- STOP -- this remained a checkpoint within an incomplete slice, not a
-  candidate, when written. Sol's final Stage 1 re-review subsequently
-  approved this checkpoint with no further findings (reported by the
-  user); Stage 1 concluded and annotation began. See Iteration 2 for the
-  completed annotation, adjudication, corpus freeze, and baseline
-  evaluation, and this slice's first candidate/publication record.
+- Date/agent: 2026-10-02, Claude (implementer). Branch `phase-3/title-normalization`.
+  Bounded C2 correction as the direct child of `A = d1c63e0ce9995bd36f981e350b3d8efbd850178d`.
+  `C = e2573bc9792e74f60b59fd2b2974141a1a32302b` and `A` are preserved unamended (no
+  rebase, amend, or force-push). Ending commit: this commit (candidate `C2`).
+- Sol's P2 finding (evidence specification): frozen witness 02 (`Technical Recruiter
+  Software Engineer`) cannot isolate `PREFIX_BLOCKERS`, because `recruiter` is also in
+  `PREFIX_ROLE_DESIGNATORS`, so it stays `AMBIGUOUS` with the blocker guard disabled.
+  The guard itself is load-bearing; this is not an implementation failure. Correction
+  authorized by the user within a three-file envelope.
+- Files (exactly three): `backend/tests/test_normalization_titles.py` (witness 02
+  renamed to `test_witness_02_prefix_blockers_isolating`, input `Data and Software
+  Engineer`, expected `AMBIGUOUS`); `backend/tests/fixtures/normalization/title_cases.json`
+  (the witness-02 designation moved from `collision_prefix_blocker_recruiter`, which is
+  kept unchanged as overlap coverage apart from its note, to
+  `collision_prefix_blocker_and_only`; only those two `note` fields changed); this file.
+  No production file, vocabulary, rule, Unicode policy, output type, realistic
+  expectation, evaluator output, fixture count (still 200), ownership mapping, or other
+  doc changed. `titles.py` is byte-identical to `C` (SHA-256 `9550ad31...cd05e`).
+- Corrected witness-02 proof (only `PREFIX_BLOCKERS` disabled, via
+  `if _prefix_has_blocker(prefix):` -> `if False:`):
+  - normal implementation: `Data and Software Engineer` -> `ambiguous`;
+  - under the mutant: `matched`, `software-engineer`, so the witness fails;
+  - after restoration: `ambiguous`, so the witness passes;
+  - `Lead Software Engineer` and `Senior Software Engineer` stay `matched` /
+    `software-engineer` under both configurations.
+- Corrected final inventory: **12/12 witnesses proven**. All 12 mutants were rerun in
+  one harness pass, and the source was restored byte-for-byte (SHA-256 verified).
+  Witnesses 01 and 03-12 are unchanged in definition and result.
+- Checks: 362 focused tests passed (title 276, verification-scope 86). Realistic
+  titles: 22 matched / 6 unsupported / 2 ambiguous, unchanged. Evaluator output is
+  byte-identical to the base-approved output (1366 lines).
+- Receipt supersession: `A`'s receipt
+  `docs/verification-receipts/e2573bc9792e74f60b59fd2b2974141a1a32302b/d8ea060c-298d-473e-93a6-aa6d32b7c7d7.json`
+  is **superseded and non-reusable** for this slice's approval. It is bound to `C`,
+  not `C2`, and is left unmodified and undeleted. `C2` needs its own fresh
+  `gate=final` receipt, recorded in `A2`.
+- STOP after `A2` for Sol's re-review. No `R`, merge, `M`/`Q`, production change,
+  Phase 3 exit audit, or Phase 4 work.
 
----
+```workflow-metadata
+workflow_version: v3.2
+state: published
+slice_id: 2026-10-02-phase3-title-normalization-aed2694
+slice_kind: parser
+risk_class: H
+base_sha: aed2694720b0344ae54feeef1916805f91e6b508
+declared_gate: final
+executed_gate: final
+candidate_sha: 4c6f933fb3112357f6a96f751115776e74831d73
+receipt_id: 1541f94b-45fe-49ef-af52-2afd39fcb367
+receipt_path: docs/verification-receipts/4c6f933fb3112357f6a96f751115776e74831d73/1541f94b-45fe-49ef-af52-2afd39fcb367.json
+fixture_path: backend/tests/fixtures/normalization/title_cases.json
+fixture_count: 200
+```
+
+### Work review
+
+- Date/reviewer: 2026-10-02, Sol (primary). Reviewed the title-classifier slice: the
+  original candidate `C` (`e2573bc`) and its publication `A` (`d1c63e0`), then the
+  bounded evidence correction `C2` (`4c6f933`) and its publication `A2` (`795ed58`),
+  on `phase-3/title-normalization`, against the proposal, the A1-A12 amendment table,
+  and the corrected A2/A4/A5 fragment with the final 12-witness inventory.
+- Prior finding, now resolved: P2 (evidence specification). Frozen witness 02 could
+  not isolate `PREFIX_BLOCKERS` because `recruiter` is also a
+  `PREFIX_ROLE_DESIGNATOR`. It was corrected in `C2` with no executable change.
+- Points verified:
+  - `C2` is `A`'s sole child, and `A2` is `C2`'s sole child.
+  - `C2` changes exactly the three authorized evidence-correction files.
+  - All production code, including `titles.py`, is byte-identical to the original `C`.
+  - The fixture still has 200 cases; only two note/designation fields changed.
+  - Corrected witness 02 (`Data and Software Engineer`) isolates `PREFIX_BLOCKERS`
+    on its own, and both positive controls (`Lead Software Engineer`, `Senior
+    Software Engineer`) are stable.
+  - Witnesses 01 and 03-12 are unchanged; the inventory is 12/12 proven.
+  - Realistic results are still 22 MATCHED / 6 UNSUPPORTED / 2 AMBIGUOUS.
+  - Evaluator output is byte-identical (SHA-256
+    `87a92187a2d37d5150fe998d06042449f6b74d540cecd15d1bba97dd94801de6`).
+  - `C2` -> `A2` contains only the permitted publication transition and the fresh
+    receipt.
+- Sol's own checks: the focused verification (362 tests) passed. Sol did not rerun
+  the full suite.
+- Relied on from the genuine `C2` receipt (`1541f94b-45fe-49ef-af52-2afd39fcb367`):
+  3,470 full-suite tests and 34/34 registered contract witnesses. The receipt is
+  valid, bound to `C2`, and independently recomputes `approval_eligible=true`.
+- Findings by severity with exact references: none.
+- Verdict: **approved** -- no executable findings.
+- Exact bounded correction: none required.
+- STOP -- record-only. No merge, `M`, `Q`, executable-file change, Phase 3 exit
+  audit, or Phase 4 work is authorized by this review.
+
+```workflow-review-metadata
+schema_version: 2
+slice_id: 2026-10-02-phase3-title-normalization-aed2694
+risk_class: H
+reviewer: Sol
+reviewer_role: primary
+reviewer_model: Sol Medium
+reviewed_at: 2026-10-02T23:03:00.637705+00:00
+candidate_sha: 4c6f933fb3112357f6a96f751115776e74831d73
+publication_commit_sha: 795ed58573f3994f432ee013c8ae5510ea200e95
+receipt_path: docs/verification-receipts/4c6f933fb3112357f6a96f751115776e74831d73/1541f94b-45fe-49ef-af52-2afd39fcb367.json
+receipt_id: 1541f94b-45fe-49ef-af52-2afd39fcb367
+gate: final
+verdict: approved
+findings: none
+```
+
+### Merge record
+
+- Date: 2026-10-02. Merged `phase-3/title-normalization` at the approved,
+  reviewed commit `71176ccba8204058b80552ef70d7b2e25b72a9bc` (`R`; Sol's "approved -- no executable findings" verdict on
+  `C2=4c6f933`/`A2=795ed58`, above) into `main` via `git merge --no-ff`. Merge
+  commit: `a3c1c12053e7990b88e2c01f6736425cb59f3453`. Pre-merge `main`/`origin/main` tip (rollback boundary): `aed2694720b0344ae54feeef1916805f91e6b508`.
+- Pre-merge checks: freshly fetched `origin`. The feature branch and its origin both
+  sat at `71176cc`, and `main`/`origin/main` were both clean and synchronized at
+  `aed2694`. `validate_c_a_r_chain(C2, A2, R)` and `check_merge_eligibility(C2, A2,
+  R)` still returned `approved`, `findings: none`, `reviewer_model: Sol Medium`.
+  Receipt `1541f94b-45fe-49ef-af52-2afd39fcb367` remained schema-valid, bound to `C2`, and independently
+  recomputed as approval-eligible.
+- Release sequence: `M` was created locally and not pushed. `R..M` has zero content
+  difference, and `check_review.validate_merge(R, M, aed2694)` confirmed `M`'s exact
+  two-parent shape. `verification_coordinator.run_post_merge_verification` ran
+  against `M` in a disposable detached worktree (always full/final):
+  - artifact `bb3ce6d0-5c3f-4791-a5a9-fcd61fb6a56e`, all 11 steps PASS;
+  - full pytest suite **3470 passed**, all 34 registered mutation witnesses
+    pass;
+  - no migration triggered;
+  - worktree initial/final snapshots identical, no residual worktree entry, cleanup
+    PASS.
+  `Q` is `M`'s direct mainline child: that artifact plus this append-only merge
+  record, in one commit (this entry itself).
+- Post-merge evidence: `docs/post-merge/a3c1c12053e7990b88e2c01f6736425cb59f3453/bb3ce6d0-5c3f-4791-a5a9-fcd61fb6a56e.json`, referencing original receipt `1541f94b-45fe-49ef-af52-2afd39fcb367`
+  (`docs/verification-receipts/4c6f933fb3112357f6a96f751115776e74831d73/1541f94b-45fe-49ef-af52-2afd39fcb367.json`). `check_review.validate_published(C2, A2, R, M, Q)` and
+  `verification_coordinator.confirm_main_unchanged` run immediately before the push;
+  their results are in the agent's final report rather than restated here ahead of
+  time.
+- STOP -- report the synchronized final `main` SHA and stop. No Phase 3 exit audit,
+  Phase 4, persistence wiring, provider contact, production database work, or another
+  correction slice without separate explicit user authorization.
 
 ## Iteration 2
 
 ### Work done
 
-- Date/agent: 2026-09-28, Claude Code (Sonnet 5). Same slice, same
-  authorization (`slice_id: 2026-09-27-realistic-corpus-freeze-evaluation-
-  0dae468`, risk class **H**, `slice_kind: tooling`, `declared_gate: final`).
-  Same branch `phase-3/realistic-corpus-freeze-evaluation`, base
-  `0dae4683645599369d41d0228b0edad1cfad73ce` (unchanged, reconfirmed
-  against freshly-fetched `origin/main` immediately before this commit).
-  Completes the remainder of the approved 8-item freeze/evaluation
-  contract: two procedurally-blind independent annotation passes (Claude
-  and Sol, each 30 records x 28 labels against rubric 1.0.4, sealed and
-  hashed before either was revealed to the other), the full human
-  adjudication/audit interview (95 genuine disagreements + 220 required
-  agreement audits, every decision made and recorded by the user
-  personally, none by an agent), the deterministic corpus freeze, and the
-  first baseline evaluation. Ending commit: this commit.
-- Base -> ending commit: `0dae4683645599369d41d0228b0edad1cfad73ce` ->
-  this commit.
-- Outcome: publishes durable, tracked copies of the two sealed annotation
-  passes and the adjudication/audit evidence, the frozen corpus fixture,
-  and a tracked baseline evaluation report -- exactly the closed set of
-  outputs authorized for this completion. No release manifest is created:
-  that concept traces only to a separate, unapproved future
-  three-annotator proposal, not to this slice's actual contract, per
-  explicit user clarification this round. Conventions applied:
-  deterministic employer-sorted dev/holdout split (`Anthropic`+`Discord`
-  dev, `GitLab` holdout -- `GitLab` is lexicographically last);
-  adjudication/audit identity is exactly `user` throughout, never an
-  agent/model identity; create-only/atomic writes for every new sealed or
-  durable artifact. No new semantic decision -- this is mechanical
-  completion and publication-preparation of the already-frozen,
-  previously-approved contract; no rubric, taxonomy, classifier, or
-  provider-mapping change of any kind.
-- Files changed: `docs/evaluation/phase3-realistic-pass-claude.json`
-  (new, durable byte-identical copy of the sealed Claude pass, sha256
-  `f732c9d0f1fa0f19609dc84c7346fab69d84d0f3646ac18a87b44ad5b87bc71d`);
-  `docs/evaluation/phase3-realistic-pass-sol.json` (new, durable
-  byte-identical copy of the sealed Sol pass, sha256
-  `b6ce0ff33a94aa8afcc4332f26596ec548f264a6429f643ae696d5b1042227e1`);
-  `docs/evaluation/phase3-realistic-adjudication-audit.json` (new,
-  schema-conformant adjudication/audit artifact mechanically derived from
-  the completed pending-adjudication working file, sha256
-  `8de5a3faf48e662fc13cad7b5d8c1d8958061cbf06f04e38862358ff300f8ad9`);
-  `backend/tests/fixtures/evaluation/phase3_realistic_corpus.json` (new,
-  frozen corpus, 30 records/840 labels, 20 dev/10 holdout, sha256
-  `1863541bb784419be16bf4ffcf88bf1b4408c951a03b12008e9645e9f18e6930`);
-  `docs/evaluation/phase3-realistic-corpus-baseline-report.md` (new,
-  tracked baseline report embedding the verbatim deterministic evaluator
-  output plus source/lineage hashes); `docs/ROADMAP.md` (Phase 3 status
-  was stale -- still named the superseded branch and claimed "not yet
-  reviewed, not merged" for the prior slice, which is in fact already
-  merged at `M=41963baf4797b1b2b6fee1f72311dd6b84d7b6a3`/
-  `Q=0dae4683645599369d41d0228b0edad1cfad73ce`; corrected and recorded
-  this slice's own completed work); `docs/LLM_HANDOFF.md` (this entry,
-  Iteration 1's F15 "six"->"seven" wording correction, its corrected STOP
-  note, and the iteration rotation).
-- Verification: `ruff format --check`/`ruff check` clean (171 files, no
-  Python file touched this round); `mypy` clean (171 source files); full
-  backend suite **3128 passed** (unchanged from the prior checkpoint --
-  no test file touched this round); `check_repo.py` clean; `git diff
-  --check` clean. Receipt-eligible `--gate final` verification via
-  `scripts.verification_coordinator.run_receipt_eligible_verification`,
-  run against this exact candidate commit from a disposable detached
-  worktree: receipt id/path and executed-gate confirmation recorded in
-  this same block's `published` transition on the direct child commit.
-- Adversarial self-review (tooling-slice abbreviated pass): confirmed the
-  "release manifest"/"lineage sidecar" terms the initiating message used
-  trace only to the separate, unapproved future three-annotator proposal
-  (grepped this session's own record), never to this slice's actual
-  8-item contract or to `verification_scope.py`'s one pre-registered
-  fixture path -- raised this discrepancy to the user before writing
-  anything, rather than silently importing unauthorized future-workflow
-  vocabulary; confirmed by direct byte/string comparison (not merely
-  re-hashing) that all three durable `docs/evaluation/` copies are
-  identical to their sealed `.evaluation-staging/` originals and that the
-  baseline report's embedded evaluator output is byte-for-byte identical
-  to the actual deterministic run (reproduced twice, identical both
-  times); confirmed `docs/ROADMAP.md`'s Phase 3 paragraph was genuinely
-  stale before editing it, rather than assuming staleness; confirmed the
-  F15 handoff wording defect (a stated regression-test count of "six"
-  against Iteration 1's own recorded 76 -> 83 = +7 delta) is exactly the
-  harmless discrepancy previously noted and deferred, not a substantive
-  count error. No regression test applicable this round -- no executable
-  code changed. Remaining limitation: the baseline report's disclosed
-  findings (a `salary.*` wiring gap, several supported-field abstentions,
-  one `skills.golang` recall gap, two `remote_type` ambiguous false
-  positives) are intentionally left uncorrected, per contract, pending a
-  separately authorized future correction slice.
-- Deviations/known limitations: none beyond what the baseline report
-  itself discloses (see that report's own "Headline result"/"Holdout
-  exposure" sections). No release manifest was created -- confirmed with
-  the user this was never part of this slice's actual contract.
-- STOP -- candidate `C` for this slice (see `workflow-metadata` below,
-  `state: pending`). No `R`, merge, `M`, or `Q` is authorized by this
-  commit. Do not fix any baseline finding, rerun classifiers for
-  correction purposes, contact providers, access the database, or begin
-  title normalization. Waiting for Sol's independent review of this
-  candidate.
+- Date/agent: 2026-10-02, Claude (implementer). Branch `phase-3/exit-audit`, base
+  `b31916827c07715bb59f430ad52dd0193561c35b` (`Q` of the title-normalization merge
+  `M=a3c1c12`). Ending commit: this commit (candidate `C`).
+- Slice: Phase 3 exit audit. Risk class D, `slice_kind: docs`, `declared_gate: docs`.
+  No executable change.
+- Frozen contract, in precedence order:
+  1. the implementer's read-only Phase 3 exit-audit proposal;
+  2. Astra's phase-gate review of D1/D2 and its evidence corrections (an additive
+     escalation review, invoked because this is a user-authorized phase gate);
+  3. Sol Medium's primary-review final approval, adopting Astra's amendments and the
+     binding clarification as the complete contract.
+
+  Neither reviewer authorized `R`, a merge, or Phase 4.
+- Files (closed five-file list, all within it):
+  `docs/DECISIONS/0011-phase-3-exit-audit.md` (new), `docs/ROADMAP.md`,
+  `docs/ARCHITECTURE.md`, `docs/DATA_MODEL.md`, this file.
+- ADR 0011 is the durable closure artifact. It records:
+  - the closure statement, verbatim;
+  - the eight-parser inventory;
+  - a requirement-to-evidence matrix for every Phase 3 entry check, required prevention,
+    and exit criterion;
+  - parser-contract completion as distinct from production readiness;
+  - limitations L1-L7;
+  - the D1 precondition, verbatim, with its clarifications;
+  - the D2 precondition;
+  - the other deferred integration obligations;
+  - the pre-existing `db/models/company.py` import exception, recorded as outside the
+    eight Phase 3 parsers.
+- Evidence the implementer reproduced read-only and offline at the base, matching
+  Astra's figures:
+  - 940 distinct strings, 12,220 parser invocations, no exceptions, and no returned
+    `explicit_source`/`structured_metadata`;
+  - evaluator output of 91,994 bytes, 1,366 CRLF lines with a final newline, SHA-256
+    `87a92187a2d37d5150fe998d06042449f6b74d540cecd15d1bba97dd94801de6`;
+  - 100 of 120 salary-component annotations with missing wired input;
+  - current combined-split mismatches: 159 (100 missing input, 56 supported abstentions,
+    3 `skills.golang` recall misses).
+
+  No full suite was rerun. The audit relies on receipt `1541f94b` and post-merge artifact
+  `bb3ce6d0`.
+- ROADMAP:
+  - added the Phase 3 closure entry with the exact closure wording;
+  - replaced the twelfth slice's stale "candidate stage" assertion with `M`/`Q`;
+  - annotated the seventh slice's "title … unstarted" sentence as a superseded
+    point-in-time statement.
+
+  Other slice history is unchanged.
+- ARCHITECTURE:
+  - marked `titles.py` as merged;
+  - corrected §11 step 2's false claim that the fixture pipeline runs normalization and
+    sets `parser_version`;
+  - added §5 notes on the pre-existing company-model exception and on deferred, binding
+    parser-version/normalization persistence.
+- DATA_MODEL: reworded five current-state "until Phase 3" or unstated-deferral notes:
+  `target_role_families`, `candidate_skills.skill`, the `candidate_skills` index
+  rationale, `normalized_title`, and `parser_version`. Moved the `job_skills` introduction
+  to Phase 4+ normalization-persistence integration. No schema commitment, migration, or
+  point-in-time history changed.
+- ADR 0010 is byte-identical (SHA-256
+  `beda935f94f63de30a5516c2ea6a055ca8da913dbd58a0161d2f078ba16813da`).
+- Verification: the genuine `verification_coordinator` `gate=docs` run against `C`,
+  recorded in `A`.
+- Self-review:
+  - every numeric claim in ADR 0011 was recomputed from the repository, not copied;
+  - provenance safety is worded as an implementation/test result, because the enum is
+    permissive;
+  - zero-wrong-value and zero-false-positive claims are scoped to the frozen corpus and
+    this invocation;
+  - title's 30 realistic cases are described only as smoke/regression expectations;
+  - the corpus is described as evaluating seven parsers.
+
+  No executable, fixture, test, schema, or configuration change was found to be needed.
+- Observed and left unchanged as out of scope: ROADMAP's historical Phase 2 header
+  ("in progress (updated 2026-09-01)"), which is followed by its own completion record;
+  and ARCHITECTURE §1.2's `job_skills` rationale, which is still accurate.
+- STOP after `A` for Sol's independent review. No `R`, merge, `M`/`Q`, Phase 4, provider
+  contact, persistence wiring, or parser change.
 
 ```workflow-metadata
 workflow_version: v3.2
 state: published
-slice_id: 2026-09-27-realistic-corpus-freeze-evaluation-0dae468
-slice_kind: tooling
-risk_class: H
-base_sha: 0dae4683645599369d41d0228b0edad1cfad73ce
-declared_gate: final
-executed_gate: final
-candidate_sha: 03609018215285cca21dd31fc126978fe2de8d15
-receipt_id: 338d5c4b-37fd-47dd-a220-f67919ca45de
-receipt_path: docs/verification-receipts/03609018215285cca21dd31fc126978fe2de8d15/338d5c4b-37fd-47dd-a220-f67919ca45de.json
-```
-
-### Work review
-
-- Date/reviewer: 2026-09-30, Sol. Diff reviewed: `C..A`
-  (`0360901..1ec12a6`) on `phase-3/realistic-corpus-freeze-evaluation`,
-  against the approved two-annotator pilot contract and its closed
-  affected-file list only -- the separate, unapproved future
-  three-annotator proposal's requirements (release manifest, lineage
-  sidecar terminology) were explicitly not applied.
-- Independent verification performed: confirmed `A` is `C`'s direct
-  single-parent child; confirmed `C..A` changes only the one new receipt
-  file plus the `workflow-metadata` block's `pending` -> `published`
-  transition in `docs/LLM_HANDOFF.md`, no other byte or path; independently
-  recomputed the receipt's schema validity and `approval_eligible: true`;
-  confirmed `docs/evaluation/phase3-realistic-pass-claude.json` and
-  `docs/evaluation/phase3-realistic-pass-sol.json` are byte-identical to
-  their sealed `.evaluation-staging/` originals; confirmed
-  `docs/evaluation/phase3-realistic-adjudication-audit.json` is
-  byte-identical to the validated working artifact and contains exactly
-  95 completed disagreements and 220 completed required agreement audits;
-  confirmed the frozen corpus has 30 records x 28 labels = 840 labels
-  with valid embedded lineage; independently rebuilt the corpus and its
-  SHA-256 matched the committed
-  `1863541bb784419be16bf4ffcf88bf1b4408c951a03b12008e9645e9f18e6930`
-  exactly; confirmed the employer-disjoint split is 20 dev (Anthropic +
-  Discord) / 10 holdout (GitLab); independently reran
-  `python -m scripts.evaluate_phase3_corpus` and its output matched
-  `docs/evaluation/phase3-realistic-corpus-baseline-report.md`'s embedded
-  report byte-for-byte; confirmed the report accurately discloses the
-  baseline findings (salary wiring gap, supported-field abstentions, one
-  skills recall gap, two remote_type ambiguous false positives) and the
-  exposed-holdout limitation; confirmed no classifier, taxonomy, provider
-  mapping, rubric label, corpus decision, or file outside the closed
-  affected-file list changed; confirmed the deferred F15 "six"->"seven"
-  wording correction is accurate and bounded.
-- Findings by severity with exact references: none.
-- Missing/inconclusive checks: focused tests' first attempt failed only
-  on an inaccessible inherited Windows temp directory (environmental, not
-  a defect in the candidate); a rerun with an isolated writable base
-  passed 126/126. No other check was inconclusive.
-- Verdict: **approved**.
-- Exact bounded correction: none required.
-- STOP -- record-only. No merge, `M`, `Q`, executable-file modification,
-  parser correction, provider contact, database access, or new slice is
-  authorized by this review.
-
-```workflow-review-metadata
-schema_version: 2
-slice_id: 2026-09-27-realistic-corpus-freeze-evaluation-0dae468
-risk_class: H
-reviewer: Sol
-reviewer_role: primary
-reviewer_model: Sol Medium
-reviewed_at: 2026-09-30T00:56:08.703120+00:00
-candidate_sha: 03609018215285cca21dd31fc126978fe2de8d15
-publication_commit_sha: 1ec12a68d933ed8addc0d7f930c8799de3c93d4b
-receipt_path: docs/verification-receipts/03609018215285cca21dd31fc126978fe2de8d15/338d5c4b-37fd-47dd-a220-f67919ca45de.json
-receipt_id: 338d5c4b-37fd-47dd-a220-f67919ca45de
-gate: final
-verdict: approved
-findings: none
+slice_id: 2026-10-02-phase3-exit-audit-b319168
+slice_kind: docs
+risk_class: D
+base_sha: b31916827c07715bb59f430ad52dd0193561c35b
+declared_gate: docs
+executed_gate: docs
+candidate_sha: 78cfd2077b4370b2d6da3d30843eb9252657ea82
+receipt_id: 90d6c6b4-b669-4de2-b36d-4d0470891cd1
+receipt_path: docs/verification-receipts/78cfd2077b4370b2d6da3d30843eb9252657ea82/90d6c6b4-b669-4de2-b36d-4d0470891cd1.json
 ```

@@ -319,7 +319,7 @@ multi-profile/multi-resume feature would key off of.
 |---|---|---|
 | id | UUID PK | generated application-side (`uuid.uuid4`), not a DB-side default |
 | user_id | UUID FK → users, `ON DELETE CASCADE`, **UNIQUE**, not null | enforces one-to-one while the relationship stays 1:1; a future multi-profile feature would need a migration to drop this uniqueness, which is an acceptable/expected cost when that feature actually lands |
-| target_role_families | text[], nullable | free-form until Phase 3 taxonomy exists; NULL = never specified (see Rev 7 note above) |
+| target_role_families | text[], nullable | free-form; Phase 3's `normalization/titles.py` defines a closed `RoleFamily` vocabulary, but nothing maps this column to it, and it stays free-form until an actual matching consumer adopts that vocabulary; NULL = never specified (see Rev 7 note above) |
 | years_experience | int, nullable | `CHECK (years_experience IS NULL OR years_experience >= 0)` |
 | education | text, nullable | |
 | certifications | text[], nullable | NULL = never specified |
@@ -344,7 +344,7 @@ skill.
 |---|---|---|
 | id | UUID PK | generated application-side (`uuid.uuid4`), not a DB-side default |
 | candidate_profile_id | UUID FK → candidate_profiles, `ON DELETE CASCADE`, not null | |
-| skill | text, not null | raw or already-canonical string; taxonomy resolution is Phase 3; normalized before storage — see below |
+| skill | text, not null | raw or already-canonical string; the Phase 3 skill taxonomy exists, but resolving these rows against it is not implemented and waits for an actual matching consumer; normalized before storage — see below |
 | category | text, nullable | free text: language / framework / cloud / tool / etc. — examples, not an enforced enum |
 | priority | text, not null | enum: must_have / preferred — `CHECK (priority IN (...))` |
 | created_at | timestamptz, not null | `server_default now()` |
@@ -361,7 +361,8 @@ backstop, not the validator:
   covered-whitespace-only skill.
 - `UNIQUE` functional index on `(candidate_profile_id, lower(skill))` — case-insensitive,
   scoped per profile, so "Python" and "python" can't both be added to the same profile as
-  separate rows before the Phase 3 taxonomy exists to catch that. A plain `UniqueConstraint`
+  separate rows while no taxonomy resolution is applied to these rows (the Phase 3
+  taxonomy exists but is not wired to `candidate_skills`). A plain `UniqueConstraint`
   can't express `lower(skill)`, so this is an `Index(..., unique=True)`, not a table
   constraint. Because the CHECK constraints above guarantee a stored row is already fully
   trimmed, a whitespace-wrapped duplicate can never be inserted in the first place — the
@@ -418,8 +419,9 @@ is still silently dropped on commit; see the model's own docstring and
 ### `saved_search_titles`
 **Implemented** (`backend/app/db/models/saved_search_title.py`; migration `0007`,
 `down_revision = "0006"`). Split out (rather than an array column on `saved_searches`)
-because titles need per-entry alias expansion against `taxonomy/titles.yaml` in Phase 3,
-and because a title can independently carry "this is the primary title" vs. "this is an
+because titles need per-entry alias expansion against a title vocabulary — deferred to a
+future matching phase (Phase 3's title classifier, `normalization/titles.py`, uses a
+code-defined vocabulary and creates no `taxonomy/titles.yaml`) — and because a title can independently carry "this is the primary title" vs. "this is an
 acceptable alias."
 
 | column | type | notes |
@@ -614,7 +616,7 @@ below are resolved *display* values only.
 | canonical_url | text | nullable, resolved display value — the identity-matching comparison happens on `job_occurrences.canonical_url_normalized`, not this column |
 | preferred_apply_url | text | nullable |
 | title | text | nullable |
-| normalized_title | text | nullable until Phase 3 — a plain nullable column in this slice (nothing populates it yet), not a generated column; any non-null value must already be trimmed and non-empty, same as every other nullable text column below |
+| normalized_title | text | nullable — a plain nullable column, not a generated column. Nothing populates it yet: Phase 3's `classify_title` exists, but writing its result is deferred normalization-persistence integration (Phase 4+, bound by [ADR 0011](DECISIONS/0011-phase-3-exit-audit.md)'s D1/D2 preconditions and not authorized by Phase 3 closure); any non-null value must already be trimmed and non-empty, same as every other nullable text column below |
 | job_family | text | nullable |
 | department | text | nullable |
 | team | text | nullable |
@@ -840,7 +842,7 @@ it. This Phase 1 slice only migrates the schema.
 | fetched_at | timestamptz, not null | **Rev 17: no server default** — represents the actual fetch event, which may differ from row-insertion time during buffering, replay, or backfill; callers/factories must supply it explicitly |
 | raw_payload | jsonb, not null | the `DiscoveredJob.raw` dict; **not** full raw HTML (§17 — avoid unbounded storage). `CHECK` requires a top-level JSON object (Rev 17). Stays not null through Phase 1 — see the retention note below. Deliberately not `MutableDict`-wrapped: an immutable, write-once snapshot set at insert, unlike `jobs.field_provenance`'s incrementally-updated fields — this is an application-level convention (Phase 2's ingestion code must honor it), not a schema-enforced immutability guarantee |
 | raw_content_hash | text, not null | sha256 of raw_payload, used to skip re-normalizing unchanged content. `CHECK` requires trim/non-empty only (Rev 17) — deliberately no length/hex-format constraint, since this is application-computed, not user input |
-| parser_version | text | nullable, case-preserving, NULL-safe trim/non-empty `CHECK` — which normalization code version produced the linked occurrence, if any |
+| parser_version | text | nullable, case-preserving, NULL-safe trim/non-empty `CHECK` — which normalization code version produced the linked occurrence, if any. No code writes it yet: Phase 3 defines no normalization-version value or threading, and [ADR 0011](DECISIONS/0011-phase-3-exit-audit.md)'s D1 precondition must be met before any classifier result is first persisted |
 | processing_status | text, not null | **renamed from `retrieval_status` in Rev 3** — `CHECK`-restricted enum: `fetched` / `parse_error` / `normalized` / `identity_conflict`. Describes only what happens to *this payload* after it exists; request-level failure modes (`http_error`, `rate_limited`, `timeout`) were removed from this enum — see below |
 | error_message | text | nullable, case-preserving, NULL-safe trim/non-empty `CHECK` |
 | created_at / updated_at | timestamptz, not null | `server_default now()`, per the established global convention (Rev 17) — the standard row-lifecycle pair, distinct from the business timestamp `fetched_at` above |
@@ -1493,7 +1495,7 @@ Foreign-key `ON DELETE` behavior (all noted inline above; summarized here for re
 
 | table | introduced | why deferred |
 |---|---|---|
-| `job_skills` | Phase 3 | depends on the skill taxonomy existing to normalize against |
+| `job_skills` | Phase 4+ (normalization-persistence integration) | Phase 3 delivered the skill taxonomy and the pure `classify_skills` parser but no persistence. Storing matches is deferred integration work, bound by [ADR 0011](DECISIONS/0011-phase-3-exit-audit.md)'s D1/D2 preconditions and not authorized by Phase 3 closure |
 | `duplicate_groups` | Phase 6 (schema previewed now — see below) | depends on `dedupe/similarity.py` producing groupings to store. **Rev 3 correction:** deterministic identity conflicts do **not** route here — they use the new Phase 1 `identity_conflicts` table above instead (ADR 0007); `duplicate_groups` is reserved exclusively for Tier 2's fuzzy/probabilistic similarity matching |
 | `contacts`, `contact_sources` | Phase 13 | contact intelligence is explicitly out of scope until core ingestion is proven |
 | `notifications` | unspecified | no feature currently generates notifications; add when one does |
