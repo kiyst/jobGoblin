@@ -438,3 +438,58 @@ gate: final
 verdict: approved
 findings: none
 ```
+
+### Merge record
+
+- Date: 2026-10-03. Merged `workflow/throughput-protocol-pilot` into `main` with
+  `git merge --no-ff`, at the approved, reviewed commit
+  `9ea083db0c8fb4c85582b1e26a8b37d0cde5b9dc` (`R`). `R` is Sol Medium's
+  "approved -- no findings" verdict on
+  `C=c8c18e18545a9b127875040352cc4abf1a638481` /
+  `A=faf25881af66678622bbb769f0078c4b39916247`.
+  - Merge commit `M`: `baebfd189fa1fdbdd6a4d3e18e9c8018f1c9a656`.
+  - Rollback boundary (the pre-merge `main`/`origin/main` tip):
+    `6b4d9ea1a2503553c18ef5efd684fc354adf515a`.
+  - Full lineage: base `6b4d9ea` -> `C` `c8c18e1` -> `A` `faf2588` -> `R` `9ea083d` ->
+    `M` `baebfd1` -> `Q` (this commit).
+- Pre-merge checks, after a fresh fetch of `origin`:
+  - the feature branch and its origin both sat at `R`, and `R`'s sole parent is `A`;
+  - `main`/`origin/main` were both clean and synchronized at the rollback boundary;
+  - `validate_c_a_r_chain(C, A, R)` and `check_merge_eligibility(C, A, R)` returned
+    `approved`, `findings: none`, `reviewer_model: Sol Medium`;
+  - receipt `e8ef9fe9-b555-40f8-add9-85e12707acde` was schema-valid, bound to `C`, and
+    independently recomputed as approval-eligible.
+- Release sequence:
+  - `M` was created locally and not pushed. It has two parents (the rollback boundary,
+    then `R`), `R..M` has zero content difference, and
+    `check_review.validate_merge(R, M, 6b4d9ea)` passed.
+  - `verification_coordinator.run_post_merge_verification` ran against `M` in a
+    disposable detached worktree (always full/final). It produced artifact
+    `7bcc8b38-cb03-4024-ac6a-ec28dfe2b354`:
+    - all 11 steps PASS;
+    - full pytest suite: **3470 passed**;
+    - all 34 registered mutation witnesses passed;
+    - no migration triggered;
+    - identical worktree snapshots, worktree removed with no residual entry or
+      directory, and cleanup PASS.
+  - `Q` is `M`'s direct mainline child. It contains that artifact plus this append-only
+    merge record, in one commit (this entry).
+- Post-merge evidence:
+  `docs/post-merge/baebfd189fa1fdbdd6a4d3e18e9c8018f1c9a656/7bcc8b38-cb03-4024-ac6a-ec28dfe2b354.json`
+  (SHA-256 of the artifact file as written:
+  `60e770a8990b95dafe1a4ac21c09a14975e0c84a30b81f8bb3f9574d8de5eeb8`). It references
+  original receipt `e8ef9fe9-b555-40f8-add9-85e12707acde`
+  (`docs/verification-receipts/c8c18e18545a9b127875040352cc4abf1a638481/e8ef9fe9-b555-40f8-add9-85e12707acde.json`).
+  `check_review.validate_published(C, A, R, M, Q)` and
+  `verification_coordinator.confirm_main_unchanged` run immediately before the push.
+  Their results are in the agent's final report rather than restated here in advance.
+- Pilot status: the Workflow Throughput Protocol pilot
+  ([ADR 0012](DECISIONS/0012-workflow-throughput-protocol-pilot.md)) becomes active
+  only when this `Q` reaches `main`. It then applies to the next three product-oriented
+  implementation slices. Existing Workflow v3.2 validator-enforced rules remain
+  controlling.
+- Phase 4 has not started. Phase 4, normalized persistence, and provider integration
+  remain unstarted and unauthorized.
+- STOP -- report the synchronized final `main` SHA and stop. No Phase 4 work,
+  normalized persistence, provider contact, policy or tooling change, or another slice
+  without separate explicit user authorization.
