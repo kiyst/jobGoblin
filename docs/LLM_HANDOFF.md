@@ -329,3 +329,57 @@ gate: final
 verdict: approved
 findings: none
 ```
+
+### Merge record
+
+- Date: 2026-10-03. Merged `phase-3/exit-audit` into `main` with `git merge --no-ff`,
+  at the approved, reviewed commit `b3f35ff4b7047f571805d8afd6a98569119261ae` (`R`):
+  Sol's "approved -- no executable findings" verdict on
+  `C3=c92b9923b25badde06f5a70f05bc0098c3ff2656` /
+  `A3=00d977bc8c02719df19dc30f35ae697c6d9271c2`.
+  - Merge commit `M`: `5dba60c649b6ffae450114a0f33437866e8efa47`.
+  - Rollback boundary (the pre-merge `main`/`origin/main` tip):
+    `b31916827c07715bb59f430ad52dd0193561c35b`.
+  - Full lineage: base `b319168` -> `C` `78cfd20` -> `A` `0de4494` -> `C2` `3582347` ->
+    `C3` `c92b992` -> `A3` `00d977b` -> `R` `b3f35ff` -> `M` `5dba60c` -> `Q` (this
+    commit). No `A2` exists, and `A`'s receipt is superseded.
+- Pre-merge checks, after a fresh fetch of `origin`:
+  - the feature branch and its origin both sat at `R`, and `main`/`origin/main` were both
+    clean and synchronized at the rollback boundary;
+  - `validate_c_a_r_chain(C3, A3, R)` and `check_merge_eligibility(C3, A3, R)` returned
+    `approved`, `findings: none`, `reviewer_model: Sol Medium`;
+  - receipt `d67a0497-6061-4809-9dac-55f6d03cd5f7` was schema-valid, bound to `C3`, had
+    matching committed verifier/checker/configuration hashes, and recomputed as
+    approval-eligible.
+- Release sequence:
+  - `M` was created locally and not pushed. It has two parents (the rollback boundary,
+    then `R`), `R..M` has zero content difference, and
+    `check_review.validate_merge(R, M, b319168)` passed.
+  - `verification_coordinator.run_post_merge_verification` ran against `M` in a
+    disposable detached worktree (always full/final): artifact
+    `74fd572f-0c6a-41bd-bdba-088a9bc180b4`, all 11 steps PASS, full pytest suite **3470
+    passed**, all 34 registered mutation witnesses passed, no migration triggered,
+    identical worktree snapshots, no leftover worktree, and cleanup PASS.
+  - `Q` is `M`'s direct mainline child. It contains that artifact plus this append-only
+    merge record, in one commit (this entry).
+- Post-merge evidence:
+  `docs/post-merge/5dba60c649b6ffae450114a0f33437866e8efa47/74fd572f-0c6a-41bd-bdba-088a9bc180b4.json`,
+  which references original receipt `d67a0497-6061-4809-9dac-55f6d03cd5f7`
+  (`docs/verification-receipts/c92b9923b25badde06f5a70f05bc0098c3ff2656/d67a0497-6061-4809-9dac-55f6d03cd5f7.json`).
+  `check_review.validate_published(C3, A3, R, M, Q)` and
+  `verification_coordinator.confirm_main_unchanged` run immediately before the push.
+  Their results are in the agent's final report rather than restated here in advance.
+- Phase 3 status: **closed within the approved conservative scope recorded in
+  [ADR 0011](DECISIONS/0011-phase-3-exit-audit.md).**
+  - Closed means parser-contract completion. It is not production readiness: no Phase 3
+    parser is wired into ingestion or persistence, no Phase 3 normalization-version
+    identifier or threading exists, providers do not map fields into parser inputs, and
+    realistic-text coverage is low.
+  - ADR 0011's D1 (deterministic parser-version identifier) and D2 (executable
+    realistic-output protection) preconditions remain binding on any future
+    normalized-persistence slice.
+  - Phase 4, normalized persistence, and provider integration remain unstarted and
+    unauthorized.
+- STOP -- report the synchronized final `main` SHA and stop. No Phase 4, normalized
+  persistence, provider contact, workflow-tooling correction, or another slice without
+  separate explicit user authorization.
