@@ -27,13 +27,23 @@ dependencies = [
     # custom `SafeLoader` subclass to fail closed on that instead of
     # relying on this dependency's own default behavior.
     "PyYAML==6.0.2",
+    # Runtime dependency (promoted from the dev extra; same pin) --
+    # async HTTP for the direct Greenhouse Job Board provider only
+    # (docs/DECISIONS/0013-direct-greenhouse-job-board-provider.md).
+    # Imported only in app/providers/greenhouse.py; an AST test enforces
+    # that boundary. BSD-3-Clause license. Its resolved runtime transitives
+    # (httpcore, anyio, h11, idna, certifi, typing-extensions) are not
+    # project-pinned -- there is no lockfile; ADR 0013 records the observed
+    # versions and licenses. Remove if the Greenhouse adapter is retired or
+    # reimplemented on stdlib urllib plus asyncio.to_thread or another
+    # reviewed client.
+    "httpx==0.28.1",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest==8.3.4",
     "pytest-asyncio==0.24.0",
-    "httpx==0.28.1",
     "ruff==0.8.4",
     "mypy==1.13.0",
 ]

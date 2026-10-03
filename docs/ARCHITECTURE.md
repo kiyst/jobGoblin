@@ -383,7 +383,7 @@ holds is a **DAG**, enforced per-module:
 | `schemas/` | stdlib, Pydantic | anything else in this app — these are provider-independent value objects (`DiscoveredJob`, `DiscoveryResult`, `SourceQuery`, `MatchResult`, etc.) that every other layer imports *from* |
 | `taxonomy/` | (data files, no code) | — |
 | `normalization/` | `schemas/`, `taxonomy/` | `providers/`, `db/`, `ingestion/`, `services/`, `api/`, any network client (`httpx`, `ats_scrapers`, `jobspy`) — pure functions only: value/dict in, typed value + provenance out |
-| `providers/` | `schemas/`, external libraries (`ats_scrapers`, `jobspy`) | `db/`, `normalization/`, `ingestion/`, `services/`, `api/` — a provider's job is to produce a `DiscoveryResult`, nothing else; it never normalizes or persists |
+| `providers/` | `schemas/`, external libraries (`ats_scrapers`, `jobspy`; `httpx` only in `providers/greenhouse.py`, per [ADR 0013](DECISIONS/0013-direct-greenhouse-job-board-provider.md)) | `db/`, `normalization/`, `ingestion/`, `services/`, `api/` — a provider's job is to produce a `DiscoveryResult`, nothing else; it never normalizes or persists |
 | `discovery/` (query_planner, source_detection) | `schemas/`, `db/models` (read `SavedSearch`), `providers/` (only `ProviderCapabilities`, to plan — never calls `discover()`) | network clients, `ingestion/`, `services/` |
 | `db/` (models, session) | `schemas/` (shared enums/types only) | `providers/`, `normalization/`, `ingestion/`, `services/`, `api/` — pure ORM + engine |
 | `ingestion/` (pipeline, raw_storage, identity, persistence) | `schemas/`, `providers/` (via `ProviderRegistry`, calls `discover()`), `discovery/`, `normalization/`, `db/` | `matching/`, `dedupe/`, `analytics/`, `api/` — and only `ingestion/persistence.py` (not `pipeline.py` directly) issues SQLAlchemy writes |
@@ -1472,6 +1472,13 @@ item 4 — full column list in [DATA_MODEL.md](DATA_MODEL.md)):**
 ---
 
 ## 10. Where `ats-scrapers` and JobSpy plug in
+
+> **Superseded for Greenhouse by
+> [ADR 0013](DECISIONS/0013-direct-greenhouse-job-board-provider.md).** Greenhouse is
+> reached through a direct `GreenhouseJobBoardProvider` (`providers/greenhouse.py`,
+> `provider="greenhouse"`) against the official public Job Board API, not through
+> `ats_scrapers`. The diagram and notes below remain the original design for the other
+> ATS types.
 
 ```text
 Saved Search
