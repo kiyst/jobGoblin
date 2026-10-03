@@ -98,102 +98,6 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-10-02, Claude (implementer). Branch `phase-3/exit-audit`, base
-  `b31916827c07715bb59f430ad52dd0193561c35b` (`Q` of the title-normalization merge
-  `M=a3c1c12`). Ending commit: this commit (candidate `C`).
-- Slice: Phase 3 exit audit. Risk class D, `slice_kind: docs`, `declared_gate: docs`.
-  No executable change.
-- Frozen contract, in precedence order:
-  1. the implementer's read-only Phase 3 exit-audit proposal;
-  2. Astra's phase-gate review of D1/D2 and its evidence corrections (an additive
-     escalation review, invoked because this is a user-authorized phase gate);
-  3. Sol Medium's primary-review final approval, adopting Astra's amendments and the
-     binding clarification as the complete contract.
-
-  Neither reviewer authorized `R`, a merge, or Phase 4.
-- Files (closed five-file list, all within it):
-  `docs/DECISIONS/0011-phase-3-exit-audit.md` (new), `docs/ROADMAP.md`,
-  `docs/ARCHITECTURE.md`, `docs/DATA_MODEL.md`, this file.
-- ADR 0011 is the durable closure artifact. It records:
-  - the closure statement, verbatim;
-  - the eight-parser inventory;
-  - a requirement-to-evidence matrix for every Phase 3 entry check, required prevention,
-    and exit criterion;
-  - parser-contract completion as distinct from production readiness;
-  - limitations L1-L7;
-  - the D1 precondition, verbatim, with its clarifications;
-  - the D2 precondition;
-  - the other deferred integration obligations;
-  - the pre-existing `db/models/company.py` import exception, recorded as outside the
-    eight Phase 3 parsers.
-- Evidence the implementer reproduced read-only and offline at the base, matching
-  Astra's figures:
-  - 940 distinct strings, 12,220 parser invocations, no exceptions, and no returned
-    `explicit_source`/`structured_metadata`;
-  - evaluator output of 91,994 bytes, 1,366 CRLF lines with a final newline, SHA-256
-    `87a92187a2d37d5150fe998d06042449f6b74d540cecd15d1bba97dd94801de6`;
-  - 100 of 120 salary-component annotations with missing wired input;
-  - current combined-split mismatches: 159 (100 missing input, 56 supported abstentions,
-    3 `skills.golang` recall misses).
-
-  No full suite was rerun. The audit relies on receipt `1541f94b` and post-merge artifact
-  `bb3ce6d0`.
-- ROADMAP:
-  - added the Phase 3 closure entry with the exact closure wording;
-  - replaced the twelfth slice's stale "candidate stage" assertion with `M`/`Q`;
-  - annotated the seventh slice's "title … unstarted" sentence as a superseded
-    point-in-time statement.
-
-  Other slice history is unchanged.
-- ARCHITECTURE:
-  - marked `titles.py` as merged;
-  - corrected §11 step 2's false claim that the fixture pipeline runs normalization and
-    sets `parser_version`;
-  - added §5 notes on the pre-existing company-model exception and on deferred, binding
-    parser-version/normalization persistence.
-- DATA_MODEL: reworded five current-state "until Phase 3" or unstated-deferral notes:
-  `target_role_families`, `candidate_skills.skill`, the `candidate_skills` index
-  rationale, `normalized_title`, and `parser_version`. Moved the `job_skills` introduction
-  to Phase 4+ normalization-persistence integration. No schema commitment, migration, or
-  point-in-time history changed.
-- ADR 0010 is byte-identical (SHA-256
-  `beda935f94f63de30a5516c2ea6a055ca8da913dbd58a0161d2f078ba16813da`).
-- Verification: the genuine `verification_coordinator` `gate=docs` run against `C`,
-  recorded in `A`.
-- Self-review:
-  - every numeric claim in ADR 0011 was recomputed from the repository, not copied;
-  - provenance safety is worded as an implementation/test result, because the enum is
-    permissive;
-  - zero-wrong-value and zero-false-positive claims are scoped to the frozen corpus and
-    this invocation;
-  - title's 30 realistic cases are described only as smoke/regression expectations;
-  - the corpus is described as evaluating seven parsers.
-
-  No executable, fixture, test, schema, or configuration change was found to be needed.
-- Observed and left unchanged as out of scope: ROADMAP's historical Phase 2 header
-  ("in progress (updated 2026-09-01)"), which is followed by its own completion record;
-  and ARCHITECTURE §1.2's `job_skills` rationale, which is still accurate.
-- STOP after `A` for Sol's independent review. No `R`, merge, `M`/`Q`, Phase 4, provider
-  contact, persistence wiring, or parser change.
-
-```workflow-metadata
-workflow_version: v3.2
-state: published
-slice_id: 2026-10-02-phase3-exit-audit-b319168
-slice_kind: docs
-risk_class: D
-base_sha: b31916827c07715bb59f430ad52dd0193561c35b
-declared_gate: docs
-executed_gate: docs
-candidate_sha: 78cfd2077b4370b2d6da3d30843eb9252657ea82
-receipt_id: 90d6c6b4-b669-4de2-b36d-4d0470891cd1
-receipt_path: docs/verification-receipts/78cfd2077b4370b2d6da3d30843eb9252657ea82/90d6c6b4-b669-4de2-b36d-4d0470891cd1.json
-```
-
-## Iteration 2
-
-### Work done
-
 - Date/agent: 2026-10-02, Claude (implementer). Branch `phase-3/exit-audit`. Bounded
   C2 documentation correction as the direct child of
   `A = 0de449434242f6172cd0c9740f68a0727f6f7d62`.
@@ -383,3 +287,71 @@ findings: none
 - STOP -- report the synchronized final `main` SHA and stop. No Phase 4, normalized
   persistence, provider contact, workflow-tooling correction, or another slice without
   separate explicit user authorization.
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-10-03, Claude (implementer). Branch
+  `workflow/throughput-protocol-pilot`, base `6b4d9ea1a2503553c18ef5efd684fc354adf515a`
+  (`Q` of the Phase 3 exit-audit merge `M=5dba60c`). Ending commit: this commit
+  (candidate `C`).
+- Slice: Workflow Throughput Protocol pilot activation, a bounded documentation-policy
+  slice. Risk class D and `slice_kind: docs`, matching the precedent of the Phase 3 exit
+  audit and the ADR 0008 policy slice: no executable, test, fixture, schema, or
+  configuration change. `declared_gate: final`, because `docs/LLM_WORKFLOW.md` is a
+  `workflow-governing-doc` under `scripts/verification_scope.py`, and that category
+  forces `gate=final`.
+- Contract: the user's activation authorization, plus the consolidated, gitignored
+  runtime packet `.claude/runtime/workflow-throughput-protocol-pilot.md` (SHA-256
+  `0160b6635c2c1b2b24c08faab80f3ed34be946403a5401fa301602318c444405`, verified before
+  any edit). The packet itself is not committed.
+- Policy consultations, recorded as prose only and not as formal review metadata:
+  - Astra approved the protocol with binding amendments A1–A10, all incorporated;
+  - Sol approved the amended protocol as compatible with the current v3.2 validators.
+
+  Neither consultation is an `R` for this slice.
+- Files (exact closed three-path list):
+  - `docs/DECISIONS/0012-workflow-throughput-protocol-pilot.md` (new);
+  - `docs/LLM_WORKFLOW.md`: a new "Workflow Throughput Protocol pilot (ADR 0012)"
+    subsection inside "Workflow v3.2 (active)", plus a one-sentence pointer in that
+    section's status paragraph. No existing requirement was deleted or reworded;
+  - this file: two-iteration rotation. The exit-audit `C` entry was removed, and the
+    exit-audit correction, Work review, and merge record were retained byte-for-byte as
+    Iteration 1.
+- Material content:
+  - pre-publication advisory review, kept distinct from formal `R`;
+  - formal `R` remains authoritative;
+  - unchanged Sol Medium requirements;
+  - a clean-path target of one final run at `C` and one post-merge run at `M`, as a
+    target and not a cap;
+  - mutation-witness timing;
+  - three correction classes;
+  - repository-first handoff;
+  - blocking versus preference findings;
+  - the docs-correction `unmapped` limitation, with direct-parent-only scope calculation
+    prohibited;
+  - metrics, exit criteria, deferred changes, and rollback;
+  - explicit precedence: existing validator-enforced rules win any conflict.
+- ADR 0012's Phase 3 delay evidence was recomputed from committed receipts: 18 receipts
+  across the seven Phase 3 slices verified under v3.2, with 6 for the realistic corpus
+  (`C`–`C6`) and 1 for the freeze slice. It makes no claim that the pilot is faster or
+  equally safe.
+- Not changed: `CLAUDE.md`, ROADMAP, validators and verification tooling, tests,
+  fixtures, schemas, configuration, reviewer-identity policy, metadata schemas, handoff
+  retention, Phase 3 closure, and Phase 4 scope. No executable or schema change. Phase 4
+  is not activated. The pilot takes effect only after this slice reaches `Q` on `main`.
+- Verification: the genuine `verification_coordinator` `gate=final` run against `C`,
+  recorded in `A`.
+- STOP after `A` for formal Sol Medium review. No `R`, merge, `M`/`Q`, validator change,
+  Phase 4, provider contact, production data access, migration, or persistence wiring.
+
+```workflow-metadata
+workflow_version: v3.2
+state: pending
+slice_id: 2026-10-03-workflow-throughput-protocol-pilot-6b4d9ea
+slice_kind: docs
+risk_class: D
+base_sha: 6b4d9ea1a2503553c18ef5efd684fc354adf515a
+declared_gate: final
+```
