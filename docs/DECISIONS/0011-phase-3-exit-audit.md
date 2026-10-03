@@ -67,7 +67,9 @@ independently verified them.
    normalization fixtures, plus the `title`, `description`, `location_raw`, and
    `compensation_text` fields of the 30 frozen-corpus records.
    - The five title/description parsers (remote, employment, seniority, experience,
-     skills) were each called twice per string: once as `(s, None)` and once as `(s, s)`.
+     skills) were each called twice per string: once as `(s, None)` and once as
+     `(None, s)`. This isolates title and description independently, so each input
+     field is exercised on its own.
    - `classify_salary`, `classify_location`, and `classify_title` were each called once
      per string.
    - That is 12,220 parser invocations. None raised an exception, and none returned a
@@ -209,7 +211,7 @@ not production readiness:
 
 - no parser is wired into ingestion;
 - no normalized value is persisted;
-- no parser-version identifier exists;
+- no Phase 3 normalization-version identifier or threading exists;
 - providers do not map fields into parser inputs (salary receives no input on the corpus);
 - live-data coverage is low (L1 below).
 

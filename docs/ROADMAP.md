@@ -420,7 +420,7 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   salary, location, remote type, employment, seniority, experience, and skills. Closure
   means parser-contract completion only, not Phase 4 or product readiness:
   - no parser is wired into ingestion or persistence;
-  - no parser-version identifier exists;
+  - no Phase 3 normalization-version identifier or threading exists;
   - providers do not map fields into parser inputs;
   - realistic-text coverage is low.
 
