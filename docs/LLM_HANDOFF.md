@@ -98,97 +98,6 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-10-02, Claude (implementer). Branch `phase-3/title-normalization`,
-  base `aed2694720b0344ae54feeef1916805f91e6b508` (Q of the Go/remote correction).
-  Ending commit: this commit (candidate `C`).
-- Slice: Phase 3 title classifier, Class H, `slice_kind: parser`, `gate: final`.
-  Frozen contract, in precedence order: the title-normalization proposal; Sol's
-  A1-A12 binding amendment table; Sol's corrected A2/A4/A5 fragment and final
-  12-item mutation-witness inventory. Decisions applied: D1 `INFERRED` only; D2 all
-  30 realistic titles as smoke/regression cases; D3 `forward deployed engineer`
-  unsupported; D4 nine-title vocabulary frozen.
-- Files (closed nine-file list, all within it):
-  `backend/app/normalization/titles.py` (new),
-  `backend/tests/test_normalization_titles.py` (new),
-  `backend/tests/fixtures/normalization/title_cases.json` (new),
-  `backend/scripts/verification_scope.py`, `backend/tests/test_verification_scope.py`,
-  `docs/ROADMAP.md`, `docs/ARCHITECTURE.md`, `docs/DATA_MODEL.md`, this file.
-- Implementation: `classify_title(title) -> TitleResult` (`canonical_title`,
-  `role_family`, `outcome`); the exact contract tables, per-segment
-  `MATCH`/`AMBIGUOUS`/`NONE` verdicts, and A5/corrected-fragment precedence; the A7
-  bounded per-code-point policy (no unrestricted NFKC, no Unicode casefold); the A6
-  single approved decoration; the A8 `TitleResult` invariants; and A9 import-time
-  table validation (`TitleVocabularyError`). No regular expressions; no record IDs,
-  employer names, splits, or per-title exceptions. Imports only the standard library,
-  `types.py`, and `identifiers.py`.
-- A11: separate exact-path `_TITLE_FIXTURE_FILES` (`title_cases.json` ->
-  `test-fixture:title-classifier`) registered at both exact-map sites. Tests cover the
-  exact category, disjointness from every other fixture map, no contract family, no
-  literal focus target, `unrelated_cases.json` still raising
-  `OwnerMappingRequiredError`, and clear-and-restore fault injection.
-- Fixture: 200 cases (42 positive, 27 negative, 27 boundary, 17 ambiguity, 21
-  collision, 36 unicode, 30 realistic). The expectations were hand-authored, not
-  produced by running the parser. Realistic cases are byte-identical to the frozen
-  corpus titles (a test enforces this). They are primary-reviewer-approved
-  smoke/regression expectations only, never accuracy, holdout, coverage, precision,
-  recall, or generalization evidence. Result: 22 matched, 6 unsupported, 2 ambiguous,
-  with exactly Sol's per-record lists.
-- Unchanged: `python -m scripts.evaluate_phase3_corpus` output is byte-identical to
-  its output at `aed2694` (1366 lines). The frozen corpus, annotations, evaluator,
-  every other parser, the skill taxonomy, provider mapping, persistence, migrations,
-  and APIs are untouched.
-- Local checks: 362 focused tests passed (`tests/test_normalization_titles.py` 276,
-  `tests/test_verification_scope.py` 86). ruff, ruff format and mypy are clean on the
-  changed code. The full suite and all witnesses are left to the coordinator's
-  `gate=final` receipt, recorded in `A`.
-- Mutation proofs (ad hoc harness against `titles.py`; source restored byte-for-byte,
-  SHA-256 verified): **11 of 12 frozen witnesses proven** (01, 03-12). Each failed
-  under its mutant and passed after restoration; the positive controls for 03 and 09
-  passed both ways.
-  **Witness 02 is NOT PROVEN as specified.** `Technical Recruiter Software Engineer`
-  stays `AMBIGUOUS` with `PREFIX_BLOCKERS` disabled, because `recruiter` is also in the
-  frozen `PREFIX_ROLE_DESIGNATORS`. Every blocker except `of`/`for`/`to`/`and`/`or`/
-  `&` is also a designator, so no witness containing one of the others can isolate
-  this guard. The guard itself is load-bearing: the non-inventory fixture cases
-  `collision_prefix_blocker_and_only` and `collision_prefix_blocker_for_only` both
-  fail under the same mutant. The inventory was not changed; that decision is Sol's.
-- Self-review (contract-conformance and counterexample passes): no defect found.
-  Contract-exact behaviours disclosed for review:
-  - The decoration is ignored only when its content is ASCII letters and spaces, so
-    `[Expression-of-Interest]` is processed normally (this resolves "normalized tokens
-    are exactly" conservatively).
-  - `counsels` is not a designator (the frozen set has `counsel` only).
-  - `leads` is an allowed prefix (only the later-terminal set contains it).
-  - `Software Engineer II` is `unsupported` (an alias must be the suffix).
-  - `Software Engineering Manager` is `ambiguous` (A3 `software` signal).
-- Environment: one harness write failed with a transient Windows `Errno 22`. The file
-  was verified intact, and the harness was rerun with write-retry and hash
-  verification. The local Postgres container was started for verification.
-- Outside this slice: the 3 remaining `skills.golang` misses (disclosed backlog) and
-  the `salary.*` missing-wired-input gap (future provider-composition work).
-- STOP after `A` for Sol's independent review. No `R`, merge, persistence wiring,
-  Phase 3 exit audit, or Phase 4 work.
-
-```workflow-metadata
-workflow_version: v3.2
-state: published
-slice_id: 2026-10-02-phase3-title-normalization-aed2694
-slice_kind: parser
-risk_class: H
-base_sha: aed2694720b0344ae54feeef1916805f91e6b508
-declared_gate: final
-executed_gate: final
-candidate_sha: e2573bc9792e74f60b59fd2b2974141a1a32302b
-receipt_id: d8ea060c-298d-473e-93a6-aa6d32b7c7d7
-receipt_path: docs/verification-receipts/e2573bc9792e74f60b59fd2b2974141a1a32302b/d8ea060c-298d-473e-93a6-aa6d32b7c7d7.json
-fixture_path: backend/tests/fixtures/normalization/title_cases.json
-fixture_count: 200
-```
-
-## Iteration 2
-
-### Work done
-
 - Date/agent: 2026-10-02, Claude (implementer). Branch `phase-3/title-normalization`.
   Bounded C2 correction as the direct child of `A = d1c63e0ce9995bd36f981e350b3d8efbd850178d`.
   `C = e2573bc9792e74f60b59fd2b2974141a1a32302b` and `A` are preserved unamended (no
@@ -328,3 +237,95 @@ findings: none
 - STOP -- report the synchronized final `main` SHA and stop. No Phase 3 exit audit,
   Phase 4, persistence wiring, provider contact, production database work, or another
   correction slice without separate explicit user authorization.
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-10-02, Claude (implementer). Branch `phase-3/exit-audit`, base
+  `b31916827c07715bb59f430ad52dd0193561c35b` (`Q` of the title-normalization merge
+  `M=a3c1c12`). Ending commit: this commit (candidate `C`).
+- Slice: Phase 3 exit audit. Risk class D, `slice_kind: docs`, `declared_gate: docs`.
+  No executable change.
+- Frozen contract, in precedence order:
+  1. the implementer's read-only Phase 3 exit-audit proposal;
+  2. Astra's phase-gate review of D1/D2 and its evidence corrections (an additive
+     escalation review, invoked because this is a user-authorized phase gate);
+  3. Sol Medium's primary-review final approval, adopting Astra's amendments and the
+     binding clarification as the complete contract.
+
+  Neither reviewer authorized `R`, a merge, or Phase 4.
+- Files (closed five-file list, all within it):
+  `docs/DECISIONS/0011-phase-3-exit-audit.md` (new), `docs/ROADMAP.md`,
+  `docs/ARCHITECTURE.md`, `docs/DATA_MODEL.md`, this file.
+- ADR 0011 is the durable closure artifact. It records:
+  - the closure statement, verbatim;
+  - the eight-parser inventory;
+  - a requirement-to-evidence matrix for every Phase 3 entry check, required prevention,
+    and exit criterion;
+  - parser-contract completion as distinct from production readiness;
+  - limitations L1-L7;
+  - the D1 precondition, verbatim, with its clarifications;
+  - the D2 precondition;
+  - the other deferred integration obligations;
+  - the pre-existing `db/models/company.py` import exception, recorded as outside the
+    eight Phase 3 parsers.
+- Evidence the implementer reproduced read-only and offline at the base, matching
+  Astra's figures:
+  - 940 distinct strings, 12,220 parser invocations, no exceptions, and no returned
+    `explicit_source`/`structured_metadata`;
+  - evaluator output of 91,994 bytes, 1,366 CRLF lines with a final newline, SHA-256
+    `87a92187a2d37d5150fe998d06042449f6b74d540cecd15d1bba97dd94801de6`;
+  - 100 of 120 salary-component annotations with missing wired input;
+  - current combined-split mismatches: 159 (100 missing input, 56 supported abstentions,
+    3 `skills.golang` recall misses).
+
+  No full suite was rerun. The audit relies on receipt `1541f94b` and post-merge artifact
+  `bb3ce6d0`.
+- ROADMAP:
+  - added the Phase 3 closure entry with the exact closure wording;
+  - replaced the twelfth slice's stale "candidate stage" assertion with `M`/`Q`;
+  - annotated the seventh slice's "title … unstarted" sentence as a superseded
+    point-in-time statement.
+
+  Other slice history is unchanged.
+- ARCHITECTURE:
+  - marked `titles.py` as merged;
+  - corrected §11 step 2's false claim that the fixture pipeline runs normalization and
+    sets `parser_version`;
+  - added §5 notes on the pre-existing company-model exception and on deferred, binding
+    parser-version/normalization persistence.
+- DATA_MODEL: reworded five current-state "until Phase 3" or unstated-deferral notes:
+  `target_role_families`, `candidate_skills.skill`, the `candidate_skills` index
+  rationale, `normalized_title`, and `parser_version`. Moved the `job_skills` introduction
+  to Phase 4+ normalization-persistence integration. No schema commitment, migration, or
+  point-in-time history changed.
+- ADR 0010 is byte-identical (SHA-256
+  `beda935f94f63de30a5516c2ea6a055ca8da913dbd58a0161d2f078ba16813da`).
+- Verification: the genuine `verification_coordinator` `gate=docs` run against `C`,
+  recorded in `A`.
+- Self-review:
+  - every numeric claim in ADR 0011 was recomputed from the repository, not copied;
+  - provenance safety is worded as an implementation/test result, because the enum is
+    permissive;
+  - zero-wrong-value and zero-false-positive claims are scoped to the frozen corpus and
+    this invocation;
+  - title's 30 realistic cases are described only as smoke/regression expectations;
+  - the corpus is described as evaluating seven parsers.
+
+  No executable, fixture, test, schema, or configuration change was found to be needed.
+- Observed and left unchanged as out of scope: ROADMAP's historical Phase 2 header
+  ("in progress (updated 2026-09-01)"), which is followed by its own completion record;
+  and ARCHITECTURE §1.2's `job_skills` rationale, which is still accurate.
+- STOP after `A` for Sol's independent review. No `R`, merge, `M`/`Q`, Phase 4, provider
+  contact, persistence wiring, or parser change.
+
+```workflow-metadata
+workflow_version: v3.2
+state: pending
+slice_id: 2026-10-02-phase3-exit-audit-b319168
+slice_kind: docs
+risk_class: D
+base_sha: b31916827c07715bb59f430ad52dd0193561c35b
+declared_gate: docs
+```
