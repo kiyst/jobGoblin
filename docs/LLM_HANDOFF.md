@@ -359,3 +359,82 @@ candidate_sha: c8c18e18545a9b127875040352cc4abf1a638481
 receipt_id: e8ef9fe9-b555-40f8-add9-85e12707acde
 receipt_path: docs/verification-receipts/c8c18e18545a9b127875040352cc4abf1a638481/e8ef9fe9-b555-40f8-add9-85e12707acde.json
 ```
+
+### Work review
+
+- Date/reviewer: 2026-10-03, Sol (primary, Sol Medium). Formal review of the Workflow
+  Throughput Protocol pilot activation on `workflow/throughput-protocol-pilot`:
+  - base `6b4d9ea1a2503553c18ef5efd684fc354adf515a`;
+  - candidate `C` = `c8c18e18545a9b127875040352cc4abf1a638481`;
+  - publication `A` = `faf25881af66678622bbb769f0078c4b39916247`.
+
+  Reviewed against the user's activation authorization and the consolidated
+  Astra-amended, Sol-approved packet.
+- Independently checked by Sol:
+  - **Git ancestry and synchronization:** `C`'s sole parent is the base; `A`'s sole
+    parent is `C`; the local and remote branch both equal `A`; `main`/`origin/main`
+    remain at the base.
+  - **Scope:**
+    - `base..C` changes exactly the authorized three paths:
+      `docs/DECISIONS/0012-workflow-throughput-protocol-pilot.md` (new),
+      `docs/LLM_WORKFLOW.md`, and `docs/LLM_HANDOFF.md`;
+    - `C..A` adds only the C-bound receipt and the permitted pending -> published
+      metadata transition, with `executed_gate: final`.
+  - **Policy content and consultation representation:**
+    - Astra's A1–A10 amendments are incorporated.
+    - Workflow v3.2 authority is unchanged; existing validator-enforced rules win any
+      conflict.
+    - Clean-path verification targets are explicitly not caps or quotas.
+    - Later findings remain unrestricted.
+    - The pilot is inactive until this slice's `Q` reaches `main`.
+    - Astra's and Sol's policy consultations are recorded as prose only, never as
+      formal review metadata.
+  - **Delay evidence:** the 18-receipt / seven-slice count in ADR 0012 was reproduced
+    from the committed receipts: skill-taxonomy foundation 2, skill classifier 3,
+    realistic evaluation corpus 6, realistic-corpus freeze/evaluation 1, baseline
+    correction 2, title classifier 2, exit audit 2.
+  - **Classification:** risk class D with `slice_kind: docs` is accepted. There is no
+    executable, test, fixture, schema, or configuration change, which matches the
+    precedent of the Phase 3 exit audit and the ADR 0008 policy slice. `gate: final`
+    is the correct treatment, because `docs/LLM_WORKFLOW.md` is a
+    `workflow-governing-doc` and that category forces the final gate.
+  - **Receipt:** receipt `e8ef9fe9-b555-40f8-add9-85e12707acde` is:
+    - schema-valid and bound to `C` and the base;
+    - consistent with the committed verifier, checker, and configuration hashes;
+    - recorded with affected surface `docs-only`, `handoff-transition`,
+      `workflow-governing-doc`;
+    - consistent with the complete active witness inventory;
+    - approval-eligible, independently recomputed as `true`.
+  - **Validations:** the C->A transition, handoff, repository, and diff validations
+    passed.
+- Relied upon from the genuine `C` receipt, not rerun by Sol:
+  - all 11 coordinator steps passed;
+  - full suite: 3,470 passed;
+  - 34/34 active mutation witnesses passed;
+  - migration not triggered;
+  - isolated-worktree integrity snapshots identical, with cleanup passing;
+  - no residual worktree.
+
+  Sol did not rerun the full suite or the mutation witnesses.
+- Findings by severity with exact references: none.
+- Verdict: **approved** -- no findings.
+- Exact bounded correction: none required.
+- STOP -- record-only. This review authorizes no merge, `M`, `Q`, Phase 4 work, policy
+  or tooling change, or other slice. Merge requires separate user authorization.
+
+```workflow-review-metadata
+schema_version: 2
+slice_id: 2026-10-03-workflow-throughput-protocol-pilot-6b4d9ea
+risk_class: D
+reviewer: Sol
+reviewer_role: primary
+reviewer_model: Sol Medium
+reviewed_at: 2026-10-03T17:09:36.037747+00:00
+candidate_sha: c8c18e18545a9b127875040352cc4abf1a638481
+publication_commit_sha: faf25881af66678622bbb769f0078c4b39916247
+receipt_path: docs/verification-receipts/c8c18e18545a9b127875040352cc4abf1a638481/e8ef9fe9-b555-40f8-add9-85e12707acde.json
+receipt_id: e8ef9fe9-b555-40f8-add9-85e12707acde
+gate: final
+verdict: approved
+findings: none
+```
