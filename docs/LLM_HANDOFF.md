@@ -739,3 +739,130 @@ receipt_path: docs/verification-receipts/505e4c1e1480b19fcecc1f0cbbdec5d3f2e1b01
 fixture_path: backend/tests/fixtures/evaluation/phase3_realistic_corpus.json
 fixture_count: 30
 ```
+
+### Work review
+
+- Date/reviewer: 2026-10-04 (UTC), Sol (primary, Sol Medium). Formal review of Phase 4
+  S2b, offline Greenhouse content conversion and strict `PostingInputs` mapping, on
+  `phase-4/greenhouse-content-mapping-s2b`:
+  - base `e670575d5b05395cb9eeb2ec84833cc0034c7002`;
+  - final candidate `C` = `505e4c1e1480b19fcecc1f0cbbdec5d3f2e1b01e`;
+  - publication `A` = `12c281357d94270c5ec9b125f3c335ee8afc92f1`.
+
+  Reviewed against frozen contract SHA-256
+  `e409427bccfecd4f3f04c839f47826f5727355788ceab8fee061e6985e519df2` (U1–U4, Sol's binding
+  amendments A1–A20 and W1–W19, and the proposal). Also reviewed against correction packet
+  SHA-256 `5d68c43a8537f629b7cd7c8392aa406297899bd82c0d7927b4d3c6e4588dcee8` (Sol's
+  "Changes requested" review R1–R7 and the correction authorization). Sol's earlier
+  pre-publication advisory review of `bfc3b93`, and re-review of the correction `9e86ba9`,
+  were advisory only; this is the formal review.
+- **1. Sol's formal verdict and dispositions** (as relayed by the user; the relay is the
+  authority for this review):
+  - verdict **approved**;
+  - findings none;
+  - primary reviewer Sol (Sol Medium);
+  - gate `final`, published slice kind `parser`;
+  - `C`/`A` above, receipt `9a62f701-d97c-4bb9-868a-8f7f796b1686`, receipt SHA-256
+    `d4e97fa0070c03864f99060ca948b7b9b5bbc9ba1cb63f860bf7adac5356a7bf`.
+
+  The relay supplies the verdict and chain plus the evidence classification below. It
+  supplies no further itemized disposition, so none is attributed to Sol here. "No
+  unresolved executable findings" is a review status, not production-readiness evidence.
+- **2. Independently rerun or recomputed in formal review** (per the relay):
+  - the focused S2b selection (`tests/test_greenhouse_content.py
+    tests/test_greenhouse_posting_inputs.py`): **331 passed**;
+  - the Phase 3 evaluator identity (`python -m scripts.evaluate_phase3_corpus`, SHA-256
+    `87a92187…01de6`, 91,994 bytes): unchanged.
+- **3. Committed implementation and evidence inspected directly.** These checks were
+  re-verified from Git plumbing and the receipt itself when this review was recorded:
+  - **ancestry:** `A`'s sole parent is `C`; `C`'s is the correction `9e86ba9`; its sole
+    parent is the original advisory candidate `bfc3b93`, whose sole parent is the base;
+  - **refs:** the local and remote branch equal `A`; `main`, `origin/main`, and the
+    remote `main` remain at the base; the tree was clean;
+  - **scope:**
+    - `base..C` is exactly the authorized nine paths;
+    - `9e86ba9..C` changes only this file (Sol's re-review paragraph, inserted verbatim
+      before valid `state: pending` metadata);
+    - `C..A` adds only the C-bound receipt and the permitted pending → published
+      transition with `executed_gate: final` (`validate_c_to_a_transition` passed);
+  - **production blobs at `A`:**
+    - `greenhouse_content.py` `00ea51d9…4c033`;
+    - `greenhouse.py` `f20ee294…edf63`;
+    - `greenhouse_posting_inputs.py` `00809ff0…b955fd2e`;
+  - **receipt:**
+    - file SHA-256 `d4e97fa0…6a7bf` equals the committed blob;
+    - schema-valid;
+    - bound to `C`, the base, gate `final`, the slice, and risk class H;
+    - the verifier, checker, and configuration hashes equal the files committed at `C`;
+    - the affected surface (`docs-only`, `generic-changed-test`, `handoff-transition`,
+      `unmapped`), focused selector, migration determination (not triggered), and
+      complete 34-witness active inventory all recompute identically;
+    - approval eligibility recomputes as `true`;
+  - **runtime packets** (gitignored, untracked, unchanged): frozen contract
+    `e409427b…519df2`; correction packet `5d68c43a…dcee8`; mutation driver v2
+    `7151c79f…761b5`; mutation log `514ac00d…5073e`.
+- **4. Relied upon from the genuine C-bound receipt** (coordinator run at `C`; not
+  rerun in formal review):
+  - all 12 steps PASS: Ruff format and check, mypy, `check_repo`, `git diff --check`,
+    disposable test-database URL validation and reachability, focused pytest (331),
+    the full suite (**4,240 passed**), registered contract mutation witnesses
+    (**34 of 34 passed**), handoff metadata validation, and temporary-directory cleanup;
+  - no migration triggered; isolated-worktree integrity and removal.
+- **5. Manual advisory mutation evidence.** W1–W20 were run during advisory correction 1
+  with the lossless JUnit driver (self-check passed; all 20 passed with byte-identical
+  restoration). They were inspected, not rerun, during formal review. The coordinator
+  did not execute them, and they are not registered witnesses.
+- Evidence boundary: No Greenhouse or other live-network contact, production database, or
+  production-data access occurred. The full suite used the configured disposable test
+  database. S2b introduces no application persistence or production database behavior.
+- **6. Limitations retained:**
+  - S2b is runtime-unreachable and non-persisting; nothing is registered or wired;
+  - no captured raw `content` or real `/jobs?content=true` list-endpoint evidence (ADR
+    0014's U6 deferral moves to S2c); synthetic HTML and 30 reconstructed synthetic
+    envelopes only, under the bounded A16 claim;
+  - only end-of-input truncation fails closed; text swallowed mid-input by a construct
+    that a later quote or `-->` closes is still lost silently (a bounded S2c observation
+    question);
+  - table and section content merges; `noscript`/`template` text is kept; escaped code
+    examples are rejected;
+  - output depends on the interpreter's `html.parser` (verified on CPython 3.12.13 and
+    golden-pinned);
+  - in-memory text is unredacted;
+  - there is no mode or outcome traceability on the job (A11), and this is not D1;
+  - D1 remains unsatisfied and no normalized write is authorized; salary is excluded
+    (ADR 0011 L4 open); ten components remain unproven; title is smoke evidence only;
+    the corpus is the exposed 30-record, three-employer corpus;
+  - production usefulness and live list-endpoint behavior are unproven.
+- Pilot metrics (ADR 0012, pilot product slice 3 of 3), as recorded in `Work done`:
+  - proposal-review rounds 1; advisory-review rounds 2 (changes requested, then
+    approved); advisory findings 1 executable, 1 evidence-integrity, and 1 documentation
+    (all resolved before `A`); formal findings 0;
+  - pre-`A` correction commits 1; handoff-only finalization commits 1; post-`A`
+    corrections 0;
+  - receipt-producing executions 1.
+
+  The relay for this formal review occurred after `A` and is outside the `Work done`
+  relay count.
+- Findings by severity with exact references: none.
+- Verdict: **approved** -- no findings.
+- Exact bounded correction: none required.
+- STOP -- record-only. This review authorizes no merge, `M`, `Q`, Greenhouse contact,
+  pilot evaluation, S2c, runtime wiring, persistence, D1, or other slice. Merge requires
+  separate user authorization.
+
+```workflow-review-metadata
+schema_version: 2
+slice_id: 2026-10-04-phase4-greenhouse-content-mapping-s2b-e670575
+risk_class: H
+reviewer: Sol
+reviewer_role: primary
+reviewer_model: Sol Medium
+reviewed_at: 2026-10-04T22:06:28+00:00
+candidate_sha: 505e4c1e1480b19fcecc1f0cbbdec5d3f2e1b01e
+publication_commit_sha: 12c281357d94270c5ec9b125f3c335ee8afc92f1
+receipt_path: docs/verification-receipts/505e4c1e1480b19fcecc1f0cbbdec5d3f2e1b01e/9a62f701-d97c-4bb9-868a-8f7f796b1686.json
+receipt_id: 9a62f701-d97c-4bb9-868a-8f7f796b1686
+gate: final
+verdict: approved
+findings: none
+```
