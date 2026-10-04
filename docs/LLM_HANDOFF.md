@@ -577,6 +577,8 @@ findings: none
   final `C`, coordinator receipt, `A`, formal `R`, merge, `M`/`Q`, Greenhouse contact,
   production data access, or S2b.
 
+**Pre-publication advisory review — approved (Sol Medium, advisory only; not formal R).** Reviewed immutable advisory candidate `d418025aaf1443d9212ced50094800b2756cafb8` against frozen-contract SHA-256 `b966b4d4cb9a8ac46c30b5cb65b65280b65239db1b91d986aca1d7b3060a80a2`; all material changes through that SHA were reviewed, with no advisory findings. Independent review confirmed the exact seven-path scope and clean ancestry; prevalidation and exact parser-input wiring; fixed result fields, call order, pass-through identity and provenance behavior; salary and unauthorized-import exclusion; absence of runtime reachability, provider mapping, persistence, database, migration or network behavior; the bounded D2 accounting and evaluator identity; 235 focused tests, 1,490 related tests, 130 contract tests, clean Ruff/mypy and repository checks. The nine mutation records and byte-identical restoration were inspected and accepted. M8’s new-`LocationResult` mechanism is approved without a replacement witness: literal in-place mutation contaminates `classify_location`’s shared unavailable singleton, while the recorded mutation preserves the exact unique predicate, injected `United States`/`INFERRED` result, required failing witnesses and stable false-positive/provenance controls without unrelated contamination. The candidate remains advisory-only; final candidate-bound verification may proceed, while formal R retains unrestricted authority to reject the slice.
+
 ```workflow-metadata
 workflow_version: v3.2
 state: pending
