@@ -722,6 +722,8 @@ findings: none
   `C`, coordinator receipt, `A`, formal `R`, merge, `M`/`Q`, Greenhouse or network
   contact, production data access, pilot evaluation, S2c, S3, or S4.
 
+**Pre-publication advisory re-review — approved (Sol Medium, advisory only; not formal R).** Reviewed corrected advisory candidate `9e86ba9ec50b089b6c76ade319b1ec6ec396941a` against original candidate `bfc3b93447417344da769f2f2e4009db78547f70`, frozen-contract SHA-256 `e409427bccfecd4f3f04c839f47826f5727355788ceab8fee061e6985e519df2`, and correction-packet SHA-256 `5d68c43a8537f629b7cd7c8392aa406297899bd82c0d7927b4d3c6e4588dcee8`; all material changes through the corrected SHA were reviewed. The six-path correction and cumulative nine-path scope are exact. The malformed-truncation, mutation-evidence, and database-wording findings are resolved: end-of-input swallowing now fails closed with deterministic source-absent marker enforcement and the required precedence; adapter retention, partiality, warning, caps, and disabled-mode behavior are correct; and the lossless JUnit driver self-check plus W1–W20 evidence and byte-identical restoration are accepted. The disclosed mid-input limitation is acceptable for this offline, runtime-unreachable, non-persisting slice and remains a bounded S2c observation question, not a production-readiness claim. Independent review reran 331 focused and 904 acceptance tests, Ruff, mypy, repository/handoff/diff checks, the driver self-check, and the unchanged 91,994-byte Phase 3 evaluator; recorded evidence for 130 contract tests, the 4,240-test full suite, and W1–W20 was inspected and accepted. Final candidate-bound verification may proceed; formal R retains unrestricted authority.
+
 ```workflow-metadata
 workflow_version: v3.2
 state: pending
