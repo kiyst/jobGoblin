@@ -187,6 +187,7 @@ def test_outcome_vocabulary_is_closed() -> None:
         "unsupported_angle_reference",
         "residual_nested_encoding",
         "unclosed_suppressed_element",
+        "malformed_truncated_markup",
         "parser_error",
     }
 
@@ -417,35 +418,216 @@ def test_comments_declarations_instructions_and_cdata_are_dropped() -> None:
     assert converted(content) == "Body"
 
 
+# ---------------------------------------------------------------------------
+# End-of-input integrity marker: malformed truncation fails closed
+# ---------------------------------------------------------------------------
+
+# Sol's three reproductions. Before the integrity check each returned a
+# truncated CONVERTED result: "Intro", "Intro", and "A" respectively.
+SOL_TRUNCATION_REPRODUCTIONS = [
+    "<p>Intro</p><!-- note <p>Requirements: Python</p>",
+    '<p>Intro</p><a href="x>More</a><p>Requirements: Python</p>',
+    "A<B rest",
+]
+
+
+@pytest.mark.parametrize("content", SOL_TRUNCATION_REPRODUCTIONS)
+def test_malformed_truncated_markup_abstains(content: str) -> None:
+    assert convert(content) == ContentConversion(text=None, outcome=C.MALFORMED_TRUNCATED_MARKUP)
+
+
 @pytest.mark.parametrize(
-    ("content", "outcome", "text"),
+    "content",
     [
-        ("<p>Intro</p><!-- note <p>Requirements: Python</p>", C.CONVERTED, "Intro"),
-        (
-            '<p>Intro</p><a href="x>More</a><p>Requirements: Python</p>',
-            C.CONVERTED,
-            "Intro",
-        ),
-        ("A<B rest", C.CONVERTED, "A"),
-        ("<p>Intro</p><!", C.CONVERTED, "Intro"),
-        ("A</", C.CONVERTED, "A</"),
-        ("A<", C.CONVERTED, "A<"),
-        ("<![ x", C.EMPTY_AFTER_CONVERSION, None),
-        ("<!x", C.EMPTY_AFTER_CONVERSION, None),
-        ("<!-- unterminated", C.EMPTY_AFTER_CONVERSION, None),
-        ("<![foo[x]]>after", C.CONVERTED, "after"),
-        ("<![CDATA[x]]>after", C.CONVERTED, "after"),
+        "<p>Intro</p><!",
+        "A</",
+        "x</p",
+        "A<p",
+        "A <b",
+        "<!-- unterminated",
+        "<!x",
+        "<![ x",
+        "<p>A</p><p title='unterminated>B</p>",
+        "&lt;p&gt;Intro&lt;/p&gt;&lt;!-- note &lt;p&gt;Requirements&lt;/p&gt;",
     ],
 )
-def test_parser_sensitive_golden_expectations_disclosed_limitation(
-    content: str, outcome: ContentOutcome, text: str | None
+def test_other_unfinished_trailing_constructs_abstain(content: str) -> None:
+    assert convert(content) == ContentConversion(text=None, outcome=C.MALFORMED_TRUNCATED_MARKUP)
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        ("A<", "A<"),
+        ("A < B", "A < B"),
+        ("5 < 6 and 7 > 3", "5 < 6 and 7 > 3"),
+        ("<![foo[x]]>after", "after"),
+        ("<![CDATA[x]]>after", "after"),
+        ("<p>Intro</p><!-- closed --><p>Requirements: Python</p>", "Intro\nRequirements: Python"),
+        (
+            '<p>Intro</p><a href="x">More</a><p>Requirements: Python</p>',
+            "Intro\nMore\nRequirements: Python",
+        ),
+    ],
+)
+def test_parser_sensitive_golden_expectations(content: str, expected: str) -> None:
+    """Literal golden pins, verified on CPython 3.12.13. The oracle shares the
+    parser, so these literals, not the differential test, catch a standard-library
+    behavior change; a failure here requires review."""
+    assert converted(content) == expected
+
+
+def test_integrity_marker_name_is_absent_from_the_source() -> None:
+    marker = greenhouse_content._integrity_marker
+    assert marker("") == "ghintegrity-z"
+    assert marker("plain text") == "ghintegrity-z"
+    assert marker("ghintegrity-") == "ghintegrity-z"
+    assert marker("<ghintegrity-z>") == "ghintegrity-zz"
+    assert marker("GHINTEGRITY-ZZZ and ghintegrity-z") == "ghintegrity-zzzz"
+    for source in ("x ghintegrity-zzzzzz y", "<GhIntegrity-ZZ></gHiNtEgRiTy-zz>"):
+        assert marker(source) not in source.lower()
+
+
+def test_integrity_marker_selection_is_linear_on_adversarial_input() -> None:
+    source = "ghintegrity-" * 15_000 + "ghintegrity-" + "z" * 10_000
+    assert greenhouse_content._integrity_marker(source) == "ghintegrity-" + "z" * 10_001
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "<p>Intro</p><!-- note <ghintegrity-z></ghintegrity-z>",
+        # A complete source pair before the truncation: forgeable by a fixed-name or
+        # last-two-events check, rejected because the real marker name differs.
+        "<p>Intro</p><ghintegrity-z></ghintegrity-z><!-- note <p>Requirements</p>",
+        'A<B rest="<ghintegrity-z></ghintegrity-z>',
+        "<p>Intro</p><!-- <GHINTEGRITY-Z></GHINTEGRITY-Z> <p>Requirements</p>",
+        "&lt;p&gt;Intro&lt;/p&gt;&lt;!-- &lt;ghintegrity-z&gt;&lt;/ghintegrity-z&gt;",
+        '<a href="x><ghintegrity-zz></ghintegrity-zz>',
+    ],
+)
+def test_marker_like_source_cannot_forge_the_integrity_check(content: str) -> None:
+    assert convert(content).outcome is C.MALFORMED_TRUNCATED_MARKUP
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "<p>Text <ghintegrity-z>x</ghintegrity-z> end</p>",
+        "<p>A</p><ghintegrity-z><ghintegrity-z/></ghintegrity-z><p>B</p>",
+        "<GHINTEGRITY-Z></GHINTEGRITY-Z>Hello",
+        "&lt;ghintegrity-z&gt;&lt;/ghintegrity-z&gt;&lt;p&gt;Hello&lt;/p&gt;",
+        "</ghintegrity-z>Hello<ghintegrity-z>",
+    ],
+)
+def test_marker_like_source_cannot_suppress_valid_conversion(content: str) -> None:
+    result = convert(content)
+    assert result.outcome is C.CONVERTED
+    assert result.text == convert_html_to_text(content, mode="declared-double-escaped")
+
+
+def test_marker_emits_no_text_or_boundary() -> None:
+    assert converted("Hello") == "Hello"
+    assert converted("A<b>B</b>") == "AB"
+    assert converted("<p>A</p>") == "A"
+    assert converted("A&nbsp;") == "A "
+
+
+def test_caps_measure_source_and_output_text_only() -> None:
+    """The marker grows with marker-like runs in the source, but neither cap counts
+    marker material: an at-cap source and an at-cap output both still convert."""
+    head = "<p>Hello</p><!--"
+    run = "ghintegrity-" + "z" * 50_000
+    tail = "-->"
+    content = head + run + "x" * (MAX_CONTENT_CHARS - len(head) - len(run) - len(tail)) + tail
+    assert len(content) == MAX_CONTENT_CHARS
+    assert converted(content) == "Hello"
+    text = "ghintegrity-" + "z" * (MAX_DESCRIPTION_CHARS - len("ghintegrity-"))
+    assert len(text) == MAX_DESCRIPTION_CHARS
+    assert converted(text) == text
+    assert convert(text + "z").outcome is C.OUTPUT_TOO_LARGE
+
+
+def test_parser_error_precedes_truncated_markup(monkeypatch: pytest.MonkeyPatch) -> None:
+    def explode(self: Any) -> None:
+        raise RecursionError
+
+    monkeypatch.setattr(greenhouse_content._BlockAwareTextExtractor, "close", explode)
+    assert convert("A<B rest").outcome is C.PARSER_ERROR
+
+
+def test_open_script_or_style_precedes_truncated_markup() -> None:
+    assert convert("<p>A</p><script>x").outcome is C.UNCLOSED_SUPPRESSED_ELEMENT
+    assert convert("<p>A</p><style>x <!-- y").outcome is C.UNCLOSED_SUPPRESSED_ELEMENT
+    # A comment that swallows a would-be script tag is generic truncation.
+    assert convert("<p>A</p><!-- <script>").outcome is C.MALFORMED_TRUNCATED_MARKUP
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "<style>x</style/",
+        "<style>B\n</style\r",
+        "<style>A</style\t<!-",
+        "<p>A</p><style>x</style ",
+        "<p>A</p><script>x</script",
+    ],
+)
+def test_dangling_suppressed_end_tag_stays_unclosed(content: str) -> None:
+    """The marker's own `<`/`>` would complete a dangling `</style`/`</script` end
+    tag; the open element is recorded before the marker is fed."""
+    assert convert(content) == ContentConversion(text=None, outcome=C.UNCLOSED_SUPPRESSED_ELEMENT)
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "A<title>B",
+        "A<textarea>B",
+        "A<xmp>B",
+        "A<iframe>B",
+        "A<noembed>B",
+        "A<noframes>B",
+        "A<p>B</p><plaintext>C",
+    ],
+)
+def test_unclosed_raw_text_element_abstains_disclosed(content: str) -> None:
+    """Disclosed behavior change: CPython 3.12.13's `html.parser` treats these
+    elements' content as literal text, so an unclosed one swallows the marker (and
+    in the oracle turns all later markup into literal text)."""
+    assert convert(content) == ContentConversion(text=None, outcome=C.MALFORMED_TRUNCATED_MARKUP)
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [("A<title>B</title>C", "ABC"), ("A<textarea>B</textarea>C", "ABC")],
+)
+def test_closed_raw_text_element_converts(content: str, expected: str) -> None:
+    assert converted(content) == expected
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        (
+            '<p>Intro</p><a href="x>More</a><p>Requirements: Python</p><p>Say "hi"</p>',
+            "Intro",
+        ),
+        ("<p>Intro</p><!-- note <p>Req</p><p>x --> y</p>", "Intro\n y"),
+    ],
+)
+def test_mid_input_swallowing_closed_later_is_not_detected_disclosed_limitation(
+    content: str, expected: str
 ) -> None:
-    """Literal golden pins, verified on CPython 3.12.13. An unterminated comment,
-    quoted attribute, or `<letter` silently truncates the rest while the outcome
-    stays CONVERTED (inherited from `html.parser` and the oracle). The oracle
-    shares the parser, so these literals, not the differential test, catch a
-    standard-library behavior change; a failure here requires review."""
-    assert convert(content) == ContentConversion(text=text, outcome=outcome)
+    """Disclosed limitation: only end-of-input swallowing is detected. When a later
+    quote or `-->` closes the swallowing construct, the lost text is not detected."""
+    assert converted(content) == expected
+
+
+def test_truncated_markup_precedes_meaningfulness_and_output_cap() -> None:
+    assert convert("<!-- unterminated").outcome is C.MALFORMED_TRUNCATED_MARKUP
+    too_long = "a" * (MAX_DESCRIPTION_CHARS + 1) + "<!--"
+    assert convert(too_long).outcome is C.MALFORMED_TRUNCATED_MARKUP
 
 
 @pytest.mark.parametrize(
@@ -740,11 +922,22 @@ def test_agrees_with_the_frozen_oracle(content: str) -> None:
         return
     if mine.outcome is C.CONVERTED:
         assert mine.text == expected
+    elif mine.outcome is C.MALFORMED_TRUNCATED_MARKUP:
+        # The oracle has no end-of-input integrity check: for these inputs it
+        # returns whatever text preceded the unfinished construct.
+        assert isinstance(expected, str)
     else:
         # The oracle has no blank/meaningfulness abstention; it returns text
         # that carries no meaning, which this module abstains on.
         assert mine.outcome in (C.BLANK, C.EMPTY_AFTER_CONVERSION)
         assert not _meaningful(expected)
+
+
+@pytest.mark.parametrize("content", ["&#60x", "a&#60b", "&#x3cg"])
+def test_oracle_numeric_fragments_now_abstain_as_truncated(content: str) -> None:
+    """Each decodes to a `<letter` fragment that swallows the end of the input;
+    the oracle silently drops it, this module abstains."""
+    assert convert(content) == ContentConversion(text=None, outcome=C.MALFORMED_TRUNCATED_MARKUP)
 
 
 def test_oracle_vectors_exercise_every_shared_category() -> None:
@@ -760,6 +953,7 @@ def test_oracle_vectors_exercise_every_shared_category() -> None:
         C.UNSUPPORTED_ANGLE_REFERENCE,
         C.RESIDUAL_NESTED_ENCODING,
         C.UNCLOSED_SUPPRESSED_ELEMENT,
+        C.MALFORMED_TRUNCATED_MARKUP,
     }
 
 

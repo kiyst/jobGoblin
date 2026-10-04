@@ -631,7 +631,8 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   Pilot product slice 3 of 3. A Greenhouse board may declare
   `content_mode="declared-double-escaped"` (default `disabled`); the adapter then fills
   `description` by deterministic, bounded text extraction (fail-closed for the enumerated
-  encoding, suppression, size, and meaningfulness cases), keeping
+  encoding, suppression, size, and meaningfulness cases, and for input whose end is
+  swallowed by an unfinished construct), keeping
   abstaining jobs with `description=None` as incomplete results.
   `providers/greenhouse_posting_inputs.py` maps only `title`, `description`, and
   `location` into `PostingInputs`. Evidence is offline only: synthetic HTML and 30

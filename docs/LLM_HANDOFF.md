@@ -454,23 +454,29 @@ findings: none
 
 - Date/agent: 2026-10-04, Claude (implementer). Branch
   `phase-4/greenhouse-content-mapping-s2b`, base
-  `e670575d5b05395cb9eeb2ec84833cc0034c7002` (`Q` of the S2 merge). Ending commit: this
-  commit, the **immutable pre-publication advisory candidate**, for Sol Medium's advisory
-  implementation review. It is not final `C`: no coordinator run, receipt, `A`, or formal
-  review exists.
+  `e670575d5b05395cb9eeb2ec84833cc0034c7002` (`Q` of the S2 merge). The first immutable
+  pre-publication advisory candidate was `bfc3b93447417344da769f2f2e4009db78547f70`; it is
+  preserved unamended and superseded only by its correction child. Ending commit: this
+  commit, advisory correction 1 (the direct single-parent child of `bfc3b93`), for Sol
+  Medium's narrow advisory re-review. Neither is final `C`: no coordinator run, receipt,
+  `A`, or formal review exists.
 - Slice: Phase 4 S2b, offline Greenhouse content conversion and strict `PostingInputs`
   mapping, plus
   [ADR 0015](DECISIONS/0015-greenhouse-content-conversion-and-posting-input-mapping.md).
   Pilot product slice 3 of 3 under ADR 0012. Risk class H, `slice_kind: parser`,
   `declared_gate: final`, fixture `backend/tests/fixtures/evaluation/phase3_realistic_corpus.json`
   (30 records; the reconstructed-envelope source). Focused selector:
-  `tests/test_greenhouse_content.py tests/test_greenhouse_posting_inputs.py`, **284** tests
-  collected (219 + 65).
+  `tests/test_greenhouse_content.py tests/test_greenhouse_posting_inputs.py`: **331** tests
+  at this commit (265 + 66); 284 (219 + 65) at `bfc3b93`.
 - Contract identity: frozen contract `.claude/runtime/phase4-s2b-frozen-contract.md`
   (gitignored, never committed), SHA-256
   `e409427bccfecd4f3f04c839f47826f5727355788ceab8fee061e6985e519df2`. Precedence: the
   user's decisions U1–U4 and requirements, then Sol Medium's binding amendments A1–A20
-  and corrected mutation inventory W1–W19, then the proposal.
+  and corrected mutation inventory W1–W19, then the proposal. Correction packet
+  `.claude/runtime/phase4-s2b-correction1-packet.md` (gitignored), SHA-256
+  `5d68c43a8537f629b7cd7c8392aa406297899bd82c0d7927b4d3c6e4588dcee8`: Sol's "Changes
+  requested" review and the user's correction authorization, verbatim. The original
+  contract packet is unmodified.
 - Files (exact closed nine-path list):
   - `backend/app/providers/greenhouse_content.py` (new);
   - `backend/app/providers/greenhouse_posting_inputs.py` (new);
@@ -488,8 +494,10 @@ findings: none
 - Material behavior:
   - **Board mode.** `GreenhouseBoard.content_mode` is `disabled` (default) or
     `declared-double-escaped`. Any other value raises the fixed A3 message.
-  - **Disabled boards.** `content` is never read by key or converted. It travels only
-    inside S1's whole-record parse and deep copy for `raw`.
+  - **Disabled boards** (Sol's R1 interpretation). There is no selective or keyed access
+    to, interpretation of, or conversion of `content`. Field-agnostic source parsing and
+    the whole-record deep copy that preserves `raw` may traverse it without branching on
+    its value.
   - **Declared boards.** `description` is the converter's text or `None`. Only
     `converted` is neutral. Every other outcome keeps the job with `description=None` and
     makes the board partial (`incomplete_results`, `possibly_incomplete`, partial health).
@@ -502,6 +510,8 @@ findings: none
       one decode, extraction, meaningfulness, 100,000-code-point output cap. Nothing is
       truncated.
     - Only `RecursionError` from the parser becomes `parser_error`.
+    - End-of-input integrity (correction 1): an unfinished construct that swallows the end
+      of the input yields `malformed_truncated_markup` (see advisory review round 1).
   - **Mapper.** It reads only `provider`/`source`/`title`/`description`/`location` and
     returns those three values unchanged, with fixed errors.
   - Nothing registers, imports the mapper, or persists. No salary, no schema field, no
@@ -509,12 +519,13 @@ findings: none
 - Evidence identities (pinned in tests):
   - oracle script canonical-LF `fff4b1c0…cd06f` and its tests `2bdf3014…9fcd1`;
   - corpus canonical JSON `ca6e1291…8f00` and committed content
-    `1863541bb784419be16bf4ffcf88bf1b4408c951a03b12008e9645e9f18e6930`;
+    `1863541bb784419be16bf4ffcf88bf1b4408c951a03b12008e9645e9f18e6930` (authoritative,
+    Sol's R5; the earlier abbreviation `…6e930` was a typo and caused no corpus change);
   - canary `690b0a5d…db4d5`.
 
   The A16 bounded claim appears verbatim in ADR 0015 §9 and the test module docstring.
-- Verification at this candidate (no receipt-producing coordinator run; no network,
-  database, or provider contact):
+- Verification at the first advisory candidate `bfc3b93` (no receipt-producing
+  coordinator run):
   - focused: **284 passed**;
   - acceptance selection, i.e. the focused modules plus unchanged
     `test_greenhouse_provider.py`, `test_greenhouse_html_convert.py`,
@@ -524,9 +535,9 @@ findings: none
   - `ruff format --check`, `ruff check`, `mypy` on the five Python files: clean;
   - evaluator `python -m scripts.evaluate_phase3_corpus`: SHA-256 `87a92187…01de6`,
     91,994 bytes, unchanged;
-  - `check_handoff`, `check_repo`, `git diff --check`, nine-path scope: see the agent's
-    report for this commit.
-- Mutation experiments W1–W19 (recorded, not registered; driver
+  - `check_handoff`, `check_repo`, `git diff --check`, nine-path scope: passed.
+- Mutation experiments W1–W19 at `bfc3b93` (superseded as acceptance evidence by the
+  correction-1 rerun below, because this v1 driver's result parsing was lossy; driver
   `.claude/runtime/phase4-s2b-mutation-driver.py`
   `bd6d9844d59dd4df50739639f79e27b9ae11b48d3cdde305bc08aee328385ed5`, log
   `phase4-s2b-mutation-log.json`
@@ -555,26 +566,28 @@ findings: none
     - W14–W18: `mapper_ast_boundary` and/or the access trace;
     - W17: the corpus round trip, normalize-flow, and direct-mapping tests;
     - W19: the no-network-primitive import test.
-  - **Driver caveat.** The driver keys pytest results on node ID up to the first space,
-    so some parametrized counts are understated (for example, the W3 control shows 2 of
-    its 3 cases, which pass when run directly). Pass/fail verdicts are unaffected.
+  - **Driver defect.** The v1 driver keyed pytest results on node ID up to the first
+    space, so parametrized IDs containing spaces were truncated and could collide (for
+    example, the W3 control showed 2 of its 3 cases). Corrected in correction 1.
 - Deviations and disclosures for Sol:
   - **Reconstruction escaping.** The reconstruction uses `html.escape(…, quote=False)` at
     both layers. The proposal's read-only check implied default quoting; the reviewer
     verified that both variants round-trip all 30 records.
   - **Hash abbreviation typo.** The proposal's (and so A15's) abbreviation `1863541b…6e930`
-    has a typo; the full committed-content hash ends `…8e6930` and is the value pinned.
+    was a typo; the authoritative full hash (R5) is the value pinned, and no corpus change
+    occurred.
   - **Access guard scope.** The A5 test mapping raises on keyed access (`[]`, `get`, `in`,
     `pop`, `setdefault`), not on `items()`/`values()`. Deep copying for `raw`, which A13
     requires, iterates items.
-- Adversarial self-review (a fresh read-only subagent, before commit). It reported no P1;
+- Adversarial self-review at `bfc3b93` (a fresh read-only subagent, before commit). It
+  reported no P1;
   its 60,000-input differential fuzz against the oracle found 0 disagreements beyond the
   documented abstentions. It accidentally left an empty `%TEMP%\claude_fuzz.py` outside
   the repository. Fixed before commit:
   - **P2-1.** Unterminated comments, quoted attributes, and `<letter` silently truncate
-    while staying `converted` (inherited from the oracle and `html.parser`). Now disclosed
-    in the module, ADR §3/§10, and ROADMAP ("fail-closed" now names the enumerated
-    cases), and pinned by golden tests.
+    while staying `converted` (inherited from the oracle and `html.parser`). At `bfc3b93`
+    this was only disclosed and pinned; Sol rejected that disposition (R2), and correction
+    1 makes it fail-closed.
   - **P2-2.** Output depends on the interpreter's `html.parser`, which the oracle shares.
     Disclosed as verified on CPython 3.12.13, with literal golden expectations for
     parser-sensitive inputs. The catch is not broadened.
@@ -589,24 +602,125 @@ findings: none
   - synthetic HTML only;
   - table and section content merges, `noscript`/`template` text is kept, and escaped
     code examples are rejected;
-  - silent truncation after unterminated markup;
+  - only end-of-input truncation is fail-closed: text swallowed mid-input by a construct
+    that a later quote or `-->` closes is still lost silently (a narrowing disclosure of
+    the original truncation limitation, which is otherwise now fail-closed);
   - interpreter-dependent parser behavior;
   - unredacted in-memory text;
   - no mode or outcome traceability on the job (A11), which is not D1;
   - D1 unsatisfied; salary excluded (L4); ten unproven components; title smoke-only;
     exposed 30-record corpus;
   - nothing runtime-reachable; mutation experiments not registered.
+- Advisory review round 1 (Sol Medium, pre-publication advisory review of `bfc3b93`;
+  advisory prose only, not formal review metadata). Verdict "Changes requested".
+  - **P2, malformed markup silently discarded parser input while reporting success**
+    (Sol's reproductions `<p>Intro</p><!-- note <p>Requirements: Python</p>` →
+    `Intro`, `<p>Intro</p><a href="x>More</a><p>Requirements: Python</p>` → `Intro`,
+    `A<B rest` → `A`). *Accepted and corrected:*
+    - The new closed outcome `malformed_truncated_markup` covers this.
+    - After decoding, the parser is fed the source, then one internal marker element
+      `<NAME></NAME>`. `NAME` is `ghintegrity-` plus one more `z` than the longest such
+      run in the decoded text (case-insensitive), so it is absent from the source. It is
+      pure and linear, emits no text or boundary, and is not counted by either cap.
+    - After `close()`, exactly one ordered start/end pair is required; otherwise the
+      outcome is the new one, with `text=None`.
+    - Precedence: `parser_error`, then `unclosed_suppressed_element` (open
+      `script`/`style`, recorded before the marker is fed), then
+      `malformed_truncated_markup`, then meaningfulness, then the output cap.
+    - The adapter (unchanged) keeps the job with `description=None`, makes the board
+      partial/incomplete, and warns exactly
+      `greenhouse content_unconverted=malformed_truncated_markup count=<n>`.
+    - Converted text still equals the oracle wherever this module converts.
+    - Disclosed behavior changes:
+      - a trailing unfinished fragment (`A</`, `x</p`, `<p>Intro</p><!`) now abstains;
+        `A</` previously converted to `A</`;
+      - an unclosed raw-text element (`title`, `textarea`, `xmp`, `iframe`, `noembed`,
+        `noframes`, `plaintext` on CPython 3.12.13) now abstains;
+      - three oracle numeric fragments (`&#60x`, `a&#60b`, `&#x3cg`) now abstain.
+  - **P2, the mutation log lost parametrized-node evidence.** *Accepted and corrected:*
+    - the gitignored v2 driver reads per-run pytest JUnit XML (xunit2) and aborts on a
+      duplicate or empty result;
+    - a self-check proves distinct, exact IDs containing spaces (`[a b]`, `[a  b]`,
+      `[a c]` failing, `[x y z]`), at the root and in a `tests/` package;
+    - the complete W1–W20 inventory was rerun.
+  - **P3, "no database access" overstated the boundary.** *Accepted:* replaced with the
+    exact wording below.
+  - **Dispositions:**
+    - R1: recorded under Material behavior.
+    - R2, R3, R4: corrected as above.
+    - R5: recorded under Evidence identities.
+    - R6: scope items confirmed in scope.
+    - R7: W1–W19 are unchanged, except that W5's anchor follows its edited decision line.
+- Correction 1 (this commit; six paths: `greenhouse_content.py`, both new test modules,
+  ADR 0015, ROADMAP, this file):
+  - **Unchanged:** `greenhouse.py`, `greenhouse_posting_inputs.py`, ARCHITECTURE, every
+    fixture, the oracle, corpus, evaluator, dependencies, schemas, and registration.
+  - **Cumulative `base..HEAD`:** still exactly the original nine paths.
+  - **Tests:**
+    - focused **331 passed**;
+    - acceptance selection **904 passed**;
+    - `tests/contracts` **130 passed**;
+    - full suite **4,240 passed**.
+  - **Checks:**
+    - `ruff format --check`, `ruff check`, and `mypy` on the five Python files: clean;
+    - evaluator SHA-256 `87a92187…01de6`, 91,994 bytes, byte-identical;
+    - `check_handoff`, `check_repo`, `git diff --check`, direct-parent six-path and
+      cumulative nine-path scope: passed.
+  - **Mutation experiments W1–W20.** Driver
+    `.claude/runtime/phase4-s2b-mutation-driver-v2.py`
+    `7151c79fb7ebe08d57a2623d2da7bf9fe823d7720c27a2ae71a494fb4f7761b5`, log
+    `phase4-s2b-mutation-log-correction1.json`
+    `514ac00d46ea1a3b00e7b04366adaa5067ee7355e4359683fc9ebce5c745073e`. The self-check
+    passed.
+    - All 20 passed. Each had one unique anchor in one production file, a green
+      baseline, every named witness failing, and every control green. Each file was
+      restored byte-identically, all three production hashes were re-verified, and the
+      witness passed again.
+    - Lossless witness/control node counts (failed/total, controls): W1 6/6, 1; W2 4/4, 1;
+      W3 10/10, 3 (including `[&ltfoo]` and `[&amp;ltfoo]`); W4 1/1, 1; W5 3/3, 1;
+      W6 1/1, 1; W7 1/1, 1; W8 9/9, 1; W9 1/1, 1; W10 2/2, 1; W11 2/2, 1; W12 2/2, 1;
+      W13 1/1, 1; W14 1/2, 1; W15 1/2, 1; W16 3/5, 5; W17 1/1, 9; W18 4/4, 1;
+      W19 1/1, 1; W20 3/3, 18.
+    - W20 disabled only the integrity-completeness decision. All three pinned witness
+      nodes failed. Its probe confirmed the reproductions revert to the former truncated
+      `converted` results `Intro`/`Intro`/`A`. The controls (valid HTML, recoverable
+      malformed tags, adapter partition) stayed green.
+    - Every overlapping failure is listed per experiment in the log; none is a control.
+  - **Restoration hashes (working-tree bytes):**
+    - `greenhouse_content.py`
+      `00ea51d9a94e54200d3c251533915dbb5f880a9b3070c45eaea7a41be964c033`;
+    - `greenhouse.py` `6c486d20…b22ed8` (CRLF form; committed LF blob `f20ee294…edf63`,
+      unchanged);
+    - `greenhouse_posting_inputs.py` `00809ff0…b955fd2e`.
+  - **Correction self-review** (a fresh read-only subagent). It found no bypass of the
+    check, 0 CONVERTED-text differences from the oracle or `bfc3b93` across 350,000 fuzz
+    inputs, and linear cost. All of the following were fixed before commit:
+    - P2-1: a dangling `</style` end tag completed by the marker turned
+      `unclosed_suppressed_element` into the generic outcome. Open state is now
+      recorded before the marker is fed, and pinned.
+    - P2-2: the raw-text-element abstention was undisclosed and contradicted the ADR. Now
+      disclosed and pinned.
+    - P3: a non-vacuous forgery case was added (a complete source pair before the
+      truncation); the end-of-input-only scope was disclosed in the ADR, module, and
+      ROADMAP; the three W20 witness nodes were pinned; and the self-check gained a
+      subdirectory case.
+- Evidence boundary: No Greenhouse or other live-network contact, production database, or
+  production-data access occurred. The full suite used the configured disposable test
+  database. S2b introduces no application persistence or production database behavior.
 - Pilot metrics so far (pilot product slice 3 of 3):
-  - review rounds: proposal 1 (Sol, approved with A1–A20); advisory 0;
-  - findings: 0 executable;
-  - correction commits: 0 pre-`A`, 0 post-`A`;
-  - full-suite executions: 2 non-receipt (implementer and self-review subagent);
-    receipt-producing executions: 0;
-  - user relays: 2 (the S2b proposal request, and this authorization with Sol's table);
+  - review rounds: proposal 1 (Sol, approved with A1–A20); advisory 1 (changes
+    requested);
+  - findings: 1 executable (P2 truncation), 1 evidence-integrity (P2 mutation log), and
+    1 documentation (P3);
+  - correction commits: 1 pre-`A` (this commit), 0 post-`A`;
+  - full-suite executions: 3 non-receipt (implementer at `bfc3b93`, self-review subagent
+    at `bfc3b93`, implementer at this commit); receipt-producing executions: 0;
+  - user relays: 5 (the S2b proposal request; the authorization with Sol's table; then
+    the correction authorization, sent twice without Sol's review and once with it);
   - branch created 2026-10-04T04:02:30Z.
-- STOP after pushing this candidate for Sol Medium's advisory implementation review. No
-  final `C`, coordinator receipt, `A`, formal `R`, merge, `M`/`Q`, Greenhouse or network
-  contact, database access, pilot evaluation, S2c, S3, or S4.
+- STOP after pushing this correction for Sol Medium's narrow advisory re-review. No final
+  `C`, coordinator receipt, `A`, formal `R`, merge, `M`/`Q`, Greenhouse or network
+  contact, production data access, pilot evaluation, S2c, S3, or S4.
 
 ```workflow-metadata
 workflow_version: v3.2

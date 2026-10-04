@@ -58,7 +58,7 @@ anything else. There is no mode lookup, fallback, or retry under another mode.
 
 | Mode | Behavior |
 |---|---|
-| `disabled` (default) | `content` is never read by key, inspected, compared, hashed, stringified, or converted: no membership test, indexing, `.get`, or converter call. It is carried only inside S1's whole-record JSON parse and the deep copy kept as `raw`. `description=None`, exactly as in S1. |
+| `disabled` (default) | No selective or keyed access to, interpretation of, or conversion of `content`: no membership test, indexing, `.get`, comparison, stringification, hashing, or converter call. Field-agnostic source parsing (S1's whole-record JSON parse) and the whole-record deep copy required to preserve `raw` may traverse it without branching on its value. `description=None`, exactly as in S1. |
 | `declared-double-escaped` | The conversion contract below. |
 
 `declared-double-escaped` is the compatibility name of the reviewed one-predecode
@@ -80,7 +80,7 @@ supplied value, as `GreenhouseConfigurationError` at board construction and as
 `not_requested`, `absent`, `blank`, `invalid_type`, `input_too_large`, `output_too_large`,
 `empty_after_conversion`, `mixed_literal_and_escaped_markup`,
 `unsupported_angle_reference`, `residual_nested_encoding`, `unclosed_suppressed_element`,
-`parser_error`.
+`malformed_truncated_markup`, `parser_error`.
 
 Validation order, first failure wins:
 
@@ -90,7 +90,10 @@ Validation order, first failure wins:
 3. input length: more than `MAX_CONTENT_CHARS` (200,000) is `input_too_large`;
 4. blank: only covered whitespace (`" \t\n\r"`) is `blank`;
 5. raw encoding checks, then exactly one `html.unescape()`, then decoded encoding checks;
-6. extraction with `html.parser.HTMLParser(convert_charrefs=True)`;
+6. extraction with `html.parser.HTMLParser(convert_charrefs=True)`, followed by the
+   end-of-input integrity check below; `parser_error` precedes
+   `unclosed_suppressed_element` (an open `script`/`style`), which precedes
+   `malformed_truncated_markup`;
 7. meaningfulness: text made only of whitespace or Unicode format (`Cf`) characters,
    including empty text, is `empty_after_conversion`;
 8. output length: more than `MAX_DESCRIPTION_CHARS` (100,000) is `output_too_large`.
@@ -126,11 +129,40 @@ Only a `RecursionError` from `HTMLParser.feed()`/`close()` becomes `parser_error
 other exception is a defect and propagates. Output is plain text and never re-escaped.
 Conversion is a pure function of `(content, mode)` on a given interpreter.
 
-The guarantee is fail-closed only for the enumerated encoding, suppression, size, and
-meaningfulness cases. An unterminated comment, an unterminated quoted attribute, or a `<`
-followed by a letter with no closing `>` silently drops everything after it, and the
-remaining text is still `converted`. The oracle behaves identically; the behavior is
-inherited from `html.parser`.
+**End-of-input integrity (fail-closed truncation).** `html.parser`, and therefore the
+oracle, silently drops everything after an unterminated comment, an unterminated quoted
+attribute, or a tag-like fragment such as `A<B rest`, and would report the remaining
+prefix as success. This module instead feeds the decoded text followed by one internal
+marker element `<NAME></NAME>`:
+
+- `NAME` is `ghintegrity-` plus one more `z` than the longest `ghintegrity-z…` run in the
+  decoded text, compared case-insensitively. The name therefore occurs nowhere in the
+  source, so source text cannot forge, satisfy, collide with, or suppress the check.
+  Selection is pure and linear-time.
+- The marker emits no text and no block boundary.
+- After the parser closes, exactly one ordered start/end pair of the marker must have been
+  seen. Otherwise an unfinished construct swallowed or corrupted the end of the input,
+  and the outcome is `malformed_truncated_markup` with no text.
+- Caps measure only source and output text, never marker material.
+
+- Whether a `script`/`style` element is still open is recorded before the marker is fed,
+  so the marker cannot complete a dangling `</style`-style end tag and hide the open
+  element; that case stays `unclosed_suppressed_element`.
+
+Malformed ordinary markup that keeps its trailing visible text still converts unchanged:
+unclosed or mismatched ordinary tags, and a bare `<` that is not a tag start. Two
+deliberate behavior changes from the original candidate:
+
+- a trailing unfinished fragment such as `A</`, `x</p`, or `<p>Intro</p><!` now
+  abstains;
+- an unclosed raw-text element (`title`, `textarea`, `xmp`, `iframe`, `noembed`,
+  `noframes`, `plaintext` on CPython 3.12.13) now abstains. `html.parser` treats its
+  content as literal text, so it swallows the marker; in the oracle it turns all later
+  markup into literal text. Closed raw-text elements still convert.
+
+Where this module converts, its text still equals the oracle's. Only end-of-input
+swallowing is detected: when a later quote or `-->` closes a swallowing construct
+mid-input, the lost text is not detected, and the outcome stays `converted`.
 
 Extraction rides on the running interpreter's standard-library `html.parser`. Its handling
 of comments, declarations, CDATA, and unterminated markup has changed between CPython patch
@@ -220,7 +252,8 @@ provenance tag; parsers assign their own.
 - Corpus `backend/tests/fixtures/evaluation/phase3_realistic_corpus.json`: canonical JSON
   SHA-256 `ca6e129110b71801e18d6bfba84d59376c689f67cb470f1335ab8805cd388f00`, committed
   content (canonical-LF) SHA-256
-  `1863541bb784419be16bf4ffcf88bf1b4408c951a03b12008e9645e9f18e6930`.
+  `1863541bb784419be16bf4ffcf88bf1b4408c951a03b12008e9645e9f18e6930`, the authoritative
+  value. An earlier abbreviated form, `…6e930`, was a typo; the corpus did not change.
 - Canary `backend/tests/fixtures/discovery/greenhouse_live_canary.json`: committed content
   (canonical-LF) SHA-256 `690b0a5d0f85599c44b88d2d2b483114ba4bc0db19647238feee280a2a6db4d5`.
   It has no `content` and proves only existing title/location behavior.
@@ -244,8 +277,8 @@ Title remains smoke-only.
   are rejected.
 - Unicode-whitespace and format characters are preserved; output made only of them
   abstains.
-- Unterminated comments, quoted attributes, and `<letter` sequences silently truncate the
-  remaining text while the outcome stays `converted`.
+- Only end-of-input truncation is fail-closed. Text swallowed mid-input by a construct
+  that a later quote or `-->` closes is still lost silently.
 - Behavior depends on the interpreter's `html.parser`; it was verified on CPython 3.12.13
   and is golden-pinned for parser-sensitive inputs, not guaranteed across patch releases.
 - In-memory descriptions are unredacted. Nothing logs or persists them; storage policy is

@@ -385,6 +385,42 @@ async def test_conversion_failure_keeps_record() -> None:
     assert (await provider.health()).sources[0].detail == "partial discovery observed"
 
 
+TRUNCATING_CONTENT = [
+    "<p>Intro</p><!-- note <p>Requirements: Python</p>",
+    '<p>Intro</p><a href="x>More</a><p>Requirements: Python</p>',
+    "A<B rest",
+]
+
+
+async def test_requirements_after_malformed_markup_never_reach_description() -> None:
+    records = [
+        synthetic_record(job_id, content=content)
+        for job_id, content in enumerate(TRUNCATING_CONTENT, start=1)
+    ] + [synthetic_record(4)]
+    provider, result = await discover_records(ACME_DECLARED, records)
+    assert [(job.source_job_id, job.description) for job in result.jobs] == [
+        ("1", None),
+        ("2", None),
+        ("3", None),
+        ("4", ESCAPED_CONTENT_TEXT),
+    ]
+    for job in result.jobs[:3]:
+        mapped = greenhouse_posting_inputs(job)
+        assert mapped.description is None
+        assert "Requirements" not in repr(mapped)
+        assert "rest" not in repr(mapped)
+    (stats,) = result.source_stats
+    assert stats.completed is True
+    assert stats.jobs_found == 4
+    assert stats.incomplete_results is True
+    assert result.possibly_incomplete is True
+    assert result.errors == []
+    assert (await provider.health()).sources[0].detail == "partial discovery observed"
+    assert result.warnings == ["greenhouse content_unconverted=malformed_truncated_markup count=3"]
+    for leaked in ("Intro", "Requirements", "Python", "More", "rest", "acme-synthetic"):
+        assert leaked not in result.warnings[0]
+
+
 async def test_board_whose_records_all_fail_conversion_still_completes() -> None:
     records = [synthetic_record(1, content=MIXED_CONTENT), synthetic_record(2, content="&ltx")]
     provider, result = await discover_records(ACME_DECLARED, records)
