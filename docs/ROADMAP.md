@@ -605,8 +605,24 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   `DiscoveryResult`/`DiscoveredJob` with whole-record `raw`, bounded retries and
   timeouts, and categorical errors, tested offline only. It is not registered or
   reachable at runtime, makes no live request, persists nothing, maps no parser input,
-  and leaves salary unproven. ADR 0011's D1 and D2 are not satisfied by it. S2–S5
-  remain unauthorized; Phase 4 is not complete.
+  and leaves salary unproven. ADR 0011's D1 and D2 are not satisfied by it. **Merged
+  into `main` at `M=48cc5c7204ec34ad911d7d9ce9839d9cc49777ea` /
+  `Q=0c2c14b573609c6b2dfc67c0d9f14de97c31e03d`** (merge record in
+  [LLM_HANDOFF.md](LLM_HANDOFF.md)). Phase 4 is not complete.
+- **Phase 4 S2 (`phase-4/pure-posting-composition-s2`): pure provider-neutral
+  `normalize_posting` composition plus scoped D2 protection
+  ([ADR 0014](DECISIONS/0014-pure-posting-composition-and-scoped-d2.md)).** Pilot product
+  slice 2 of 3. `app/normalization/posting.py` composes the title, remote-type,
+  employment, seniority, experience, location, and skills parsers over `PostingInputs`
+  (no salary) and returns every result unchanged. Its exact executable realistic-output
+  protection is intended to satisfy ADR 0011's D2 only at that composition boundary, for
+  the exact covered outputs demonstrated by the current exposed 30-record corpus under the
+  pinned corpus and taxonomy identities (ADR 0014's bounded claim). Nothing at runtime
+  calls it; no provider field is mapped, no HTML
+  is converted, nothing is persisted, and D1 remains unsatisfied. ADR 0014 revises the
+  Phase 4 sequence to S1 → S2 → S2b (offline HTML conversion and provider mapping) →
+  S2c (bounded read-only live canary) → S3 (D1 and normalized persistence) → S4 (read
+  API). S2b and later slices remain unauthorized.
 - **Phases 5-14: not started.** Begin each phase only after completing its preflight in
   [PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md) and receiving approval for the next
   smallest slice.

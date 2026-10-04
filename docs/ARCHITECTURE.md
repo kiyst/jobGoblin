@@ -293,6 +293,8 @@ jobGoblin/
 │   │   │   ├── employment.py
 │   │   │   ├── seniority.py
 │   │   │   ├── remote.py               # remote/hybrid/onsite classifier (Phase 3, first parser slice)
+│   │   │   ├── posting.py              # pure normalize_posting composition (Phase 4 S2, ADR 0014);
+│   │   │   │                            # no salary, not called by ingestion or any runtime path
 │   │   │   ├── types.py                # NormalizationResult[T]/Provenance shared by every parser above
 │   │   │   ├── company.py
 │   │   │   └── url.py                  # canonical URL normalization (ADR 0004)
@@ -417,6 +419,13 @@ Hard rules that don't fit neatly into the table:
   `normalization/` per the table above, but today it uses only `normalization/url.py`.
   Wiring the parsers in, defining and threading a parser version, and persisting
   normalized values are deferred, binding integration work (ADR 0011, D1/D2).
+  Phase 4 S2 adds a pure, provider-neutral composition,
+  `normalization/posting.py::normalize_posting`
+  ([ADR 0014](DECISIONS/0014-pure-posting-composition-and-scoped-d2.md)). Nothing in
+  `ingestion/` or any runtime path calls it yet. D2 is satisfied only at that composition
+  boundary, for the exact covered outputs demonstrated by the current exposed 30-record
+  corpus under the pinned corpus and taxonomy identities (ADR 0014's bounded claim); D1
+  remains unsatisfied.
 
 ---
 
