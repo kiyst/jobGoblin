@@ -581,12 +581,16 @@ findings: none
 
 ```workflow-metadata
 workflow_version: v3.2
-state: pending
+state: published
 slice_id: 2026-10-03-phase4-pure-posting-composition-s2-0c2c14b
 slice_kind: parser
 risk_class: H
 base_sha: 0c2c14b573609c6b2dfc67c0d9f14de97c31e03d
 declared_gate: final
+executed_gate: final
+candidate_sha: 2a3f50d681d2a97b9adc2cf097f933ce4507ead2
+receipt_id: 5b39efd7-64c7-491f-8ca0-98803789b1e4
+receipt_path: docs/verification-receipts/2a3f50d681d2a97b9adc2cf097f933ce4507ead2/5b39efd7-64c7-491f-8ca0-98803789b1e4.json
 fixture_path: backend/tests/fixtures/evaluation/phase3_realistic_corpus.json
 fixture_count: 30
 ```
