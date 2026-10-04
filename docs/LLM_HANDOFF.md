@@ -594,3 +594,109 @@ receipt_path: docs/verification-receipts/2a3f50d681d2a97b9adc2cf097f933ce4507ead
 fixture_path: backend/tests/fixtures/evaluation/phase3_realistic_corpus.json
 fixture_count: 30
 ```
+
+### Work review
+
+- Date/reviewer: 2026-10-04 (UTC), Sol (primary, Sol Medium). Formal review of Phase 4 S2,
+  the pure provider-neutral `normalize_posting` composition with scoped D2 protection, on
+  `phase-4/pure-posting-composition-s2`:
+  - base `0c2c14b573609c6b2dfc67c0d9f14de97c31e03d`;
+  - final candidate `C` = `2a3f50d681d2a97b9adc2cf097f933ce4507ead2`;
+  - publication `A` = `95e975164560bb35021076eadf650af11720482c`.
+
+  Reviewed against the frozen contract (SHA-256
+  `b966b4d4cb9a8ac46c30b5cb65b65280b65239db1b91d986aca1d7b3060a80a2`), which integrates
+  the proposal, Sol's binding amendments A1–A12, and the user's decisions U1–U7. Sol's
+  earlier pre-publication advisory review of `d418025` was advisory only; this is the
+  formal review.
+- Sol's formal verdict, as relayed by the user: **approved**, findings none, primary
+  reviewer Sol (Sol Medium), gate `final`, for `C`/`A` above, receipt
+  `5b39efd7-64c7-491f-8ca0-98803789b1e4`, and frozen-contract SHA-256 `b966b4d4…80a2`.
+  The relay states the verdict and chain; it is the authority for this review. The
+  evidence below is classified by source.
+- Independently checked evidence (re-verified from Git plumbing and the receipt itself
+  when this review was recorded; not inferred from prose):
+  - **Ancestry and refs:** `A`'s sole parent is `C`; `C`'s sole parent is the advisory
+    candidate `d418025`, whose sole parent is the base; the local and remote branch both
+    equal `A`; `main`/`origin/main`/remote `main` remain at the base; the tree was clean.
+  - **Scope:** `base..C` changes exactly the seven authorized paths; `d418025..C` changes
+    only this file (the advisory paragraph inserted verbatim before valid `state: pending`
+    metadata); `C..A` adds only the C-bound receipt and the permitted pending -> published
+    metadata transition with `executed_gate: final` (`validate_c_to_a_transition` passed).
+  - **Receipt:** receipt file SHA-256
+    `05d60a10e2bdb64a90b19ce0223ac31f17e4d1d559ae9ce69ec5ebeaf6541766`; schema-valid; bound
+    to `C`, the base, gate `final`, the slice, and risk class H; consistent with the
+    committed verifier, checker, and configuration hashes; affected surface (`docs-only`,
+    `generic-changed-test`, `handoff-transition`, `unmapped`) and migration determination
+    (not triggered) independently recomputed and identical; complete active witness
+    inventory; approval eligibility recomputed as `true`.
+  - **Frozen contract:** runtime packet hash unchanged and untracked.
+- Receipt-derived evidence (produced by the genuine coordinator run at `C`; not rerun):
+  - all 12 steps PASS: Ruff format/check, mypy, `check_repo`, `git diff --check`,
+    disposable test-database URL validation and reachability, focused pytest (235
+    passed), full pytest suite (3,909 passed), contract mutation witnesses (34/34
+    passed), handoff metadata validation, temporary-directory cleanup;
+  - isolated-worktree integrity, cache redirection, and worktree removal.
+- Reused advisory evidence (from Sol's pre-publication advisory review of `d418025`,
+  recorded verbatim in `Work done`; not re-executed for this review):
+  - the contract checks: prevalidation and exact parser-input wiring, fixed result fields,
+    call order, identity pass-through and provenance behavior, salary and
+    unauthorized-import exclusion, and absence of runtime reachability, provider mapping,
+    persistence, database, migration, or network behavior;
+  - the bounded D2 accounting and Phase 3 evaluator identity (SHA-256
+    `87a92187a2d37d5150fe998d06042449f6b74d540cecd15d1bba97dd94801de6`);
+  - 1,490 related tests, 130 contract tests, and clean Ruff/mypy and repository checks at
+    the advisory candidate;
+  - the nine manual S2 mutation experiments (M1a, M1b, M2–M8) and their byte-identical
+    restoration evidence. These were inspected during advisory review; **they were not
+    run by the coordinator** and are not registered witnesses.
+- Formal-review dispositions:
+  - M8: constructing a predicate-limited new `LocationResult` is the valid isolating
+    mutation, because literal in-place mutation contaminates `classify_location`'s
+    shared unavailable singleton. Accepted without a replacement witness.
+  - The pre-commit self-review fixes recorded in `Work done` (bounded documentation
+    wording, read-once validated values, dynamic-import check, non-vacuous provenance and
+    category checks, annotated-skill assertion) are accepted.
+  - The focused count is recorded in prose rather than metadata, consistent with the
+    schema; the receipt's focused count (235) matches.
+- Limitations retained:
+  - D2 is satisfied only at the pure `normalize_posting` composition boundary, for the
+    exact covered outputs of the exposed 30-record, three-employer corpus under the
+    pinned identities;
+  - title is smoke evidence only; ten components are unproven; salary is not composed
+    (ADR 0011 L4 stays open);
+  - skill-match order, duplicates, and display names are not pinned per record;
+  - HTML conversion, Greenhouse list-endpoint escaping, provider-field mapping, and
+    unredacted text are unproven;
+  - D1 remains unsatisfied and no normalized write is authorized;
+  - the composition is not reachable at runtime. No claim of runtime reachability or
+    production usefulness may be made for S2.
+- Pilot metrics (ADR 0012, pilot product slice 2 of 3), accepted as recorded:
+  proposal-review rounds 1; advisory-review rounds 1 (no findings); semantic pre-`A`
+  correction commits 0; handoff-only finalization commits 1; post-`A` corrections 0;
+  receipt-producing executions 1; full-suite executions through `A` 1; user relays
+  through `A` publication 4, plus one identical re-paste. The relay for this formal
+  review occurred after `A` and is outside that boundary.
+- Findings by severity with exact references: none.
+- Verdict: **approved** -- no findings.
+- Exact bounded correction: none required.
+- STOP -- record-only. This review authorizes no merge, `M`, `Q`, Greenhouse contact,
+  S2b, runtime wiring, persistence, or other slice. Merge requires separate user
+  authorization.
+
+```workflow-review-metadata
+schema_version: 2
+slice_id: 2026-10-03-phase4-pure-posting-composition-s2-0c2c14b
+risk_class: H
+reviewer: Sol
+reviewer_role: primary
+reviewer_model: Sol Medium
+reviewed_at: 2026-10-04T02:49:44+00:00
+candidate_sha: 2a3f50d681d2a97b9adc2cf097f933ce4507ead2
+publication_commit_sha: 95e975164560bb35021076eadf650af11720482c
+receipt_path: docs/verification-receipts/2a3f50d681d2a97b9adc2cf097f933ce4507ead2/5b39efd7-64c7-491f-8ca0-98803789b1e4.json
+receipt_id: 5b39efd7-64c7-491f-8ca0-98803789b1e4
+gate: final
+verdict: approved
+findings: none
+```
