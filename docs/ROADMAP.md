@@ -622,7 +622,24 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   is converted, nothing is persisted, and D1 remains unsatisfied. ADR 0014 revises the
   Phase 4 sequence to S1 → S2 → S2b (offline HTML conversion and provider mapping) →
   S2c (bounded read-only live canary) → S3 (D1 and normalized persistence) → S4 (read
-  API). S2b and later slices remain unauthorized.
+  API). **Merged into `main` at `M=f509e80f68505dbdee7d8aed5f2748b805eaec4d` /
+  `Q=e670575d5b05395cb9eeb2ec84833cc0034c7002`** (merge record in
+  [LLM_HANDOFF.md](LLM_HANDOFF.md)).
+- **Phase 4 S2b (`phase-4/greenhouse-content-mapping-s2b`, in progress): offline
+  Greenhouse content conversion and strict `PostingInputs` mapping
+  ([ADR 0015](DECISIONS/0015-greenhouse-content-conversion-and-posting-input-mapping.md)).**
+  Pilot product slice 3 of 3. A Greenhouse board may declare
+  `content_mode="declared-double-escaped"` (default `disabled`); the adapter then fills
+  `description` by deterministic, bounded text extraction (fail-closed for the enumerated
+  encoding, suppression, size, and meaningfulness cases, and for input whose end is
+  swallowed by an unfinished construct), keeping
+  abstaining jobs with `description=None` as incomplete results.
+  `providers/greenhouse_posting_inputs.py` maps only `title`, `description`, and
+  `location` into `PostingInputs`. Evidence is offline only: synthetic HTML and 30
+  reconstructed synthetic envelopes, not captured Greenhouse HTML or list-endpoint
+  encoding. Nothing is registered, reachable at runtime, or persisted; salary stays
+  excluded and D1 unsatisfied. After S2b's `Q`, the ADR 0012 pilot evaluation precedes
+  any S2c authorization; S2c, S3, and S4 remain unauthorized.
 - **Phases 5-14: not started.** Begin each phase only after completing its preflight in
   [PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md) and receiving approval for the next
   smallest slice.

@@ -12,9 +12,17 @@ S1 boundaries (binding):
 - Not wired into any registry, composition root, setting, or kill switch, so
   nothing at runtime can reach it yet. Live enablement is a later,
   separately authorized slice.
-- No persistence, no normalization, no parser-input mapping: `description`
-  and `compensation_text` are always `None` (HTML conversion is S2 work under
-  ADR 0011's D2), and no salary field is read, composed, or inferred.
+- No persistence, no normalization, no parser-input mapping: `compensation_text`
+  is always `None`, and no salary field is read, composed, or inferred.
+- `description` (Phase 4 S2b, ADR 0015) is `None` unless the board explicitly
+  declares `content_mode="declared-double-escaped"`; then it is the record's
+  `content` converted by `app.providers.greenhouse_content`, or `None` when the
+  conversion abstains. Under the default `"disabled"` mode the `content` value is
+  never read by key, inspected, compared, hashed, stringified, or converted; it is
+  carried only inside S1's whole-record JSON parse and the deep copy kept as `raw`.
+  On an enabled board every non-converted outcome is an
+  incomplete result: the job is kept, the board becomes partial, and one
+  token-free categorical warning per outcome is reported source-wide.
 - `raw` is a deep copy of the whole parsed record — structurally identical to
   the source record, never an allowlisted subset (byte identity is impossible
   once JSON is parsed; see `app/ingestion/hashing.py`).
@@ -38,7 +46,7 @@ import re
 import time
 from collections import Counter
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
@@ -46,6 +54,13 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from app.providers.greenhouse_content import (
+    CONTENT_MODES,
+    ERROR_INVALID_CONTENT_MODE,
+    ContentOutcome,
+    GreenhouseContentMode,
+    convert_greenhouse_content,
+)
 from app.schemas.discovered_job import (
     DiscoveredJob,
     DiscoveryResult,
@@ -171,16 +186,21 @@ class GreenhouseClientSettings:
 class GreenhouseBoard:
     """One configured board. `board_token` is a lowercase slug, so no
     tenant-case ambiguity can reach the natural key; `company` is the only
-    source of `DiscoveredJob.company` (never the payload's `company_name`)."""
+    source of `DiscoveredJob.company` (never the payload's `company_name`).
+    `content_mode` is declared here and never inferred; `"disabled"` (the
+    default) leaves `content` untouched."""
 
     board_token: str
     company: str
+    content_mode: GreenhouseContentMode = "disabled"
 
     def __post_init__(self) -> None:
         if not isinstance(self.board_token, str) or not _BOARD_TOKEN_RE.fullmatch(self.board_token):
             raise GreenhouseConfigurationError("board_token must match ^[a-z0-9][a-z0-9_-]{0,99}$")
         if not isinstance(self.company, str) or not self.company.strip(_COVERED_WHITESPACE):
             raise GreenhouseConfigurationError("company must be a non-blank string")
+        if type(self.content_mode) is not str or self.content_mode not in CONTENT_MODES:
+            raise GreenhouseConfigurationError(ERROR_INVALID_CONTENT_MODE)
 
 
 # ---------------------------------------------------------------------------
@@ -398,6 +418,8 @@ class _BoardResult:
     completeness_failed: bool
     retries: int
     rate_limited: bool
+    # Incomplete content-conversion outcomes on a content-enabled board.
+    unconverted: Counter[ContentOutcome] = field(default_factory=Counter)
 
 
 def _failure_detail(board: GreenhouseBoard, kind: str, status: int | None, attempts: int) -> str:
@@ -553,6 +575,15 @@ class GreenhouseJobBoardProvider:
             for result in board_results
         )
         jobs = [job for result in board_results for job in result.jobs]
+        unconverted: Counter[ContentOutcome] = Counter()
+        for result in board_results:
+            unconverted.update(result.unconverted)
+        # Source-wide and token-free: no board token, content, title, job ID, URL,
+        # or exception text, unlike the S1 per-board diagnostics.
+        content_warnings = [
+            f"greenhouse content_unconverted={outcome.value} count={count}"
+            for outcome, count in sorted(unconverted.items(), key=lambda pair: pair[0].value)
+        ]
         stats = SourceRunStats(
             source=SOURCE_NAME,
             completed=completed,
@@ -569,7 +600,8 @@ class GreenhouseJobBoardProvider:
             jobs=jobs if completed else [],
             source_stats=[stats],
             errors=[error for result in board_results for error in result.errors],
-            warnings=[warning for result in board_results for warning in result.warnings],
+            warnings=[warning for result in board_results for warning in result.warnings]
+            + content_warnings,
             started_at=started_at,
             completed_at=completed_at,
         )
@@ -718,7 +750,15 @@ class GreenhouseJobBoardProvider:
             return failed("no_usable_records")
 
         discovered_at = self._now()
-        jobs = [self._to_discovered_job(board, item, discovered_at) for item in kept]
+        jobs: list[DiscoveredJob] = []
+        unconverted: Counter[ContentOutcome] = Counter()
+        for item in kept:
+            job, content_outcome = self._to_discovered_job(board, item, discovered_at)
+            jobs.append(job)
+            # On an enabled board only `CONVERTED` is neutral; the job is kept
+            # either way, with `description=None` when conversion abstained.
+            if content_outcome is not None and content_outcome is not ContentOutcome.CONVERTED:
+                unconverted[content_outcome] += 1
         skipped = len(records) - len(kept)
         problem = _completeness_problem(payload, len(records))
         errors: list[ProviderError] = []
@@ -735,7 +775,7 @@ class GreenhouseJobBoardProvider:
             )
         if problem is not None:
             warnings.append(f"greenhouse board={board.board_token} completeness_evidence={problem}")
-        partial = bool(kept) and (bool(skipped) or problem is not None)
+        partial = bool(kept) and (bool(skipped) or problem is not None or bool(unconverted))
         return _BoardResult(
             outcome=_Outcome.PARTIAL if partial else _Outcome.SUCCESS,
             jobs=jobs,
@@ -744,12 +784,26 @@ class GreenhouseJobBoardProvider:
             completeness_failed=problem is not None,
             retries=retries,
             rate_limited=rate_limited,
+            unconverted=unconverted,
         )
 
     def _to_discovered_job(
         self, board: GreenhouseBoard, item: _ValidRecord, discovered_at: datetime
-    ) -> DiscoveredJob:
-        return DiscoveredJob(
+    ) -> tuple[DiscoveredJob, ContentOutcome | None]:
+        """The job, plus the content-conversion outcome on an enabled board
+        (`None` when the board is disabled, in which case `content` is never read by
+        key; only the whole-record deep copy for `raw` carries it). Conversion reads
+        only the original `content` value and never
+        writes to the record or to `raw`."""
+        description: str | None = None
+        content_outcome: ContentOutcome | None = None
+        if board.content_mode != "disabled":
+            conversion = convert_greenhouse_content(
+                item.record.get("content"), mode=board.content_mode
+            )
+            description = conversion.text
+            content_outcome = conversion.outcome
+        job = DiscoveredJob(
             provider=PROVIDER_NAME,
             source=SOURCE_NAME,
             source_tenant_id=board.board_token,
@@ -761,9 +815,10 @@ class GreenhouseJobBoardProvider:
             source_url=item.absolute_url,
             apply_url=None,
             canonical_url=item.absolute_url,
-            description=None,
+            description=description,
             compensation_text=None,
             posted_at=item.posted_at,
             discovered_at=discovered_at,
             raw=copy.deepcopy(item.record),
         )
+        return job, content_outcome
