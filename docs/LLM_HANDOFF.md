@@ -726,12 +726,16 @@ findings: none
 
 ```workflow-metadata
 workflow_version: v3.2
-state: pending
+state: published
 slice_id: 2026-10-04-phase4-greenhouse-content-mapping-s2b-e670575
 slice_kind: parser
 risk_class: H
 base_sha: e670575d5b05395cb9eeb2ec84833cc0034c7002
 declared_gate: final
+executed_gate: final
+candidate_sha: 505e4c1e1480b19fcecc1f0cbbdec5d3f2e1b01e
+receipt_id: 9a62f701-d97c-4bb9-868a-8f7f796b1686
+receipt_path: docs/verification-receipts/505e4c1e1480b19fcecc1f0cbbdec5d3f2e1b01e/9a62f701-d97c-4bb9-868a-8f7f796b1686.json
 fixture_path: backend/tests/fixtures/evaluation/phase3_realistic_corpus.json
 fixture_count: 30
 ```
