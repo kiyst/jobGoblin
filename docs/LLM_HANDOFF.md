@@ -700,3 +700,92 @@ gate: final
 verdict: approved
 findings: none
 ```
+
+### Merge record
+
+- Date: 2026-10-04 (UTC). Merged `phase-4/pure-posting-composition-s2` into `main` with
+  `git merge --no-ff`, at the approved, reviewed commit
+  `fa7ff78115a5158444443b6c55962f2f9b8e6359` (`R`). `R` is Sol Medium's
+  "approved -- no findings" formal verdict on
+  `C=2a3f50d681d2a97b9adc2cf097f933ce4507ead2` /
+  `A=95e975164560bb35021076eadf650af11720482c`.
+  - Merge commit `M`: `f509e80f68505dbdee7d8aed5f2748b805eaec4d`.
+  - Rollback boundary (the pre-merge `main`/`origin/main` tip):
+    `0c2c14b573609c6b2dfc67c0d9f14de97c31e03d`.
+  - Full lineage: base `0c2c14b` -> advisory candidate `d418025` -> `C` `2a3f50d` ->
+    `A` `95e9751` -> `R` `fa7ff78` -> `M` `f509e80` -> `Q` (this commit).
+- Pre-merge checks, after a fresh fetch of `origin`:
+  - the feature branch and its origin both sat at `R`, and `R`'s sole parent is `A`;
+  - `main`/`origin/main`/remote `main` were clean and synchronized at the rollback
+    boundary;
+  - receipt `5b39efd7-64c7-491f-8ca0-98803789b1e4` was schema-valid, bound to `C`, the
+    base, and gate `final`, and independently recomputed as approval-eligible;
+  - `validate_c_a_r_chain(C, A, R)` and `check_merge_eligibility(C, A, R)` returned
+    `approved`, `findings: none`, `reviewer_model: Sol Medium`, `gate: final`,
+    `published_slice_kind: parser`.
+- Release sequence:
+  - `M` was created locally and not pushed. It has two parents (the rollback boundary,
+    then `R`), `R..M` has zero content difference, and
+    `check_review.validate_merge(R, M, 0c2c14b)` passed.
+  - `verification_coordinator.run_post_merge_verification` ran against `M` in a
+    disposable detached worktree (always full/final). It produced artifact
+    `eb15c344-c68f-42a9-8df0-97739b73e953`:
+    - all 11 steps PASS, including the disposable test-database URL validation and
+      reachability preflight, repository and handoff checks;
+    - full pytest suite: **3909 passed**;
+    - all 34 registered mutation witnesses passed;
+    - no migration triggered;
+    - identical worktree snapshots (tracked tree `f15200ce06978387a4f3807cbb58a3d1d1aacee9`),
+      worktree removed with no residual entry or directory, and cleanup PASS.
+
+    The post-merge coordinator did not run S2's nine manual mutation experiments
+    (M1a, M1b, M2–M8); they remain advisory-candidate evidence, not registered
+    witnesses. No test made a live network request.
+  - `Q` is `M`'s direct mainline child. It contains that artifact plus this append-only
+    merge record, in one commit (this entry).
+- Post-merge evidence:
+  `docs/post-merge/f509e80f68505dbdee7d8aed5f2748b805eaec4d/eb15c344-c68f-42a9-8df0-97739b73e953.json`
+  (SHA-256 of the artifact file as written:
+  `cee2a213134a20ef8dba4a9ed2ca42c0abf4a2394139234db026b6cda4f08a8f`). It references
+  original receipt `5b39efd7-64c7-491f-8ca0-98803789b1e4`
+  (`docs/verification-receipts/2a3f50d681d2a97b9adc2cf097f933ce4507ead2/5b39efd7-64c7-491f-8ca0-98803789b1e4.json`).
+  `check_review.validate_published(C, A, R, M, Q)` and
+  `verification_coordinator.confirm_main_unchanged` run immediately before the push.
+  Their results are in the agent's final report rather than restated here in advance.
+- S2 status: merged. S2 adds a pure, provider-neutral `normalize_posting` composition
+  (`app/normalization/posting.py`) and executable D2 protection at that boundary, plus
+  [ADR 0014](DECISIONS/0014-pure-posting-composition-and-scoped-d2.md).
+  - D2 is satisfied only at the pure `normalize_posting` composition boundary, for the
+    exact covered outputs of the exposed 30-record corpus under the pinned corpus and
+    taxonomy identities.
+  - S2 introduces no runtime-reachable composition, provider mapping, HTML conversion,
+    persistence, salary composition, or live Greenhouse contact, and it is not a
+    production-usefulness proof.
+  - D1 remains unsatisfied; no normalized write is authorized.
+  - S2b remains unstarted and requires separate authorization; S2c, S3, and S4 likewise.
+    Phase 4 is not complete.
+- Retained limitations: title is smoke evidence only; ten components are unproven
+  (`remote_type`, `experience.minimum`/`maximum`, `location.city`/`state`/`postal_code`,
+  and the four `salary.*`); salary is not composed (ADR 0011 L4 open); skill-match order,
+  duplicates, and display names are not pinned per record; HTML conversion, list-endpoint
+  escaping, provider-field mapping, and unredacted text are unproven; the composition is
+  not reachable at runtime; the nine mutation experiments are not registered guards.
+- Pilot metrics through merge (ADR 0012, pilot product slice 2 of 3):
+  - proposal-review rounds: 1; advisory-review rounds: 1 (no findings); formal-review
+    rounds: 1;
+  - findings: 0 advisory, 0 formal; 2 P2 and 5 P3 pre-commit self-review findings, fixed
+    before the advisory candidate;
+  - semantic pre-`A` correction commits: 0; handoff-only finalization commits: 1;
+    post-`A` corrections: 0;
+  - receipt-producing executions: 1 (the clean-path target); full-suite executions: 2
+    (the `C` receipt run and the post-merge run at `M`);
+  - user relays: 4 through `A` publication, plus the formal-review relay and the merge
+    authorization (6 through merge), plus one identical re-paste;
+  - escaped post-merge defects: none known at merge; newly reachable runtime product
+    behavior: none, by design.
+
+  These are measurements, not conclusions; the pilot's exit comparison happens after
+  the third slice.
+- STOP -- report the synchronized final `main` SHA and stop. No S2b, Greenhouse contact,
+  runtime provider wiring, normalized persistence, D1 work, migration, or another slice
+  without separate explicit user authorization.
