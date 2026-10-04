@@ -866,3 +866,128 @@ gate: final
 verdict: approved
 findings: none
 ```
+
+### Merge record
+
+- Date: 2026-10-04 (UTC). Merged `phase-4/greenhouse-content-mapping-s2b` into `main` with
+  `git merge --no-ff`, at the approved, reviewed commit
+  `defc55557191dafdb34216b059a1cdb080297292` (`R`). `R` is Sol Medium's
+  "approved -- no findings" formal verdict on
+  `C=505e4c1e1480b19fcecc1f0cbbdec5d3f2e1b01e` /
+  `A=12c281357d94270c5ec9b125f3c335ee8afc92f1`.
+  - Merge commit `M`: `692c420e47f0e0b23acc8be6aec020b7eb3377d9`.
+  - Rollback boundary (the pre-merge `main`/`origin/main` tip):
+    `e670575d5b05395cb9eeb2ec84833cc0034c7002`.
+  - Full lineage: base `e670575` -> advisory candidate `bfc3b93` -> advisory correction 1
+    `9e86ba9` -> `C` `505e4c1` -> `A` `12c2813` -> `R` `defc555` -> `M` `692c420` -> `Q`
+    (this commit).
+- Pre-merge checks, after a fresh fetch of `origin`:
+  - the feature branch, its origin, and the remote ref all sat at `R`; `R`'s sole parent
+    is `A` and `A`'s is `C`;
+  - `main`/`origin/main`/remote `main` were clean and synchronized at the rollback
+    boundary;
+  - **receipt `9a62f701-d97c-4bb9-868a-8f7f796b1686`** (file SHA-256
+    `d4e97fa0070c03864f99060ca948b7b9b5bbc9ba1cb63f860bf7adac5356a7bf`):
+    - schema-valid and bound to `C`, the base, the slice, gate `final`, and risk class H;
+    - its verifier, checker, and configuration hashes equal the files committed at `C`;
+    - the affected surface, focused selector, migration decision (not triggered), and
+      34-witness inventory recomputed identically;
+    - independently recomputed as approval-eligible;
+  - `validate_c_a_r_chain(C, A, R)` and `check_merge_eligibility(C, A, R)` returned
+    `approved`, `findings: none`, `reviewer_model: Sol Medium`, `reviewer_role: primary`,
+    `gate: final`, `published_slice_kind: parser`.
+- Release sequence:
+  - `M` was created locally and not pushed. It has two parents (the rollback boundary,
+    then `R`), `R..M` has zero content difference, and
+    `check_review.validate_merge(R, M, e670575)` passed.
+  - `verification_coordinator.run_post_merge_verification` ran against `M` in a
+    disposable detached worktree (always full/final). It produced artifact
+    `08dcbdd3-9ba0-47e3-9ed4-5ca7ee1c0e6a`:
+    - all 11 steps PASS: Ruff format and check, mypy, `check_repo`, `git diff --check`,
+      disposable test-database URL validation and reachability preflight, the full
+      suite, contract mutation witnesses, handoff metadata validation, and
+      temporary-directory cleanup;
+    - full pytest suite: **4240 passed**;
+    - all 34 registered mutation witnesses passed, 0 failed;
+    - no migration triggered;
+    - identical worktree snapshots (tracked tree `90f54d7051cc2c5509129544f4ba644559474ccd`);
+      worktree removed with no residual entry or directory; cleanup PASS.
+  - `Q` is `M`'s direct mainline child. It contains that artifact plus this append-only
+    merge record, in one commit (this entry).
+- Post-merge evidence:
+  `docs/post-merge/692c420e47f0e0b23acc8be6aec020b7eb3377d9/08dcbdd3-9ba0-47e3-9ed4-5ca7ee1c0e6a.json`
+  (SHA-256 of the artifact file as written:
+  `936e4f3526fe59f2b8984a10478be328db60014dc578eb1f3c8e1004b4c6d20d`). It references
+  original receipt `9a62f701-d97c-4bb9-868a-8f7f796b1686`.
+  `check_review.validate_published(C, A, R, M, Q)` and
+  `verification_coordinator.confirm_main_unchanged` run immediately before the push.
+  Their results are in the agent's final report rather than restated here in advance.
+- Evidence by source:
+  - **Post-merge coordinator (this artifact, at `M`):** the 11 steps above, including the
+    4,240-test full suite and 34/34 registered witnesses.
+  - **Pre-merge receipt (at `C`):** all 12 steps PASS, including focused 331, the full
+    suite 4,240, and 34/34 registered witnesses.
+  - **Manual advisory evidence:** W1–W20 were run during advisory correction 1 with the
+    lossless JUnit driver (all passed, byte-identical restoration). Neither coordinator
+    ran them; they are not registered witnesses and are not attributed to the receipt
+    or this artifact.
+  - **Formal review (`R`):** Sol independently reran the focused 331 and the evaluator
+    identity, inspected the committed implementation and evidence, and relied on the
+    receipt for the full suite and registered witnesses.
+  - No Greenhouse or other live-network contact, production database, or
+    production-data access occurred. Both suite runs used the configured disposable test
+    database.
+- S2b status: merged. S2b adds:
+  - `app/providers/greenhouse_content.py`: declared-mode, bounded content-to-text
+    extraction, fail-closed for the enumerated encoding, suppression, size,
+    meaningfulness, and end-of-input truncation cases;
+  - `content_mode` and incomplete-result handling in `app/providers/greenhouse.py`;
+  - the three-field `app/providers/greenhouse_posting_inputs.py` bridge;
+  - [ADR 0015](DECISIONS/0015-greenhouse-content-conversion-and-posting-input-mapping.md).
+
+  S2b remains runtime-unreachable and non-persisting: nothing is registered, wired, or
+  written. It is not a production-usefulness proof. D1 remains unsatisfied; no normalized
+  write is authorized. Completing S2b completes ADR 0012 pilot product slice 3 of 3. It
+  is not itself the ADR 0012 pilot evaluation and does not authorize S2c. The pilot
+  evaluation, S2c, S3, and S4 each require separate authorization. Phase 4 is not
+  complete.
+- Retained limitations:
+  - no captured raw Greenhouse `content`;
+  - unknown live `/jobs?content=true` list-endpoint encoding (ADR 0014's U6 deferral
+    moves to S2c);
+  - synthetic HTML and 30 reconstructed synthetic envelopes only;
+  - end-of-input-only truncation detection, so text can still be swallowed mid-input
+    when a later quote or `-->` closes the construct;
+  - extraction and suppression boundaries: table and section content merges,
+    `noscript`/`template` text is kept, escaped code examples are rejected, and unclosed
+    raw-text elements abstain;
+  - dependence on CPython's `html.parser` (verified on 3.12.13, golden-pinned);
+  - unredacted in-memory text;
+  - no per-job conversion-mode or outcome traceability;
+  - D1 unsatisfied; salary excluded (ADR 0011 L4 open);
+  - ten components unproven; title smoke-only;
+  - the exposed 30-record corpus;
+  - no production-usefulness proof;
+  - W1–W20 are not registered guards.
+- Final pilot metrics (ADR 0012, pilot product slice 3 of 3):
+  - review rounds: proposal 1 (approved with A1–A20); advisory 2 (changes requested,
+    then approved); formal 1;
+  - findings: advisory 1 executable, 1 evidence-integrity, and 1 documentation, all
+    resolved before `A`; formal 0;
+  - correction commits: 1 semantic pre-`A` (`9e86ba9`); 1 handoff-only finalization
+    (`C`); 0 post-`A`;
+  - receipt-producing executions: 1 (the clean-path target);
+  - full-suite executions: 5 (3 non-receipt during authoring and self-review, the `C`
+    receipt run, and the post-merge run at `M`);
+  - user relays: 9 through merge (the proposal request; the implementation authorization
+    with Sol's table; two correction-authorization relays that lacked Sol's review; Sol's
+    review; one duplicate re-paste after the correction; the re-review approval and
+    final-`C` authorization; the formal-review relay; and this merge authorization);
+  - escaped post-merge defects: none known at merge; newly reachable runtime product
+    behavior: none, by design.
+
+  These are measurements, not conclusions; the ADR 0012 exit comparison is a separately
+  authorized step.
+- STOP -- report the synchronized final `main` SHA and stop. No ADR 0012 pilot
+  evaluation, Greenhouse contact, S2c, runtime wiring, normalized persistence, D1 work,
+  migration, S3, or S4 without separate explicit user authorization.
