@@ -652,6 +652,15 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   is at Phase 4 exit. It changes no validator, schema, reviewer role, or receipt rule. It
   authorizes no S2c, provider contact, persistence, D1, S3, or S4; each still requires
   separate explicit user authorization.
+- **Phase 4 S2c (`phase-4/greenhouse-live-canary-s2c`): bounded read-only Greenhouse live
+  canary ([ADR 0017](DECISIONS/0017-greenhouse-live-canary.md)) -- in progress, pre-live.**
+  One separately authorized `GET /v1/boards/discord/jobs?content=true` through the
+  unchanged S1 adapter, S2b converter and bridge, and S2 composition, with no retry,
+  redirect, fallback, second request, persistence, or runtime registration. The offline
+  harness, its tests, and the exact fixture-ownership mapping exist as the pre-live
+  advisory candidate. **No live request has been made**; network contact still requires
+  Sol Medium and Astra pre-live review, the user's terms/robots review, and explicit
+  network authorization. The projected fixture and report do not exist yet.
 - **Phases 5-14: not started.** Begin each phase only after completing its preflight in
   [PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md) and receiving approval for the next
   smallest slice.

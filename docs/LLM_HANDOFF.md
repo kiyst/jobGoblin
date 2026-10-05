@@ -99,550 +99,6 @@ that detail.
 ### Work done
 
 - Date/agent: 2026-10-04, Claude (implementer). Branch
-  `phase-4/greenhouse-content-mapping-s2b`, base
-  `e670575d5b05395cb9eeb2ec84833cc0034c7002` (`Q` of the S2 merge). The first immutable
-  pre-publication advisory candidate was `bfc3b93447417344da769f2f2e4009db78547f70`; it is
-  preserved unamended and superseded only by its correction child. Ending commit: this
-  commit, advisory correction 1 (the direct single-parent child of `bfc3b93`), for Sol
-  Medium's narrow advisory re-review. Neither is final `C`: no coordinator run, receipt,
-  `A`, or formal review exists.
-- Slice: Phase 4 S2b, offline Greenhouse content conversion and strict `PostingInputs`
-  mapping, plus
-  [ADR 0015](DECISIONS/0015-greenhouse-content-conversion-and-posting-input-mapping.md).
-  Pilot product slice 3 of 3 under ADR 0012. Risk class H, `slice_kind: parser`,
-  `declared_gate: final`, fixture `backend/tests/fixtures/evaluation/phase3_realistic_corpus.json`
-  (30 records; the reconstructed-envelope source). Focused selector:
-  `tests/test_greenhouse_content.py tests/test_greenhouse_posting_inputs.py`: **331** tests
-  at this commit (265 + 66); 284 (219 + 65) at `bfc3b93`.
-- Contract identity: frozen contract `.claude/runtime/phase4-s2b-frozen-contract.md`
-  (gitignored, never committed), SHA-256
-  `e409427bccfecd4f3f04c839f47826f5727355788ceab8fee061e6985e519df2`. Precedence: the
-  user's decisions U1–U4 and requirements, then Sol Medium's binding amendments A1–A20
-  and corrected mutation inventory W1–W19, then the proposal. Correction packet
-  `.claude/runtime/phase4-s2b-correction1-packet.md` (gitignored), SHA-256
-  `5d68c43a8537f629b7cd7c8392aa406297899bd82c0d7927b4d3c6e4588dcee8`: Sol's "Changes
-  requested" review and the user's correction authorization, verbatim. The original
-  contract packet is unmodified.
-- Files (exact closed nine-path list):
-  - `backend/app/providers/greenhouse_content.py` (new);
-  - `backend/app/providers/greenhouse_posting_inputs.py` (new);
-  - `backend/app/providers/greenhouse.py` (`content_mode`, conversion, partition, warnings);
-  - `backend/tests/test_greenhouse_content.py` and `test_greenhouse_posting_inputs.py` (new);
-  - `docs/DECISIONS/0015-…` (new);
-  - `docs/ROADMAP.md`: the S2b bullet, plus the S2 bullet's merge SHAs, replacing its
-    stale "S2b and later slices remain unauthorized" sentence (disclosed: beyond the S2b
-    bullet itself);
-  - `docs/ARCHITECTURE.md`: §4 tree rows (including S1's missing `greenhouse.py` row), the
-    `providers/` dependency row's single named exception for the bridge, a §5 note, and a
-    §10 note;
-  - this file (rotation: S1's iteration removed, S2's retained byte-for-byte as
-    Iteration 1).
-- Material behavior:
-  - **Board mode.** `GreenhouseBoard.content_mode` is `disabled` (default) or
-    `declared-double-escaped`. Any other value raises the fixed A3 message.
-  - **Disabled boards** (Sol's R1 interpretation). There is no selective or keyed access
-    to, interpretation of, or conversion of `content`. Field-agnostic source parsing and
-    the whole-record deep copy that preserves `raw` may traverse it without branching on
-    its value.
-  - **Declared boards.** `description` is the converter's text or `None`. Only
-    `converted` is neutral. Every other outcome keeps the job with `description=None` and
-    makes the board partial (`incomplete_results`, `possibly_incomplete`, partial health).
-  - **Warnings.** Source-wide and token-free, one per outcome, sorted:
-    `greenhouse content_unconverted=<outcome> count=<n>`.
-  - **Unchanged from S1:** `raw` (deep, equal, non-aliased, equal hash), record validity,
-    skipping, completeness, labels, and `compensation_text=None`.
-  - **Converter.** It reimplements the frozen script's declared-mode algorithm exactly.
-    - Order: mode, type (exact `str`), 200,000-code-point input cap, blank, encoding,
-      one decode, extraction, meaningfulness, 100,000-code-point output cap. Nothing is
-      truncated.
-    - Only `RecursionError` from the parser becomes `parser_error`.
-    - End-of-input integrity (correction 1): an unfinished construct that swallows the end
-      of the input yields `malformed_truncated_markup` (see advisory review round 1).
-  - **Mapper.** It reads only `provider`/`source`/`title`/`description`/`location` and
-    returns those three values unchanged, with fixed errors.
-  - Nothing registers, imports the mapper, or persists. No salary, no schema field, no
-    parser, taxonomy, corpus, evaluator, or script change.
-- Evidence identities (pinned in tests):
-  - oracle script canonical-LF `fff4b1c0…cd06f` and its tests `2bdf3014…9fcd1`;
-  - corpus canonical JSON `ca6e1291…8f00` and committed content
-    `1863541bb784419be16bf4ffcf88bf1b4408c951a03b12008e9645e9f18e6930` (authoritative,
-    Sol's R5; the earlier abbreviation `…6e930` was a typo and caused no corpus change);
-  - canary `690b0a5d…db4d5`.
-
-  The A16 bounded claim appears verbatim in ADR 0015 §9 and the test module docstring.
-- Verification at the first advisory candidate `bfc3b93` (no receipt-producing
-  coordinator run):
-  - focused: **284 passed**;
-  - acceptance selection, i.e. the focused modules plus unchanged
-    `test_greenhouse_provider.py`, `test_greenhouse_html_convert.py`,
-    `test_canary_greenhouse_mapping.py`, both S2 modules, and the D2 module: **857 passed**;
-  - `tests/contracts`: **130 passed**;
-  - full suite: **4,193 passed**;
-  - `ruff format --check`, `ruff check`, `mypy` on the five Python files: clean;
-  - evaluator `python -m scripts.evaluate_phase3_corpus`: SHA-256 `87a92187…01de6`,
-    91,994 bytes, unchanged;
-  - `check_handoff`, `check_repo`, `git diff --check`, nine-path scope: passed.
-- Mutation experiments W1–W19 at `bfc3b93` (superseded as acceptance evidence by the
-  correction-1 rerun below, because this v1 driver's result parsing was lossy; driver
-  `.claude/runtime/phase4-s2b-mutation-driver.py`
-  `bd6d9844d59dd4df50739639f79e27b9ae11b48d3cdde305bc08aee328385ed5`, log
-  `phase4-s2b-mutation-log.json`
-  `c06cfd5a412f9ef3a34dab67cdaf0c98bbba71d41f1d911290087e7c4c568c71`).
-  - **Procedure.** Each experiment applied one unique anchor to one production file. The
-    witness and controls passed beforehand. Under the mutation every named witness
-    failed (W3 including both the raw `&ltfoo` and post-decode `&amp;ltfoo` cases) and the
-    corrected controls passed. The file was restored byte-identically and the witness
-    passed again.
-  - **Restoration hashes,** before and after every experiment:
-    - `greenhouse_content.py` `c1999524d8fa046195d954c00a9560e02feb169ed7f141352ce9e9b3a4a2adef`;
-    - `greenhouse.py` `6c486d20c13eda813ef47315aa1c319a954cf03dc60b7455c0a7d19f73b22ed8`
-      (CRLF working-tree form; its committed LF blob is
-      `f20ee294dfe2f37da68deb238a5422db9bf2dd244efde0c9f154fe38903edf63`. The other two
-      files are LF on disk and equal their committed blobs);
-    - `greenhouse_posting_inputs.py` `00809ff005012f29f569df25a52e311c310e72802d7bf0e08aaca8e0b955fd2e`.
-  - **Overlaps,** from the full overlap selection in the log. These are disclosed and none
-    is a control:
-    - W1–W5, W8, W9: oracle-differential cases;
-    - W1/W2: conversion-warning and partition tests;
-    - W4: the W5 control and the `<script>`-only abstention case;
-    - W6: the code-point and order tests;
-    - W8: the parser-sensitive goldens;
-    - W10/W11: S1 `t05`/`t07` and the canary and mixed-board tests;
-    - W12/W13/W15–W17: the canary test;
-    - W14–W18: `mapper_ast_boundary` and/or the access trace;
-    - W17: the corpus round trip, normalize-flow, and direct-mapping tests;
-    - W19: the no-network-primitive import test.
-  - **Driver defect.** The v1 driver keyed pytest results on node ID up to the first
-    space, so parametrized IDs containing spaces were truncated and could collide (for
-    example, the W3 control showed 2 of its 3 cases). Corrected in correction 1.
-- Deviations and disclosures for Sol:
-  - **Reconstruction escaping.** The reconstruction uses `html.escape(…, quote=False)` at
-    both layers. The proposal's read-only check implied default quoting; the reviewer
-    verified that both variants round-trip all 30 records.
-  - **Hash abbreviation typo.** The proposal's (and so A15's) abbreviation `1863541b…6e930`
-    was a typo; the authoritative full hash (R5) is the value pinned, and no corpus change
-    occurred.
-  - **Access guard scope.** The A5 test mapping raises on keyed access (`[]`, `get`, `in`,
-    `pop`, `setdefault`), not on `items()`/`values()`. Deep copying for `raw`, which A13
-    requires, iterates items.
-- Adversarial self-review at `bfc3b93` (a fresh read-only subagent, before commit). It
-  reported no P1;
-  its 60,000-input differential fuzz against the oracle found 0 disagreements beyond the
-  documented abstentions. It accidentally left an empty `%TEMP%\claude_fuzz.py` outside
-  the repository. Fixed before commit:
-  - **P2-1.** Unterminated comments, quoted attributes, and `<letter` silently truncate
-    while staying `converted` (inherited from the oracle and `html.parser`). At `bfc3b93`
-    this was only disclosed and pinned; Sol rejected that disposition (R2), and correction
-    1 makes it fail-closed.
-  - **P2-2.** Output depends on the interpreter's `html.parser`, which the oracle shares.
-    Disclosed as verified on CPython 3.12.13, with literal golden expectations for
-    parser-sensitive inputs. The catch is not broadened.
-  - **P2-3.** The "never touched" wording overclaimed, since the deep copy for `raw` still
-    carries `content`. Reworded in the code and ADR.
-  - **P3s.** The W11 control was renamed `test_description_populated_on_declared_board`.
-    ADR 0015 now states that ADR 0014's U6 list-endpoint deferral moves to S2c. The
-    ARCHITECTURE tree alignment was fixed. The hash typo, reconstruction quoting, ROADMAP
-    S2 edit, and access-guard scope are disclosed above.
-- Known limitations:
-  - no captured raw `content` or list-endpoint encoding evidence, and U6 moves to S2c;
-  - synthetic HTML only;
-  - table and section content merges, `noscript`/`template` text is kept, and escaped
-    code examples are rejected;
-  - only end-of-input truncation is fail-closed: text swallowed mid-input by a construct
-    that a later quote or `-->` closes is still lost silently (a narrowing disclosure of
-    the original truncation limitation, which is otherwise now fail-closed);
-  - interpreter-dependent parser behavior;
-  - unredacted in-memory text;
-  - no mode or outcome traceability on the job (A11), which is not D1;
-  - D1 unsatisfied; salary excluded (L4); ten unproven components; title smoke-only;
-    exposed 30-record corpus;
-  - nothing runtime-reachable; mutation experiments not registered.
-- Advisory review round 1 (Sol Medium, pre-publication advisory review of `bfc3b93`;
-  advisory prose only, not formal review metadata). Verdict "Changes requested".
-  - **P2, malformed markup silently discarded parser input while reporting success**
-    (Sol's reproductions `<p>Intro</p><!-- note <p>Requirements: Python</p>` →
-    `Intro`, `<p>Intro</p><a href="x>More</a><p>Requirements: Python</p>` → `Intro`,
-    `A<B rest` → `A`). *Accepted and corrected:*
-    - The new closed outcome `malformed_truncated_markup` covers this.
-    - After decoding, the parser is fed the source, then one internal marker element
-      `<NAME></NAME>`. `NAME` is `ghintegrity-` plus one more `z` than the longest such
-      run in the decoded text (case-insensitive), so it is absent from the source. It is
-      pure and linear, emits no text or boundary, and is not counted by either cap.
-    - After `close()`, exactly one ordered start/end pair is required; otherwise the
-      outcome is the new one, with `text=None`.
-    - Precedence: `parser_error`, then `unclosed_suppressed_element` (open
-      `script`/`style`, recorded before the marker is fed), then
-      `malformed_truncated_markup`, then meaningfulness, then the output cap.
-    - The adapter (unchanged) keeps the job with `description=None`, makes the board
-      partial/incomplete, and warns exactly
-      `greenhouse content_unconverted=malformed_truncated_markup count=<n>`.
-    - Converted text still equals the oracle wherever this module converts.
-    - Disclosed behavior changes:
-      - a trailing unfinished fragment (`A</`, `x</p`, `<p>Intro</p><!`) now abstains;
-        `A</` previously converted to `A</`;
-      - an unclosed raw-text element (`title`, `textarea`, `xmp`, `iframe`, `noembed`,
-        `noframes`, `plaintext` on CPython 3.12.13) now abstains;
-      - three oracle numeric fragments (`&#60x`, `a&#60b`, `&#x3cg`) now abstain.
-  - **P2, the mutation log lost parametrized-node evidence.** *Accepted and corrected:*
-    - the gitignored v2 driver reads per-run pytest JUnit XML (xunit2) and aborts on a
-      duplicate or empty result;
-    - a self-check proves distinct, exact IDs containing spaces (`[a b]`, `[a  b]`,
-      `[a c]` failing, `[x y z]`), at the root and in a `tests/` package;
-    - the complete W1–W20 inventory was rerun.
-  - **P3, "no database access" overstated the boundary.** *Accepted:* replaced with the
-    exact wording below.
-  - **Dispositions:**
-    - R1: recorded under Material behavior.
-    - R2, R3, R4: corrected as above.
-    - R5: recorded under Evidence identities.
-    - R6: scope items confirmed in scope.
-    - R7: W1–W19 are unchanged, except that W5's anchor follows its edited decision line.
-- Correction 1 (this commit; six paths: `greenhouse_content.py`, both new test modules,
-  ADR 0015, ROADMAP, this file):
-  - **Unchanged:** `greenhouse.py`, `greenhouse_posting_inputs.py`, ARCHITECTURE, every
-    fixture, the oracle, corpus, evaluator, dependencies, schemas, and registration.
-  - **Cumulative `base..HEAD`:** still exactly the original nine paths.
-  - **Tests:**
-    - focused **331 passed**;
-    - acceptance selection **904 passed**;
-    - `tests/contracts` **130 passed**;
-    - full suite **4,240 passed**.
-  - **Checks:**
-    - `ruff format --check`, `ruff check`, and `mypy` on the five Python files: clean;
-    - evaluator SHA-256 `87a92187…01de6`, 91,994 bytes, byte-identical;
-    - `check_handoff`, `check_repo`, `git diff --check`, direct-parent six-path and
-      cumulative nine-path scope: passed.
-  - **Mutation experiments W1–W20.** Driver
-    `.claude/runtime/phase4-s2b-mutation-driver-v2.py`
-    `7151c79fb7ebe08d57a2623d2da7bf9fe823d7720c27a2ae71a494fb4f7761b5`, log
-    `phase4-s2b-mutation-log-correction1.json`
-    `514ac00d46ea1a3b00e7b04366adaa5067ee7355e4359683fc9ebce5c745073e`. The self-check
-    passed.
-    - All 20 passed. Each had one unique anchor in one production file, a green
-      baseline, every named witness failing, and every control green. Each file was
-      restored byte-identically, all three production hashes were re-verified, and the
-      witness passed again.
-    - Lossless witness/control node counts (failed/total, controls): W1 6/6, 1; W2 4/4, 1;
-      W3 10/10, 3 (including `[&ltfoo]` and `[&amp;ltfoo]`); W4 1/1, 1; W5 3/3, 1;
-      W6 1/1, 1; W7 1/1, 1; W8 9/9, 1; W9 1/1, 1; W10 2/2, 1; W11 2/2, 1; W12 2/2, 1;
-      W13 1/1, 1; W14 1/2, 1; W15 1/2, 1; W16 3/5, 5; W17 1/1, 9; W18 4/4, 1;
-      W19 1/1, 1; W20 3/3, 18.
-    - W20 disabled only the integrity-completeness decision. All three pinned witness
-      nodes failed. Its probe confirmed the reproductions revert to the former truncated
-      `converted` results `Intro`/`Intro`/`A`. The controls (valid HTML, recoverable
-      malformed tags, adapter partition) stayed green.
-    - Every overlapping failure is listed per experiment in the log; none is a control.
-  - **Restoration hashes (working-tree bytes):**
-    - `greenhouse_content.py`
-      `00ea51d9a94e54200d3c251533915dbb5f880a9b3070c45eaea7a41be964c033`;
-    - `greenhouse.py` `6c486d20…b22ed8` (CRLF form; committed LF blob `f20ee294…edf63`,
-      unchanged);
-    - `greenhouse_posting_inputs.py` `00809ff0…b955fd2e`.
-  - **Correction self-review** (a fresh read-only subagent). It found no bypass of the
-    check, 0 CONVERTED-text differences from the oracle or `bfc3b93` across 350,000 fuzz
-    inputs, and linear cost. All of the following were fixed before commit:
-    - P2-1: a dangling `</style` end tag completed by the marker turned
-      `unclosed_suppressed_element` into the generic outcome. Open state is now
-      recorded before the marker is fed, and pinned.
-    - P2-2: the raw-text-element abstention was undisclosed and contradicted the ADR. Now
-      disclosed and pinned.
-    - P3: a non-vacuous forgery case was added (a complete source pair before the
-      truncation); the end-of-input-only scope was disclosed in the ADR, module, and
-      ROADMAP; the three W20 witness nodes were pinned; and the self-check gained a
-      subdirectory case.
-- Evidence boundary: No Greenhouse or other live-network contact, production database, or
-  production-data access occurred. The full suite used the configured disposable test
-  database. S2b introduces no application persistence or production database behavior.
-- Pilot metrics so far (pilot product slice 3 of 3):
-  - review rounds: proposal 1 (Sol, approved with A1–A20); advisory 1 (changes
-    requested);
-  - findings: 1 executable (P2 truncation), 1 evidence-integrity (P2 mutation log), and
-    1 documentation (P3);
-  - correction commits: 1 pre-`A` (this commit), 0 post-`A`;
-  - full-suite executions: 3 non-receipt (implementer at `bfc3b93`, self-review subagent
-    at `bfc3b93`, implementer at this commit); receipt-producing executions: 0;
-  - user relays: 5 (the S2b proposal request; the authorization with Sol's table; then
-    the correction authorization, sent twice without Sol's review and once with it);
-  - branch created 2026-10-04T04:02:30Z.
-- STOP after pushing this correction for Sol Medium's narrow advisory re-review. No final
-  `C`, coordinator receipt, `A`, formal `R`, merge, `M`/`Q`, Greenhouse or network
-  contact, production data access, pilot evaluation, S2c, S3, or S4.
-
-**Pre-publication advisory re-review — approved (Sol Medium, advisory only; not formal R).** Reviewed corrected advisory candidate `9e86ba9ec50b089b6c76ade319b1ec6ec396941a` against original candidate `bfc3b93447417344da769f2f2e4009db78547f70`, frozen-contract SHA-256 `e409427bccfecd4f3f04c839f47826f5727355788ceab8fee061e6985e519df2`, and correction-packet SHA-256 `5d68c43a8537f629b7cd7c8392aa406297899bd82c0d7927b4d3c6e4588dcee8`; all material changes through the corrected SHA were reviewed. The six-path correction and cumulative nine-path scope are exact. The malformed-truncation, mutation-evidence, and database-wording findings are resolved: end-of-input swallowing now fails closed with deterministic source-absent marker enforcement and the required precedence; adapter retention, partiality, warning, caps, and disabled-mode behavior are correct; and the lossless JUnit driver self-check plus W1–W20 evidence and byte-identical restoration are accepted. The disclosed mid-input limitation is acceptable for this offline, runtime-unreachable, non-persisting slice and remains a bounded S2c observation question, not a production-readiness claim. Independent review reran 331 focused and 904 acceptance tests, Ruff, mypy, repository/handoff/diff checks, the driver self-check, and the unchanged 91,994-byte Phase 3 evaluator; recorded evidence for 130 contract tests, the 4,240-test full suite, and W1–W20 was inspected and accepted. Final candidate-bound verification may proceed; formal R retains unrestricted authority.
-
-```workflow-metadata
-workflow_version: v3.2
-state: published
-slice_id: 2026-10-04-phase4-greenhouse-content-mapping-s2b-e670575
-slice_kind: parser
-risk_class: H
-base_sha: e670575d5b05395cb9eeb2ec84833cc0034c7002
-declared_gate: final
-executed_gate: final
-candidate_sha: 505e4c1e1480b19fcecc1f0cbbdec5d3f2e1b01e
-receipt_id: 9a62f701-d97c-4bb9-868a-8f7f796b1686
-receipt_path: docs/verification-receipts/505e4c1e1480b19fcecc1f0cbbdec5d3f2e1b01e/9a62f701-d97c-4bb9-868a-8f7f796b1686.json
-fixture_path: backend/tests/fixtures/evaluation/phase3_realistic_corpus.json
-fixture_count: 30
-```
-
-### Work review
-
-- Date/reviewer: 2026-10-04 (UTC), Sol (primary, Sol Medium). Formal review of Phase 4
-  S2b, offline Greenhouse content conversion and strict `PostingInputs` mapping, on
-  `phase-4/greenhouse-content-mapping-s2b`:
-  - base `e670575d5b05395cb9eeb2ec84833cc0034c7002`;
-  - final candidate `C` = `505e4c1e1480b19fcecc1f0cbbdec5d3f2e1b01e`;
-  - publication `A` = `12c281357d94270c5ec9b125f3c335ee8afc92f1`.
-
-  Reviewed against frozen contract SHA-256
-  `e409427bccfecd4f3f04c839f47826f5727355788ceab8fee061e6985e519df2` (U1–U4, Sol's binding
-  amendments A1–A20 and W1–W19, and the proposal). Also reviewed against correction packet
-  SHA-256 `5d68c43a8537f629b7cd7c8392aa406297899bd82c0d7927b4d3c6e4588dcee8` (Sol's
-  "Changes requested" review R1–R7 and the correction authorization). Sol's earlier
-  pre-publication advisory review of `bfc3b93`, and re-review of the correction `9e86ba9`,
-  were advisory only; this is the formal review.
-- **1. Sol's formal verdict and dispositions** (as relayed by the user; the relay is the
-  authority for this review):
-  - verdict **approved**;
-  - findings none;
-  - primary reviewer Sol (Sol Medium);
-  - gate `final`, published slice kind `parser`;
-  - `C`/`A` above, receipt `9a62f701-d97c-4bb9-868a-8f7f796b1686`, receipt SHA-256
-    `d4e97fa0070c03864f99060ca948b7b9b5bbc9ba1cb63f860bf7adac5356a7bf`.
-
-  The relay supplies the verdict and chain plus the evidence classification below. It
-  supplies no further itemized disposition, so none is attributed to Sol here. "No
-  unresolved executable findings" is a review status, not production-readiness evidence.
-- **2. Independently rerun or recomputed in formal review** (per the relay):
-  - the focused S2b selection (`tests/test_greenhouse_content.py
-    tests/test_greenhouse_posting_inputs.py`): **331 passed**;
-  - the Phase 3 evaluator identity (`python -m scripts.evaluate_phase3_corpus`, SHA-256
-    `87a92187…01de6`, 91,994 bytes): unchanged.
-- **3. Committed implementation and evidence inspected directly.** These checks were
-  re-verified from Git plumbing and the receipt itself when this review was recorded:
-  - **ancestry:** `A`'s sole parent is `C`; `C`'s is the correction `9e86ba9`; its sole
-    parent is the original advisory candidate `bfc3b93`, whose sole parent is the base;
-  - **refs:** the local and remote branch equal `A`; `main`, `origin/main`, and the
-    remote `main` remain at the base; the tree was clean;
-  - **scope:**
-    - `base..C` is exactly the authorized nine paths;
-    - `9e86ba9..C` changes only this file (Sol's re-review paragraph, inserted verbatim
-      before valid `state: pending` metadata);
-    - `C..A` adds only the C-bound receipt and the permitted pending → published
-      transition with `executed_gate: final` (`validate_c_to_a_transition` passed);
-  - **production blobs at `A`:**
-    - `greenhouse_content.py` `00ea51d9…4c033`;
-    - `greenhouse.py` `f20ee294…edf63`;
-    - `greenhouse_posting_inputs.py` `00809ff0…b955fd2e`;
-  - **receipt:**
-    - file SHA-256 `d4e97fa0…6a7bf` equals the committed blob;
-    - schema-valid;
-    - bound to `C`, the base, gate `final`, the slice, and risk class H;
-    - the verifier, checker, and configuration hashes equal the files committed at `C`;
-    - the affected surface (`docs-only`, `generic-changed-test`, `handoff-transition`,
-      `unmapped`), focused selector, migration determination (not triggered), and
-      complete 34-witness active inventory all recompute identically;
-    - approval eligibility recomputes as `true`;
-  - **runtime packets** (gitignored, untracked, unchanged): frozen contract
-    `e409427b…519df2`; correction packet `5d68c43a…dcee8`; mutation driver v2
-    `7151c79f…761b5`; mutation log `514ac00d…5073e`.
-- **4. Relied upon from the genuine C-bound receipt** (coordinator run at `C`; not
-  rerun in formal review):
-  - all 12 steps PASS: Ruff format and check, mypy, `check_repo`, `git diff --check`,
-    disposable test-database URL validation and reachability, focused pytest (331),
-    the full suite (**4,240 passed**), registered contract mutation witnesses
-    (**34 of 34 passed**), handoff metadata validation, and temporary-directory cleanup;
-  - no migration triggered; isolated-worktree integrity and removal.
-- **5. Manual advisory mutation evidence.** W1–W20 were run during advisory correction 1
-  with the lossless JUnit driver (self-check passed; all 20 passed with byte-identical
-  restoration). They were inspected, not rerun, during formal review. The coordinator
-  did not execute them, and they are not registered witnesses.
-- Evidence boundary: No Greenhouse or other live-network contact, production database, or
-  production-data access occurred. The full suite used the configured disposable test
-  database. S2b introduces no application persistence or production database behavior.
-- **6. Limitations retained:**
-  - S2b is runtime-unreachable and non-persisting; nothing is registered or wired;
-  - no captured raw `content` or real `/jobs?content=true` list-endpoint evidence (ADR
-    0014's U6 deferral moves to S2c); synthetic HTML and 30 reconstructed synthetic
-    envelopes only, under the bounded A16 claim;
-  - only end-of-input truncation fails closed; text swallowed mid-input by a construct
-    that a later quote or `-->` closes is still lost silently (a bounded S2c observation
-    question);
-  - table and section content merges; `noscript`/`template` text is kept; escaped code
-    examples are rejected;
-  - output depends on the interpreter's `html.parser` (verified on CPython 3.12.13 and
-    golden-pinned);
-  - in-memory text is unredacted;
-  - there is no mode or outcome traceability on the job (A11), and this is not D1;
-  - D1 remains unsatisfied and no normalized write is authorized; salary is excluded
-    (ADR 0011 L4 open); ten components remain unproven; title is smoke evidence only;
-    the corpus is the exposed 30-record, three-employer corpus;
-  - production usefulness and live list-endpoint behavior are unproven.
-- Pilot metrics (ADR 0012, pilot product slice 3 of 3), as recorded in `Work done`:
-  - proposal-review rounds 1; advisory-review rounds 2 (changes requested, then
-    approved); advisory findings 1 executable, 1 evidence-integrity, and 1 documentation
-    (all resolved before `A`); formal findings 0;
-  - pre-`A` correction commits 1; handoff-only finalization commits 1; post-`A`
-    corrections 0;
-  - receipt-producing executions 1.
-
-  The relay for this formal review occurred after `A` and is outside the `Work done`
-  relay count.
-- Findings by severity with exact references: none.
-- Verdict: **approved** -- no findings.
-- Exact bounded correction: none required.
-- STOP -- record-only. This review authorizes no merge, `M`, `Q`, Greenhouse contact,
-  pilot evaluation, S2c, runtime wiring, persistence, D1, or other slice. Merge requires
-  separate user authorization.
-
-```workflow-review-metadata
-schema_version: 2
-slice_id: 2026-10-04-phase4-greenhouse-content-mapping-s2b-e670575
-risk_class: H
-reviewer: Sol
-reviewer_role: primary
-reviewer_model: Sol Medium
-reviewed_at: 2026-10-04T22:06:28+00:00
-candidate_sha: 505e4c1e1480b19fcecc1f0cbbdec5d3f2e1b01e
-publication_commit_sha: 12c281357d94270c5ec9b125f3c335ee8afc92f1
-receipt_path: docs/verification-receipts/505e4c1e1480b19fcecc1f0cbbdec5d3f2e1b01e/9a62f701-d97c-4bb9-868a-8f7f796b1686.json
-receipt_id: 9a62f701-d97c-4bb9-868a-8f7f796b1686
-gate: final
-verdict: approved
-findings: none
-```
-
-### Merge record
-
-- Date: 2026-10-04 (UTC). Merged `phase-4/greenhouse-content-mapping-s2b` into `main` with
-  `git merge --no-ff`, at the approved, reviewed commit
-  `defc55557191dafdb34216b059a1cdb080297292` (`R`). `R` is Sol Medium's
-  "approved -- no findings" formal verdict on
-  `C=505e4c1e1480b19fcecc1f0cbbdec5d3f2e1b01e` /
-  `A=12c281357d94270c5ec9b125f3c335ee8afc92f1`.
-  - Merge commit `M`: `692c420e47f0e0b23acc8be6aec020b7eb3377d9`.
-  - Rollback boundary (the pre-merge `main`/`origin/main` tip):
-    `e670575d5b05395cb9eeb2ec84833cc0034c7002`.
-  - Full lineage: base `e670575` -> advisory candidate `bfc3b93` -> advisory correction 1
-    `9e86ba9` -> `C` `505e4c1` -> `A` `12c2813` -> `R` `defc555` -> `M` `692c420` -> `Q`
-    (this commit).
-- Pre-merge checks, after a fresh fetch of `origin`:
-  - the feature branch, its origin, and the remote ref all sat at `R`; `R`'s sole parent
-    is `A` and `A`'s is `C`;
-  - `main`/`origin/main`/remote `main` were clean and synchronized at the rollback
-    boundary;
-  - **receipt `9a62f701-d97c-4bb9-868a-8f7f796b1686`** (file SHA-256
-    `d4e97fa0070c03864f99060ca948b7b9b5bbc9ba1cb63f860bf7adac5356a7bf`):
-    - schema-valid and bound to `C`, the base, the slice, gate `final`, and risk class H;
-    - its verifier, checker, and configuration hashes equal the files committed at `C`;
-    - the affected surface, focused selector, migration decision (not triggered), and
-      34-witness inventory recomputed identically;
-    - independently recomputed as approval-eligible;
-  - `validate_c_a_r_chain(C, A, R)` and `check_merge_eligibility(C, A, R)` returned
-    `approved`, `findings: none`, `reviewer_model: Sol Medium`, `reviewer_role: primary`,
-    `gate: final`, `published_slice_kind: parser`.
-- Release sequence:
-  - `M` was created locally and not pushed. It has two parents (the rollback boundary,
-    then `R`), `R..M` has zero content difference, and
-    `check_review.validate_merge(R, M, e670575)` passed.
-  - `verification_coordinator.run_post_merge_verification` ran against `M` in a
-    disposable detached worktree (always full/final). It produced artifact
-    `08dcbdd3-9ba0-47e3-9ed4-5ca7ee1c0e6a`:
-    - all 11 steps PASS: Ruff format and check, mypy, `check_repo`, `git diff --check`,
-      disposable test-database URL validation and reachability preflight, the full
-      suite, contract mutation witnesses, handoff metadata validation, and
-      temporary-directory cleanup;
-    - full pytest suite: **4240 passed**;
-    - all 34 registered mutation witnesses passed, 0 failed;
-    - no migration triggered;
-    - identical worktree snapshots (tracked tree `90f54d7051cc2c5509129544f4ba644559474ccd`);
-      worktree removed with no residual entry or directory; cleanup PASS.
-  - `Q` is `M`'s direct mainline child. It contains that artifact plus this append-only
-    merge record, in one commit (this entry).
-- Post-merge evidence:
-  `docs/post-merge/692c420e47f0e0b23acc8be6aec020b7eb3377d9/08dcbdd3-9ba0-47e3-9ed4-5ca7ee1c0e6a.json`
-  (SHA-256 of the artifact file as written:
-  `936e4f3526fe59f2b8984a10478be328db60014dc578eb1f3c8e1004b4c6d20d`). It references
-  original receipt `9a62f701-d97c-4bb9-868a-8f7f796b1686`.
-  `check_review.validate_published(C, A, R, M, Q)` and
-  `verification_coordinator.confirm_main_unchanged` run immediately before the push.
-  Their results are in the agent's final report rather than restated here in advance.
-- Evidence by source:
-  - **Post-merge coordinator (this artifact, at `M`):** the 11 steps above, including the
-    4,240-test full suite and 34/34 registered witnesses.
-  - **Pre-merge receipt (at `C`):** all 12 steps PASS, including focused 331, the full
-    suite 4,240, and 34/34 registered witnesses.
-  - **Manual advisory evidence:** W1–W20 were run during advisory correction 1 with the
-    lossless JUnit driver (all passed, byte-identical restoration). Neither coordinator
-    ran them; they are not registered witnesses and are not attributed to the receipt
-    or this artifact.
-  - **Formal review (`R`):** Sol independently reran the focused 331 and the evaluator
-    identity, inspected the committed implementation and evidence, and relied on the
-    receipt for the full suite and registered witnesses.
-  - No Greenhouse or other live-network contact, production database, or
-    production-data access occurred. Both suite runs used the configured disposable test
-    database.
-- S2b status: merged. S2b adds:
-  - `app/providers/greenhouse_content.py`: declared-mode, bounded content-to-text
-    extraction, fail-closed for the enumerated encoding, suppression, size,
-    meaningfulness, and end-of-input truncation cases;
-  - `content_mode` and incomplete-result handling in `app/providers/greenhouse.py`;
-  - the three-field `app/providers/greenhouse_posting_inputs.py` bridge;
-  - [ADR 0015](DECISIONS/0015-greenhouse-content-conversion-and-posting-input-mapping.md).
-
-  S2b remains runtime-unreachable and non-persisting: nothing is registered, wired, or
-  written. It is not a production-usefulness proof. D1 remains unsatisfied; no normalized
-  write is authorized. Completing S2b completes ADR 0012 pilot product slice 3 of 3. It
-  is not itself the ADR 0012 pilot evaluation and does not authorize S2c. The pilot
-  evaluation, S2c, S3, and S4 each require separate authorization. Phase 4 is not
-  complete.
-- Retained limitations:
-  - no captured raw Greenhouse `content`;
-  - unknown live `/jobs?content=true` list-endpoint encoding (ADR 0014's U6 deferral
-    moves to S2c);
-  - synthetic HTML and 30 reconstructed synthetic envelopes only;
-  - end-of-input-only truncation detection, so text can still be swallowed mid-input
-    when a later quote or `-->` closes the construct;
-  - extraction and suppression boundaries: table and section content merges,
-    `noscript`/`template` text is kept, escaped code examples are rejected, and unclosed
-    raw-text elements abstain;
-  - dependence on CPython's `html.parser` (verified on 3.12.13, golden-pinned);
-  - unredacted in-memory text;
-  - no per-job conversion-mode or outcome traceability;
-  - D1 unsatisfied; salary excluded (ADR 0011 L4 open);
-  - ten components unproven; title smoke-only;
-  - the exposed 30-record corpus;
-  - no production-usefulness proof;
-  - W1–W20 are not registered guards.
-- Final pilot metrics (ADR 0012, pilot product slice 3 of 3):
-  - review rounds: proposal 1 (approved with A1–A20); advisory 2 (changes requested,
-    then approved); formal 1;
-  - findings: advisory 1 executable, 1 evidence-integrity, and 1 documentation, all
-    resolved before `A`; formal 0;
-  - correction commits: 1 semantic pre-`A` (`9e86ba9`); 1 handoff-only finalization
-    (`C`); 0 post-`A`;
-  - receipt-producing executions: 1 (the clean-path target);
-  - full-suite executions: 5 (3 non-receipt during authoring and self-review, the `C`
-    receipt run, and the post-merge run at `M`);
-  - user relays: 9 through merge (the proposal request; the implementation authorization
-    with Sol's table; two correction-authorization relays that lacked Sol's review; Sol's
-    review; one duplicate re-paste after the correction; the re-review approval and
-    final-`C` authorization; the formal-review relay; and this merge authorization);
-  - escaped post-merge defects: none known at merge; newly reachable runtime product
-    behavior: none, by design.
-
-  These are measurements, not conclusions; the ADR 0012 exit comparison is a separately
-  authorized step.
-- STOP -- report the synchronized final `main` SHA and stop. No ADR 0012 pilot
-  evaluation, Greenhouse contact, S2c, runtime wiring, normalized persistence, D1 work,
-  migration, S3, or S4 without separate explicit user authorization.
-
-## Iteration 2
-
-### Work done
-
-- Date/agent: 2026-10-04, Claude (implementer). Branch
   `workflow/throughput-protocol-retention`, base
   `6752dcdc0ce1b57c0af164aa217d3181566086bd` (`Q` of the Phase 4 S2b merge
   `M=692c420`). Ending commit: this commit (candidate `C`).
@@ -978,3 +434,138 @@ findings: none
 - STOP -- report the synchronized final `main` SHA and stop. No Greenhouse contact, S2c,
   runtime wiring, persistence, D1 work, migration, workflow-tooling change, S3, S4, or
   another slice without separate explicit user authorization.
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-10-05, Claude (implementer). Branch
+  `phase-4/greenhouse-live-canary-s2c`, base
+  `eeac72abb2ba930fb469a4abb563a7601826266a` (`Q` of the ADR 0016 retention slice).
+  Ending commit: this commit, the single immutable **pre-live advisory candidate** for
+  Sol Medium and Astra. It is not final `C`: no coordinator run, receipt, `A`, formal
+  review, merge metadata, live request, raw staging, or attempt reservation exists.
+- Slice: Phase 4 S2c, a bounded read-only Greenhouse live canary
+  ([ADR 0017](DECISIONS/0017-greenhouse-live-canary.md)), offline pre-live portion only.
+  Risk class H, `slice_kind: tooling`, `declared_gate: final`.
+- Contract: frozen, create-only, gitignored packet
+  `.claude/runtime/phase4-s2c-frozen-contract.md`, SHA-256
+  `ac2cc00afc9e2bb7b7520eba71da7d6349e7b523f1b9b601bb2ad254c450800b`, frozen from the
+  user's relay packet (SHA-256
+  `b1268d8d85c7a2c1ce89cebb6fabb4d138f9a32ff38b604e77a742975187a1cd`). It holds nine
+  immutable inputs:
+  - three authoritative sources, re-read and verified before freezing: the proposal
+    `6de1fd21…24a6`, Astra's review `38759f5a…acc6`, and Sol's review `8822137e…1eb9`;
+  - Sol's compatibility ruling;
+  - Astra's two compatibility findings;
+  - Sol's final corrections;
+  - Astra's confirmation;
+  - the user's decisions U1–U8 and the authorization.
+
+  The packet records the hash of every section. Each embedded source equals its file
+  after CRLF-to-LF and outer blank-line trimming.
+- User decisions:
+  - U1: network authorization withheld;
+  - U2: board `discord`;
+  - U3: the terms/robots review is pending;
+  - U4: create-only raw retention through post-run review, then verified deletion before
+    final `C`;
+  - U5: publication approval pending;
+  - U6: default `httpx` User-Agent plus `Accept-Encoding: identity`;
+  - U7: Sol Medium and Astra review the pre-live and post-run candidates;
+  - U8: raw-capture fidelity required for PASS.
+- Files (cumulative scope; 7 of the 9 authorized paths):
+  - `backend/scripts/run_greenhouse_s2c_canary.py` (new): the default-off harness;
+  - `backend/scripts/verification_scope.py`: exactly `_GREENHOUSE_S2C_FIXTURE_FILES`,
+    included in configuration validation and classification;
+  - `backend/tests/test_greenhouse_s2c_canary.py` (new) and
+    `backend/tests/test_verification_scope.py`;
+  - `docs/DECISIONS/0017-greenhouse-live-canary.md` (new; results section empty);
+  - `docs/ROADMAP.md` (S2c bullet);
+  - this file. Rotation: S2b's iteration was removed; the ADR 0016 iteration is retained
+    unchanged apart from its renumbered heading.
+
+  Reserved, deliberately not created: `backend/tests/fixtures/providers/greenhouse_s2c_projected.json`
+  and `docs/evaluation/phase4-s2c-live-canary.md`. No fabricated or placeholder live
+  evidence exists.
+- Harness, offline: everything in ADR 0017 §2–§7 for the pre-live portion:
+  - gates, the one guarded request, and headers;
+  - complete-versus-partial capture;
+  - the record cap before conversion;
+  - the attempt reservation and supervised deadline;
+  - diagnostic reconstruction cross-checked against the adapter;
+  - verdicts;
+  - selection, projection, excerpts, lineage, the fixture validator, and the report
+    draft;
+  - cleanup and the fresh-process checker.
+
+  It makes no `app/` change. Its imports are limited to the authorized adapter,
+  converter, bridge, composition, taxonomy, schemas, and hashing helper.
+- Disclosed interpretations for review:
+  - **Private helpers.** The harness reuses the adapter's private `_validate_record`,
+    `_duplicate_identity`, and `_is_json_media_type` for diagnostic reconstruction, and
+    cross-checks the result against the adapter's own output.
+  - **Unavailable fidelity review** caps the verdict at INCONCLUSIVE, per Sol A16 (not
+    superseded).
+  - **5xx and transport errors.** Every 5xx is INCONCLUSIVE, per final §6. A non-timeout
+    transport error is FAIL-CLOSED.
+  - **Mutation inventory.** The contract names "W1–W12" without an itemized list, so the
+    reconciled inventory below is the implementer's mapping of the original M1–M12 onto
+    the amended safety boundaries.
+- O1 pre-advisory evidence (no full suite; no risk required one):
+  - focused harness tests: 128 passed;
+  - verification-scope tests: 93 passed;
+  - existing Greenhouse adapter, converter, bridge, composition, D2 realistic, and HTML
+    oracle tests: 828 passed (unchanged);
+  - Ruff format/check and mypy clean on all changed Python;
+  - `check_handoff` and `check_repo` pass, and `git diff --check` is clean.
+- W1–W12 manual mutations, run after the last harness change against harness SHA-256
+  `778c549e78039b458078d3d5de1ea16df4fab87163ecabb009b3b97671fdd082`. Each has a unique
+  anchor and one named failing witness; two stable controls passed under every
+  mutation; every restoration was byte-identical; the baseline and final runs passed.
+  1. W1: request-shape guard removed;
+  2. W2: second-send refusal removed;
+  3. W3: env gate removed;
+  4. W4: board allowlist removed;
+  5. W5: `Accept-Encoding: identity` removed;
+  6. W6: raw overwrite instead of exclusive create;
+  7. W7: no terminate/kill at the deadline;
+  8. W8: `max_attempts=3`;
+  9. W9: cap raised to 5 MiB;
+  10. W10: record cap removed;
+  11. W11: database-layer import added;
+  12. W12: reservation refusal removed.
+
+  These are advisory evidence, not registered witnesses; the 34 registered witnesses are
+  unchanged.
+- Network and side effects: no Greenhouse or other provider contact. No live transport
+  was constructed: tests disable real transports and DNS. No database or production
+  data was accessed, and no real staging or reservation was created.
+- Remaining pre-live gates:
+  1. Sol Medium and Astra advisory review of this candidate;
+  2. the user's recorded terms/robots review;
+  3. explicit network authorization naming the board, this exact SHA (or an approved
+     correction child), the contract hash, the request, the bounds, the one-attempt rule,
+     and the retention policy.
+
+  Publication (U5), the post-run review, cleanup, final `C`/`A`/`R`, and merge each
+  require their own authorization.
+- Retained limitations:
+  - a live result is unproven;
+  - Discord's response size is unknown;
+  - screening is defense in depth, not a guarantee;
+  - after cleanup, omitted source content cannot be reconstructed from hashes;
+  - D1 is unsatisfied and L4 remains open;
+  - nothing is runtime-reachable.
+- STOP -- pre-live advisory candidate. No live canary, Greenhouse contact, raw staging,
+  attempt reservation, captured fixture, final `C`/`A`, persistence, or other slice.
+
+```workflow-metadata
+workflow_version: v3.2
+state: pending
+slice_id: 2026-10-05-phase4-greenhouse-live-canary-s2c-eeac72a
+slice_kind: tooling
+risk_class: H
+base_sha: eeac72abb2ba930fb469a4abb563a7601826266a
+declared_gate: final
+```
