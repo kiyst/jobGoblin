@@ -724,10 +724,14 @@ findings: none
 
 ```workflow-metadata
 workflow_version: v3.2
-state: pending
+state: published
 slice_id: 2026-10-04-workflow-throughput-protocol-retention-6752dcd
 slice_kind: docs
 risk_class: D
 base_sha: 6752dcdc0ce1b57c0af164aa217d3181566086bd
 declared_gate: final
+executed_gate: final
+candidate_sha: eac6f0a37e9ceb8a744b2c0c54b1c2315e08ebd2
+receipt_id: 734bd347-bac1-4a8d-a3e7-97b957a995bb
+receipt_path: docs/verification-receipts/eac6f0a37e9ceb8a744b2c0c54b1c2315e08ebd2/734bd347-bac1-4a8d-a3e7-97b957a995bb.json
 ```
