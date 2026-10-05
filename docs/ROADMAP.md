@@ -625,7 +625,7 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   API). **Merged into `main` at `M=f509e80f68505dbdee7d8aed5f2748b805eaec4d` /
   `Q=e670575d5b05395cb9eeb2ec84833cc0034c7002`** (merge record in
   [LLM_HANDOFF.md](LLM_HANDOFF.md)).
-- **Phase 4 S2b (`phase-4/greenhouse-content-mapping-s2b`, in progress): offline
+- **Phase 4 S2b (`phase-4/greenhouse-content-mapping-s2b`): offline
   Greenhouse content conversion and strict `PostingInputs` mapping
   ([ADR 0015](DECISIONS/0015-greenhouse-content-conversion-and-posting-input-mapping.md)).**
   Pilot product slice 3 of 3. A Greenhouse board may declare
@@ -638,8 +638,20 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   `location` into `PostingInputs`. Evidence is offline only: synthetic HTML and 30
   reconstructed synthetic envelopes, not captured Greenhouse HTML or list-endpoint
   encoding. Nothing is registered, reachable at runtime, or persisted; salary stays
-  excluded and D1 unsatisfied. After S2b's `Q`, the ADR 0012 pilot evaluation precedes
-  any S2c authorization; S2c, S3, and S4 remain unauthorized.
+  excluded and D1 unsatisfied. **Merged into `main` at
+  `M=692c420e47f0e0b23acc8be6aec020b7eb3377d9` /
+  `Q=6752dcdc0ce1b57c0af164aa217d3181566086bd`** (merge record in
+  [LLM_HANDOFF.md](LLM_HANDOFF.md)). Phase 4 is not complete.
+- **ADR 0012 pilot evaluation (`workflow/throughput-protocol-retention`): Workflow
+  Throughput Protocol retained with bounded operational revisions O1–O5
+  ([ADR 0016](DECISIONS/0016-workflow-throughput-pilot-evaluation-and-retention.md)).**
+  This is a documentation-policy slice, not product work. After S2b's `Q`, it evaluated
+  the three pilot product slices (S1, S2, S2b) against a historical Phase 3 comparison
+  group, which is not a controlled baseline. It found fewer committed receipts per slice
+  and claims no measured time saving or unchanged assurance. The next workflow assessment
+  is at Phase 4 exit. It changes no validator, schema, reviewer role, or receipt rule. It
+  authorizes no S2c, provider contact, persistence, D1, S3, or S4; each still requires
+  separate explicit user authorization.
 - **Phases 5-14: not started.** Begin each phase only after completing its preflight in
   [PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md) and receiving approval for the next
   smallest slice.

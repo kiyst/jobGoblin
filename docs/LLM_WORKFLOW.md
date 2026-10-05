@@ -409,9 +409,9 @@ Status: active, adopted per ADR 0008's accepted principles and activated per ADR
 explicitly superseded below continues to apply — the Definition of Ready, risk classes,
 revision discipline, adversarial self-review, and the closed historical-pilot section
 above remain in force. This section adds the durable-evidence and gate mechanism ADR 0008
-deferred to a separately authorized slice. A bounded operational pilot layered on top of
-it, which changes only review timing and ordering, is defined in "Workflow Throughput
-Protocol pilot (ADR 0012)" below.
+deferred to a separately authorized slice. An operational protocol layered on top of it,
+which changes only review timing and ordering, is defined in "Workflow Throughput
+Protocol (ADR 0012, retained by ADR 0016)" below.
 
 ### Reviewer roles (ADR 0008 principles 3–4)
 
@@ -543,16 +543,24 @@ an empty finding list.
 A receipt, an `approved` verdict, or any mechanically-satisfied gate never substitutes for
 the user's own merge authorization — unchanged from v3 and v3.1.
 
-### Workflow Throughput Protocol pilot (ADR 0012)
+### Workflow Throughput Protocol (ADR 0012, retained by ADR 0016)
 
-Status: a bounded operational pilot, recorded in
-[ADR 0012](DECISIONS/0012-workflow-throughput-protocol-pilot.md). It takes effect only
-once its own activation slice reaches `Q` on `main`. It then applies to the next three
-product-oriented implementation slices. Astra approved the policy with binding amendments
-A1–A10, and Sol approved it as compatible with the current validators. Both were policy
-consultations, not formal `R` reviews.
+Status: retained with bounded operational revisions O1–O5, per
+[ADR 0016](DECISIONS/0016-workflow-throughput-pilot-evaluation-and-retention.md), once
+that ADR's slice reaches `Q` on `main`. The protocol began as a bounded pilot recorded in
+[ADR 0012](DECISIONS/0012-workflow-throughput-protocol-pilot.md). The pilot covered the
+three product-oriented slices after its activation, Phase 4 S1, S2, and S2b. All three
+reached `Q`, and ADR 0016 records the evaluation that ADR 0012's exit criteria required.
+The rules below continue for executable or semantic slices, as amended by "Retention and
+operational revisions O1–O5 (ADR 0016)" at the end of this subsection.
 
-**Precedence.** The pilot changes operational ordering and review timing only. These
+None of the policy consultations was a formal `R` review:
+
+- for ADR 0012, Astra's binding amendments A1–A10 and Sol's compatibility approval;
+- for ADR 0016, Sol's binding amendments E9–E13 and Astra's binding amendments E1–E8 as
+  relayed. ADR 0016 records that Astra's full response was not received.
+
+**Precedence.** The protocol changes operational ordering and review timing only. These
 remain controlling:
 
 - the existing validators and transition rules;
@@ -563,11 +571,12 @@ remain controlling:
 - handoff retention;
 - safety policy.
 
-When pilot text conflicts with an existing validator-enforced rule, the existing rule wins
-until it is separately amended. Nothing here weakens any other requirement in this file.
+When protocol text conflicts with an existing validator-enforced rule, the existing rule
+wins until it is separately amended. Nothing here weakens any other requirement in this
+file.
 
-**Product priority.** Pilot slices prioritize reachable product behavior. That priority
-never authorizes:
+**Product priority.** Slices under the protocol prioritize reachable product behavior.
+That priority never authorizes:
 
 - skipping ADR 0011's D1/D2 prerequisites;
 - enlarging slices;
@@ -770,7 +779,7 @@ Direct-parent-only authoritative scope calculation is prohibited. Any future opt
 must validate full lineage and inherited changes against valid prior evidence, as its own
 separately authorized proposal with tests, a final gate, and independent review.
 
-**Metrics.** Record separately for each pilot slice:
+**Metrics.** Record separately for each slice under the protocol:
 
 - proposal-review, advisory-review, and formal-review rounds;
 - executable findings;
@@ -788,10 +797,71 @@ Failures and extra runs are reported honestly and are not policy violations. Com
 similarly risky slices; three defect-free slices do not by themselves prove unchanged
 assurance.
 
-**Exit and rollback.** After the third pilot slice, compare its metrics with similarly
-risky Phase 3 work and decide separately whether to retain, revise, or end the pilot. To
-roll back, stop using the pilot and return to the prior ordering, where review follows
-receipt publication. Historical commits are never rewritten.
+**Exit evaluation, next assessment, and rollback.** ADR 0012's exit evaluation was
+performed after the third pilot slice. ADR 0016 records it and retains the protocol with
+O1–O5. The next workflow assessment is at Phase 4 exit, with an earlier O5 incident
+assessment whenever O5 is triggered. To roll back, stop using the adopted ordering and
+return to the prior ordering, where review follows receipt publication. Historical
+commits are never rewritten.
+
+**Retention and operational revisions O1–O5 (ADR 0016).** These revise operational
+practice only. They change no validator, verification tool, metadata schema, reviewer
+role, receipt binding, `C -> A -> R -> M -> Q` rule, handoff retention, registered-witness
+policy, affected-surface calculation, or merge or publication rule. ADR 0016's
+evaluation found fewer committed receipts per slice. It does not establish a time saving,
+unchanged assurance, improved relay frequency, or generalization to live-provider or
+persistence work.
+
+- **O1 — Pre-advisory verification default.** Before advisory implementation review, the
+  default evidence is:
+  - focused tests;
+  - static checks;
+  - relevant evaluator comparisons;
+  - contract tests;
+  - targeted mutation evidence.
+
+  Routine full-suite execution is normally reserved for genuine final `C` verification
+  and post-merge `M` verification. This is a default, not a prohibition or a closed
+  exception list. Any concrete risk-based reason may justify an earlier broad run.
+  Required checks always win. Additional runs are not presumed waste without examining
+  their purpose and results.
+- **O2 — Actionable review evidence.** An implementation, advisory, or formal review of an
+  immutable repository candidate is actionable only when it gives the verdict, an
+  accessible immutable reference to the complete findings or amendments, the reviewed
+  candidate SHA, and the contract identity. A proposal or policy review for which no
+  candidate commit exists instead requires an accessible immutable proposal or decision
+  identity and the applicable repository base; it must not invent a reviewed candidate
+  SHA.
+  - If no durable accessible reference exists, relay the complete actionable review.
+  - A repeated message may be acknowledged without action only when it has already been
+    handled, repository state is unchanged, and it provides no new authorization,
+    evidence, finding, or branch change.
+  - Otherwise, reassess current state before acting.
+- **O3 — Product capability statement.** Every subsequent authorized product slice must
+  state the concrete dependency it removes or the newly reachable capability it creates.
+  This requirement does not force premature runtime wiring or weaken prerequisites.
+- **O4 — Formal-review evidence reuse and authority.** Formal `R` must record:
+  - the reviewed advisory SHA;
+  - material changes through final `C`;
+  - how those changes were reviewed;
+  - checks independently rerun;
+  - evidence inspected or relied upon;
+  - unresolved limitations.
+
+  This permits formal R to reuse advisory evidence. The formal reviewer still determines
+  the proportionate review depth, independently verifies C/A lineage, receipt integrity,
+  all material changes through final C, and enough semantics to own the verdict. Nothing
+  presumes advisory clearance, caps formal-review scope, or prevents a complete semantic
+  rereview. Formal R’s unrestricted authority to reject is unchanged.
+- **O5 — Incident assessment trigger.** Any escaped defect or post-`A` executable
+  correction must:
+  1. be handled immediately under existing controls;
+  2. trigger a bounded assessment of whether advisory-review ordering contributed;
+  3. produce a decision to retain, revise, pause, or end the adopted ordering.
+
+  This is an assessment trigger. It is not automatic rollback, emergency tooling
+  authorization, or permission to bypass the workflow. It grants no permission for S2c,
+  provider contact, persistence or D1, or reviewer-role or schema changes.
 
 **Deferred and unauthorized** (each needs its own proposal):
 
@@ -802,7 +872,9 @@ receipt publication. Historical commits are never rewritten.
 - automated cross-session relay;
 - changed handoff retention;
 - changed review schemas;
-- validator or verification-tooling changes.
+- validator or verification-tooling changes;
+- a new metrics framework;
+- another model-approval layer.
 
 ## Established conventions are defaults
 
