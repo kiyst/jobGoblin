@@ -10,14 +10,19 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import dataclasses
 import hashlib
 import html
+import io
 import json
 import os
+import secrets
+import shutil
 import socket
 import subprocess
 import sys
 import textwrap
+import threading
 import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -840,7 +845,11 @@ def test_reservation_blocks_rerun_after_cleanup(paths: canary.CanaryPaths) -> No
     summary = {"run_verdict": "INCONCLUSIVE", "run_kind": "http_status:503"}
     _run_live(paths, _worker_writing(summary, paths.summary))
     before = paths.reservation.read_bytes()
-    canary.cleanup_staging(paths, expected_raw_sha256=None, expected_raw_bytes=None)
+    paths.report.write_text("# S2c report\n", encoding="utf-8")
+    binding = canary.CleanupBinding(SHA, CANDIDATE, None, canary.file_sha256(paths.report))
+    canary.cleanup_staging(
+        paths, expected_raw_sha256=None, expected_raw_bytes=None, binding=binding, git=_git()
+    )
     assert not paths.staging_dir.exists()
     with pytest.raises(canary.CanaryRefusal) as refusal:
         _run_live(paths, _worker_writing(summary, paths.summary))
@@ -882,6 +891,7 @@ def test_run_live_records_outer_deadline(paths: canary.CanaryPaths) -> None:
 
 class _StuckProcess:
     returncode = None
+    stdin = None
 
     def __init__(self, *_: Any, **__: Any) -> None:
         self.stops: list[str] = []
@@ -911,7 +921,9 @@ def test_unconfirmed_termination_fails_closed(
 
 
 def test_worker_refuses_without_its_preconditions(paths: canary.CanaryPaths) -> None:
-    assert canary.worker_main(paths) == 3  # no live env, no reservation, no staging
+    # No live env, no supervisor token, no reservation, no staging.
+    assert canary.worker_main(paths, env={}, token="") == 3
+    assert canary.worker_main(paths, env=_LIVE_ENV, token="") == 3
 
 
 def test_default_invocation_refuses(capsys: pytest.CaptureFixture[str]) -> None:
@@ -1052,10 +1064,8 @@ def test_selection_rule_follows_provider_order() -> None:
         (3, "distinct_outcome"),
         (4, "distinct_outcome"),
     ]
-    assert canary.expected_selection(rows, frozenset({1, 2, 3, 4})) == [
-        (0, "distinct_outcome"),
-        (6, "distinct_outcome"),
-    ]
+    # Without an eligible converted record, nothing is selected.
+    assert canary.expected_selection(rows, frozenset({1, 2})) == []
     invalid = _rows("converted", disposition="duplicate")
     assert canary.expected_selection(invalid, frozenset()) == []
 
@@ -1079,11 +1089,11 @@ def test_projection_keeps_only_the_allowlist_and_exact_excerpt() -> None:
 @pytest.mark.parametrize(
     ("content", "start", "end", "kind"),
     [
-        ("a" * 2001, 0, 2001, "excerpt_code_point_cap"),
-        ("\U0001f600" * 1025, 0, 1025, "excerpt_utf8_byte_cap"),
-        ("abc", 2, 1, "excerpt_offsets_invalid"),
-        ("abc", 0, 4, "excerpt_offsets_invalid"),
-        ("ab\ud800c", 0, 4, "excerpt_not_utf8_encodable"),
+        pytest.param("a" * 2002, 0, 2001, "excerpt_code_point_cap", id="code_points"),
+        pytest.param("\U0001f600" * 1026, 0, 1025, "excerpt_utf8_byte_cap", id="utf8_bytes"),
+        pytest.param("abc", 2, 1, "excerpt_offsets_invalid", id="inverted"),
+        pytest.param("abc", 0, 4, "excerpt_offsets_invalid", id="past_end"),
+        pytest.param("ab\ud800cd", 0, 4, "excerpt_not_utf8_encodable", id="surrogate"),
     ],
 )
 def test_excerpt_bounds_refuse(content: str, start: int, end: int, kind: str) -> None:
@@ -1093,8 +1103,8 @@ def test_excerpt_bounds_refuse(content: str, start: int, end: int, kind: str) ->
 
 
 def test_excerpt_bounds_accept_exact_limits() -> None:
-    canary.check_excerpt_bounds("a" * 2000, 0, 2000)
-    canary.check_excerpt_bounds("\U0001f600" * 1024, 0, 1024)
+    canary.check_excerpt_bounds("a" * 2001, 0, 2000)
+    canary.check_excerpt_bounds("\U0001f600" * 1025, 1, 1025)
 
 
 def _observed_run(
@@ -1202,7 +1212,7 @@ def test_canonical_hashing_is_the_repository_algorithm() -> None:
         ),
         pytest.param(
             lambda d: d["selected"][0].__setitem__("reviewer", None),
-            "review_disposition_invalid",
+            "decisions_invalid",
             id="no_reviewer",
         ),
         pytest.param(
@@ -1234,7 +1244,7 @@ def test_build_projection_refuses_screening_hits(
     records = [record(1, content=escaped("<p>Email recruiter@example.com today</p>"))]
     raw, summary = _observed_run(paths, taxonomy, records)
     content = records[0]["content"]
-    decisions = {"selected": [_decision(0, "first_converted", (0, len(content)))]}
+    decisions = {"selected": [_decision(0, "first_converted", (0, len(content) - 1))]}
     with pytest.raises(canary.CanaryRefusal, match="screening_hit"):
         canary.build_projection(raw, summary, decisions, taxonomy)
 
@@ -1331,28 +1341,94 @@ def test_display_excerpt_caps_at_one_thousand_characters() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _staged(paths: canary.CanaryPaths, taxonomy: TaxonomyIndex) -> dict[str, Any]:
-    summary = run_pipeline(paths, Recorder(body_of([record(1)])), taxonomy)
+CANDIDATE = "c" * 40
+
+
+def _git(
+    *,
+    head: str = CANDIDATE,
+    status: str = "",
+    range_objects: str = "",
+    index: str = "",
+    changed: str = "",
+    log: str = "",
+) -> Callable[[Any], str]:
+    """A fake `git` for the cleanup binding; `rev-list` always lists the
+    candidate as descending from the base."""
+
+    def git(args: Any) -> str:
+        outputs = {
+            "rev-parse": head + "\n",
+            "status": status,
+            "rev-list": CANDIDATE + "\n" + range_objects,
+            "ls-files": index,
+            "diff": changed,
+            "log": log,
+        }
+        return outputs.get(args[0], "")
+
+    return git
+
+
+def _approved(
+    paths: canary.CanaryPaths,
+    taxonomy: TaxonomyIndex,
+    *,
+    with_fixture: bool = True,
+    report_text: str = "# S2c live canary report\n\nAggregates only.\n",
+) -> tuple[dict[str, Any], canary.CleanupBinding]:
+    """A staged run plus an approved fixture/report pair bound to CANDIDATE."""
+    records = [record(1)]
+    summary = run_pipeline(paths, Recorder(body_of(records)), taxonomy)
     canary.exclusive_write(paths.summary, json.dumps(summary).encode())
     (paths.staging_dir / "drafts").mkdir()
     (paths.staging_dir / "drafts" / "preview.json").write_bytes(b"{}")
-    return summary
+    fixture_sha = None
+    if with_fixture:
+        span = _balanced_excerpt(records[0]["content"])
+        document = canary.build_projection(
+            paths.raw.read_bytes(),
+            summary,
+            {"selected": [_decision(0, "first_converted", span)]},
+            taxonomy,
+        )
+        paths.fixture.write_text(json.dumps(document, indent=2), encoding="utf-8")
+        fixture_sha = canary.file_sha256(paths.fixture)
+    paths.report.write_text(report_text, encoding="utf-8")
+    binding = canary.CleanupBinding(SHA, CANDIDATE, fixture_sha, canary.file_sha256(paths.report))
+    return summary, binding
+
+
+def _cleanup(
+    paths: canary.CanaryPaths,
+    summary: dict[str, Any],
+    binding: canary.CleanupBinding,
+    git: Callable[[Any], str],
+) -> dict[str, Any]:
+    capture = summary["capture"]
+    return canary.cleanup_staging(
+        paths,
+        expected_raw_sha256=capture["complete_response_sha256"],
+        expected_raw_bytes=capture["complete_response_bytes"],
+        binding=binding,
+        git=git,
+    )
 
 
 def test_cleanup_inventories_deletes_staging_and_keeps_the_reservation(
     paths: canary.CanaryPaths, taxonomy: TaxonomyIndex
 ) -> None:
-    summary = _staged(paths, taxonomy)
+    summary, binding = _approved(paths, taxonomy)
     paths.reservation.write_bytes(b'{"event": "reserved"}\n')
     reservation = paths.reservation.read_bytes()
-    capture = summary["capture"]
-    attestation = canary.cleanup_staging(
-        paths,
-        expected_raw_sha256=capture["complete_response_sha256"],
-        expected_raw_bytes=capture["complete_response_bytes"],
-    )
+    raw = paths.raw.read_bytes()
+    attestation = _cleanup(paths, summary, binding, _git())
     assert not paths.staging_dir.exists()
     assert paths.reservation.read_bytes() == reservation
+    assert attestation["pre_deletion_checks"] == dict.fromkeys(
+        attestation["pre_deletion_checks"], True
+    )
+    assert attestation["raw_blob"] == canary.git_blob_id(raw)
     inventory = {entry["path"]: entry for entry in attestation["inventory"]}
     assert set(inventory) == {
         "drafts",
@@ -1360,26 +1436,175 @@ def test_cleanup_inventories_deletes_staging_and_keeps_the_reservation(
         "raw-response.bin",
         "run-summary.json",
     }
-    assert inventory["raw-response.bin"]["sha256"] == capture["complete_response_sha256"]
+    assert inventory["raw-response.bin"]["sha256"] == hashlib.sha256(raw).hexdigest()
     assert attestation["inventory_sha256"] == canonical_json_hash(
         {"inventory": attestation["inventory"]}
     )
     assert "content" not in json.dumps(attestation["inventory"])
+    checks = canary.verify_cleanup(
+        paths, binding=binding, raw_blob=attestation["raw_blob"], git=_git()
+    )
+    assert checks == dict.fromkeys(checks, True)
+    assert len(checks) == 14
+
+
+def test_git_blob_id_matches_git() -> None:
+    assert canary.git_blob_id(b"hello\n") == "ce013625030ba8dba906f756967f9e9ca394464a"
 
 
 def test_cleanup_refuses_a_raw_mismatch_and_deletes_nothing(
     paths: canary.CanaryPaths, taxonomy: TaxonomyIndex
 ) -> None:
-    _staged(paths, taxonomy)
+    _, binding = _approved(paths, taxonomy)
     with pytest.raises(canary.CanaryRefusal, match="raw_capture_mismatch"):
-        canary.cleanup_staging(paths, expected_raw_sha256="0" * 64, expected_raw_bytes=1)
+        canary.cleanup_staging(
+            paths, expected_raw_sha256="0" * 64, expected_raw_bytes=1, binding=binding, git=_git()
+        )
     assert paths.raw.exists()
 
 
-def test_cleanup_refuses_links_without_following_them(
-    paths: canary.CanaryPaths, tmp_path: Path
+def test_raw_response_copied_into_the_report_blocks_cleanup(
+    paths: canary.CanaryPaths, taxonomy: TaxonomyIndex
 ) -> None:
-    paths.staging_dir.mkdir()
+    """Approved hash and clean screening do not make a raw copy publishable."""
+    summary = run_pipeline(paths, Recorder(body_of([record(1)])), taxonomy)
+    raw_text = paths.raw.read_text(encoding="utf-8")
+    paths.raw.unlink()
+    shutil.rmtree(paths.staging_dir)
+    summary, binding = _approved(paths, taxonomy, report_text=f"# Report\n\n{raw_text}\n")
+    with pytest.raises(canary.CanaryRefusal) as refusal:
+        _cleanup(paths, summary, binding, _git())
+    assert refusal.value.kind == "publication_binding_failed:raw_bytes_absent_from_tracked_paths"
+    assert paths.raw.exists()
+
+
+@pytest.mark.parametrize("where", ["other_tracked_path", "commit_range_blob", "index_blob"])
+def test_raw_response_under_any_filename_blocks_cleanup(
+    where: str, paths: canary.CanaryPaths, taxonomy: TaxonomyIndex, tmp_path: Path
+) -> None:
+    summary, binding = _approved(paths, taxonomy)
+    raw = paths.raw.read_bytes()
+    blob = canary.git_blob_id(raw)
+    elsewhere = tmp_path / "innocent-name.json"
+    elsewhere.write_bytes(raw)
+    git = {
+        "other_tracked_path": _git(changed=str(elsewhere) + "\n"),
+        "commit_range_blob": _git(range_objects=f"{blob} docs/innocent.md\n"),
+        "index_blob": _git(index=f"100644 {blob} 0\tdocs/innocent.md\n"),
+    }[where]
+    expected = {
+        "other_tracked_path": "raw_bytes_absent_from_tracked_paths",
+        "commit_range_blob": "raw_blob_absent_from_commit_range",
+        "index_blob": "raw_blob_absent_from_index",
+    }[where]
+    with pytest.raises(canary.CanaryRefusal) as refusal:
+        _cleanup(paths, summary, binding, git)
+    assert refusal.value.kind == f"publication_binding_failed:{expected}"
+    assert paths.raw.exists()
+
+
+def _set_reviewer(paths: canary.CanaryPaths) -> None:
+    document = json.loads(paths.fixture.read_text(encoding="utf-8"))
+    document["selected"][0]["review"]["reviewer"] = "someone else"
+    paths.fixture.write_text(json.dumps(document, indent=2), encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    ("mutate", "failed"),
+    [
+        pytest.param(_set_reviewer, "fixture_matches_approval", id="fixture_after_approval"),
+        pytest.param(
+            lambda p: p.report.write_text("# changed\n", encoding="utf-8"),
+            "report_matches_approval",
+            id="report_after_approval",
+        ),
+        pytest.param(
+            lambda p: p.fixture.unlink(), "fixture_matches_approval", id="fixture_missing"
+        ),
+    ],
+)
+def test_artifact_changes_after_approval_block_cleanup(
+    mutate: Callable[[canary.CanaryPaths], Any],
+    failed: str,
+    paths: canary.CanaryPaths,
+    taxonomy: TaxonomyIndex,
+) -> None:
+    summary, binding = _approved(paths, taxonomy)
+    mutate(paths)
+    with pytest.raises(canary.CanaryRefusal) as refusal:
+        _cleanup(paths, summary, binding, _git())
+    assert refusal.value.kind == f"publication_binding_failed:{failed}"
+    assert paths.raw.exists()
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("publication_safe", False),
+        ("excerpt_replay_disposition", "not_performed"),
+        ("full_capture_fidelity_disposition", "not_performed"),
+        ("full_capture_fidelity_disposition", "unknown"),
+        ("reviewer", ""),
+    ],
+)
+def test_unapproved_review_states_block_cleanup_even_when_hash_bound(
+    field: str, value: Any, paths: canary.CanaryPaths, taxonomy: TaxonomyIndex
+) -> None:
+    summary, _ = _approved(paths, taxonomy)
+    document = json.loads(paths.fixture.read_text(encoding="utf-8"))
+    document["selected"][0]["review"][field] = value
+    paths.fixture.write_text(json.dumps(document, indent=2), encoding="utf-8")
+    binding = canary.CleanupBinding(
+        SHA, CANDIDATE, canary.file_sha256(paths.fixture), canary.file_sha256(paths.report)
+    )
+    with pytest.raises(canary.CanaryRefusal) as refusal:
+        _cleanup(paths, summary, binding, _git())
+    assert refusal.value.kind == "publication_binding_failed:fixture_matches_approval"
+
+
+@pytest.mark.parametrize(
+    ("git", "failed"),
+    [
+        (_git(head="d" * 40), "head_is_candidate"),
+        (_git(status=" M docs/x.md\n"), "tree_clean"),
+    ],
+)
+def test_cleanup_is_bound_to_the_clean_reviewed_candidate(
+    git: Callable[[Any], str], failed: str, paths: canary.CanaryPaths, taxonomy: TaxonomyIndex
+) -> None:
+    summary, binding = _approved(paths, taxonomy)
+    with pytest.raises(canary.CanaryRefusal) as refusal:
+        _cleanup(paths, summary, binding, git)
+    assert refusal.value.kind == f"publication_binding_failed:{failed}"
+
+
+def test_malformed_binding_blocks_cleanup(
+    paths: canary.CanaryPaths, taxonomy: TaxonomyIndex
+) -> None:
+    summary, binding = _approved(paths, taxonomy)
+    bad = canary.CleanupBinding(SHA, "not-a-sha", binding.fixture_sha256, binding.report_sha256)
+    with pytest.raises(canary.CanaryRefusal) as refusal:
+        _cleanup(paths, summary, bad, _git())
+    assert refusal.value.kind == "publication_binding_failed:binding_well_formed"
+
+
+def test_findings_only_state_requires_an_absent_fixture(
+    paths: canary.CanaryPaths, taxonomy: TaxonomyIndex
+) -> None:
+    summary, binding = _approved(paths, taxonomy, with_fixture=False)
+    paths.fixture.write_text("{}", encoding="utf-8")
+    with pytest.raises(canary.CanaryRefusal) as refusal:
+        _cleanup(paths, summary, binding, _git())
+    assert refusal.value.kind == "publication_binding_failed:fixture_matches_approval"
+    paths.fixture.unlink()
+    _cleanup(paths, summary, binding, _git())
+    assert not paths.staging_dir.exists()
+
+
+def test_cleanup_refuses_links_without_following_them(
+    paths: canary.CanaryPaths, taxonomy: TaxonomyIndex, tmp_path: Path
+) -> None:
+    summary, binding = _approved(paths, taxonomy)
     outside = tmp_path / "outside.txt"
     outside.write_bytes(b"keep")
     try:
@@ -1387,35 +1612,38 @@ def test_cleanup_refuses_links_without_following_them(
     except OSError:
         pytest.skip("symlink creation is not permitted on this host")
     with pytest.raises(canary.CanaryRefusal, match="staging_link_refused"):
-        canary.cleanup_staging(paths, expected_raw_sha256=None, expected_raw_bytes=None)
+        _cleanup(paths, summary, binding, _git())
     assert outside.read_bytes() == b"keep"
 
 
-def _fake_git(outputs: dict[str, str]) -> Callable[[Any], str]:
-    def git(args: Any) -> str:
-        return outputs.get(args[0], "")
-
-    return git
-
-
-def test_verify_cleanup_reports_each_check(paths: canary.CanaryPaths) -> None:
-    clean = canary.verify_cleanup(paths, base_sha=SHA, git=_fake_git({}))
-    assert clean == dict.fromkeys(clean, True)
-    assert len(clean) == 7
+def test_verify_cleanup_reports_each_failure(
+    paths: canary.CanaryPaths, taxonomy: TaxonomyIndex
+) -> None:
+    summary, binding = _approved(paths, taxonomy)
+    blob = canary.git_blob_id(paths.raw.read_bytes())
+    _cleanup(paths, summary, binding, _git())
     residue = canary.verify_cleanup(
         paths,
-        base_sha=SHA,
-        git=_fake_git({"status": "!! staging/raw-response.bin\n", "log": ".claude/runtime/x\n"}),
+        binding=binding,
+        raw_blob=blob,
+        git=_git(
+            status="!! staging/raw-response.bin\n",
+            log=".claude/runtime/x\n",
+            range_objects=f"{blob} docs/x.md\n",
+        ),
     )
-    assert residue["no_staging_residue"] is False
-    assert residue["no_runtime_path_in_commit_range"] is False
+    for name in (
+        "no_staging_residue",
+        "tree_clean",
+        "no_runtime_path_in_commit_range",
+        "raw_blob_absent_from_commit_range",
+    ):
+        assert residue[name] is False
     paths.staging_dir.mkdir()
-    paths.fixture.write_text('{"schema_version": 1}')
-    paths.report.write_text("contact someone@example.com")
-    failing = canary.verify_cleanup(paths, base_sha=SHA, git=_fake_git({}))
+    _set_reviewer(paths)
+    failing = canary.verify_cleanup(paths, binding=binding, raw_blob=blob, git=_git())
     assert failing["staging_root_absent"] is False
-    assert failing["fixture_valid_or_absent"] is False
-    assert failing["report_screening_clean_or_absent"] is False
+    assert failing["fixture_matches_approval"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -1455,3 +1683,706 @@ def test_cli_eligibility_is_categorical(
     assert [r["screening_hits"] for r in rows] == [[], ["email"]]
     assert "example.com" not in out
     assert "Senior Software Engineer" not in out
+
+
+# ---------------------------------------------------------------------------
+# Correction 1: fidelity dispositions.
+# ---------------------------------------------------------------------------
+
+_OBSERVED: dict[str, Any] = {"run_verdict": None, "findings": []}
+
+
+@pytest.mark.parametrize(
+    ("full", "replay", "expected"),
+    [
+        pytest.param(
+            "faithful",
+            "not_performed",
+            (canary.Verdict.INCONCLUSIVE, ["fidelity_review_unavailable"]),
+            id="excerpt_replay_unavailable",
+        ),
+        pytest.param(
+            "not_performed",
+            "faithful",
+            (canary.Verdict.INCONCLUSIVE, ["fidelity_review_unavailable"]),
+            id="full_capture_unavailable",
+        ),
+        pytest.param("faithful", "faithful", (canary.Verdict.PASS, []), id="both_faithful"),
+        pytest.param(
+            "mismatch",
+            "faithful",
+            (canary.Verdict.PASS_WITH_FINDINGS, ["fidelity_mismatch"]),
+            id="full_capture_mismatch",
+        ),
+        pytest.param(
+            "faithful",
+            "mismatch",
+            (canary.Verdict.PASS_WITH_FINDINGS, ["fidelity_mismatch"]),
+            id="excerpt_replay_mismatch",
+        ),
+    ],
+)
+def test_each_fidelity_disposition_in_isolation(full: str, replay: str, expected: Any) -> None:
+    assert canary.compute_verdict(_OBSERVED, _selected(full, replay)) == expected
+
+
+@pytest.mark.parametrize("value", ["maybe", "", None, ["faithful"], 1])
+def test_fidelity_outside_the_closed_vocabulary_fails_closed(value: Any) -> None:
+    for full, replay in ((value, "faithful"), ("faithful", value)):
+        assert canary.compute_verdict(_OBSERVED, _selected(full, replay)) == (
+            canary.Verdict.FAIL_CLOSED,
+            ["review_disposition_invalid"],
+        )
+
+
+def test_fidelity_precedence_controls() -> None:
+    # Unavailable review outranks a mismatch; a settled FAIL-CLOSED run outranks both.
+    assert canary.compute_verdict(_OBSERVED, _selected("mismatch", "not_performed")) == (
+        canary.Verdict.INCONCLUSIVE,
+        ["fidelity_review_unavailable"],
+    )
+    failed = {"run_verdict": "FAIL-CLOSED", "run_kind": "record_cap_exceeded"}
+    assert canary.compute_verdict(failed, _selected("faithful", "not_performed")) == (
+        canary.Verdict.FAIL_CLOSED,
+        ["record_cap_exceeded"],
+    )
+    assert canary.compute_verdict(
+        _OBSERVED, _selected("faithful", "faithful"), cleanup_passed=False
+    )[0] is (canary.Verdict.FAIL_CLOSED)
+    vocabulary = {"faithful", "mismatch", "not_performed"}
+    assert vocabulary == canary.REVIEW_DISPOSITIONS
+
+
+# ---------------------------------------------------------------------------
+# Correction 1: converted-first selection and proper excerpts.
+# ---------------------------------------------------------------------------
+
+
+def test_selection_is_empty_without_an_eligible_converted_record() -> None:
+    assert (
+        canary.expected_selection(_rows("absent", "mixed_literal_and_escaped_markup"), frozenset())
+        == []
+    )
+    assert canary.expected_selection(_rows("absent", "converted", "blank"), frozenset({1})) == []
+    assert canary.expected_selection(_rows("converted", disposition="invalid"), frozenset()) == []
+
+
+def test_distinct_outcomes_are_eligible_only_after_the_first_converted_record() -> None:
+    rows = _rows("absent", "blank", "converted", "blank", "absent")
+    assert canary.expected_selection(rows, frozenset()) == [
+        (2, "first_converted"),
+        (3, "distinct_outcome"),
+        (4, "distinct_outcome"),
+    ]
+    assert canary.expected_selection(_rows("converted", "absent"), frozenset()) == [
+        (0, "first_converted"),
+        (1, "distinct_outcome"),
+    ]
+
+
+def test_negative_only_projection_is_refused(
+    paths: canary.CanaryPaths, taxonomy: TaxonomyIndex
+) -> None:
+    raw, summary = _observed_run(
+        paths, taxonomy, [record(1, content=None), record(2, content="  ")]
+    )
+    decisions = {"selected": [_decision(0, "distinct_outcome", None)]}
+    with pytest.raises(canary.CanaryRefusal, match="no_converted_sample"):
+        canary.build_projection(raw, summary, decisions, taxonomy)
+
+
+_SHORT = escaped("<p>Build Python services.</p>")
+
+
+@pytest.mark.parametrize(
+    ("content", "start", "end"),
+    [
+        pytest.param(_SHORT, 0, len(_SHORT), id="short_description"),
+        pytest.param("x", 0, 1, id="one_character"),
+        pytest.param("", 0, 0, id="empty"),
+    ],
+)
+def test_complete_source_excerpt_is_refused_however_short(
+    content: str, start: int, end: int
+) -> None:
+    with pytest.raises(canary.CanaryRefusal) as refusal:
+        canary.check_excerpt_bounds(content, start, end)
+    assert refusal.value.kind == "excerpt_is_complete_source"
+
+
+def test_short_description_regression_through_the_builder(
+    paths: canary.CanaryPaths, taxonomy: TaxonomyIndex
+) -> None:
+    records = [record(1, content=_SHORT)]
+    raw, summary = _observed_run(paths, taxonomy, records)
+    whole = {"selected": [_decision(0, "first_converted", (0, len(_SHORT)))]}
+    with pytest.raises(canary.CanaryRefusal, match="excerpt_is_complete_source"):
+        canary.build_projection(raw, summary, whole, taxonomy)
+    # Stable proper-excerpt control: the inner text only.
+    inner = (len(escaped("<p>")), len(_SHORT) - len(escaped("</p>")))
+    proper = {"selected": [_decision(0, "first_converted", inner)]}
+    document = canary.build_projection(raw, summary, proper, taxonomy)
+    assert document["replay_envelope"]["jobs"][0]["content"] == "Build Python services."
+    assert document["selected"][0]["golden_expectations"]["content_outcome"] == "converted"
+
+
+def _valid_document(paths: canary.CanaryPaths, taxonomy: TaxonomyIndex) -> dict[str, Any]:
+    records = [record(1)]
+    raw, summary = _observed_run(paths, taxonomy, records)
+    span = _balanced_excerpt(records[0]["content"])
+    return canary.build_projection(
+        raw, summary, {"selected": [_decision(0, "first_converted", span)]}, taxonomy
+    )
+
+
+def _whole_source_lineage(document: dict[str, Any]) -> None:
+    lineage = document["selected"][0]["lineage"]
+    length = lineage["excerpt_code_points"]
+    lineage.update(
+        excerpt_start_code_point=0,
+        excerpt_end_code_point_exclusive=length,
+        original_content_code_points=length,
+    )
+
+
+@pytest.mark.parametrize(
+    ("mutate", "kind"),
+    [
+        pytest.param(_whole_source_lineage, "excerpt_is_complete_source", id="whole_source"),
+        pytest.param(
+            lambda d: d["selected"][0]["review"].__setitem__("publication_safe", False),
+            "review_not_publication_safe",
+            id="unsafe",
+        ),
+        pytest.param(
+            lambda d: d["selected"][0]["review"].__setitem__(
+                "excerpt_replay_disposition", "not_performed"
+            ),
+            "review_not_performed",
+            id="excerpt_review_unperformed",
+        ),
+        pytest.param(
+            lambda d: d["selected"][0]["review"].__setitem__(
+                "full_capture_fidelity_disposition", "pending"
+            ),
+            "review_not_performed",
+            id="malformed_disposition",
+        ),
+        pytest.param(
+            lambda d: d["selected"][0]["review"].__setitem__("reviewer", " "),
+            "review_reviewer_invalid",
+            id="blank_reviewer",
+        ),
+        pytest.param(
+            lambda d: d["selected"][0].__setitem__("selection_reason", "distinct_outcome"),
+            "fixture_selection_order",
+            id="negative_only",
+        ),
+        pytest.param(
+            lambda d: (
+                d.__setitem__("selected", []),
+                d["replay_envelope"].update(jobs=[], meta={"total": 0}),
+            ),
+            "fixture_without_converted_sample",
+            id="empty",
+        ),
+    ],
+)
+def test_validate_fixture_rejects_unapproved_or_whole_source_states(
+    mutate: Callable[[dict[str, Any]], Any],
+    kind: str,
+    paths: canary.CanaryPaths,
+    taxonomy: TaxonomyIndex,
+) -> None:
+    document = _valid_document(paths, taxonomy)
+    canary.validate_fixture(document)  # control
+    mutate(document)
+    with pytest.raises(canary.CanaryRefusal) as refusal:
+        canary.validate_fixture(document)
+    assert refusal.value.kind == kind
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        pytest.param(
+            lambda d: d["selected"][0].__setitem__("ordinal", "SYNTHETIC"), id="ordinal_str"
+        ),
+        pytest.param(lambda d: d["selected"][0].__setitem__("ordinal", True), id="ordinal_bool"),
+        pytest.param(
+            lambda d: d["selected"][0].__setitem__("excerpt", {"start": "0", "end": 9}),
+            id="excerpt",
+        ),
+        pytest.param(lambda d: d["selected"][0].__setitem__("extra", 1), id="extra_key"),
+        pytest.param(
+            lambda d: d["selected"][0].__setitem__("publication_safe", "yes"), id="safe_str"
+        ),
+        pytest.param(
+            lambda d: d["selected"][0].__setitem__("selection_reason", "best"), id="reason"
+        ),
+        pytest.param(
+            lambda d: d.__setitem__("rejected", [{"ordinal": 1, "reason": "x"}]), id="reject"
+        ),
+        pytest.param(lambda d: d.__setitem__("selected", "all"), id="selected_type"),
+    ],
+)
+def test_decisions_are_type_checked_before_conversion(
+    mutate: Callable[[dict[str, Any]], Any],
+) -> None:
+    decisions: dict[str, Any] = {"selected": [_decision(0, "first_converted", (1, 5))]}
+    canary.validate_decisions(decisions)  # control
+    mutate(decisions)
+    with pytest.raises(canary.CanaryRefusal) as refusal:
+        canary.validate_decisions(decisions)
+    assert refusal.value.kind == "decisions_invalid"
+    assert "SYNTHETIC" not in str(refusal.value)
+
+
+# ---------------------------------------------------------------------------
+# Correction 1: exclusive supervisor-to-worker authorization.
+# ---------------------------------------------------------------------------
+
+
+def _launched(paths: canary.CanaryPaths) -> str:
+    """Reservation, staging, and the supervisor's one-time launch capability."""
+    canary.create_reservation(paths.reservation, _preflight(paths, _live_request(paths))).close()
+    paths.staging_dir.mkdir()
+    token = secrets.token_hex(32)
+    line = paths.reservation.read_bytes().splitlines(keepends=True)[0]
+    canary.exclusive_write(
+        paths.launch, json.dumps(canary.launch_capability(line, token), sort_keys=True).encode()
+    )
+    return token
+
+
+@pytest.fixture
+def pipeline_calls(monkeypatch: pytest.MonkeyPatch) -> list[Path]:
+    """Replaces the live pipeline and forbids any real transport construction."""
+    calls: list[Path] = []
+
+    async def fake(_: Any, raw_path: Path, __: Any) -> dict[str, Any]:
+        calls.append(raw_path)
+        return {"run_verdict": "INCONCLUSIVE", "run_kind": "http_status:503"}
+
+    def no_transport(*_: Any, **__: Any) -> None:
+        raise AssertionError("transport constructed")
+
+    monkeypatch.setattr(canary, "run_canary_pipeline", fake)
+    monkeypatch.setattr(httpx.AsyncHTTPTransport, "__init__", no_transport)
+    return calls
+
+
+def test_worker_with_its_supervisor_capability_runs_once(
+    paths: canary.CanaryPaths, pipeline_calls: list[Path]
+) -> None:
+    token = _launched(paths)
+    assert canary.worker_main(paths, env=_LIVE_ENV, token=token) == 0
+    assert pipeline_calls == [paths.raw]
+    claim = json.loads(paths.claim.read_text())
+    launch = json.loads(paths.launch.read_text())
+    assert (
+        claim["token_sha256"]
+        == launch["token_sha256"]
+        == hashlib.sha256(token.encode()).hexdigest()
+    )
+    assert token not in paths.launch.read_text()
+    # Duplicate launch with the same capability is refused before any transport.
+    assert canary.worker_main(paths, env=_LIVE_ENV, token=token) == 3
+    assert pipeline_calls == [paths.raw]
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        pytest.param(lambda p, t: "", id="direct_no_token"),
+        pytest.param(lambda p, t: secrets.token_hex(32), id="wrong_token"),
+        pytest.param(lambda p, t: (p.launch.unlink(), t)[1], id="launch_missing"),
+        pytest.param(
+            lambda p, t: (
+                p.launch.write_text(
+                    json.dumps({**json.loads(p.launch.read_text()), "advisory_sha": "b" * 40})
+                ),
+                t,
+            )[1],
+            id="launch_identity_mismatch",
+        ),
+        pytest.param(
+            lambda p, t: (
+                p.reservation.write_bytes(p.reservation.read_bytes() + b'{"event": "terminal"}\n'),
+                t,
+            )[1],
+            id="reservation_closed",
+        ),
+        pytest.param(
+            lambda p, t: (
+                p.reservation.write_bytes(
+                    p.reservation.read_bytes().replace(b"discord", b"gitlab")
+                ),
+                t,
+            )[1],
+            id="reservation_altered",
+        ),
+        pytest.param(lambda p, t: (p.raw.write_bytes(b"partial"), t)[1], id="raw_residue"),
+    ],
+)
+def test_worker_refuses_without_a_valid_supervisor_launch(
+    tamper: Callable[[canary.CanaryPaths, str], str],
+    paths: canary.CanaryPaths,
+    pipeline_calls: list[Path],
+) -> None:
+    token = tamper(paths, _launched(paths))
+    assert canary.worker_main(paths, env=_LIVE_ENV, token=token) == 3
+    assert pipeline_calls == []
+    assert not paths.claim.exists()
+
+
+def test_restart_after_the_request_began_is_refused(
+    paths: canary.CanaryPaths, pipeline_calls: list[Path]
+) -> None:
+    """Crash residue: the claim exists but no raw capture or summary does."""
+    token = _launched(paths)
+    canary.claim_worker(paths, token)
+    assert not paths.raw.exists() and not paths.summary.exists()
+    assert canary.worker_main(paths, env=_LIVE_ENV, token=token) == 3
+    assert pipeline_calls == []
+
+
+def test_concurrent_worker_claims_admit_exactly_one(paths: canary.CanaryPaths) -> None:
+    token = _launched(paths)
+    results: list[str] = []
+    barrier = threading.Barrier(8)
+
+    def attempt() -> None:
+        barrier.wait()
+        try:
+            canary.claim_worker(paths, token)
+            results.append("claimed")
+        except canary.CanaryRefusal as refusal:
+            results.append(refusal.kind)
+
+    threads = [threading.Thread(target=attempt) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert sorted(results) == ["claimed"] + ["worker_already_claimed"] * 7
+
+
+def test_direct_worker_cli_cannot_self_authorize() -> None:
+    completed = subprocess.run(
+        [sys.executable, str(HARNESS), "_worker"],
+        cwd=BACKEND_DIR,
+        env={**os.environ, **_LIVE_ENV},
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    # Refused either by the missing capability or by parent-loss containment
+    # (stdin is not a supervisor pipe); never authorized.
+    assert completed.returncode in (3, canary.PARENT_LOST_EXIT)
+    assert (completed.stdout, completed.stderr) == ("", "")
+
+
+class _Stdin:
+    def __init__(self, data: bytes, *, tty: bool = False) -> None:
+        self.buffer = io.BytesIO(data)
+        self.tty = tty
+
+    def isatty(self) -> bool:
+        return self.tty
+
+
+def test_worker_entry_reads_the_token_and_arms_parent_loss_containment(
+    paths: canary.CanaryPaths, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    events: list[Any] = []
+    monkeypatch.setattr(canary, "start_parent_loss_watchdog", lambda s: events.append(("watch", s)))
+
+    def fake_worker(_: Any, *, env: Any, token: str) -> int:
+        events.append(("worker", token))
+        return 0
+
+    monkeypatch.setattr(canary, "worker_main", fake_worker)
+    stdin = _Stdin(b"ab12\nignored")
+    assert canary.worker_entry(paths, stdin) == 0
+    assert events == [("watch", stdin.buffer), ("worker", "ab12")]
+    events.clear()
+    assert canary.worker_entry(paths, _Stdin(b"ab12\n", tty=True)) == 3
+    assert events == []
+
+
+_CLAIMING_WORKER = """
+import json, sys
+from pathlib import Path
+from scripts import run_greenhouse_s2c_canary as m
+p = m.CanaryPaths(**{{k: Path(v) for k, v in json.loads(sys.argv[1]).items()}})
+token = sys.stdin.buffer.readline().decode().strip()
+m.claim_worker(p, token)
+p.summary.write_text(json.dumps({{"run_verdict": None, "run_kind": None}}))
+"""
+
+
+def test_supervisor_launches_its_worker_with_a_one_time_stdin_capability(
+    paths: canary.CanaryPaths,
+) -> None:
+    layout = {f.name: str(getattr(paths, f.name)) for f in dataclasses.fields(paths)}
+    argv = [sys.executable, "-c", _CLAIMING_WORKER.format(), json.dumps(layout)]
+    outcome = canary.run_live(
+        _live_request(paths),
+        env={**os.environ, **_LIVE_ENV, "PYTHONPATH": str(BACKEND_DIR)},
+        paths=paths,
+        head_sha=lambda: SHA,
+        tree_is_clean=lambda: True,
+        worker_argv=argv,
+    )
+    assert outcome == "OBSERVED:pending_post_run_review"
+    launch = json.loads(paths.launch.read_text())
+    assert json.loads(paths.claim.read_text())["token_sha256"] == launch["token_sha256"]
+    line = paths.reservation.read_bytes().splitlines(keepends=True)[0]
+    assert launch["reservation_sha256"] == hashlib.sha256(line).hexdigest()
+    assert launch["advisory_sha"] == SHA
+
+
+# ---------------------------------------------------------------------------
+# Correction 1: supervisor interruption and parent-loss containment.
+# ---------------------------------------------------------------------------
+
+
+class _ScriptedProcess:
+    """Fake worker: the first wait raises `first`; it exits after
+    `stops_needed` stop calls (never, when larger than two)."""
+
+    stdin = None
+
+    def __init__(self, first: BaseException, stops_needed: int = 1) -> None:
+        self.first: BaseException | None = first
+        self.stops: list[str] = []
+        self.stops_needed = stops_needed
+        self.returncode: int | None = None
+
+    def wait(self, timeout: float | None = None) -> int:
+        if self.first is not None:
+            first, self.first = self.first, None
+            raise first
+        if len(self.stops) >= self.stops_needed:
+            self.returncode = -9
+            return -9
+        raise subprocess.TimeoutExpired("worker", timeout or 0)
+
+    def terminate(self) -> None:
+        self.stops.append("terminate")
+
+    def kill(self) -> None:
+        self.stops.append("kill")
+
+    def poll(self) -> int | None:
+        return self.returncode
+
+
+@pytest.mark.parametrize(
+    ("first", "stops_needed", "stops", "confirmed"),
+    [
+        pytest.param(KeyboardInterrupt(), 1, ["terminate"], True, id="interrupt"),
+        pytest.param(OSError("wait failed"), 1, ["terminate"], True, id="supervision_failure"),
+        pytest.param(KeyboardInterrupt(), 2, ["terminate", "kill"], True, id="graceful_failed"),
+        pytest.param(KeyboardInterrupt(), 3, ["terminate", "kill"], False, id="unkillable"),
+    ],
+)
+def test_abnormal_supervisor_exit_stops_and_reaps_the_worker(
+    first: BaseException,
+    stops_needed: int,
+    stops: list[str],
+    confirmed: bool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process = _ScriptedProcess(first, stops_needed)
+    monkeypatch.setattr(canary.subprocess, "Popen", lambda *_, **__: process)
+    with pytest.raises(canary.SupervisionAborted) as aborted:
+        canary.supervise_worker(["x"], deadline_seconds=5, grace_seconds=0.01)
+    assert aborted.value.confirmed is confirmed
+    assert process.stops == stops
+
+
+@pytest.mark.parametrize(
+    ("stops_needed", "outcome"),
+    [
+        (1, "FAIL-CLOSED:supervisor_interrupted"),
+        (3, "FAIL-CLOSED:worker_termination_unconfirmed"),
+    ],
+)
+def test_interrupted_run_live_records_after_reaping_and_keeps_the_reservation(
+    stops_needed: int, outcome: str, paths: canary.CanaryPaths, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    process = _ScriptedProcess(KeyboardInterrupt(), stops_needed)
+    monkeypatch.setattr(canary.subprocess, "Popen", lambda *_, **__: process)
+    with pytest.raises(canary.SupervisionAborted):
+        _run_live(paths, ["x"])
+    lines = _reservation_lines(paths)
+    assert [line["event"] for line in lines] == ["reserved", "terminal"]
+    assert lines[-1]["outcome"] == outcome
+    assert process.stops
+    with pytest.raises(canary.CanaryRefusal, match="attempt_already_reserved"):
+        _preflight(paths, _live_request(paths))
+
+
+def test_real_worker_is_reaped_when_supervision_is_interrupted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started: list[subprocess.Popen[bytes]] = []
+
+    class InterruptingPopen(subprocess.Popen[bytes]):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+            self.interrupt = True
+            started.append(self)
+
+        def wait(self, timeout: float | None = None) -> int:
+            if self.interrupt:
+                self.interrupt = False
+                raise KeyboardInterrupt
+            return super().wait(timeout)
+
+    monkeypatch.setattr(canary.subprocess, "Popen", InterruptingPopen)
+    with pytest.raises(canary.SupervisionAborted) as aborted:
+        canary.supervise_worker(_SLEEPER, deadline_seconds=30, grace_seconds=5)
+    assert aborted.value.confirmed is True
+    assert started[0].poll() is not None
+
+
+_WATCHED = (
+    "import sys, time\n"
+    "from scripts import run_greenhouse_s2c_canary as m\n"
+    "m.start_parent_loss_watchdog(sys.stdin.buffer)\n"
+    "time.sleep(30)\n"
+)
+
+
+def test_parent_loss_watchdog_ends_the_worker_when_the_pipe_closes() -> None:
+    child = subprocess.Popen(
+        [sys.executable, "-c", _WATCHED], cwd=BACKEND_DIR, stdin=subprocess.PIPE
+    )
+    try:
+        assert child.stdin is not None
+        child.stdin.write(b"token\n")
+        child.stdin.flush()
+        time.sleep(0.5)
+        assert child.poll() is None
+        child.stdin.close()
+        assert child.wait(timeout=15) == canary.PARENT_LOST_EXIT
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait()
+
+
+def test_killing_the_supervisor_process_ends_its_worker(tmp_path: Path) -> None:
+    marker = tmp_path / "worker-ended"
+    worker = (
+        "import os, sys, time, pathlib\n"
+        "from scripts import run_greenhouse_s2c_canary as m\n"
+        f"mark = pathlib.Path({str(marker)!r})\n"
+        "m.start_parent_loss_watchdog(sys.stdin.buffer,"
+        " lambda: (mark.write_text('parent lost'), os._exit(m.PARENT_LOST_EXIT)))\n"
+        "time.sleep(30)\n"
+    )
+    supervisor = (
+        "import subprocess, sys, time\n"
+        f"child = subprocess.Popen([sys.executable, '-c', {worker!r}], stdin=subprocess.PIPE)\n"
+        "print(child.pid, flush=True)\n"
+        "time.sleep(30)\n"
+    )
+    parent = subprocess.Popen(
+        [sys.executable, "-c", supervisor], cwd=BACKEND_DIR, stdout=subprocess.PIPE
+    )
+    assert parent.stdout is not None
+    assert parent.stdout.readline().strip()
+    time.sleep(0.5)
+    parent.kill()
+    parent.wait()
+    deadline = time.monotonic() + 15
+    while not marker.exists() and time.monotonic() < deadline:
+        time.sleep(0.1)
+    assert marker.read_text() == "parent lost"
+
+
+# ---------------------------------------------------------------------------
+# Correction 1: fail-closed CLI output (stdout/stderr sentinels).
+# ---------------------------------------------------------------------------
+
+SENTINEL = "SYNTHETIC_PRIVATE_TEXT"
+
+
+def _cli(paths: canary.CanaryPaths, argv: list[str], prelude: str = "") -> Any:
+    layout = {f.name: str(getattr(paths, f.name)) for f in dataclasses.fields(paths)}
+    code = (
+        "import json, sys\n"
+        "from pathlib import Path\n"
+        "from scripts import run_greenhouse_s2c_canary as m\n"
+        f"layout = json.loads({json.dumps(layout)!r})\n"
+        "p = m.CanaryPaths(**{k: Path(v) for k, v in layout.items()})\n"
+        f"{prelude}\n"
+        f"raise SystemExit(m.main({argv!r}, paths=p))\n"
+    )
+    return subprocess.run(
+        [sys.executable, "-c", code], cwd=BACKEND_DIR, capture_output=True, text=True, timeout=120
+    )
+
+
+def _stage_for_cli(paths: canary.CanaryPaths, taxonomy: TaxonomyIndex) -> Path:
+    records = [record(1, title=f"{SENTINEL} title")]
+    summary = run_pipeline(paths, Recorder(body_of(records)), taxonomy)
+    canary.exclusive_write(paths.summary, json.dumps(summary).encode())
+    decisions = paths.staging_dir / "decisions.json"
+    span = _balanced_excerpt(records[0]["content"])
+    decisions.write_text(json.dumps({"selected": [_decision(0, "first_converted", span)]}))
+    return decisions
+
+
+def _assert_categorical(completed: Any, kind: str) -> None:
+    assert completed.returncode == 2
+    assert json.loads(completed.stdout) == {"kind": kind, "result": "refused"}
+    assert completed.stderr == ""
+    assert SENTINEL not in completed.stdout + completed.stderr
+
+
+def test_malformed_decisions_produce_only_categorical_output(
+    paths: canary.CanaryPaths, taxonomy: TaxonomyIndex
+) -> None:
+    decisions = _stage_for_cli(paths, taxonomy)
+    data = json.loads(decisions.read_text())
+    data["selected"][0]["ordinal"] = SENTINEL
+    decisions.write_text(json.dumps(data))
+    _assert_categorical(
+        _cli(paths, ["project", "--decisions", str(decisions)]), "decisions_invalid"
+    )
+    decisions.write_text("{not json " + SENTINEL)
+    _assert_categorical(
+        _cli(paths, ["project", "--decisions", str(decisions)]), "decisions_invalid"
+    )
+
+
+@pytest.mark.parametrize(
+    ("argv_kind", "target"),
+    [("project", "build_projection"), ("eligibility", "published_screening")],
+)
+def test_post_run_failures_produce_only_categorical_output(
+    argv_kind: str, target: str, paths: canary.CanaryPaths, taxonomy: TaxonomyIndex
+) -> None:
+    decisions = _stage_for_cli(paths, taxonomy)
+    argv = ["project", "--decisions", str(decisions)] if argv_kind == "project" else ["eligibility"]
+    prelude = (
+        "def boom(*a, **k):\n"
+        f"    raise RuntimeError({SENTINEL!r}) from ValueError({SENTINEL!r})\n"
+        f"m.{target} = boom"
+    )
+    _assert_categorical(_cli(paths, argv, prelude), "operational_failure")
+    assert not paths.projection_preview.exists()
+
+
+def test_cli_interrupt_is_categorical(paths: canary.CanaryPaths) -> None:
+    prelude = "def stop(*a, **k):\n    raise KeyboardInterrupt\nm._staged_summary = stop"
+    completed = _cli(paths, ["eligibility"], prelude)
+    assert completed.returncode == 130
+    assert json.loads(completed.stdout) == {"kind": "interrupted", "result": "refused"}
+    assert completed.stderr == ""

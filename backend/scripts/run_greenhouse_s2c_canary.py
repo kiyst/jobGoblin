@@ -42,14 +42,17 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import hashlib
 import html
 import json
 import os
 import re
+import secrets
 import stat
 import subprocess
 import sys
+import threading
 import time
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
@@ -161,6 +164,14 @@ class CanaryPaths:
     def projection_preview(self) -> Path:
         return self.staging_dir / "projection-preview.json"
 
+    @property
+    def launch(self) -> Path:
+        return self.staging_dir / "worker-launch.json"
+
+    @property
+    def claim(self) -> Path:
+        return self.staging_dir / "worker-claim.json"
+
 
 _RUNTIME_DIR = REPO_ROOT / ".claude" / "runtime"
 LIVE_PATHS: Final = CanaryPaths(
@@ -186,6 +197,11 @@ class Verdict(StrEnum):
     PASS_WITH_FINDINGS = "PASS-WITH-FINDINGS"
     PASS = "PASS"
 
+
+# Closed fidelity-review vocabulary. A committed fixture records performed
+# reviews only (`faithful` or `mismatch`).
+REVIEW_DISPOSITIONS: Final = frozenset({"faithful", "mismatch", "not_performed"})
+PERFORMED_DISPOSITIONS: Final = frozenset({"faithful", "mismatch"})
 
 _PRECEDENCE: Final = (
     Verdict.FAIL_CLOSED,
@@ -621,7 +637,11 @@ def compute_verdict(
     cleanup_passed: bool | None = None,
 ) -> tuple[Verdict, list[str]]:
     """Final verdict with strict precedence. `selected` is the fixture's
-    reviewed selection (`None` when no fidelity review was performed)."""
+    reviewed selection (`None` when no fidelity review was performed).
+
+    Both fidelity dispositions must come from the closed vocabulary; either
+    one unavailable (`not_performed`) caps the verdict at INCONCLUSIVE, and
+    PASS requires both to be `faithful`."""
     reasons: dict[Verdict, list[str]] = {verdict: [] for verdict in Verdict}
     if summary.get("run_verdict") is not None:
         reasons[Verdict(summary["run_verdict"])].append(str(summary["run_kind"]))
@@ -632,14 +652,19 @@ def compute_verdict(
         if selected is None:
             reasons[Verdict.INCONCLUSIVE].append("fidelity_review_unavailable")
         else:
-            reviews = [entry["review"] for entry in selected]
-            if any(r["full_capture_fidelity_disposition"] == "not_performed" for r in reviews):
+            dispositions = [
+                entry.get("review", {}).get(field)
+                for entry in selected
+                for field in (
+                    "full_capture_fidelity_disposition",
+                    "excerpt_replay_disposition",
+                )
+            ]
+            if not all(isinstance(d, str) and d in REVIEW_DISPOSITIONS for d in dispositions):
+                reasons[Verdict.FAIL_CLOSED].append("review_disposition_invalid")
+            if "not_performed" in dispositions:
                 reasons[Verdict.INCONCLUSIVE].append("fidelity_review_unavailable")
-            if any(
-                r["full_capture_fidelity_disposition"] == "mismatch"
-                or r["excerpt_replay_disposition"] == "mismatch"
-                for r in reviews
-            ):
+            if "mismatch" in dispositions:
                 reasons[Verdict.PASS_WITH_FINDINGS].append("fidelity_mismatch")
             if not any(
                 entry["golden_expectations"]["content_outcome"] == ContentOutcome.CONVERTED.value
@@ -654,7 +679,7 @@ def compute_verdict(
 
 
 # ---------------------------------------------------------------------------
-# Attempt reservation and supervised worker.
+# Attempt reservation, launch capability, and supervised worker.
 # ---------------------------------------------------------------------------
 
 
@@ -684,10 +709,93 @@ def append_terminal_outcome(handle: IO[bytes], outcome: str) -> None:
     handle.close()
 
 
+_BOUND_RESERVATION_FIELDS: Final = (
+    "board_token",
+    "advisory_sha",
+    "contract_sha256",
+    "request_fingerprint",
+    "authorization_identity",
+    "authorization_sha256",
+)
+
+
+def launch_capability(reservation_line: bytes, token: str) -> dict[str, Any]:
+    """The one-time supervisor launch capability: bound to the exact checked
+    reservation line and to the hash of a secret token that only the
+    supervisor holds and passes to its own worker over the stdin pipe."""
+    record = json.loads(reservation_line.decode("utf-8"))
+    if not isinstance(record, dict) or record.get("event") != "reserved":
+        raise CanaryRefusal("reservation_invalid")
+    capability = {key: record.get(key) for key in _BOUND_RESERVATION_FIELDS}
+    capability["reservation_sha256"] = hashlib.sha256(reservation_line).hexdigest()
+    capability["token_sha256"] = hashlib.sha256(token.encode("ascii")).hexdigest()
+    return capability
+
+
+def claim_worker(paths: CanaryPaths, token: str) -> None:
+    """Validate the supervisor's launch capability against the open
+    reservation and atomically claim the single worker slot, before any
+    transport exists. A direct invocation, a missing or mismatched
+    capability, a reservation that already has a terminal outcome, crash
+    residue, a concurrent or duplicate launch, and a restart after the
+    request began are all refused."""
+    if not isinstance(token, str) or not _SHA256_RE.fullmatch(token):
+        raise CanaryRefusal("worker_token_invalid")
+    if not paths.staging_dir.is_dir() or not paths.reservation.is_file():
+        raise CanaryRefusal("worker_state_missing")
+    lines = paths.reservation.read_bytes().splitlines(keepends=True)
+    if len(lines) != 1:
+        raise CanaryRefusal("reservation_not_open")
+    try:
+        launch = json.loads(paths.launch.read_text(encoding="utf-8"))
+        expected = launch_capability(lines[0], token)
+    except (OSError, ValueError):
+        raise CanaryRefusal("launch_capability_invalid") from None
+    if (
+        launch != expected
+        or expected["board_token"] != BOARD_TOKEN
+        or expected["request_fingerprint"] != request_fingerprint()
+    ):
+        raise CanaryRefusal("launch_capability_invalid")
+    for path in (paths.claim, paths.raw, paths.summary):
+        if os.path.lexists(path):
+            raise CanaryRefusal("worker_already_claimed")
+    claim = {"token_sha256": expected["token_sha256"], "claimed_at": _now_iso()}
+    try:
+        exclusive_write(paths.claim, json.dumps(claim, sort_keys=True).encode("utf-8"))
+    except FileExistsError:
+        raise CanaryRefusal("worker_already_claimed") from None
+
+
 @dataclass(frozen=True)
 class WorkerResult:
     kind: str  # "exited" | "deadline_terminated" | "termination_unconfirmed"
     returncode: int | None
+
+
+class SupervisionAborted(Exception):  # noqa: N818 - a categorical abort, not an error report
+    """Supervision ended abnormally after launch (interrupt or supervision
+    failure). The worker has already been stopped and reaped when
+    `confirmed` is true."""
+
+    def __init__(self, confirmed: bool) -> None:
+        super().__init__("supervision_aborted")
+        self.confirmed = confirmed
+
+
+def _stop_and_reap(process: Any, grace_seconds: float) -> bool:
+    """Terminate, then kill; reap after each step. True once the worker is
+    confirmed gone."""
+    for stop in (process.terminate, process.kill):
+        with contextlib.suppress(OSError):  # already exited: confirmed by the reap below
+            stop()
+        try:
+            process.wait(timeout=grace_seconds)
+        except subprocess.TimeoutExpired:
+            continue
+        if process.poll() is not None:
+            return True
+    return process.poll() is not None
 
 
 def supervise_worker(
@@ -696,43 +804,83 @@ def supervise_worker(
     deadline_seconds: float = OUTER_DEADLINE_SECONDS,
     grace_seconds: float = TERMINATION_GRACE_SECONDS,
     env: Mapping[str, str] | None = None,
+    stdin_payload: bytes | None = None,
 ) -> WorkerResult:
     """Run the worker with one wall-clock deadline that starts immediately
     before launch. At the deadline: terminate, reap, escalate to kill, and
-    confirm exit; unconfirmed termination is reported, never ignored."""
+    confirm exit; unconfirmed termination is reported, never ignored.
+
+    Any abnormal supervisor exit after launch (KeyboardInterrupt or a
+    supervision failure) stops and reaps the worker first, then raises
+    `SupervisionAborted`. The worker's stdin pipe stays open until the worker
+    has exited; if the supervisor itself is lost, the operating system closes
+    it and the worker's parent-loss watchdog ends the worker."""
     start = time.monotonic()
     process = subprocess.Popen(  # fixed argv, no shell
         list(argv),
-        stdin=subprocess.DEVNULL,
+        stdin=subprocess.PIPE,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         env=dict(env) if env is not None else None,
     )
     try:
-        returncode = process.wait(timeout=max(0.0, deadline_seconds - (time.monotonic() - start)))
-        return WorkerResult("exited", returncode)
-    except subprocess.TimeoutExpired:
-        pass
-    for stop in (process.terminate, process.kill):
-        stop()
         try:
-            process.wait(timeout=grace_seconds)
+            if stdin_payload is not None and process.stdin is not None:
+                try:
+                    process.stdin.write(stdin_payload)
+                    process.stdin.flush()
+                except OSError:
+                    pass  # the worker already exited; its result is reaped below
+            remaining = max(0.0, deadline_seconds - (time.monotonic() - start))
+            returncode = process.wait(timeout=remaining)
         except subprocess.TimeoutExpired:
-            continue
-        if process.poll() is not None:
-            return WorkerResult("deadline_terminated", process.returncode)
-    return WorkerResult("termination_unconfirmed", None)
+            if _stop_and_reap(process, grace_seconds):
+                return WorkerResult("deadline_terminated", process.returncode)
+            return WorkerResult("termination_unconfirmed", None)
+        return WorkerResult("exited", returncode)
+    except BaseException:
+        raise SupervisionAborted(_stop_and_reap(process, grace_seconds)) from None
+    finally:
+        if process.stdin is not None:
+            with contextlib.suppress(OSError):
+                process.stdin.close()
 
 
-def worker_main(paths: CanaryPaths) -> int:
-    """The supervised worker: re-checks its preconditions, performs the one
-    request and all automated processing, and writes the categorical
-    summary. Spawns no process and prints nothing."""
-    if os.environ.get(LIVE_ENV_VAR) != LIVE_ENV_VALUE:
+PARENT_LOST_EXIT: Final = 75
+_TOKEN_LINE_LIMIT: Final = 128
+
+
+def _hard_exit() -> None:
+    os._exit(PARENT_LOST_EXIT)
+
+
+def start_parent_loss_watchdog(
+    stream: IO[bytes], on_lost: Callable[[], None] = _hard_exit
+) -> threading.Thread:
+    """Parent-death containment: ends the worker process immediately when
+    the supervisor's end of the stdin pipe closes (normal supervisor exit,
+    crash, or kill)."""
+
+    def watch() -> None:
+        while stream.read(1):
+            pass
+        on_lost()
+
+    thread = threading.Thread(target=watch, name="s2c-parent-loss", daemon=True)
+    thread.start()
+    return thread
+
+
+def worker_main(paths: CanaryPaths, *, env: Mapping[str, str], token: str) -> int:
+    """The supervised worker: claims the single worker slot under the
+    supervisor's launch capability, performs the one request and all
+    automated processing, and writes the categorical summary. Spawns no
+    process and prints nothing."""
+    if env.get(LIVE_ENV_VAR) != LIVE_ENV_VALUE:
         return 3
-    if not paths.reservation.is_file() or not paths.staging_dir.is_dir():
-        return 3
-    if paths.raw.exists() or paths.summary.exists():
+    try:
+        claim_worker(paths, token)
+    except CanaryRefusal:
         return 3
     try:
         taxonomy = load_taxonomy(DEFAULT_SKILLS_TAXONOMY_PATH)
@@ -745,6 +893,17 @@ def worker_main(paths: CanaryPaths) -> int:
         )
     exclusive_write(paths.summary, json.dumps(summary, indent=2, sort_keys=True).encode("utf-8"))
     return 0
+
+
+def worker_entry(paths: CanaryPaths, stdin: Any) -> int:
+    """`_worker` CLI entry: reads the supervisor's token from the stdin pipe,
+    starts the parent-loss watchdog, then runs the worker. An interactive
+    stdin can never carry a supervisor launch."""
+    if stdin.isatty():
+        return 3
+    token = stdin.buffer.readline(_TOKEN_LINE_LIMIT).decode("ascii", "replace").strip()
+    start_parent_loss_watchdog(stdin.buffer)
+    return worker_main(paths, env=os.environ, token=token)
 
 
 # ---------------------------------------------------------------------------
@@ -832,7 +991,8 @@ def run_live(
     worker_argv: Sequence[str],
     deadline_seconds: float = OUTER_DEADLINE_SECONDS,
 ) -> str:
-    """Preflight, reserve, stage, supervise, and record one terminal outcome.
+    """Preflight, reserve, stage, issue the one-time launch capability,
+    supervise, and record one terminal outcome after the worker is reaped.
     Returns the categorical terminal outcome."""
     record = live_preflight(
         request, env=env, paths=paths, head_sha=head_sha, tree_is_clean=tree_is_clean
@@ -844,7 +1004,16 @@ def run_live(
         except FileExistsError:
             append_terminal_outcome(handle, f"{Verdict.FAIL_CLOSED.value}:staging_exists")
             raise CanaryRefusal("staging_exists") from None
-        worker = supervise_worker(worker_argv, deadline_seconds=deadline_seconds, env=env)
+        token = secrets.token_hex(32)
+        reservation_line = paths.reservation.read_bytes().splitlines(keepends=True)[0]
+        capability = launch_capability(reservation_line, token)
+        exclusive_write(paths.launch, json.dumps(capability, sort_keys=True).encode("utf-8"))
+        worker = supervise_worker(
+            worker_argv,
+            deadline_seconds=deadline_seconds,
+            env=env,
+            stdin_payload=(token + "\n").encode("ascii"),
+        )
         if worker.kind == "termination_unconfirmed":
             outcome = f"{Verdict.FAIL_CLOSED.value}:worker_termination_unconfirmed"
         elif worker.kind == "deadline_terminated":
@@ -858,6 +1027,10 @@ def run_live(
             else:
                 outcome = f"{summary['run_verdict']}:{summary['run_kind']}"
     except CanaryRefusal:
+        raise
+    except SupervisionAborted as aborted:
+        kind = "supervisor_interrupted" if aborted.confirmed else "worker_termination_unconfirmed"
+        append_terminal_outcome(handle, f"{Verdict.FAIL_CLOSED.value}:{kind}")
         raise
     except BaseException:
         append_terminal_outcome(handle, f"{Verdict.FAIL_CLOSED.value}:supervisor_exception")
@@ -961,6 +1134,9 @@ def project_record(record: Mapping[str, Any], excerpt: tuple[int, int] | None) -
 def check_excerpt_bounds(content: str, start: int, end: int) -> None:
     if not (_strict_int(start) and _strict_int(end) and 0 <= start <= end <= len(content)):
         raise CanaryRefusal("excerpt_offsets_invalid")
+    if start == 0 and end == len(content):
+        # C16: a complete source description is never committed, however short.
+        raise CanaryRefusal("excerpt_is_complete_source")
     excerpt = content[start:end]
     if len(excerpt) > MAX_EXCERPT_CODE_POINTS:
         raise CanaryRefusal("excerpt_code_point_cap")
@@ -994,6 +1170,8 @@ def expected_selection(
     """The contract selection rule over provider order (C17): the first
     eligible `converted` record, then the first later eligible record with a
     distinct actual non-`converted` outcome, then another; stop at three.
+    Without an eligible `converted` record the selection is empty: a
+    findings-only report is possible, a negative-only fixture is not.
     `invalid_type` stays synthetic-only and is never selected."""
     eligible = [
         row
@@ -1002,12 +1180,11 @@ def expected_selection(
         and row["source_ordinal"] not in rejected
         and row["content_outcome"] != ContentOutcome.INVALID_TYPE.value
     ]
-    chosen: list[tuple[int, str]] = []
-    after = -1
     first = next((r for r in eligible if r["content_outcome"] == "converted"), None)
-    if first is not None:
-        chosen.append((first["source_ordinal"], "first_converted"))
-        after = first["source_ordinal"]
+    if first is None:
+        return []
+    chosen = [(first["source_ordinal"], "first_converted")]
+    after = first["source_ordinal"]
     seen = {"converted"}
     for row in eligible:
         if len(chosen) >= limit:
@@ -1019,7 +1196,59 @@ def expected_selection(
     return chosen
 
 
-_REVIEW_DISPOSITIONS: Final = frozenset({"faithful", "mismatch", "not_performed"})
+_DECISION_KEYS: Final = frozenset(
+    {
+        "ordinal",
+        "selection_reason",
+        "excerpt",
+        "publication_safe",
+        "full_capture_fidelity_disposition",
+        "excerpt_replay_disposition",
+        "reviewer",
+    }
+)
+_SELECTION_REASONS: Final = frozenset({"first_converted", "distinct_outcome"})
+_REJECTION_REASONS: Final = frozenset({"not_publication_safe", "no_safe_excerpt"})
+
+
+def validate_decisions(data: Any) -> dict[str, Any]:
+    """Type-checks reviewer decisions before any conversion. Every violation
+    is the single categorical refusal `decisions_invalid`; no value is ever
+    echoed."""
+
+    def require(condition: bool) -> None:
+        if not condition:
+            raise CanaryRefusal("decisions_invalid")
+
+    def member(value: Any, allowed: frozenset[str]) -> bool:
+        return isinstance(value, str) and value in allowed
+
+    require(isinstance(data, dict) and set(data) <= {"selected", "rejected"})
+    require(isinstance(data.get("selected"), list) and isinstance(data.get("rejected", []), list))
+    for item in data.get("rejected", []):
+        require(isinstance(item, dict) and set(item) == {"ordinal", "reason"})
+        require(_strict_int(item["ordinal"]) and item["ordinal"] >= 0)
+        require(member(item["reason"], _REJECTION_REASONS))
+    for item in data["selected"]:
+        require(isinstance(item, dict) and set(item) == _DECISION_KEYS)
+        require(_strict_int(item["ordinal"]) and item["ordinal"] >= 0)
+        require(member(item["selection_reason"], _SELECTION_REASONS))
+        excerpt = item["excerpt"]
+        require(
+            excerpt is None
+            or (
+                isinstance(excerpt, dict)
+                and set(excerpt) == {"start", "end"}
+                and _strict_int(excerpt["start"])
+                and _strict_int(excerpt["end"])
+            )
+        )
+        require(isinstance(item["publication_safe"], bool))
+        require(member(item["full_capture_fidelity_disposition"], REVIEW_DISPOSITIONS))
+        require(member(item["excerpt_replay_disposition"], REVIEW_DISPOSITIONS))
+        require(isinstance(item["reviewer"], str) and bool(item["reviewer"].strip()))
+    validated: dict[str, Any] = data
+    return validated
 
 
 async def replay_envelope(
@@ -1070,14 +1299,19 @@ def build_projection(
         or len(raw_body) != capture["complete_response_bytes"]
     ):
         raise CanaryRefusal("raw_capture_mismatch")
+    decisions = validate_decisions(decisions)
     records = json.loads(raw_body.decode("utf-8"))["jobs"]
-    rejected = frozenset(int(item["ordinal"]) for item in decisions.get("rejected", []))
+    rejected = frozenset(item["ordinal"] for item in decisions.get("rejected", []))
     selections = list(decisions["selected"])
     if len(selections) > MAX_SELECTED:
         raise CanaryRefusal("too_many_selected")
+    if any(s["ordinal"] >= len(records) for s in selections):
+        raise CanaryRefusal("decision_ordinal_out_of_range")
     expected = expected_selection(summary["records"], rejected)
-    actual = [(int(s["ordinal"]), str(s["selection_reason"])) for s in selections]
-    if actual != expected[: len(actual)] or (expected and not actual):
+    if not expected:
+        raise CanaryRefusal("no_converted_sample")
+    actual = [(s["ordinal"], s["selection_reason"]) for s in selections]
+    if not actual or actual != expected[: len(actual)]:
         raise CanaryRefusal("selection_rule_violation")
 
     jobs: list[dict[str, Any]] = []
@@ -1116,8 +1350,8 @@ def build_projection(
         if {
             review["full_capture_fidelity_disposition"],
             review["excerpt_replay_disposition"],
-        } - _REVIEW_DISPOSITIONS or not isinstance(review["reviewer"], str):
-            raise CanaryRefusal("review_disposition_invalid")
+        } - PERFORMED_DISPOSITIONS:
+            raise CanaryRefusal("review_not_performed")
         lineage = lineages[index]
         lineage["golden_output_sha256"] = canonical_json_hash(golden)
         selected.append(
@@ -1271,8 +1505,10 @@ _REVIEW_KEYS: Final = {
 
 def validate_fixture(document: Mapping[str, Any]) -> None:
     """Structural and lineage validation of a projected fixture document:
-    exact key sets, the five-field allowlist, limits, and recomputed
-    projection/excerpt/golden hashes. Raises `CanaryRefusal`."""
+    exact key sets, the five-field allowlist, converted-first selection,
+    performed and approved review states, proper excerpts within both
+    limits, and recomputed projection/excerpt/golden hashes. Raises
+    `CanaryRefusal`."""
 
     def require(condition: bool, kind: str) -> None:
         if not condition:
@@ -1302,13 +1538,32 @@ def validate_fixture(document: Mapping[str, Any]) -> None:
     selected = document["selected"]
     require(len(jobs) == len(selected) <= MAX_SELECTED, "fixture_count")
     require(envelope["meta"]["total"] == len(jobs), "fixture_meta_total")
+    require(len(selected) >= 1, "fixture_without_converted_sample")
+    require(
+        [entry.get("selection_reason") for entry in selected]
+        == ["first_converted"] + ["distinct_outcome"] * (len(selected) - 1),
+        "fixture_selection_order",
+    )
     for index, (job, entry) in enumerate(zip(jobs, selected, strict=True)):
         require(set(job) <= set(PROJECTED_FIELDS), "projected_keys")
         location = job.get("location")
         require(not isinstance(location, dict) or set(location) <= {"name"}, "projected_location")
         require(set(entry) == _SELECTED_KEYS, "selected_keys")
         require(entry["replay_index"] == index, "replay_index")
-        require(set(entry["review"]) == _REVIEW_KEYS, "review_keys")
+        review = entry["review"]
+        require(set(review) == _REVIEW_KEYS, "review_keys")
+        require(review["publication_safe"] is True, "review_not_publication_safe")
+        require(
+            all(
+                isinstance(review[field], str) and review[field] in PERFORMED_DISPOSITIONS
+                for field in ("full_capture_fidelity_disposition", "excerpt_replay_disposition")
+            ),
+            "review_not_performed",
+        )
+        require(
+            isinstance(review["reviewer"], str) and bool(review["reviewer"].strip()),
+            "review_reviewer_invalid",
+        )
         lineage = entry["lineage"]
         require(set(lineage) == _LINEAGE_KEYS, "lineage_keys")
         require(lineage["projected_record_sha256"] == canonical_json_hash(job), "projected_hash")
@@ -1330,6 +1585,15 @@ def validate_fixture(document: Mapping[str, Any]) -> None:
                 == len(content),
                 "excerpt_counts",
             )
+            start = lineage["excerpt_start_code_point"]
+            end = lineage["excerpt_end_code_point_exclusive"]
+            original = lineage["original_content_code_points"]
+            require(
+                all(_strict_int(v) for v in (start, end, original))
+                and 0 <= start < end <= original,
+                "excerpt_offsets_invalid",
+            )
+            require(not (start == 0 and end == original), "excerpt_is_complete_source")
         else:
             require(lineage["excerpt_sha256"] is None, "excerpt_not_applicable")
 
@@ -1483,22 +1747,129 @@ def staging_inventory(staging_dir: Path) -> list[dict[str, Any]]:
     return sorted(entries, key=lambda e: e["path"])
 
 
+def git_blob_id(data: bytes) -> str:
+    """Git's object id for `data` as a blob (an identity, not a security hash)."""
+    header = b"blob %d\x00" % len(data)
+    return hashlib.sha1(header + data, usedforsecurity=False).hexdigest()
+
+
+@dataclass(frozen=True)
+class CleanupBinding:
+    """The exact immutable post-run advisory candidate and the approved
+    publication-artifact hashes that cleanup is bound to. `fixture_sha256`
+    is `None` only when the approved state is a findings-only report."""
+
+    base_sha: str
+    candidate_sha: str
+    fixture_sha256: str | None
+    report_sha256: str
+
+
+def _repo_rel(path: Path) -> str:
+    return os.path.relpath(path, REPO_ROOT).replace(os.sep, "/")
+
+
+def publication_checks(
+    paths: CanaryPaths, binding: CleanupBinding, git: Callable[[Sequence[str]], str]
+) -> dict[str, bool]:
+    """Binding to the reviewed candidate and approved artifacts: HEAD is the
+    candidate, the tree is clean, and the fixture/report bytes equal the
+    approved hashes (so any post-approval change fails). The fixture must
+    also validate, including performed and approved review states. Content
+    screening is recorded but never establishes publication safety alone."""
+    well_formed = (
+        bool(_SHA_RE.fullmatch(binding.base_sha))
+        and bool(_SHA_RE.fullmatch(binding.candidate_sha))
+        and bool(_SHA256_RE.fullmatch(binding.report_sha256))
+        and (binding.fixture_sha256 is None or bool(_SHA256_RE.fullmatch(binding.fixture_sha256)))
+    )
+    if not well_formed:
+        return {"binding_well_formed": False}
+    in_range = git(["rev-list", f"{binding.base_sha}..{binding.candidate_sha}"]).split()
+    report_ok = paths.report.is_file() and file_sha256(paths.report) == binding.report_sha256
+    checks = {
+        "binding_well_formed": True,
+        "head_is_candidate": git(["rev-parse", "HEAD"]).strip() == binding.candidate_sha,
+        "tree_clean": git(["status", "--porcelain"]) == "",
+        "candidate_descends_from_base": binding.candidate_sha in in_range,
+        "report_matches_approval": report_ok,
+        "report_screening_clean": report_ok
+        and not screening_hits(paths.report.read_text(encoding="utf-8"), phone=False),
+        "fixture_matches_approval": False,
+    }
+    if binding.fixture_sha256 is None:
+        checks["fixture_matches_approval"] = not os.path.lexists(paths.fixture)
+    elif paths.fixture.is_file() and file_sha256(paths.fixture) == binding.fixture_sha256:
+        try:
+            validate_fixture(json.loads(paths.fixture.read_text(encoding="utf-8")))
+            checks["fixture_matches_approval"] = True
+        except (CanaryRefusal, ValueError, KeyError, TypeError, AttributeError):
+            pass
+    return checks
+
+
+def raw_absence_checks(
+    raw: bytes, paths: CanaryPaths, binding: CleanupBinding, git: Callable[[Sequence[str]], str]
+) -> dict[str, bool]:
+    """While raw staging exists: the known raw-response bytes, regardless of
+    filename, are absent from the proposed commit range, the index, and every
+    changed or publication file."""
+    blob = git_blob_id(raw)
+    span = f"{binding.base_sha}..{binding.candidate_sha}"
+    range_objects = {
+        line.split(" ", 1)[0] for line in git(["rev-list", "--objects", span]).split("\n")
+    }
+    index_objects = {
+        fields_[1]
+        for line in git(["ls-files", "-s"]).splitlines()
+        if len(fields_ := line.split()) > 1
+    }
+    changed = [
+        line
+        for line in git(["diff", "--name-only", binding.base_sha, binding.candidate_sha]).split(
+            "\n"
+        )
+        if line
+    ]
+    forms = {raw, raw.replace(b"\n", b"\r\n")} - {b""}
+    targets = {REPO_ROOT / rel for rel in changed} | {paths.fixture, paths.report}
+    contained = any(
+        target.is_file() and any(form in target.read_bytes() for form in forms)
+        for target in targets
+    )
+    return {
+        "raw_blob_absent_from_commit_range": blob not in range_objects,
+        "raw_blob_absent_from_index": blob not in index_objects,
+        "raw_bytes_absent_from_tracked_paths": not contained,
+    }
+
+
 def cleanup_staging(
-    paths: CanaryPaths, *, expected_raw_sha256: str | None, expected_raw_bytes: int | None
+    paths: CanaryPaths,
+    *,
+    expected_raw_sha256: str | None,
+    expected_raw_bytes: int | None,
+    binding: CleanupBinding,
+    git: Callable[[Sequence[str]], str],
 ) -> dict[str, Any]:
-    """Verify, inventory, and delete the dedicated staging directory. The
-    attempt reservation is never touched. Raises `CanaryRefusal` (and deletes
-    nothing) when the raw capture does not match its recorded evidence."""
+    """Verify the publication binding and raw absence, then inventory and
+    delete the dedicated staging directory. The attempt reservation is never
+    touched. Any failed check raises `CanaryRefusal` and deletes nothing."""
     if not os.path.lexists(paths.staging_dir):
         raise CanaryRefusal("staging_absent")
+    raw: bytes | None = None
     if paths.raw.exists():
-        if (
-            file_sha256(paths.raw) != expected_raw_sha256
-            or paths.raw.stat().st_size != expected_raw_bytes
-        ):
+        raw = paths.raw.read_bytes()
+        if hashlib.sha256(raw).hexdigest() != expected_raw_sha256 or len(raw) != expected_raw_bytes:
             raise CanaryRefusal("raw_capture_mismatch")
     elif expected_raw_sha256 is not None:
         raise CanaryRefusal("raw_capture_missing")
+    pre_deletion = publication_checks(paths, binding, git)
+    if raw is not None:
+        pre_deletion.update(raw_absence_checks(raw, paths, binding, git))
+    failed = sorted(name for name, ok in pre_deletion.items() if not ok)
+    if failed:
+        raise CanaryRefusal(f"publication_binding_failed:{failed[0]}")
     inventory = staging_inventory(paths.staging_dir)
     for entry in sorted(inventory, key=lambda e: e["path"].count("/"), reverse=True):
         target = paths.staging_dir / entry["path"]
@@ -1510,6 +1881,8 @@ def cleanup_staging(
     return {
         "raw_sha256": expected_raw_sha256,
         "raw_bytes": expected_raw_bytes,
+        "raw_blob": git_blob_id(raw) if raw is not None else None,
+        "pre_deletion_checks": pre_deletion,
         "inventory": inventory,
         "inventory_sha256": canonical_json_hash({"inventory": inventory}),
         "cleaned_at": _now_iso(),
@@ -1517,33 +1890,36 @@ def cleanup_staging(
 
 
 def verify_cleanup(
-    paths: CanaryPaths, *, base_sha: str, git: Callable[[Sequence[str]], str]
+    paths: CanaryPaths,
+    *,
+    binding: CleanupBinding,
+    raw_blob: str | None,
+    git: Callable[[Sequence[str]], str],
 ) -> dict[str, bool]:
-    """The fresh-process checker (contract §7 step 6)."""
-    staging_rel = os.path.relpath(paths.staging_dir, REPO_ROOT).replace(os.sep, "/")
-    changed = git(["log", "--format=", "--name-only", f"{base_sha}..HEAD"]).splitlines()
+    """The fresh-process checker (contract §7 step 6), bound to the same
+    candidate and approved artifacts."""
+    staging_rel = _repo_rel(paths.staging_dir)
+    span = f"{binding.base_sha}..{binding.candidate_sha}"
+    known = (paths.raw, paths.summary, paths.projection_preview, paths.launch, paths.claim)
     results = {
         "staging_root_absent": not os.path.lexists(paths.staging_dir),
-        "known_capture_paths_absent": not any(
-            os.path.lexists(p) for p in (paths.raw, paths.summary, paths.projection_preview)
-        ),
+        "known_capture_paths_absent": not any(os.path.lexists(p) for p in known),
         "no_staging_residue": git(["status", "--porcelain", "--ignored", "--", staging_rel]) == "",
         "no_staging_path_in_index": git(["ls-files", "--", staging_rel]) == "",
-        "no_runtime_path_in_commit_range": not any(
-            line.startswith(".claude/runtime/") for line in changed
-        ),
-        "fixture_valid_or_absent": True,
-        "report_screening_clean_or_absent": True,
     }
-    if paths.fixture.exists():
-        try:
-            validate_fixture(json.loads(paths.fixture.read_text(encoding="utf-8")))
-        except (CanaryRefusal, ValueError, KeyError, TypeError):
-            results["fixture_valid_or_absent"] = False
-    if paths.report.exists():
-        results["report_screening_clean_or_absent"] = not screening_hits(
-            paths.report.read_text(encoding="utf-8"), phone=False
+    results.update(publication_checks(paths, binding, git))
+    if results.get("binding_well_formed"):
+        changed = git(["log", "--format=", "--name-only", span]).splitlines()
+        results["no_runtime_path_in_commit_range"] = not any(
+            line.startswith(".claude/runtime/") for line in changed
         )
+        if raw_blob is not None:
+            objects = {
+                line.split(" ", 1)[0] for line in git(["rev-list", "--objects", span]).split("\n")
+            }
+            index = git(["ls-files", "-s"])
+            results["raw_blob_absent_from_commit_range"] = raw_blob not in objects
+            results["raw_blob_absent_from_index"] = raw_blob not in index
     return results
 
 
@@ -1558,6 +1934,18 @@ def _git_clean() -> bool:
 
 def _print(payload: Mapping[str, Any]) -> None:
     print(json.dumps(dict(payload), indent=2, sort_keys=True))
+
+
+def _add_binding_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--base", required=True)
+    parser.add_argument("--candidate", required=True)
+    parser.add_argument("--fixture-sha256", required=True, help="hex digest, or 'absent'")
+    parser.add_argument("--report-sha256", required=True)
+
+
+def _binding(args: argparse.Namespace) -> CleanupBinding:
+    fixture = None if args.fixture_sha256 == "absent" else args.fixture_sha256
+    return CleanupBinding(args.base, args.candidate, fixture, args.report_sha256)
 
 
 def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
@@ -1579,18 +1967,21 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     cleanup = sub.add_parser("cleanup", help="verified deletion of raw staging")
     cleanup.add_argument("--expected-raw-sha256")
     cleanup.add_argument("--expected-raw-bytes", type=int)
-    cleanup.add_argument("--base", required=True)
+    _add_binding_args(cleanup)
     check = sub.add_parser("verify-cleanup", help=argparse.SUPPRESS)
-    check.add_argument("--base", required=True)
+    _add_binding_args(check)
+    check.add_argument("--raw-blob")
     return parser.parse_args(argv)
 
 
 def _decisions(path: Path, paths: CanaryPaths) -> dict[str, Any]:
     if not path.resolve().is_relative_to(paths.staging_dir.resolve()):
         raise CanaryRefusal("decisions_outside_staging")
-    data = json.loads(path.read_text(encoding="utf-8"))
-    assert isinstance(data, dict)
-    return data
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raise CanaryRefusal("decisions_invalid") from None
+    return validate_decisions(data)
 
 
 def _staged_summary(paths: CanaryPaths) -> tuple[bytes, dict[str, Any]]:
@@ -1599,83 +1990,116 @@ def _staged_summary(paths: CanaryPaths) -> tuple[bytes, dict[str, Any]]:
 
 
 def main(argv: Sequence[str] | None = None, *, paths: CanaryPaths = LIVE_PATHS) -> int:
+    """Every outcome is a fixed categorical line; no exception message,
+    traceback, or staged value is ever printed."""
     args = _parse_args(argv)
     try:
-        if args.command is None:
-            _print({"result": "refused", "kind": "gate_disabled"})
-            return 2
-        if args.command == "_worker":
-            return worker_main(paths)
-        if args.command == "live":
-            outcome = run_live(
-                LiveRequest(
-                    args.board,
-                    args.expected_sha,
-                    args.contract_sha256,
-                    args.authorization_file,
-                    args.authorization_sha256,
-                ),
-                env=os.environ,
-                paths=paths,
-                head_sha=lambda: git_output(["rev-parse", "HEAD"]).strip(),
-                tree_is_clean=_git_clean,
-                worker_argv=[sys.executable, str(Path(__file__).resolve()), "_worker"],
-            )
-            _print({"result": "terminal", "outcome": outcome})
-            return 0
-        if args.command == "eligibility":
-            raw, summary = _staged_summary(paths)
-            records = json.loads(raw.decode("utf-8"))["jobs"]
-            rows = []
-            for row in summary["records"]:
-                if row["disposition"] != "retained":
-                    continue
-                record = records[row["source_ordinal"]]
-                hits = published_screening(project_record_full(record), None)
-                rows.append({**row, "screening_hits": hits})
-            _print({"eligible": rows})
-            return 0
-        if args.command in ("project", "build-fixture"):
-            raw, summary = _staged_summary(paths)
-            taxonomy = load_taxonomy(DEFAULT_SKILLS_TAXONOMY_PATH)
-            document = build_projection(raw, summary, _decisions(args.decisions, paths), taxonomy)
-            data = (json.dumps(document, indent=2, ensure_ascii=True) + "\n").encode("utf-8")
-            target = paths.projection_preview if args.command == "project" else paths.fixture
-            exclusive_write(target, data)
-            _print({"result": "written", "path": target.name, "sha256": file_sha256(target)})
-            return 0
-        if args.command == "cleanup":
-            attestation = cleanup_staging(
-                paths,
-                expected_raw_sha256=args.expected_raw_sha256,
-                expected_raw_bytes=args.expected_raw_bytes,
-            )
-            checker = Path(__file__).resolve()
-            completed = subprocess.run(  # fixed argv: a fresh checker process
-                [sys.executable, str(checker), "verify-cleanup", "--base", args.base],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            checks = json.loads(completed.stdout)
-            attestation.update(
-                checker={"path": checker.name, "sha256": file_sha256(checker)},
-                executing_sha=git_output(["rev-parse", "HEAD"]).strip(),
-                checks=checks,
-                passed=completed.returncode == 0 and all(checks.values()),
-            )
-            _print(attestation)
-            return 0 if attestation["passed"] else 1
-        if args.command == "verify-cleanup":
-            checks = verify_cleanup(paths, base_sha=args.base, git=git_output)
-            _print(checks)
-            return 0 if all(checks.values()) else 1
+        return _dispatch(args, paths)
     except CanaryRefusal as refusal:
         _print({"result": "refused", "kind": refusal.kind})
         return 2
     except FileExistsError:
         _print({"result": "refused", "kind": "create_only_target_exists"})
         return 2
+    except SupervisionAborted:
+        _print({"result": "refused", "kind": "supervision_aborted"})
+        return 2
+    except KeyboardInterrupt:
+        _print({"result": "refused", "kind": "interrupted"})
+        return 130
+    except Exception:  # categorical: never the message or traceback
+        _print({"result": "refused", "kind": "operational_failure"})
+        return 2
+
+
+def _dispatch(args: argparse.Namespace, paths: CanaryPaths) -> int:
+    if args.command is None:
+        _print({"result": "refused", "kind": "gate_disabled"})
+        return 2
+    if args.command == "_worker":
+        return worker_entry(paths, sys.stdin)
+    if args.command == "live":
+        outcome = run_live(
+            LiveRequest(
+                args.board,
+                args.expected_sha,
+                args.contract_sha256,
+                args.authorization_file,
+                args.authorization_sha256,
+            ),
+            env=os.environ,
+            paths=paths,
+            head_sha=lambda: git_output(["rev-parse", "HEAD"]).strip(),
+            tree_is_clean=_git_clean,
+            worker_argv=[sys.executable, str(Path(__file__).resolve()), "_worker"],
+        )
+        _print({"result": "terminal", "outcome": outcome})
+        return 0
+    if args.command == "eligibility":
+        raw, summary = _staged_summary(paths)
+        records = json.loads(raw.decode("utf-8"))["jobs"]
+        rows = []
+        for row in summary["records"]:
+            if row["disposition"] != "retained":
+                continue
+            record = records[row["source_ordinal"]]
+            hits = published_screening(project_record_full(record), None)
+            rows.append({**row, "screening_hits": hits})
+        _print({"eligible": rows})
+        return 0
+    if args.command in ("project", "build-fixture"):
+        decisions = _decisions(args.decisions, paths)
+        raw, summary = _staged_summary(paths)
+        taxonomy = load_taxonomy(DEFAULT_SKILLS_TAXONOMY_PATH)
+        document = build_projection(raw, summary, decisions, taxonomy)
+        data = (json.dumps(document, indent=2, ensure_ascii=True) + "\n").encode("utf-8")
+        target = paths.projection_preview if args.command == "project" else paths.fixture
+        exclusive_write(target, data)
+        _print({"result": "written", "path": target.name, "sha256": file_sha256(target)})
+        return 0
+    if args.command == "cleanup":
+        binding = _binding(args)
+        attestation = cleanup_staging(
+            paths,
+            expected_raw_sha256=args.expected_raw_sha256,
+            expected_raw_bytes=args.expected_raw_bytes,
+            binding=binding,
+            git=git_output,
+        )
+        checker = Path(__file__).resolve()
+        argv = [
+            sys.executable,
+            str(checker),
+            "verify-cleanup",
+            "--base",
+            binding.base_sha,
+            "--candidate",
+            binding.candidate_sha,
+            "--fixture-sha256",
+            binding.fixture_sha256 or "absent",
+            "--report-sha256",
+            binding.report_sha256,
+        ]
+        if attestation["raw_blob"] is not None:
+            argv += ["--raw-blob", attestation["raw_blob"]]
+        completed = subprocess.run(  # fixed argv: a fresh checker process
+            argv, capture_output=True, text=True, check=False
+        )
+        checks = json.loads(completed.stdout)
+        attestation.update(
+            checker={"path": checker.name, "sha256": file_sha256(checker)},
+            executing_sha=git_output(["rev-parse", "HEAD"]).strip(),
+            checks=checks,
+            passed=completed.returncode == 0 and all(checks.values()),
+        )
+        _print(attestation)
+        return 0 if attestation["passed"] else 1
+    if args.command == "verify-cleanup":
+        checks = verify_cleanup(
+            paths, binding=_binding(args), raw_blob=args.raw_blob, git=git_output
+        )
+        _print(checks)
+        return 0 if all(checks.values()) else 1
     return 2
 
 
