@@ -884,3 +884,97 @@ gate: final
 verdict: approved
 findings: none
 ```
+
+### Merge record
+
+- Date: 2026-10-05 (UTC). Merged `workflow/throughput-protocol-retention` into `main` with
+  `git merge --no-ff`, at the approved, reviewed commit
+  `7a2e007ab1fac085cfb018a4c1b3a1882646640c` (`R`). `R` is Sol Medium's "approved -- no
+  findings" formal verdict on `C=eac6f0a37e9ceb8a744b2c0c54b1c2315e08ebd2` /
+  `A=cc76502a0d3c4f23e8225b1573184fe0a2f99e9c`.
+  - Merge commit `M`: `e1f510bf7482bb4f48ef1c21c0d35f32ac0ee0ba`.
+  - Rollback boundary (the pre-merge `main`/`origin/main` tip):
+    `6752dcdc0ce1b57c0af164aa217d3181566086bd`.
+  - Full lineage: base `6752dcd` -> `C` `eac6f0a` -> `A` `cc76502` -> `R` `7a2e007` ->
+    `M` `e1f510b` -> `Q` (this commit).
+- Pre-merge checks, after a fresh fetch of `origin`:
+  - the feature branch, its origin, and the remote ref all sat at `R`; `R`'s sole parent
+    is `A` and `A`'s is `C`; the tree was clean;
+  - `main`/`origin/main`/remote `main` were synchronized at the rollback boundary;
+  - **receipt `734bd347-bac1-4a8d-a3e7-97b957a995bb`** (file SHA-256
+    `e6e349cda892b013f11cdc9bbc168d7eca962a5335200c5bb2bcc5e67692563d`):
+    - schema-valid and bound to `C`, the base, the slice, gate `final`, and risk class D;
+    - its verifier, checker (`check_handoff.py`), and configuration hashes equal the files
+      committed at `C`;
+    - the affected surface (`docs-only`, `handoff-transition`, `workflow-governing-doc`)
+      and migration decision (not triggered) recomputed identically;
+    - independently recomputed as approval-eligible;
+  - `validate_c_a_r_chain(C, A, R)` and `check_merge_eligibility(C, A, R)` returned
+    `approved`, `findings: none`, `reviewer_model: Sol Medium`, `reviewer_role: primary`,
+    `gate: final`, `published_slice_kind: docs`.
+- Release sequence:
+  - `M` was created locally and not pushed. It has two parents (the rollback boundary,
+    then `R`), `R..M` has zero content difference, and
+    `check_review.validate_merge(R, M, 6752dcd)` passed.
+  - `verification_coordinator.run_post_merge_verification` ran against `M` in a
+    disposable detached worktree (always full/final). It produced artifact
+    `41e35df6-9d84-4e01-9726-9d0d71d4aa44`:
+    - all 11 steps PASS: Ruff format and check, mypy, `check_repo`, `git diff --check`,
+      disposable test-database URL validation and reachability preflight, the full
+      suite, contract mutation witnesses, handoff metadata validation, and
+      temporary-directory cleanup;
+    - full pytest suite: **4240 passed**;
+    - all 34 registered mutation witnesses passed, 0 failed;
+    - no migration triggered;
+    - worktree removed with no residual entry or directory; cleanup PASS;
+    - recorded step duration 457.172 seconds.
+  - `Q` is `M`'s direct mainline child. It contains that artifact plus this append-only
+    merge record, in one commit (this entry).
+- Post-merge evidence:
+  `docs/post-merge/e1f510bf7482bb4f48ef1c21c0d35f32ac0ee0ba/41e35df6-9d84-4e01-9726-9d0d71d4aa44.json`
+  (SHA-256 of the artifact file as written:
+  `1248b5f1f91f2aee758bd1361a26e8cd8602c98b540a7636c18c860052d10ee6`). It references
+  original receipt `734bd347-bac1-4a8d-a3e7-97b957a995bb`.
+  `check_review.validate_published(C, A, R, M, Q)` and
+  `verification_coordinator.confirm_main_unchanged` run immediately before the push.
+  Their results are in the agent's final report rather than restated here in advance.
+- Evidence by source:
+  - **Post-merge coordinator (this artifact, at `M`):** the 11 steps above, including the
+    4,240-test full suite and 34/34 registered witnesses.
+  - **Pre-merge receipt (at `C`):** all 11 final-gate steps PASS, including the full suite
+    (4,240 passed) and 34/34 registered witnesses; migration not triggered; cleanup PASS;
+    recorded step duration 481.625 seconds.
+  - **Formal review (`R`):** Sol independently reran or recomputed the lineage, scope,
+    ADR 0012 identity, receipt binding and hashes, affected surface, witness inventory,
+    approval eligibility, the `C`→`A` transition, handoff/repository/diff checks, and
+    every material evaluation metric. Sol inspected the four documents, the frozen
+    contract, and the cited evidence inventory, and relied on the receipt for the full
+    suite and registered witnesses. Sol approved N1, N2, and continued recording of ADR
+    0012's existing metrics.
+  - No Greenhouse or other live-network contact, production database, or production-data
+    access occurred. Both suite runs used the configured disposable test database.
+- Status: merged. This slice adds
+  [ADR 0016](DECISIONS/0016-workflow-throughput-pilot-evaluation-and-retention.md), which
+  records the ADR 0012 three-slice pilot evaluation and retains the Workflow Throughput
+  Protocol with bounded operational revisions O1–O5. **O1–O5 become effective only when
+  this `Q` reaches `main`.** The next workflow assessment is at Phase 4 exit, with earlier
+  O5 incident assessments if triggered. No validator, verification tool, metadata schema,
+  reviewer role, receipt-binding rule, handoff-retention rule, registered witness,
+  executable behavior, or product behavior changed. ADR 0012 is unchanged.
+- Retained limitations:
+  - Astra's full response was not received; only the relayed E1–E8 text was available to
+    the evaluator;
+  - complete end-to-end timing is unavailable; only recorded verification-step durations
+    exist, and authoring, reviewer, waiting, relay, and unrecorded verification time
+    remain unknown;
+  - Phase 3 is a historical comparison group, not a controlled baseline, and the tasks
+    are not matched;
+  - equivalent assurance and reduced relay frequency have not been demonstrated;
+  - the evidence does not generalize to live-provider, runtime-reachable, or persistence
+    work.
+
+  Approval and passing verification are review and verification status. They do not
+  establish unchanged assurance or a demonstrated throughput improvement.
+- STOP -- report the synchronized final `main` SHA and stop. No Greenhouse contact, S2c,
+  runtime wiring, persistence, D1 work, migration, workflow-tooling change, S3, S4, or
+  another slice without separate explicit user authorization.
