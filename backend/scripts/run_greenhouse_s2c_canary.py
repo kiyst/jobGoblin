@@ -43,6 +43,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import ctypes
 import hashlib
 import html
 import json
@@ -60,7 +61,7 @@ from dataclasses import dataclass, fields, is_dataclass
 from datetime import UTC, datetime
 from enum import Enum, StrEnum
 from pathlib import Path
-from typing import IO, Any, Final
+from typing import IO, Any, Final, Protocol
 
 import httpx
 
@@ -769,7 +770,8 @@ def claim_worker(paths: CanaryPaths, token: str) -> None:
 
 @dataclass(frozen=True)
 class WorkerResult:
-    kind: str  # "exited" | "deadline_terminated" | "termination_unconfirmed"
+    # "exited" | "deadline_terminated" | "termination_unconfirmed" | "containment_failed"
+    kind: str
     returncode: int | None
 
 
@@ -783,19 +785,229 @@ class SupervisionAborted(Exception):  # noqa: N818 - a categorical abort, not an
         self.confirmed = confirmed
 
 
-def _stop_and_reap(process: Any, grace_seconds: float) -> bool:
-    """Terminate, then kill; reap after each step. True once the worker is
-    confirmed gone."""
-    for stop in (process.terminate, process.kill):
-        with contextlib.suppress(OSError):  # already exited: confirmed by the reap below
-            stop()
+# ---------------------------------------------------------------------------
+# Operating-system parent-loss containment (Windows Job Object).
+# ---------------------------------------------------------------------------
+
+_JOB_OBJECT_EXTENDED_LIMIT_INFORMATION: Final = 9
+_JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: Final = 0x2000
+_PROCESS_TERMINATE: Final = 0x0001
+_PROCESS_SET_QUOTA: Final = 0x0100
+_PROCESS_QUERY_LIMITED_INFORMATION: Final = 0x1000
+_STILL_ACTIVE: Final = 259
+_ERROR_INVALID_PARAMETER: Final = 87
+
+
+class _BasicLimitInformation(ctypes.Structure):
+    _fields_ = [
+        ("PerProcessUserTimeLimit", ctypes.c_int64),
+        ("PerJobUserTimeLimit", ctypes.c_int64),
+        ("LimitFlags", ctypes.c_uint32),
+        ("MinimumWorkingSetSize", ctypes.c_size_t),
+        ("MaximumWorkingSetSize", ctypes.c_size_t),
+        ("ActiveProcessLimit", ctypes.c_uint32),
+        ("Affinity", ctypes.c_size_t),
+        ("PriorityClass", ctypes.c_uint32),
+        ("SchedulingClass", ctypes.c_uint32),
+    ]
+
+
+class _IoCounters(ctypes.Structure):
+    _fields_ = [
+        (name, ctypes.c_uint64)
+        for name in (
+            "ReadOperationCount",
+            "WriteOperationCount",
+            "OtherOperationCount",
+            "ReadTransferCount",
+            "WriteTransferCount",
+            "OtherTransferCount",
+        )
+    ]
+
+
+class _ExtendedLimitInformation(ctypes.Structure):
+    _fields_ = [
+        ("BasicLimitInformation", _BasicLimitInformation),
+        ("IoInfo", _IoCounters),
+        ("ProcessMemoryLimit", ctypes.c_size_t),
+        ("JobMemoryLimit", ctypes.c_size_t),
+        ("PeakProcessMemoryUsed", ctypes.c_size_t),
+        ("PeakJobMemoryUsed", ctypes.c_size_t),
+    ]
+
+
+def _kernel32() -> Any:
+    """kernel32 with exact signatures. The supported execution platform is
+    Windows; anything else refuses containment."""
+    if sys.platform != "win32":
+        raise CanaryRefusal("containment_unavailable")
+    from ctypes import wintypes
+
+    k = ctypes.WinDLL("kernel32", use_last_error=True)
+    handle, dword, boolean, pointer = (
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        wintypes.BOOL,
+        ctypes.c_void_p,
+    )
+    k.CreateJobObjectW.argtypes, k.CreateJobObjectW.restype = [pointer, wintypes.LPCWSTR], handle
+    k.SetInformationJobObject.argtypes = [handle, ctypes.c_int, pointer, dword]
+    k.SetInformationJobObject.restype = boolean
+    k.QueryInformationJobObject.argtypes = [handle, ctypes.c_int, pointer, dword, pointer]
+    k.QueryInformationJobObject.restype = boolean
+    k.AssignProcessToJobObject.argtypes, k.AssignProcessToJobObject.restype = (
+        [handle, handle],
+        boolean,
+    )
+    k.IsProcessInJob.argtypes = [handle, handle, ctypes.POINTER(boolean)]
+    k.IsProcessInJob.restype = boolean
+    k.OpenProcess.argtypes, k.OpenProcess.restype = [dword, boolean, dword], handle
+    k.GetExitCodeProcess.argtypes = [handle, ctypes.POINTER(dword)]
+    k.GetExitCodeProcess.restype = boolean
+    k.CloseHandle.argtypes, k.CloseHandle.restype = [handle], boolean
+    return k
+
+
+def _kills_on_close(k: Any, job: Any) -> bool:
+    """Reads back the job's limits (`job=None`: the calling process's job)."""
+    info = _ExtendedLimitInformation()
+    ok = k.QueryInformationJobObject(
+        job, _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION, ctypes.byref(info), ctypes.sizeof(info), None
+    )
+    flags = info.BasicLimitInformation.LimitFlags
+    return bool(ok) and bool(flags & _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE)
+
+
+class KillOnCloseJob:
+    """Supervisor-owned, non-inheritable Windows Job Object with
+    `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, verified by reading it back. When the
+    supervisor's handle closes, including on supervisor crash or kill, the
+    kernel terminates every assigned process without involving the worker's
+    interpreter, threads, event loop, or GIL. Any setup failure is the
+    categorical refusal `containment_unavailable`."""
+
+    def __init__(self) -> None:
+        self._k = _kernel32()
+        self._handle: Any = self._k.CreateJobObjectW(None, None)
+        if not self._handle:
+            raise CanaryRefusal("containment_unavailable")
+        info = _ExtendedLimitInformation()
+        info.BasicLimitInformation.LimitFlags = _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        configured = self._k.SetInformationJobObject(
+            self._handle,
+            _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
+            ctypes.byref(info),
+            ctypes.sizeof(info),
+        )
+        if not configured or not _kills_on_close(self._k, self._handle):
+            self.close()
+            raise CanaryRefusal("containment_unavailable")
+
+    def assign(self, pid: int) -> None:
+        """Assign the worker and confirm membership; `containment_assignment_failed`
+        otherwise."""
+        k = self._k
+        access = _PROCESS_SET_QUOTA | _PROCESS_TERMINATE | _PROCESS_QUERY_LIMITED_INFORMATION
+        process = k.OpenProcess(access, False, pid)
+        if not process:
+            raise CanaryRefusal("containment_assignment_failed")
         try:
-            process.wait(timeout=grace_seconds)
-        except subprocess.TimeoutExpired:
-            continue
+            from ctypes import wintypes
+
+            inside = wintypes.BOOL(False)
+            if (
+                not k.AssignProcessToJobObject(self._handle, process)
+                or not k.IsProcessInJob(process, self._handle, ctypes.byref(inside))
+                or not inside.value
+            ):
+                raise CanaryRefusal("containment_assignment_failed")
+        finally:
+            k.CloseHandle(process)
+
+    def close(self) -> None:
+        """Closing the only handle terminates any process still assigned."""
+        if self._handle:
+            self._k.CloseHandle(self._handle)
+            self._handle = None
+
+
+def current_process_kill_on_close() -> bool:
+    """Worker-side defense in depth: the calling process is inside a job with
+    kill-on-close. The supervisor's assignment remains the guarantee."""
+    try:
+        return _kills_on_close(_kernel32(), None)
+    except CanaryRefusal:
+        return False
+
+
+def process_has_exited(pid: int) -> bool | None:
+    """Independent OS evidence: True (exited or no such process), False
+    (still active), or None (state cannot be established)."""
+    try:
+        k = _kernel32()
+    except CanaryRefusal:
+        return None
+    process = k.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not process:
+        return True if ctypes.get_last_error() == _ERROR_INVALID_PARAMETER else None
+    try:
+        from ctypes import wintypes
+
+        code = wintypes.DWORD()
+        if not k.GetExitCodeProcess(process, ctypes.byref(code)):
+            return None
+        return code.value != _STILL_ACTIVE
+    finally:
+        k.CloseHandle(process)
+
+
+class Containment(Protocol):
+    def assign(self, pid: int) -> None: ...
+
+    def close(self) -> None: ...
+
+
+# ---------------------------------------------------------------------------
+# Supervised worker.
+# ---------------------------------------------------------------------------
+
+
+def _confirmed_exit(process: Any) -> bool:
+    """Death is confirmed only by evidence: the reaped return code, or the
+    operating system's process state."""
+    try:
         if process.poll() is not None:
             return True
-    return process.poll() is not None
+    except BaseException:  # fall through to the independent OS query
+        pass
+    try:
+        return process_has_exited(int(process.pid)) is True
+    except BaseException:  # no evidence means unconfirmed
+        return False
+
+
+def _stop_and_reap(process: Any, grace_seconds: float) -> tuple[bool, bool]:
+    """Terminate, then kill; reap and confirm after each step. Failures and
+    interruptions inside the shutdown sequence never skip escalation or
+    confirmation. Returns `(confirmed, interrupted)`."""
+    interrupted = False
+    for stop in (process.terminate, process.kill):
+        try:
+            stop()
+        except KeyboardInterrupt:
+            interrupted = True
+        except BaseException:  # escalation continues; confirmed below
+            pass
+        try:
+            process.wait(timeout=grace_seconds)
+        except KeyboardInterrupt:
+            interrupted = True
+        except BaseException:  # a failed wait never ends shutdown
+            pass
+        if _confirmed_exit(process):
+            return True, interrupted
+    return _confirmed_exit(process), interrupted
 
 
 def supervise_worker(
@@ -805,16 +1017,21 @@ def supervise_worker(
     grace_seconds: float = TERMINATION_GRACE_SECONDS,
     env: Mapping[str, str] | None = None,
     stdin_payload: bytes | None = None,
+    containment: Containment | None = None,
 ) -> WorkerResult:
     """Run the worker with one wall-clock deadline that starts immediately
-    before launch. At the deadline: terminate, reap, escalate to kill, and
-    confirm exit; unconfirmed termination is reported, never ignored.
+    before launch.
 
-    Any abnormal supervisor exit after launch (KeyboardInterrupt or a
-    supervision failure) stops and reaps the worker first, then raises
-    `SupervisionAborted`. The worker's stdin pipe stays open until the worker
-    has exited; if the supervisor itself is lost, the operating system closes
-    it and the worker's parent-loss watchdog ends the worker."""
+    A launch token (`stdin_payload`) is released only after the worker has
+    been assigned to `containment`; without containment no token is released
+    at all. A failed assignment stops the worker before any token exists.
+    At the deadline, and on any abnormal supervisor exit after launch, the
+    worker is terminated, escalated to kill, and confirmed dead by evidence;
+    otherwise the result is `termination_unconfirmed`. An interruption during
+    shutdown is honoured (as `SupervisionAborted`) only after shutdown was
+    attempted."""
+    if stdin_payload is not None and containment is None:
+        raise CanaryRefusal("containment_required")
     start = time.monotonic()
     process = subprocess.Popen(  # fixed argv, no shell
         list(argv),
@@ -825,6 +1042,15 @@ def supervise_worker(
     )
     try:
         try:
+            if containment is not None:
+                try:
+                    containment.assign(process.pid)
+                except CanaryRefusal:
+                    confirmed, interrupted = _stop_and_reap(process, grace_seconds)
+                    if interrupted:
+                        raise SupervisionAborted(confirmed) from None
+                    kind = "containment_failed" if confirmed else "termination_unconfirmed"
+                    return WorkerResult(kind, None)
             if stdin_payload is not None and process.stdin is not None:
                 try:
                     process.stdin.write(stdin_payload)
@@ -834,12 +1060,17 @@ def supervise_worker(
             remaining = max(0.0, deadline_seconds - (time.monotonic() - start))
             returncode = process.wait(timeout=remaining)
         except subprocess.TimeoutExpired:
-            if _stop_and_reap(process, grace_seconds):
+            confirmed, interrupted = _stop_and_reap(process, grace_seconds)
+            if interrupted:
+                raise SupervisionAborted(confirmed) from None
+            if confirmed:
                 return WorkerResult("deadline_terminated", process.returncode)
             return WorkerResult("termination_unconfirmed", None)
         return WorkerResult("exited", returncode)
+    except SupervisionAborted:
+        raise
     except BaseException:
-        raise SupervisionAborted(_stop_and_reap(process, grace_seconds)) from None
+        raise SupervisionAborted(_stop_and_reap(process, grace_seconds)[0]) from None
     finally:
         if process.stdin is not None:
             with contextlib.suppress(OSError):
@@ -857,9 +1088,9 @@ def _hard_exit() -> None:
 def start_parent_loss_watchdog(
     stream: IO[bytes], on_lost: Callable[[], None] = _hard_exit
 ) -> threading.Thread:
-    """Parent-death containment: ends the worker process immediately when
-    the supervisor's end of the stdin pipe closes (normal supervisor exit,
-    crash, or kill)."""
+    """Defense in depth only (it needs this interpreter to stay responsive):
+    ends the worker when the supervisor's end of the stdin pipe closes. The
+    containment guarantee is the supervisor's kill-on-close Job Object."""
 
     def watch() -> None:
         while stream.read(1):
@@ -871,12 +1102,20 @@ def start_parent_loss_watchdog(
     return thread
 
 
-def worker_main(paths: CanaryPaths, *, env: Mapping[str, str], token: str) -> int:
-    """The supervised worker: claims the single worker slot under the
-    supervisor's launch capability, performs the one request and all
-    automated processing, and writes the categorical summary. Spawns no
-    process and prints nothing."""
+def worker_main(
+    paths: CanaryPaths,
+    *,
+    env: Mapping[str, str],
+    token: str,
+    in_containment: Callable[[], bool] = current_process_kill_on_close,
+) -> int:
+    """The supervised worker: confirms it runs inside a kill-on-close job,
+    claims the single worker slot under the supervisor's launch capability,
+    performs the one request and all automated processing, and writes the
+    categorical summary. Spawns no process and prints nothing."""
     if env.get(LIVE_ENV_VAR) != LIVE_ENV_VALUE:
+        return 3
+    if not in_containment():
         return 3
     try:
         claim_worker(paths, token)
@@ -896,9 +1135,10 @@ def worker_main(paths: CanaryPaths, *, env: Mapping[str, str], token: str) -> in
 
 
 def worker_entry(paths: CanaryPaths, stdin: Any) -> int:
-    """`_worker` CLI entry: reads the supervisor's token from the stdin pipe,
-    starts the parent-loss watchdog, then runs the worker. An interactive
-    stdin can never carry a supervisor launch."""
+    """`_worker` CLI entry: blocks for the supervisor's token, which is only
+    released after kernel containment is in place, arms the defense-in-depth
+    watchdog, then runs the worker. An interactive stdin can never carry a
+    supervisor launch."""
     if stdin.isatty():
         return 3
     token = stdin.buffer.readline(_TOKEN_LINE_LIMIT).decode("ascii", "replace").strip()
@@ -990,13 +1230,39 @@ def run_live(
     tree_is_clean: Callable[[], bool],
     worker_argv: Sequence[str],
     deadline_seconds: float = OUTER_DEADLINE_SECONDS,
+    containment_factory: Callable[[], Containment] = KillOnCloseJob,
 ) -> str:
-    """Preflight, reserve, stage, issue the one-time launch capability,
-    supervise, and record one terminal outcome after the worker is reaped.
-    Returns the categorical terminal outcome."""
+    """Preflight, establish kernel containment, reserve, stage, issue the
+    one-time launch capability, supervise, and record one terminal outcome
+    after the worker is reaped. Unsupported or failed containment setup
+    refuses before the reservation exists. Returns the categorical terminal
+    outcome."""
     record = live_preflight(
         request, env=env, paths=paths, head_sha=head_sha, tree_is_clean=tree_is_clean
     )
+    containment = containment_factory()
+    try:
+        return _reserve_and_supervise(
+            record,
+            containment,
+            env=env,
+            paths=paths,
+            worker_argv=worker_argv,
+            deadline_seconds=deadline_seconds,
+        )
+    finally:
+        containment.close()
+
+
+def _reserve_and_supervise(
+    record: Mapping[str, Any],
+    containment: Containment,
+    *,
+    env: Mapping[str, str],
+    paths: CanaryPaths,
+    worker_argv: Sequence[str],
+    deadline_seconds: float,
+) -> str:
     handle = create_reservation(paths.reservation, record)
     try:
         try:
@@ -1013,8 +1279,11 @@ def run_live(
             deadline_seconds=deadline_seconds,
             env=env,
             stdin_payload=(token + "\n").encode("ascii"),
+            containment=containment,
         )
-        if worker.kind == "termination_unconfirmed":
+        if worker.kind == "containment_failed":
+            outcome = f"{Verdict.FAIL_CLOSED.value}:containment_assignment_failed"
+        elif worker.kind == "termination_unconfirmed":
             outcome = f"{Verdict.FAIL_CLOSED.value}:worker_termination_unconfirmed"
         elif worker.kind == "deadline_terminated":
             outcome = f"{Verdict.FAIL_CLOSED.value}:outer_deadline"
@@ -1281,6 +1550,40 @@ def golden_for(job: DiscoveredJob, normalized: NormalizedPosting) -> dict[str, A
     }
 
 
+_NEVER_DISTINCT: Final = frozenset(
+    {ContentOutcome.CONVERTED.value, ContentOutcome.INVALID_TYPE.value}
+)
+
+
+def check_selection_semantics(entries: Sequence[tuple[Any, Any, Any]]) -> None:
+    """Enforces the selection contract on actual replay outcomes, never on
+    labels alone. `entries` is `(source_ordinal, selection_reason,
+    actual_replay_outcome)` in replay order:
+
+    - at least one record, and source ordinals strictly increasing;
+    - the first is `first_converted` and actually replays as `converted`;
+    - every later one is `distinct_outcome` with an actual outcome that is
+      neither `converted` nor `invalid_type`, pairwise distinct."""
+    if not entries:
+        raise CanaryRefusal("fixture_without_converted_sample")
+    ordinals = [entry[0] for entry in entries]
+    if not all(_strict_int(o) and o >= 0 for o in ordinals) or any(
+        a >= b for a, b in zip(ordinals, ordinals[1:], strict=False)
+    ):
+        raise CanaryRefusal("selection_ordinal_order")
+    _, first_reason, first_outcome = entries[0]
+    if first_reason != "first_converted" or first_outcome != ContentOutcome.CONVERTED.value:
+        raise CanaryRefusal("first_sample_not_converted")
+    later = entries[1:]
+    outcomes = [outcome for _, _, outcome in later]
+    if (
+        any(reason != "distinct_outcome" for _, reason, _ in later)
+        or any(outcome in _NEVER_DISTINCT for outcome in outcomes)
+        or len(set(outcomes)) != len(outcomes)
+    ):
+        raise CanaryRefusal("distinct_outcome_violation")
+
+
 def build_projection(
     raw_body: bytes,
     summary: Mapping[str, Any],
@@ -1365,6 +1668,17 @@ def build_projection(
             }
         )
 
+    check_selection_semantics(
+        [
+            (
+                entry["source_ordinal"],
+                entry["selection_reason"],
+                entry["golden_expectations"]["content_outcome"],
+            )
+            for entry in selected
+        ]
+    )
+
     source_evidence: dict[str, Any] = {
         "provider": "greenhouse",
         "board_token": BOARD_TOKEN,
@@ -1399,7 +1713,7 @@ def build_projection(
         "selected": selected,
         "replay_envelope": envelope,
     }
-    validate_fixture(document)
+    validate_fixture(document, taxonomy)
     return document
 
 
@@ -1503,11 +1817,15 @@ _REVIEW_KEYS: Final = {
 }
 
 
-def validate_fixture(document: Mapping[str, Any]) -> None:
-    """Structural and lineage validation of a projected fixture document:
-    exact key sets, the five-field allowlist, converted-first selection,
-    performed and approved review states, proper excerpts within both
-    limits, and recomputed projection/excerpt/golden hashes. Raises
+def validate_fixture(document: Mapping[str, Any], taxonomy: TaxonomyIndex) -> None:
+    """Structural, lineage, and semantic validation of a projected fixture
+    document: exact key sets, the five-field allowlist, performed and
+    approved review states, proper excerpts within both limits, recomputed
+    projection/excerpt/golden hashes, and an independent replay of every
+    projected job through the unchanged adapter, converter, bridge, and
+    composition. Golden expectations must equal the recomputed results, and
+    the selection contract is enforced on the actual replay outcomes, so
+    relabelling or recomputing editable hashes cannot pass. Raises
     `CanaryRefusal`."""
 
     def require(condition: bool, kind: str) -> None:
@@ -1539,11 +1857,6 @@ def validate_fixture(document: Mapping[str, Any]) -> None:
     require(len(jobs) == len(selected) <= MAX_SELECTED, "fixture_count")
     require(envelope["meta"]["total"] == len(jobs), "fixture_meta_total")
     require(len(selected) >= 1, "fixture_without_converted_sample")
-    require(
-        [entry.get("selection_reason") for entry in selected]
-        == ["first_converted"] + ["distinct_outcome"] * (len(selected) - 1),
-        "fixture_selection_order",
-    )
     for index, (job, entry) in enumerate(zip(jobs, selected, strict=True)):
         require(set(job) <= set(PROJECTED_FIELDS), "projected_keys")
         location = job.get("location")
@@ -1596,6 +1909,19 @@ def validate_fixture(document: Mapping[str, Any]) -> None:
             require(not (start == 0 and end == original), "excerpt_is_complete_source")
         else:
             require(lineage["excerpt_sha256"] is None, "excerpt_not_applicable")
+
+    # Independent semantic replay: actual outcomes, never labels.
+    result, normalized = asyncio.run(replay_envelope(envelope, taxonomy))
+    require(len(result.jobs) == len(jobs), "replay_dropped_record")
+    recomputed = [golden_for(job, n) for job, n in zip(result.jobs, normalized, strict=True)]
+    for entry, golden in zip(selected, recomputed, strict=True):
+        require(entry["golden_expectations"] == golden, "golden_mismatch")
+    check_selection_semantics(
+        [
+            (entry["source_ordinal"], entry["selection_reason"], golden["content_outcome"])
+            for entry, golden in zip(selected, recomputed, strict=True)
+        ]
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1801,10 +2127,13 @@ def publication_checks(
         checks["fixture_matches_approval"] = not os.path.lexists(paths.fixture)
     elif paths.fixture.is_file() and file_sha256(paths.fixture) == binding.fixture_sha256:
         try:
-            validate_fixture(json.loads(paths.fixture.read_text(encoding="utf-8")))
+            validate_fixture(
+                json.loads(paths.fixture.read_text(encoding="utf-8")),
+                load_taxonomy(DEFAULT_SKILLS_TAXONOMY_PATH),
+            )
             checks["fixture_matches_approval"] = True
-        except (CanaryRefusal, ValueError, KeyError, TypeError, AttributeError):
-            pass
+        except Exception:  # any validation or replay failure means not approved
+            checks["fixture_matches_approval"] = False
     return checks
 
 

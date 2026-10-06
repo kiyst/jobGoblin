@@ -69,10 +69,34 @@ dispositions, the cleanup attestation, and pending workflow metadata.
   5,000,000 bytes, not 5 MiB). Every other bound is the reviewed default.
 - The 500-record cap is checked on the bounded body before any adapter conversion.
 - The complete automated operation runs in a separately supervised worker process with
-  one 60-second wall-clock deadline that starts immediately before launch. At the deadline
-  the supervisor terminates, reaps, and if necessary kills the worker. Unconfirmed
-  termination is `FAIL-CLOSED`. The worker spawns no process. No second harness timer
-  exists.
+  one 60-second wall-clock deadline that starts immediately before launch. The worker
+  spawns no process. No second harness timer exists.
+- **Parent-loss containment (operating-system enforced).** Before the reservation exists,
+  the supervisor creates a Windows Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`
+  and verifies that setting by reading it back. The supervisor holds the only,
+  non-inheritable handle.
+  - The worker is assigned to the job, and membership is confirmed with
+    `IsProcessInJob`, before the launch token is released.
+  - Until then the worker can only block waiting for the token, so it cannot claim,
+    construct a transport, request, capture, convert, or write a summary.
+  - When the supervisor's handle closes, including when the supervisor crashes or is
+    killed, the kernel terminates the worker in any phase. This does not depend on the
+    worker's interpreter, threads, event loop, or GIL.
+  - Unsupported platforms or failed configuration refuse with `containment_unavailable`
+    before the reservation. A failed assignment releases no token, stops the worker, and
+    records `FAIL-CLOSED:containment_assignment_failed`.
+  - The worker also refuses unless it runs inside a kill-on-close job, and a stdin-pipe
+    watchdog remains. Both are defense in depth only, never the guarantee.
+- **Shutdown confirmation.** At the deadline, and on any abnormal supervisor exit after
+  launch (interrupt or supervision failure), the supervisor terminates, then kills, and
+  reaps after each step.
+  - Failures or interruptions of terminate, kill, wait, or poll never skip escalation.
+  - Death counts as confirmed only on evidence: the reaped return code, or the operating
+    system's process state.
+  - Without evidence the result is `FAIL-CLOSED:worker_termination_unconfirmed`.
+  - An interruption is honoured only after shutdown was attempted. It is recorded as
+    `FAIL-CLOSED:supervisor_interrupted` with the reservation kept.
+  - No exception text is ever reported.
 
 ### 3. Gates and the attempt reservation
 
@@ -96,6 +120,25 @@ retained through `Q` or recorded abandonment; its SHA-256 and outcome are record
 handoff before any deletion. A new request needs new explicit authorization and an
 explicitly authorized reservation reset.
 
+**Launch capability and single worker claim.** After reserving and creating staging, the
+supervisor writes a create-only launch capability to staging. It is bound to:
+- the exact reservation line's SHA-256 and its board, advisory SHA, contract,
+  authorization, and request-fingerprint identities;
+- the SHA-256 of a one-time secret token.
+
+The token itself is delivered only over the worker's stdin pipe, after kernel
+containment, and is never written to disk, argv, or the environment.
+
+Before any transport exists, the worker:
+1. re-derives the capability from the open, single-line reservation and the token, and
+   compares it;
+2. requires that no claim, raw capture, or summary exists;
+3. exclusively creates its claim.
+
+Each of these is refused before any transport: direct invocation, a wrong or missing
+token, a missing or mismatched capability, an altered or closed reservation, crash
+residue, a restart after the request began, and a concurrent or duplicate launch.
+
 ### 4. Capture, retention, and cleanup
 
 - Only a complete 200 JSON identity-encoded body that reaches EOF within the cap gets a
@@ -105,14 +148,34 @@ explicitly authorized reservation reset.
 - The complete body is written once, exclusive-create, to
   `.claude/runtime/phase4-s2c-staging/` (gitignored). It is kept through post-run review
   and is never committed, staged, pushed, logged, pasted, or included in a receipt (U4).
-- Cleanup, after post-run advisory clearance and before final `C`:
-  1. recompute and compare the raw hash and size;
-  2. inventory staging by relative path, size, and hash only;
-  3. refuse links, junctions, and reparse points;
-  4. delete everything beneath the staging root, then the root;
-  5. run a fresh checker process confirming the root and known capture paths are absent,
-     no staging residue is tracked, staged, untracked, or ignored, and no runtime path
-     appears in the commit range or the index.
+- Cleanup, after post-run advisory clearance and before final `C`, is bound to the exact
+  immutable post-run advisory candidate SHA and to the approved fixture SHA-256 (or
+  approved absence, for a findings-only report) and the approved report SHA-256.
+  **Before any deletion**, all of these must hold, or cleanup refuses and deletes nothing:
+  1. the raw hash and size match the captured evidence;
+  2. `HEAD` is the candidate, the tree is clean, and the candidate descends from the
+     base;
+  3. the fixture and report bytes equal the approved hashes, so any change after
+     approval fails;
+  4. the fixture passes full validation, including:
+     - `publication_safe=true`;
+     - both fidelity reviews performed (`faithful` or `mismatch`);
+     - a non-blank reviewer;
+     - the semantic replay in §5;
+  5. the raw response, whatever its filename, is absent:
+     - its Git blob id from the commit range and the index;
+     - its bytes (LF and CRLF forms) from every changed and publication file.
+
+  Content screening is recorded but never establishes publication safety; independent
+  content review of derived artifacts stays mandatory. Cleanup then:
+  1. inventories staging by relative path, size, and hash only;
+  2. refuses links, junctions, and reparse points;
+  3. deletes everything beneath the staging root, then the root;
+  4. runs a fresh checker process bound to the same candidate and hashes. It confirms the
+     root and every known capture path are absent, no staging residue is tracked, staged,
+     untracked, or ignored, no runtime path appears in the commit range or the index,
+     the raw blob is absent from the commit range and the index, and the artifact
+     bindings still hold.
 
   Cleanup failure blocks final `C`. This proves logical deletion from controlled
   locations, not forensic erasure.
@@ -123,15 +186,30 @@ explicitly authorized reservation reset.
 created) has `fixture_kind = projected_live_record_with_exact_content_excerpt`:
 
 - at most three selected records, chosen in provider order:
-  1. the first publication-safe, adapter-valid `converted` record with a safe excerpt;
+  1. the first publication-safe, adapter-valid `converted` record with a safe excerpt
+     **whose projected excerpt itself replays as `converted`** through the unchanged
+     adapter, converter, bridge, and composition. A source that converts but whose
+     proposed excerpt abstains is not eligible as the first sample; a different safe
+     proper excerpt must be chosen or the record excluded;
   2. optionally, the first later record with a distinct actual non-`converted` outcome;
   3. optionally, another such record.
 
-  `invalid_type` stays synthetic-only.
+  `invalid_type` stays synthetic-only. Without an eligible replay-converted first sample
+  no projected fixture is created; a findings-only report remains allowed.
 - Each projected record contains only `id`, `absolute_url`, `title`, `location.name`, and
   `content`. Missing versus `null` is preserved.
-- String `content` is replaced by one exact, contiguous, unmodified excerpt of at most
-  2,000 code points and 4,096 UTF-8 bytes, with code-point offsets recorded.
+- String `content` is replaced by one exact, contiguous, unmodified **proper** substring
+  of the source (never the complete source string, however short), of at most 2,000 code
+  points and 4,096 UTF-8 bytes, with code-point offsets and the original length recorded.
+- Fixture validation replays every projected job independently and enforces actual
+  outcomes, not labels or self-consistent hashes:
+  - golden expectations must equal the recomputed results;
+  - the first sample is `first_converted` and actually replays as `converted`;
+  - later samples are `distinct_outcome`, with actual outcomes that are not `converted`
+    or `invalid_type` and are pairwise distinct;
+  - source ordinals strictly increase.
+
+  Review states must be valid, performed, and publication-safe.
 - Detailed lineage covers selected records only:
   - source-record, allowed-field, original-content, excerpt, projected-record, and
     golden-output hashes;
