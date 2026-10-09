@@ -53,7 +53,6 @@ import secrets
 import stat
 import subprocess
 import sys
-import threading
 import time
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
@@ -1077,29 +1076,7 @@ def supervise_worker(
                 process.stdin.close()
 
 
-PARENT_LOST_EXIT: Final = 75
 _TOKEN_LINE_LIMIT: Final = 128
-
-
-def _hard_exit() -> None:
-    os._exit(PARENT_LOST_EXIT)
-
-
-def start_parent_loss_watchdog(
-    stream: IO[bytes], on_lost: Callable[[], None] = _hard_exit
-) -> threading.Thread:
-    """Defense in depth only (it needs this interpreter to stay responsive):
-    ends the worker when the supervisor's end of the stdin pipe closes. The
-    containment guarantee is the supervisor's kill-on-close Job Object."""
-
-    def watch() -> None:
-        while stream.read(1):
-            pass
-        on_lost()
-
-    thread = threading.Thread(target=watch, name="s2c-parent-loss", daemon=True)
-    thread.start()
-    return thread
 
 
 def worker_main(
@@ -1135,14 +1112,20 @@ def worker_main(
 
 
 def worker_entry(paths: CanaryPaths, stdin: Any) -> int:
-    """`_worker` CLI entry: blocks for the supervisor's token, which is only
-    released after kernel containment is in place, arms the defense-in-depth
-    watchdog, then runs the worker. An interactive stdin can never carry a
-    supervisor launch."""
+    """`_worker` CLI entry: one blocking read of the supervisor's token, which
+    is released only after kernel containment is in place, then the worker.
+    An interactive stdin can never carry a supervisor launch.
+
+    No thread is started and stdin is not read again: the supervisor's
+    kill-on-close Job Object is the sole parent-loss containment. (A daemon
+    stdin watchdog, removed by post-run correction 3, held stdin's buffer lock
+    at interpreter shutdown and crashed attempt 1's successful worker with
+    `_enter_buffered_busy`.) Before assignment the worker can only block on
+    this read; supervisor loss closes the pipe and it refuses with an empty
+    token."""
     if stdin.isatty():
         return 3
     token = stdin.buffer.readline(_TOKEN_LINE_LIMIT).decode("ascii", "replace").strip()
-    start_parent_loss_watchdog(stdin.buffer)
     return worker_main(paths, env=os.environ, token=token)
 
 

@@ -2090,9 +2090,8 @@ def test_direct_worker_cli_cannot_self_authorize() -> None:
         text=True,
         timeout=60,
     )
-    # Refused either by the missing capability or by parent-loss containment
-    # (stdin is not a supervisor pipe); never authorized.
-    assert completed.returncode in (3, canary.PARENT_LOST_EXIT)
+    # Refused by the missing supervisor capability; never authorized.
+    assert completed.returncode == 3
     assert (completed.stdout, completed.stderr) == ("", "")
 
 
@@ -2105,11 +2104,16 @@ class _Stdin:
         return self.tty
 
 
-def test_worker_entry_reads_the_token_and_arms_parent_loss_containment(
+def test_worker_entry_reads_only_the_token_and_starts_no_thread(
     paths: canary.CanaryPaths, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Correction 3: no watchdog thread holds stdin at interpreter shutdown."""
     events: list[Any] = []
-    monkeypatch.setattr(canary, "start_parent_loss_watchdog", lambda s: events.append(("watch", s)))
+
+    def no_thread(*_: Any, **__: Any) -> Any:
+        raise AssertionError("worker_entry started a thread")
+
+    monkeypatch.setattr(threading.Thread, "start", no_thread)
 
     def fake_worker(_: Any, *, env: Any, token: str) -> int:
         events.append(("worker", token))
@@ -2118,7 +2122,8 @@ def test_worker_entry_reads_the_token_and_arms_parent_loss_containment(
     monkeypatch.setattr(canary, "worker_main", fake_worker)
     stdin = _Stdin(b"ab12\nignored")
     assert canary.worker_entry(paths, stdin) == 0
-    assert events == [("watch", stdin.buffer), ("worker", "ab12")]
+    assert events == [("worker", "ab12")]
+    assert stdin.buffer.read() == b"ignored"  # nothing beyond the token line is read
     events.clear()
     assert canary.worker_entry(paths, _Stdin(b"ab12\n", tty=True)) == 3
     assert events == []
@@ -2261,62 +2266,6 @@ def test_real_worker_is_reaped_when_supervision_is_interrupted(
         canary.supervise_worker(_SLEEPER, deadline_seconds=30, grace_seconds=5)
     assert aborted.value.confirmed is True
     assert started[0].poll() is not None
-
-
-_WATCHED = (
-    "import sys, time\n"
-    "from scripts import run_greenhouse_s2c_canary as m\n"
-    "m.start_parent_loss_watchdog(sys.stdin.buffer)\n"
-    "time.sleep(30)\n"
-)
-
-
-def test_parent_loss_watchdog_ends_the_worker_when_the_pipe_closes() -> None:
-    child = subprocess.Popen(
-        [sys.executable, "-c", _WATCHED], cwd=BACKEND_DIR, stdin=subprocess.PIPE
-    )
-    try:
-        assert child.stdin is not None
-        child.stdin.write(b"token\n")
-        child.stdin.flush()
-        time.sleep(0.5)
-        assert child.poll() is None
-        child.stdin.close()
-        assert child.wait(timeout=15) == canary.PARENT_LOST_EXIT
-    finally:
-        if child.poll() is None:
-            child.kill()
-            child.wait()
-
-
-def test_killing_the_supervisor_process_ends_its_worker(tmp_path: Path) -> None:
-    marker = tmp_path / "worker-ended"
-    worker = (
-        "import os, sys, time, pathlib\n"
-        "from scripts import run_greenhouse_s2c_canary as m\n"
-        f"mark = pathlib.Path({str(marker)!r})\n"
-        "m.start_parent_loss_watchdog(sys.stdin.buffer,"
-        " lambda: (mark.write_text('parent lost'), os._exit(m.PARENT_LOST_EXIT)))\n"
-        "time.sleep(30)\n"
-    )
-    supervisor = (
-        "import subprocess, sys, time\n"
-        f"child = subprocess.Popen([sys.executable, '-c', {worker!r}], stdin=subprocess.PIPE)\n"
-        "print(child.pid, flush=True)\n"
-        "time.sleep(30)\n"
-    )
-    parent = subprocess.Popen(
-        [sys.executable, "-c", supervisor], cwd=BACKEND_DIR, stdout=subprocess.PIPE
-    )
-    assert parent.stdout is not None
-    assert parent.stdout.readline().strip()
-    time.sleep(0.5)
-    parent.kill()
-    parent.wait()
-    deadline = time.monotonic() + 15
-    while not marker.exists() and time.monotonic() < deadline:
-        time.sleep(0.1)
-    assert marker.read_text() == "parent lost"
 
 
 # ---------------------------------------------------------------------------
@@ -3038,3 +2987,86 @@ def test_three_sample_fixture_is_a_stable_control(
     document = _three_sample_document(paths, taxonomy)
     _recompute_everything(document, taxonomy)  # honest recomputation changes nothing
     canary.validate_fixture(document, taxonomy)
+
+
+# ---------------------------------------------------------------------------
+# Post-run correction 3: a successful real worker exits cleanly.
+# ---------------------------------------------------------------------------
+
+_REAL_WORKER = r'''
+import json, os, sys
+from pathlib import Path
+
+cfg = json.loads(Path(sys.argv[1]).read_text())
+# Capture every interpreter-level diagnostic, including fatal shutdown errors.
+err = os.open(cfg["stderr"], os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
+os.dup2(err, 2)
+
+import httpx
+from scripts import run_greenhouse_s2c_canary as m
+
+body = json.dumps({"jobs": [cfg["record"]], "meta": {"total": 1}}).encode()
+
+
+def handler(request):
+    m.check_request_shape(request)
+    headers = {"content-type": "application/json"}
+    return httpx.Response(200, headers=headers, stream=httpx.ByteStream(body))
+
+
+class OfflineTransport(httpx.MockTransport):
+    """No network is possible: the worker's transport is a MockTransport."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(handler)
+
+
+httpx.AsyncHTTPTransport = OfflineTransport
+p = m.CanaryPaths(**{k: Path(v) for k, v in cfg["paths"].items()})
+raise SystemExit(m.main(["_worker"], paths=p))
+'''
+
+
+@windows_only
+def test_successful_real_worker_exits_cleanly_through_the_actual_entry_path(
+    paths: canary.CanaryPaths, tmp_path: Path
+) -> None:
+    """The real `_worker` CLI entry under the real supervisor: launch
+    capability, Job Object assignment and membership, token release, atomic
+    claim, offline transport, processing, summary writing, and a normal exit
+    0 with no shutdown diagnostic. Attempt 1's `_enter_buffered_busy` crash
+    regression."""
+    stderr = tmp_path / "worker-stderr.txt"
+    script = tmp_path / "real_worker.py"
+    script.write_text(_REAL_WORKER, encoding="utf-8")
+    layout = {f.name: str(getattr(paths, f.name)) for f in dataclasses.fields(paths)}
+    config = tmp_path / "worker-config.json"
+    config.write_text(
+        json.dumps({"stderr": str(stderr), "record": record(1), "paths": layout}),
+        encoding="utf-8",
+    )
+    start = time.monotonic()
+    outcome = canary.run_live(
+        _live_request(paths),
+        env={**os.environ, **_LIVE_ENV, "PYTHONPATH": str(BACKEND_DIR)},
+        paths=paths,
+        head_sha=lambda: SHA,
+        tree_is_clean=lambda: True,
+        worker_argv=[sys.executable, str(script), str(config)],
+    )
+    assert time.monotonic() - start < canary.OUTER_DEADLINE_SECONDS
+    diagnostics = stderr.read_text(encoding="utf-8", errors="replace")
+    assert diagnostics == ""
+    assert outcome == "OBSERVED:pending_post_run_review"  # implies worker exit status 0
+    assert (
+        json.loads(paths.claim.read_text())["token_sha256"]
+        == json.loads(paths.launch.read_text())["token_sha256"]
+    )
+    summary = json.loads(paths.summary.read_text(encoding="utf-8"))
+    assert summary["run_verdict"] is None
+    assert summary["capture"]["complete"] is True
+    assert summary["aggregate"]["conversion_outcomes"]["converted"] == 1
+    assert [line["outcome"] for line in _reservation_lines(paths)] == [
+        "reserved",
+        "OBSERVED:pending_post_run_review",
+    ]

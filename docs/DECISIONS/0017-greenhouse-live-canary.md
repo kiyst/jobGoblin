@@ -6,10 +6,10 @@
 (`phase-4/greenhouse-live-canary-s2c`, risk class H, `slice_kind: tooling`, `gate: final`),
 base `eeac72abb2ba930fb469a4abb563a7601826266a` (`Q` of the ADR 0016 retention slice).
 
-**No live request has been made.** This ADR records the reviewed contract and the offline
-harness. The live result, the projected fixture, and the report do not exist yet. They may
-be recorded only from the evidence of a separately authorized run, under
-[Results](#results-pending).
+**One live request has been made: attempt 1, permanently `FAIL-CLOSED:worker_failed`**
+(see [Results](#results)). S2c has not passed. A corrected candidate must complete a
+separately authorized new live request before S2c can pass. No projected fixture or report
+exists.
 
 The contract is the frozen, gitignored packet `.claude/runtime/phase4-s2c-frozen-contract.md`
 (SHA-256 `ac2cc00afc9e2bb7b7520eba71da7d6349e7b523f1b9b601bb2ad254c450800b`). It holds nine
@@ -85,8 +85,11 @@ dispositions, the cleanup attestation, and pending workflow metadata.
   - Unsupported platforms or failed configuration refuse with `containment_unavailable`
     before the reservation. A failed assignment releases no token, stops the worker, and
     records `FAIL-CLOSED:containment_assignment_failed`.
-  - The worker also refuses unless it runs inside a kill-on-close job, and a stdin-pipe
-    watchdog remains. Both are defense in depth only, never the guarantee.
+  - The worker also refuses unless it runs inside a kill-on-close job (defense in depth
+    only, never the guarantee). It starts no thread and reads stdin exactly once, for the
+    token. Before assignment it can only block on that read; supervisor loss closes the
+    pipe and it refuses with an empty token. The former daemon stdin watchdog was removed
+    by post-run correction 3 (see [Results](#results)).
 - **Shutdown confirmation.** At the deadline, and on any abnormal supervisor exit after
   launch (interrupt or supervision failure), the supervisor terminates, then kills, and
   reaps after each step.
@@ -284,19 +287,102 @@ Its salary statement is exactly:
 - **D1 and D2.** D1 remains unsatisfied. Bounded fixture expectations and reports are
   evaluation artifacts with no runtime consumer, and S2c adds no D2 evidence.
 
-## Results (pending)
+## Results
 
-None. This section may be completed only from the separately authorized run's recorded,
-reviewed evidence. Nothing here is a live result.
+### Live attempt 1 (immutable): `FAIL-CLOSED:worker_failed`
+
+- **Authority and identity.**
+  - Candidate `1cb715a00c52fef07ea93ea356612ffe0322ac83`, harness SHA-256
+    `b5ecedb6ffbea05d64a3e9b662fd951e3f4a9ecd6062e1206a7b3d9e9aa0b61a`.
+  - The approved personal-use terms amendment, SHA-256
+    `46b2c55c9f5d9990b4c6b12970d55744c7071e01eb9a7e3bb26699619f165323`.
+  - The user's U1 network authorization, recorded verbatim in the gitignored record
+    `.claude/runtime/phase4-s2c-u1-network-authorization.md`, SHA-256
+    `8564eaafdf60d1719128fd6bd9ff79283ab8ba3ce967db76dfd96b09f0795fcd`.
+- **The request.** Exactly one `GET https://boards-api.greenhouse.io/v1/boards/discord/jobs?content=true`
+  at 2026-10-08T23:18:16Z, made once with no retry. The consumed reservation
+  `.claude/runtime/phase4-s2c-attempt.jsonl` (SHA-256
+  `18763cf69c9452d36e96017ee91b9ad3638398726b7dbce24917ef75efd00f5e`) records `reserved`,
+  then the terminal outcome `FAIL-CLOSED:worker_failed`. That outcome is permanent and
+  is not downgraded.
+- **Recorded worker evidence.** All of this is categorical, comes from the run summary
+  written before the failure, and is unreviewed:
+  - HTTP 200, JSON, observed User-Agent `python-httpx/0.28.1`;
+  - a complete 413,101-byte capture, SHA-256
+    `3bbce131108b1fb0b0645a90bcb5174b58c69360fd4257f1ff288460cbf90c19`;
+  - 48 source records, with `meta.total` 48;
+  - 48 retained, every one with conversion outcome `converted`.
+
+  No PASS or other verdict is derived from this clean processing summary.
+- **Defect and cause.** The worker finished processing and wrote its summary, then exited
+  with 0xC0000005 instead of 0, so the supervisor correctly recorded a failure.
+  - The cause was the defense-in-depth daemon stdin watchdog. It was still blocked
+    reading the supervisor's open stdin pipe, holding the stdin `BufferedReader` lock, at
+    interpreter finalization.
+  - CPython then aborted with `Fatal Python error: _enter_buffered_busy`.
+  - No offline test had exercised a successful real `_worker` exit.
+- **Retained staging.** Raw capture, run summary, launch capability, and worker claim
+  remain unchanged and gitignored for post-run review. They are never committed or
+  logged.
+
+### Post-run correction 3
+
+- **Mechanism.** The daemon stdin watchdog is removed. The worker starts no thread and
+  reads stdin once, for the token. The supervisor's verified kill-on-close Job Object
+  remains the sole and authoritative parent-loss containment. All of these are
+  unchanged:
+  - assignment and membership confirmation before token release;
+  - the atomic claim and consumed-reservation controls;
+  - no transport before authorization and containment;
+  - termination of the worker on supervisor loss in every phase;
+  - fail-closed shutdown escalation with evidence-based death confirmation.
+- **Regression.** A real-process, synthetic, offline test drives the actual `_worker`
+  CLI entry under the real supervisor through:
+  1. a valid launch capability;
+  2. Job Object assignment and membership confirmation;
+  3. token release;
+  4. the atomic claim;
+  5. a mocked transport with no possible network access;
+  6. processing and summary writing;
+  7. a normal shutdown.
+
+  It requires exit status 0 within the deadline and an empty stderr (fd 2). It fails
+  against `1cb715a` with `_enter_buffered_busy` and passes after the correction.
+
+### Evidence limitations
+
+- The complete capture remains usable only for bounded evidence: captured-response,
+  replay, lineage, and provisional fidelity.
+- It cannot make S2c pass. A corrected candidate must complete a separately authorized
+  new live request, which needs new U1 network authorization and an explicitly
+  authorized reservation reset.
+- The W1–W12 mutation experiments are manual advisory evidence. No coordinator executed
+  them.
+
+### Timeout-wording disclosure
+
+U1 repeated a "55-second per-board bound". The reconciled contract had removed that
+separate harness timer (Sol A25, compatibility C9/C10). The only bounds are:
+
+- the adapter's internal timeouts, whose conservative per-board sum is 55 seconds;
+- one supervised 60-second whole-run deadline.
+
+U1 is preserved unchanged as historical evidence, and no timer was added to match it.
+Any future network authorization must state this corrected timeout model explicitly.
 
 ## Remaining pre-live gates
 
-1. Sol Medium and Astra review of the immutable pre-live advisory candidate (U7).
-2. The user's terms-of-use and robots.txt review, recorded with URLs, date, and separate
-   dispositions (U3).
-3. Explicit network authorization (U1) naming:
-   - the board, the exact advisory SHA, and the contract hash;
-   - the request, bounds, one-attempt rule, and retention policy.
+Gates 1–3 were satisfied for attempt 1 at candidate `1cb715a`. A new live attempt with a
+corrected candidate requires all of these again, and separately:
+
+1. Sol Medium and Astra review of the corrected advisory candidate (U7).
+2. The user's terms and robots dispositions (U3). Attempt 1's are recorded in the personal-use
+   terms amendment.
+3. New explicit network authorization (U1) and an explicitly authorized reservation reset,
+   naming:
+   - the board, the exact candidate SHA, and the contract hash;
+   - the request, the corrected timeout model, the one-attempt rule, and the retention
+     policy.
 
 ## Consequences
 
@@ -305,4 +391,6 @@ reviewed evidence. Nothing here is a live result.
   after the authorized run).
 - The W1–W12 manual mutation experiments are advisory evidence, not registered
   witnesses. The 34 registered witnesses are unchanged.
-- Rollback before the live run: abandon the branch. No external effect has occurred.
+- One external request has occurred (attempt 1). Rollback: abandon the branch and apply
+  the contract's verified staging cleanup. The consumed reservation is retained through
+  `Q` or recorded abandonment.

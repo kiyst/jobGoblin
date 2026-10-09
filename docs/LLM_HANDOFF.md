@@ -442,13 +442,15 @@ findings: none
 - Date/agent: 2026-10-05, Claude (implementer). Branch
   `phase-4/greenhouse-live-canary-s2c`, base
   `eeac72abb2ba930fb469a4abb563a7601826266a` (`Q` of the ADR 0016 retention slice).
-  The immutable pre-live advisory candidate is
-  `cc14774533035c5b119060e980bf8bbc9062537d`, and pre-live advisory correction 1 is its
-  direct child `6ca5fd18bef83a300117918370625c1a5a3f303d`. Both are preserved unamended. Ending commit: this commit,
-  **pre-live advisory correction 2**, the direct single-parent child of correction 1, for
-  narrow re-review by Sol Medium and Astra. None of them is final `C`: no coordinator
-  run, receipt, `A`, formal review, merge metadata, live request, raw staging, or attempt
-  reservation exists.
+  The chain of immutable advisory candidates, each preserved unamended:
+  - the pre-live candidate `cc14774533035c5b119060e980bf8bbc9062537d`;
+  - correction 1, `6ca5fd18bef83a300117918370625c1a5a3f303d`;
+  - correction 2, `1cb715a00c52fef07ea93ea356612ffe0322ac83`, under which live attempt 1 ran (`FAIL-CLOSED:worker_failed`).
+
+  Ending commit: this commit, **post-run correction 3**, the direct single-parent child of
+  correction 2, for narrow re-review by Sol Medium and Astra. None of them is final `C`: no
+  coordinator run, receipt, `A`, formal review, or merge metadata exists. The consumed
+  reservation and gitignored raw staging from attempt 1 exist and are unchanged.
 - Slice: Phase 4 S2c, a bounded read-only Greenhouse live canary
   ([ADR 0017](DECISIONS/0017-greenhouse-live-canary.md)), offline pre-live portion only.
   Risk class H, `slice_kind: tooling`, `declared_gate: final`.
@@ -627,7 +629,7 @@ findings: none
   restoration. The complete per-mutation table is in this file at commit `6ca5fd1`. The
   gitignored log is `.claude/runtime/phase4-s2c-correction1-mutation-log.json`, SHA-256
   `86c222d37e89be3d8e0ef6d2908c30239bd24e022b27b8709501b49a28c3b4fe`.
-- **Pre-live advisory correction 2** (this commit, the direct single-parent child of
+- **Pre-live advisory correction 2** (`1cb715a00c52fef07ea93ea356612ffe0322ac83`, the direct single-parent child of
   `6ca5fd18bef83a300117918370625c1a5a3f303d`). Authority: packet
   `.claude/runtime/phase4-s2c-prelive-correction2-authorization.md` (gitignored), SHA-256
   `951486634ad8fcea1fb0175a400c2193db566c4c9b9537293b7d89e58436d9b9`. It holds both
@@ -682,7 +684,7 @@ findings: none
      decisions are unchanged. The earlier temporary statement that this entry overrode
      the ADR is withdrawn: ADR 0017 is the normative record.
   6. **Evidence.** The table below.
-- Verification at this commit (no full suite; no finding indicated broader risk):
+- Verification at `1cb715a` (no full suite; no finding indicated broader risk):
   - harness module: 239 passed, 0 skipped, on Windows. This includes nine real-process
     supervisor-loss tests:
     - before assignment and before claim;
@@ -695,35 +697,125 @@ findings: none
     composition, D2 realistic, and HTML-oracle tests: 921 passed;
   - Ruff format/check and mypy clean;
   - `check_handoff`, `check_repo`, and `git diff --check` pass.
+- W1–W12 at `1cb715a`: all twelve were detected against harness SHA-256
+  `b5ecedb6ffbea05d64a3e9b662fd951e3f4a9ecd6062e1206a7b3d9e9aa0b61a`, with byte-identical
+  restoration. The complete per-mutation table is in this file at commit `1cb715a`. The
+  gitignored log is `.claude/runtime/phase4-s2c-correction2-mutation-log.json`, SHA-256
+  `cc80c54628eb9b6803473e79c0025bef04b7a42ec8aefe82f278acff99631c8b`.
+- **Live attempt 1 (immutable): `FAIL-CLOSED:worker_failed`.**
+  - **Authority.**
+    - Candidate `1cb715a00c52fef07ea93ea356612ffe0322ac83`, harness `b5ecedb6…a0b61a`.
+    - Personal-use terms amendment
+      `46b2c55c9f5d9990b4c6b12970d55744c7071e01eb9a7e3bb26699619f165323`, approved as
+      compatible by Sol Medium and Astra, as relayed.
+    - The user's U1 network authorization, recorded verbatim at
+      `.claude/runtime/phase4-s2c-u1-network-authorization.md`, SHA-256
+      `8564eaafdf60d1719128fd6bd9ff79283ab8ba3ce967db76dfd96b09f0795fcd`.
+  - **The request.** Exactly one `GET https://boards-api.greenhouse.io/v1/boards/discord/jobs?content=true`
+    at 2026-10-08T23:18:16Z, with no retry and no second request.
+  - **Recorded outcome.** The consumed reservation `.claude/runtime/phase4-s2c-attempt.jsonl`
+    (SHA-256 `18763cf69c9452d36e96017ee91b9ad3638398726b7dbce24917ef75efd00f5e`) holds
+    `reserved`, then `FAIL-CLOSED:worker_failed`. This outcome is permanent.
+  - **Run summary** (written before the failure; categorical, unreviewed):
+    - HTTP 200, JSON, User-Agent `python-httpx/0.28.1`;
+    - a complete 413,101-byte capture, SHA-256
+      `3bbce131108b1fb0b0645a90bcb5174b58c69360fd4257f1ff288460cbf90c19`;
+    - 48 source records, with `meta.total` 48;
+    - 48 retained, all `converted`;
+    - no run findings.
+
+    No PASS is derived from this clean processing summary.
+  - **Cause.** The defense-in-depth daemon stdin watchdog held stdin's `BufferedReader`
+    lock at interpreter shutdown. CPython aborted with `Fatal Python error:
+    _enter_buffered_busy` and exit code 0xC0000005, which the supervisor correctly
+    treated as a failure.
+  - **Staging** (gitignored; unchanged through this correction; never committed or
+    logged). SHA-256 values were taken before and after the correction:
+
+    | Artifact | SHA-256 |
+    |---|---|
+    | raw capture | `3bbce131108b1fb0b0645a90bcb5174b58c69360fd4257f1ff288460cbf90c19` |
+    | run summary | `0ca3ded395beab0d7ebb161845f17c9c0e65943f1003e5f0010a31f3929de46c` |
+    | launch capability | `ac86b5d980957a32061b27c4d0f17665c8197cd75fb42687d2f4ab73798e14ad` |
+    | worker claim | `25a8a1ea5f1099dae988300270af9d14163c9b799293f31282b3dc0c5b68404d` |
+  - **Evidence limits.**
+    - The capture is usable only for bounded evidence: captured-response, replay,
+      lineage, and provisional fidelity.
+    - A corrected candidate must complete a separately authorized new live request,
+      under new U1 authorization with an explicitly authorized reservation reset, before
+      S2c can pass.
+    - The W1–W12 experiments are manual. No coordinator executed them.
+  - **Timeout-wording disclosure.** U1 repeated a stale "55-second per-board bound". The
+    reconciled contract removed that separate harness timer. The only bounds are the
+    adapter's internal timeouts (a conservative 55-second per-board sum) and the one
+    supervised 60-second deadline. U1 is preserved unchanged, and no timer was added. Any
+    future authorization must state the corrected timeout model.
+- **Post-run correction 3** (this commit, the direct single-parent child of `1cb715a00c52fef07ea93ea356612ffe0322ac83`).
+  - **Authority.** The user's post-run correction 3 authorization. Scope: exactly
+    `backend/scripts/run_greenhouse_s2c_canary.py`,
+    `backend/tests/test_greenhouse_s2c_canary.py`,
+    `docs/DECISIONS/0017-greenhouse-live-canary.md`, and this file.
+  - **Mechanism.** The redundant daemon stdin watchdog is removed. `worker_entry` starts
+    no thread and reads stdin once, for the token. The verified kill-on-close Job Object
+    remains the sole and authoritative parent-loss containment. All of these are
+    unchanged:
+    - assignment and membership before token release;
+    - the atomic claim and consumed-reservation controls;
+    - no transport before authorization and containment;
+    - fail-closed, evidence-based shutdown.
+
+    Request, retention, privacy, fixture, and provider semantics are unchanged.
+  - **Tests.**
+    - Removed: the two watchdog-only tests.
+    - Changed: the direct `_worker` CLI refusal must now be exactly 3. A `worker_entry`
+      test proves that no thread starts and that nothing beyond the token line is read.
+    - Added: a real-process regression that drives the actual `_worker` entry under the
+      real supervisor, Job Object, launch capability, token, claim, and mocked transport
+      (no network possible). It requires exit 0 within the deadline, an empty fd-2
+      stderr, an observed summary, and the terminal line
+      `OBSERVED:pending_post_run_review`. It **fails against `1cb715a`** with
+      `_enter_buffered_busy`; this was rerun against the exact `b5ecedb6…` harness bytes,
+      which were then restored byte-identically. It **passes after the correction**.
+  - **ADR 0017** records the immutable attempt, the defect and its cause, the mechanism,
+    the regression, the evidence limits, the timeout-wording disclosure, and that a new
+    attempt needs separate authorization.
+- Verification at this commit (no full suite; no broader risk was found):
+  - harness module: 238 passed, 0 skipped (239, minus two watchdog-only tests, plus the
+    regression). This includes:
+    - all nine real-process supervisor-loss phase tests;
+    - the direct-worker refusal, assignment and token-ordering, claim and reservation,
+      transport-containment, and shutdown-escalation tests;
+  - verification-scope plus related tests: 921 passed;
+  - Ruff format/check and mypy clean;
+  - `check_handoff`, `check_repo`, and `git diff --check` pass.
 - W1–W12 manual mutations, rerun after the final semantic change against harness SHA-256
-  `b5ecedb6ffbea05d64a3e9b662fd951e3f4a9ecd6062e1206a7b3d9e9aa0b61a`. No anchor needed to move. Advisory evidence only: not registered
-  witnesses, never attributed to a coordinator, and the 34 registered witnesses are
-  unchanged.
+  `7bcc0edff2e1df734b52eba4ad7767bd51c0493b7b84edac5ef129b1cab099c0`. No anchor needed to move. Manual advisory evidence only: no
+  coordinator executed them, and the 34 registered witnesses are unchanged.
   - Stable controls for every mutation: `tests/test_greenhouse_s2c_canary.py::test_default_invocation_refuses` and `tests/test_greenhouse_s2c_canary.py::test_selection_rule_follows_provider_order`.
   - Every anchor occurred exactly once.
-  - The overall baseline and final runs of all witnesses and controls passed.
+  - The baseline and final runs of all witnesses and controls passed.
   - Anchors are shown with line indentation omitted; ⏎ marks a newline.
-  - The gitignored log is `.claude/runtime/phase4-s2c-correction2-mutation-log.json`,
-    SHA-256 `cc80c54628eb9b6803473e79c0025bef04b7a42ec8aefe82f278acff99631c8b`.
+  - The gitignored log is `.claude/runtime/phase4-s2c-correction3-mutation-log.json`,
+    SHA-256 `6ed5b8718438ae04221f626ab29fad4e52ef95e1c5af151ee55a823cacfcb915`.
 
   | ID | Mutation | Anchor → replacement | Failing witness (`tests/test_greenhouse_s2c_canary.py::`) | Baseline | Mutant | Restored; SHA-256 |
   |---|---|---|---|---|---|---|
-  | W1 | request-shape guard removed | `check_request_shape(request) ⏎ request.headers["Accept-Encoding"]` → `request.headers["Accept-Encoding"]` | `test_request_shape_guard_refuses_before_send[other_board]` | pass | fail; controls pass | pass; `b5ecedb6ffbea05d64a3e9b662fd951e3f4a9ecd6062e1206a7b3d9e9aa0b61a` |
-  | W2 | second-send refusal removed | `if self._capture.request_sent: ⏎ raise CanaryRefusal("second_request_refused")` → (deleted) | `test_second_send_is_refused_before_network` | pass | fail; controls pass | pass; `b5ecedb6ffbea05d64a3e9b662fd951e3f4a9ecd6062e1206a7b3d9e9aa0b61a` |
-  | W3 | live gate enabled by default (env check removed) | `if env.get(LIVE_ENV_VAR) != LIVE_ENV_VALUE: ⏎ raise CanaryRefusal("gate_disabled")` → (deleted) | `test_live_preflight_refuses_without_live_env` | pass | fail; controls pass | pass; `b5ecedb6ffbea05d64a3e9b662fd951e3f4a9ecd6062e1206a7b3d9e9aa0b61a` |
-  | W4 | board allowlist check removed | `if request.board != BOARD_TOKEN: ⏎ raise CanaryRefusal("board_not_allowlisted")` → (deleted) | `test_live_preflight_refuses_non_allowlisted_board` | pass | fail; controls pass | pass; `b5ecedb6ffbea05d64a3e9b662fd951e3f4a9ecd6062e1206a7b3d9e9aa0b61a` |
-  | W5 | Accept-Encoding: identity override removed | `request.headers["Accept-Encoding"] = ACCEPT_ENCODING` → (deleted) | `test_accept_encoding_identity_and_default_user_agent` | pass | fail; controls pass | pass; `b5ecedb6ffbea05d64a3e9b662fd951e3f4a9ecd6062e1206a7b3d9e9aa0b61a` |
-  | W6 | raw capture overwrite instead of exclusive create | `fd = os.open(path, os.O_WRONLY \| os.O_CREAT \| os.O_EXCL \| getattr(os, "O_BINARY", 0))` → `fd = os.open(path, os.O_WRONLY \| os.O_CREAT \| os.O_TRUNC \| getattr(os, "O_BINARY", 0))` | `test_exclusive_write_never_overwrites` | pass | fail; controls pass | pass; `b5ecedb6ffbea05d64a3e9b662fd951e3f4a9ecd6062e1206a7b3d9e9aa0b61a` |
-  | W7 | supervisor no longer terminates/kills at the deadline | `stop()` → `pass` | `test_supervisor_terminates_and_reaps_worker_at_deadline` | pass | fail; controls pass | pass; `b5ecedb6ffbea05d64a3e9b662fd951e3f4a9ecd6062e1206a7b3d9e9aa0b61a` |
-  | W8 | retries enabled (max_attempts=3) | `max_attempts=1, max_response_bytes=MAX_RESPONSE_BYTES` → `max_attempts=3, max_response_bytes=MAX_RESPONSE_BYTES` | `test_503_is_inconclusive_with_exactly_one_request` | pass | fail; controls pass | pass; `b5ecedb6ffbea05d64a3e9b662fd951e3f4a9ecd6062e1206a7b3d9e9aa0b61a` |
-  | W9 | response cap raised to 5 MiB (5,242,880) | `MAX_RESPONSE_BYTES: Final = 5_000_000` → `MAX_RESPONSE_BYTES: Final = 5_242_880` | `test_body_over_cap_is_partial_without_complete_hash` | pass | fail; controls pass | pass; `b5ecedb6ffbea05d64a3e9b662fd951e3f4a9ecd6062e1206a7b3d9e9aa0b61a` |
-  | W10 | record cap before conversion removed | `if capture.source_record_count > MAX_SOURCE_RECORDS: ⏎ raise CanaryRefusal("record_cap_exceeded")` → (deleted) | `test_record_cap_is_enforced_before_conversion` | pass | fail; controls pass | pass; `b5ecedb6ffbea05d64a3e9b662fd951e3f4a9ecd6062e1206a7b3d9e9aa0b61a` |
-  | W11 | database-layer import added | `from app.ingestion.hashing import canonical_json_hash  # noqa: E402` → `import sqlalchemy  # noqa: E402, F401 ⏎ from app.ingestion.hashing import canonical_json_hash  # noqa: E402` | `test_harness_imports_only_allowed_modules` | pass | fail; controls pass | pass; `b5ecedb6ffbea05d64a3e9b662fd951e3f4a9ecd6062e1206a7b3d9e9aa0b61a` |
-  | W12 | existing-reservation refusal removed from preflight | `if os.path.lexists(paths.reservation): ⏎ raise CanaryRefusal("attempt_already_reserved")` → (deleted) | `test_live_preflight_refuses_existing_reservation` | pass | fail; controls pass | pass; `b5ecedb6ffbea05d64a3e9b662fd951e3f4a9ecd6062e1206a7b3d9e9aa0b61a` |
-- STOP -- pre-live advisory correction 2, for narrow re-review by Sol Medium and Astra.
-  No live canary, Greenhouse contact, terms/robots retrieval, raw staging, attempt
-  reservation, captured fixture, live report, receipt, final `C`/`A`/`R`, persistence,
-  merge, or other slice.
+  | W1 | request-shape guard removed | `check_request_shape(request) ⏎ request.headers["Accept-Encoding"]` → `request.headers["Accept-Encoding"]` | `test_request_shape_guard_refuses_before_send[other_board]` | pass | fail; controls pass | pass; `7bcc0edff2e1df734b52eba4ad7767bd51c0493b7b84edac5ef129b1cab099c0` |
+  | W2 | second-send refusal removed | `if self._capture.request_sent: ⏎ raise CanaryRefusal("second_request_refused")` → (deleted) | `test_second_send_is_refused_before_network` | pass | fail; controls pass | pass; `7bcc0edff2e1df734b52eba4ad7767bd51c0493b7b84edac5ef129b1cab099c0` |
+  | W3 | live gate enabled by default (env check removed) | `if env.get(LIVE_ENV_VAR) != LIVE_ENV_VALUE: ⏎ raise CanaryRefusal("gate_disabled")` → (deleted) | `test_live_preflight_refuses_without_live_env` | pass | fail; controls pass | pass; `7bcc0edff2e1df734b52eba4ad7767bd51c0493b7b84edac5ef129b1cab099c0` |
+  | W4 | board allowlist check removed | `if request.board != BOARD_TOKEN: ⏎ raise CanaryRefusal("board_not_allowlisted")` → (deleted) | `test_live_preflight_refuses_non_allowlisted_board` | pass | fail; controls pass | pass; `7bcc0edff2e1df734b52eba4ad7767bd51c0493b7b84edac5ef129b1cab099c0` |
+  | W5 | Accept-Encoding: identity override removed | `request.headers["Accept-Encoding"] = ACCEPT_ENCODING` → (deleted) | `test_accept_encoding_identity_and_default_user_agent` | pass | fail; controls pass | pass; `7bcc0edff2e1df734b52eba4ad7767bd51c0493b7b84edac5ef129b1cab099c0` |
+  | W6 | raw capture overwrite instead of exclusive create | `fd = os.open(path, os.O_WRONLY \| os.O_CREAT \| os.O_EXCL \| getattr(os, "O_BINARY", 0))` → `fd = os.open(path, os.O_WRONLY \| os.O_CREAT \| os.O_TRUNC \| getattr(os, "O_BINARY", 0))` | `test_exclusive_write_never_overwrites` | pass | fail; controls pass | pass; `7bcc0edff2e1df734b52eba4ad7767bd51c0493b7b84edac5ef129b1cab099c0` |
+  | W7 | supervisor no longer terminates/kills at the deadline | `stop()` → `pass` | `test_supervisor_terminates_and_reaps_worker_at_deadline` | pass | fail; controls pass | pass; `7bcc0edff2e1df734b52eba4ad7767bd51c0493b7b84edac5ef129b1cab099c0` |
+  | W8 | retries enabled (max_attempts=3) | `max_attempts=1, max_response_bytes=MAX_RESPONSE_BYTES` → `max_attempts=3, max_response_bytes=MAX_RESPONSE_BYTES` | `test_503_is_inconclusive_with_exactly_one_request` | pass | fail; controls pass | pass; `7bcc0edff2e1df734b52eba4ad7767bd51c0493b7b84edac5ef129b1cab099c0` |
+  | W9 | response cap raised to 5 MiB (5,242,880) | `MAX_RESPONSE_BYTES: Final = 5_000_000` → `MAX_RESPONSE_BYTES: Final = 5_242_880` | `test_body_over_cap_is_partial_without_complete_hash` | pass | fail; controls pass | pass; `7bcc0edff2e1df734b52eba4ad7767bd51c0493b7b84edac5ef129b1cab099c0` |
+  | W10 | record cap before conversion removed | `if capture.source_record_count > MAX_SOURCE_RECORDS: ⏎ raise CanaryRefusal("record_cap_exceeded")` → (deleted) | `test_record_cap_is_enforced_before_conversion` | pass | fail; controls pass | pass; `7bcc0edff2e1df734b52eba4ad7767bd51c0493b7b84edac5ef129b1cab099c0` |
+  | W11 | database-layer import added | `from app.ingestion.hashing import canonical_json_hash  # noqa: E402` → `import sqlalchemy  # noqa: E402, F401 ⏎ from app.ingestion.hashing import canonical_json_hash  # noqa: E402` | `test_harness_imports_only_allowed_modules` | pass | fail; controls pass | pass; `7bcc0edff2e1df734b52eba4ad7767bd51c0493b7b84edac5ef129b1cab099c0` |
+  | W12 | existing-reservation refusal removed from preflight | `if os.path.lexists(paths.reservation): ⏎ raise CanaryRefusal("attempt_already_reserved")` → (deleted) | `test_live_preflight_refuses_existing_reservation` | pass | fail; controls pass | pass; `7bcc0edff2e1df734b52eba4ad7767bd51c0493b7b84edac5ef129b1cab099c0` |
+- STOP -- post-run correction 3, for narrow re-review by Sol Medium and Astra. No
+  Greenhouse request, reservation reset, second attempt, staging change or deletion,
+  tracked fixture, tracked report, receipt, final `C`/`A`/`R`, `M`/`Q`, persistence, or
+  other slice.
 
 ```workflow-metadata
 workflow_version: v3.2
