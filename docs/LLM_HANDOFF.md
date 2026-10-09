@@ -881,6 +881,33 @@ findings: none
   - Correction 3 has two advisory approvals, as relayed. The stale 55-second U1 wording
     disclosure above still applies. A separately authorized corrected live attempt is
     still required.
+- **Post-run documentation correction 4** (this commit, the direct single-parent child of
+  `ec1a0f01fecced17277084cf12b72bf2d8d05abf`). Scope: exactly
+  `docs/DECISIONS/0017-greenhouse-live-canary.md` and this file.
+  - **Review input (as relayed by the user; complete text not relayed):**
+    - Sol Medium's P2 finding: the ADR status and gate heading were stale;
+    - Astra's two mechanical documentation clarifications.
+  - **Dispositions** (exact ADR 0017 replacements):
+    1. status: "Proposed — pre-live advisory candidate." → "Proposed — post-run advisory
+       candidate; S2c has not passed.", with the rest of the paragraph unchanged;
+    2. report line: "(path reserved; not yet created)" → "(published as post-run advisory
+       evidence; not final-C evidence)";
+    3. worker evidence: "All of this is categorical, comes from the run summary written
+       before the failure, and is unreviewed:" → "These categorical observations come from
+       the run summary written before the worker failure. They were checked during post-run
+       advisory review and do not supersede the permanent failed-attempt verdict.";
+    4. heading: "Remaining pre-live gates" → "Remaining gates for a corrected live attempt",
+       with the gates beneath it unchanged.
+  - **Unchanged:** the fixture, report, replay test, harness, ROADMAP, raw artifacts, and
+    every evidence value. The hashes stay the same:
+    - fixture `d7e14857…5249` (canonical `3475e5a4…f503`);
+    - report `0b3c1369…148c`;
+    - harness `7bcc0edf…9c0`;
+    - raw capture `3bbce131…0c19`.
+  - Cleanup must bind to this corrected advisory candidate, not to `ec1a0f0`.
+  - Workflow metadata remains pending and unchanged.
+  - No cleanup, Greenhouse contact, new request, reservation reset, receipt, `A`, formal `R`,
+    merge, or other slice is authorized.
 - STOP -- the post-run advisory candidate may be committed and pushed under the user's
   publication approval. Cleanup, another request, a reservation reset, a receipt, `A`,
   formal `R`, `M`/`Q`, persistence, S3, and S4 remain prohibited.

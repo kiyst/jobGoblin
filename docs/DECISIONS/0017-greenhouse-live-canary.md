@@ -2,7 +2,7 @@
 
 ## Status
 
-**Proposed — pre-live advisory candidate.** Phase 4 S2c
+**Proposed — post-run advisory candidate; S2c has not passed.** Phase 4 S2c
 (`phase-4/greenhouse-live-canary-s2c`, risk class H, `slice_kind: tooling`, `gate: final`),
 base `eeac72abb2ba930fb469a4abb563a7601826266a` (`Q` of the ADR 0016 retention slice).
 
@@ -258,7 +258,8 @@ downgraded because other records succeeded.
 
 ### 7. Report
 
-`docs/evaluation/phase4-s2c-live-canary.md` (path reserved; not yet created) covers:
+`docs/evaluation/phase4-s2c-live-canary.md` (published as post-run advisory evidence; not
+final-C evidence) covers:
 
 - aggregates for all source records;
 - categorical per-record rows: ordinal, disposition, outcome, and length;
@@ -306,8 +307,9 @@ Its salary statement is exactly:
   `18763cf69c9452d36e96017ee91b9ad3638398726b7dbce24917ef75efd00f5e`) records `reserved`,
   then the terminal outcome `FAIL-CLOSED:worker_failed`. That outcome is permanent and
   is not downgraded.
-- **Recorded worker evidence.** All of this is categorical, comes from the run summary
-  written before the failure, and is unreviewed:
+- **Recorded worker evidence.** These categorical observations come from the run summary
+  written before the worker failure. They were checked during post-run advisory review and
+  do not supersede the permanent failed-attempt verdict.
   - HTTP 200, JSON, observed User-Agent `python-httpx/0.28.1`;
   - a complete 413,101-byte capture, SHA-256
     `3bbce131108b1fb0b0645a90bcb5174b58c69360fd4257f1ff288460cbf90c19`;
@@ -395,7 +397,7 @@ separate harness timer (Sol A25, compatibility C9/C10). The only bounds are:
 U1 is preserved unchanged as historical evidence, and no timer was added to match it.
 Any future network authorization must state this corrected timeout model explicitly.
 
-## Remaining pre-live gates
+## Remaining gates for a corrected live attempt
 
 Gates 1–3 were satisfied for attempt 1 at candidate `1cb715a`. A new live attempt with a
 corrected candidate requires all of these again, and separately:
