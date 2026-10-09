@@ -8,8 +8,9 @@ base `eeac72abb2ba930fb469a4abb563a7601826266a` (`Q` of the ADR 0016 retention s
 
 **One live request has been made: attempt 1, permanently `FAIL-CLOSED:worker_failed`**
 (see [Results](#results)). S2c has not passed. A corrected candidate must complete a
-separately authorized new live request before S2c can pass. No projected fixture or report
-exists.
+separately authorized new live request before S2c can pass. The minimized projected fixture
+and report are published to the S2c feature branch as the post-run advisory candidate
+(advisory only; not final-C evidence).
 
 The contract is the frozen, gitignored packet `.claude/runtime/phase4-s2c-frozen-contract.md`
 (SHA-256 `ac2cc00afc9e2bb7b7520eba71da7d6349e7b523f1b9b601bb2ad254c450800b`). It holds nine
@@ -348,6 +349,30 @@ Its salary statement is exactly:
 
   It requires exit status 0 within the deadline and an empty stderr (fd 2). It fails
   against `1cb715a` with `_enter_buffered_busy` and passes after the correction.
+
+### Attempt 1 fidelity decisions and provisional artifacts
+
+- Approved bounded fidelity decisions, for source ordinal 0 only: full-capture fidelity
+  `faithful`, excerpt-replay fidelity `faithful`, publication safe `true`, excerpt proper
+  and useful `true`, lineage and golden expectations correct `true`. These are the user's
+  final decisions; Sol Medium and Astra independently returned the same five with no
+  findings. They are bound to fidelity packet SHA-256
+  `aea88d58434f28538f68ab812219544c391aebc7e3d9cbb4ef2e56a85d3e4975` and raw capture `3bbce131…0c19`.
+- Post-run advisory artifacts, built offline at candidate `3d9404b`. SHA-256 values are of
+  the files as written (LF):
+  - fixture `backend/tests/fixtures/providers/greenhouse_s2c_projected.json`,
+    `d7e14857e3279090709093d71f0c7c26d3e7baf806f35615c3b32520c75b5249`. It was produced by the reviewed create-only builder and holds one
+    record: the five-field projection, the exact proper excerpt `[0, 1005)`, lineage,
+    aggregates, and golden expectations;
+  - report `docs/evaluation/phase4-s2c-live-canary.md`, `0b3c136954e31ad5c713eb6e47cbeaac2fcf56b22fb11fc0b2aa0491ef80148c`. Its controlling
+    verdict is permanently `FAIL-CLOSED:worker_failed`.
+- The user approved the minimized fixture, report, and replay test for publication to the S2c
+  feature branch as the immutable post-run advisory candidate. This is advisory publication
+  only: raw cleanup remains pending, and final `C`/`A`/`R`/`M`/`Q` and another request
+  remain unauthorized.
+- Post-run correction 3 (`3d9404b0fe42663457ad80cf58f791e801bd7ff4`) received advisory
+  approval from both Sol Medium and Astra (as relayed by the user). It has not completed
+  a live attempt.
 
 ### Evidence limitations
 

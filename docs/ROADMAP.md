@@ -653,14 +653,21 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   authorizes no S2c, provider contact, persistence, D1, S3, or S4; each still requires
   separate explicit user authorization.
 - **Phase 4 S2c (`phase-4/greenhouse-live-canary-s2c`): bounded read-only Greenhouse live
-  canary ([ADR 0017](DECISIONS/0017-greenhouse-live-canary.md)) -- in progress, pre-live.**
+  canary ([ADR 0017](DECISIONS/0017-greenhouse-live-canary.md)) -- in progress; not passed.**
   One separately authorized `GET /v1/boards/discord/jobs?content=true` through the
   unchanged S1 adapter, S2b converter and bridge, and S2 composition, with no retry,
-  redirect, fallback, second request, persistence, or runtime registration. The offline
-  harness, its tests, and the exact fixture-ownership mapping exist as the pre-live
-  advisory candidate. **No live request has been made**; network contact still requires
-  Sol Medium and Astra pre-live review, the user's terms/robots review, and explicit
-  network authorization. The projected fixture and report do not exist yet.
+  redirect, fallback, second request, persistence, or runtime registration.
+  - **Live attempt 1** (candidate `1cb715a`) is permanently `FAIL-CLOSED:worker_failed`.
+    The response was HTTP 200 with a complete 413,101-byte capture, and all 48 records
+    were retained and converted. A worker-shutdown defect then crashed the exit.
+  - **Post-run correction 3** (`3d9404b`) fixes that defect and has advisory approval. It
+    has not completed a live attempt.
+  - Bounded fidelity decisions are approved for one excerpt (ordinal 0). The minimized
+    projected fixture, report, and replay test are published to the S2c feature branch
+    as the post-run advisory candidate (advisory only; final `C`/`A`/`R`/`M`/`Q` and
+    another request remain unauthorized).
+  - Raw cleanup is pending.
+  - A separately authorized new live request is required before S2c can pass.
 - **Phases 5-14: not started.** Begin each phase only after completing its preflight in
   [PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md) and receiving approval for the next
   smallest slice.

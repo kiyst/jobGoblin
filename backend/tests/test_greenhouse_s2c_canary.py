@@ -2,8 +2,11 @@
 
 Mocks and fakes only: every test runs with real network transports and DNS
 resolution disabled, and none creates the real staging directory or
-attempt reservation (`_no_live_side_effects`). The projected fixture and the
-report do not exist yet; every record here is synthetic.
+attempt reservation (`_no_live_side_effects`). Records built in this module
+are synthetic. The one exception is the committed, minimized projected fixture
+from live attempt 1 (`PROJECTED_FIXTURE`). It holds one reviewed excerpt of one
+real record, and it is replayed offline only; the retained raw capture is never
+read.
 """
 
 from __future__ import annotations
@@ -40,6 +43,9 @@ from scripts import run_greenhouse_s2c_canary as canary
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 HARNESS = BACKEND_DIR / "scripts" / "run_greenhouse_s2c_canary.py"
+PROJECTED_FIXTURE = (
+    BACKEND_DIR / "tests" / "fixtures" / "providers" / "greenhouse_s2c_projected.json"
+)
 URL = "https://boards-api.greenhouse.io/v1/boards/discord/jobs?content=true"
 SHA = "a" * 40
 
@@ -3070,3 +3076,28 @@ def test_successful_real_worker_exits_cleanly_through_the_actual_entry_path(
         "reserved",
         "OBSERVED:pending_post_run_review",
     ]
+
+
+# ---------------------------------------------------------------------------
+# Committed projected fixture from live attempt 1 (offline replay only).
+# ---------------------------------------------------------------------------
+
+
+def test_committed_projected_fixture_validates_and_replays(taxonomy: TaxonomyIndex) -> None:
+    """The committed minimized fixture, without the raw capture, is pinned by its
+    canonical hash and passes full validation. That includes the independent
+    adapter -> converter -> bridge -> composition replay and the comparison
+    against its golden expectations."""
+    document = json.loads(PROJECTED_FIXTURE.read_text(encoding="utf-8"))
+    assert canonical_json_hash(document) == (
+        "3475e5a441bcee0d068238b3f5ca5ca7653901b71b05370734bda6b10974f503"
+    )
+    canary.validate_fixture(document, taxonomy)
+    (selected,) = document["selected"]
+    assert selected["source_ordinal"] == 0
+    assert selected["selection_reason"] == "first_converted"
+    assert document["source_evidence"]["complete_response_sha256"] == (
+        "3bbce131108b1fb0b0645a90bcb5174b58c69360fd4257f1ff288460cbf90c19"
+    )
+    assert len(document["replay_envelope"]["jobs"]) == 1
+    assert document["replay_envelope"]["meta"]["total"] == 1

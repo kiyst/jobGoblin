@@ -812,10 +812,78 @@ findings: none
   | W10 | record cap before conversion removed | `if capture.source_record_count > MAX_SOURCE_RECORDS: ⏎ raise CanaryRefusal("record_cap_exceeded")` → (deleted) | `test_record_cap_is_enforced_before_conversion` | pass | fail; controls pass | pass; `7bcc0edff2e1df734b52eba4ad7767bd51c0493b7b84edac5ef129b1cab099c0` |
   | W11 | database-layer import added | `from app.ingestion.hashing import canonical_json_hash  # noqa: E402` → `import sqlalchemy  # noqa: E402, F401 ⏎ from app.ingestion.hashing import canonical_json_hash  # noqa: E402` | `test_harness_imports_only_allowed_modules` | pass | fail; controls pass | pass; `7bcc0edff2e1df734b52eba4ad7767bd51c0493b7b84edac5ef129b1cab099c0` |
   | W12 | existing-reservation refusal removed from preflight | `if os.path.lexists(paths.reservation): ⏎ raise CanaryRefusal("attempt_already_reserved")` → (deleted) | `test_live_preflight_refuses_existing_reservation` | pass | fail; controls pass | pass; `7bcc0edff2e1df734b52eba4ad7767bd51c0493b7b84edac5ef129b1cab099c0` |
-- STOP -- post-run correction 3, for narrow re-review by Sol Medium and Astra. No
-  Greenhouse request, reservation reset, second attempt, staging change or deletion,
-  tracked fixture, tracked report, receipt, final `C`/`A`/`R`, `M`/`Q`, persistence, or
-  other slice.
+- **Attempt 1 fidelity decisions and post-run advisory artifacts** (direct child of
+  `3d9404b`; this commit).
+  - The user authorized provisional fixture and report construction only. That excludes
+    publication, commit, push, cleanup, another request, a reservation reset, a receipt,
+    `A`, `R`, merge, S3, and S4.
+  - Inputs:
+    - decisions file `.claude/runtime/phase4-s2c-staging/decisions.json` (gitignored),
+      SHA-256 `cce96428beb80274d5b32c7631b4307a9b29aeebaee8c929c5c632d97aef48c8`,
+      selecting only ordinal 0 (`first_converted`, excerpt `[0, 1005)`);
+    - reviewer `user`.
+  - Approved bounded fidelity decisions, for source ordinal 0 only:
+
+    | Decision | Result |
+    |---|---|
+    | full-capture fidelity | `faithful` |
+    | excerpt-replay fidelity | `faithful` |
+    | publication safe | `true` |
+    | excerpt proper and useful | `true` |
+    | lineage and golden expectations correct | `true` |
+
+    These are the user's final decisions; Sol Medium and Astra independently returned the
+    same five with no findings. They are bound to fidelity packet SHA-256
+    `aea88d58434f28538f68ab812219544c391aebc7e3d9cbb4ef2e56a85d3e4975` and raw capture
+    `3bbce131…0c19`.
+  - Post-run advisory artifacts, built offline at candidate `3d9404b`. SHA-256 values are
+    of the files as written (LF):
+    - fixture `backend/tests/fixtures/providers/greenhouse_s2c_projected.json`,
+      `d7e14857e3279090709093d71f0c7c26d3e7baf806f35615c3b32520c75b5249`. It was produced by
+      the reviewed create-only builder and holds one record: the five-field projection,
+      the exact proper excerpt `[0, 1005)`, lineage, aggregates, and golden expectations;
+    - report `docs/evaluation/phase4-s2c-live-canary.md`,
+      `0b3c136954e31ad5c713eb6e47cbeaac2fcf56b22fb11fc0b2aa0491ef80148c`. Its controlling
+      verdict is permanently `FAIL-CLOSED:worker_failed`.
+  - The user approved the minimized fixture, report, and replay test for publication to the S2c
+    feature branch as the immutable post-run advisory candidate. This is advisory publication
+    only: raw cleanup remains pending, and final `C`/`A`/`R`/`M`/`Q` and another request
+    remain unauthorized.
+  - Validation:
+    - `validate_fixture` passes, including the semantic replay;
+    - the projection, excerpt, lineage, and golden expectations equal the approved
+      packet;
+    - all canonical, source, and excerpt hashes recompute;
+    - the aggregates equal the run summary;
+    - there are no prohibited keys and no screening hits;
+    - neither the raw bytes nor the complete source appear in the fixture;
+    - the fixture maps to `test-fixture:greenhouse-s2c-canary`, and the report is
+      `unmapped`, which forces the final gate.
+  - Tracked replay test (a test-only posterity correction, approved separately):
+    `backend/tests/test_greenhouse_s2c_canary.py::test_committed_projected_fixture_validates_and_replays`.
+    - It loads the committed fixture from `PROJECTED_FIXTURE` and pins its canonical JSON
+      SHA-256 `3475e5a441bcee0d068238b3f5ca5ca7653901b71b05370734bda6b10974f503`.
+    - It calls the real `validate_fixture(document, taxonomy)`. That runs the independent
+      adapter -> converter -> bridge -> composition replay and compares the result with
+      the golden expectations.
+    - It asserts one selected record (ordinal 0, `first_converted`), the
+      complete-response SHA-256 `3bbce131…0c19`, and one replay job with `meta.total` 1.
+    - It never reads the retained raw capture, so the minimized fixture stays replayable
+      after raw cleanup. It runs under the module's autouse network-denial and
+      no-live-side-effects fixtures.
+    - The module docstring now describes this one committed real-record fixture.
+    - No production or harness source changed; the harness is still `7bcc0edf…9c0`.
+      W1–W12 were not re-executed. Correction 3's existing mutation evidence (against
+      that unchanged harness) is unchanged and is not attributed to this test-only
+      change.
+  - Limitation: under `core.autocrlf` a later checkout can change working-file bytes, so
+    the cleanup binding must use hashes recomputed from the committed candidate.
+  - Correction 3 has two advisory approvals, as relayed. The stale 55-second U1 wording
+    disclosure above still applies. A separately authorized corrected live attempt is
+    still required.
+- STOP -- the post-run advisory candidate may be committed and pushed under the user's
+  publication approval. Cleanup, another request, a reservation reset, a receipt, `A`,
+  formal `R`, `M`/`Q`, persistence, S3, and S4 remain prohibited.
 
 ```workflow-metadata
 workflow_version: v3.2
