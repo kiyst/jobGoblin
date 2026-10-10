@@ -861,8 +861,9 @@ def test_run_live_worker_without_summary_fails_closed(paths: canary.CanaryPaths)
 
 
 def test_reservation_blocks_rerun_after_cleanup(paths: canary.CanaryPaths) -> None:
-    summary = {"run_verdict": "INCONCLUSIVE", "run_kind": "http_status:503"}
-    _run_live(paths, _worker_writing(summary, paths.summary))
+    summary = {"run_verdict": None, "run_kind": "pending_post_run_review"}
+    outcome = _run_live(paths, _worker_writing(summary, paths.summary))
+    assert outcome == canary.ACCEPTED_WORKER_OUTCOME
     before = paths.reservation.read_bytes()
     paths.report.write_text("# S2c report\n", encoding="utf-8")
     binding = canary.CleanupBinding(SHA, CANDIDATE, None, canary.file_sha256(paths.report))
@@ -1426,7 +1427,8 @@ def _approved(
 
 
 _EXITED_RESERVATION = (
-    b'{"event": "reserved"}\n{"event": "terminal", "outcome": "OBSERVED:synthetic"}\n'
+    b'{"event": "reserved"}\n'
+    b'{"event": "terminal", "outcome": "OBSERVED:pending_post_run_review"}\n'
 )
 
 
@@ -3415,7 +3417,7 @@ def _set_entry(field: str, value: Any) -> Callable[[dict[str, Any]], None]:
         ),
         pytest.param(
             lambda p: p.reservation.write_bytes(
-                _EXITED_RESERVATION.replace(b"synthetic", b"tampered")
+                _EXITED_RESERVATION.replace(b'"event": "terminal"', b'"event":  "terminal"')
             ),
             {},
             None,
@@ -3565,6 +3567,10 @@ def _cleanup_argv(
 
 
 _ALL_KEYS = sorted(canary.required_checker_keys("b" * 40))
+_CHECKER_IDENTITY = {
+    "path": "run_greenhouse_s2c_canary.py",
+    "sha256": hashlib.sha256(Path(canary.__file__).read_bytes()).hexdigest(),
+}
 _SENTINEL = "SENTINEL-FRAGMENT-C6"
 
 
@@ -3647,7 +3653,8 @@ def test_invalid_checker_results_fail_the_attestation(
     assert _SENTINEL not in out
     assert attestation["inventory_equal"] is True
     assert attestation["expected_manifest"]["sha256"] == expected.manifest_sha256
-    assert attestation["checker"]["path"] == "run_greenhouse_s2c_canary.py"
+    assert attestation["checker"] == _CHECKER_IDENTITY
+    assert attestation["executing_sha"] == CANDIDATE
     if attestation["checks"] is not None:
         assert set(attestation["checks"]) == set(_ALL_KEYS)
 
@@ -3672,6 +3679,8 @@ def test_exact_all_true_checker_result_passes(
     assert attestation["checker_failure"] is None
     assert attestation["checks"] == dict.fromkeys(_ALL_KEYS, True)
     assert len(_ALL_KEYS) == 14
+    assert attestation["checker"] == _CHECKER_IDENTITY
+    assert attestation["executing_sha"] == CANDIDATE
 
 
 def test_checker_launch_failure_yields_a_failed_attestation(
@@ -3705,6 +3714,8 @@ def test_checker_launch_failure_yields_a_failed_attestation(
     assert attestation["observed_inventory_sha256"] == expected.inventory_sha256
     assert attestation["quiescence"]["worker_exit_recorded"] is True
     assert not paths.staging_dir.exists()  # deletion already performed and attested
+    assert attestation["checker"] == _CHECKER_IDENTITY
+    assert attestation["executing_sha"] == CANDIDATE
 
 
 @pytest.mark.parametrize(
@@ -3737,6 +3748,413 @@ def test_required_checker_keys_follow_the_raw_binding() -> None:
     }
 
 
+def _forbid_inventory_verification(monkeypatch: pytest.MonkeyPatch) -> None:
+    def forbidden(*_: Any, **__: Any) -> Any:
+        raise AssertionError("expected-inventory verification reached")
+
+    monkeypatch.setattr(canary, "check_expected_inventory", forbidden)
+    monkeypatch.setattr(canary, "staging_inventory", forbidden)
+
+
+def _terminal(outcome: Any = None, *, omit: bool = False) -> bytes:
+    terminal: dict[str, Any] = {"event": "terminal"}
+    if not omit:
+        terminal["outcome"] = outcome
+    return b'{"event": "reserved"}\n' + json.dumps(terminal).encode("utf-8") + b"\n"
+
+
+_REJECTED_OUTCOMES = [
+    pytest.param(_terminal("FAIL-CLOSED:worker_termination_unconfirmed"), id="unconfirmed"),
+    pytest.param(_terminal("FAIL-CLOSED:worker_failed"), id="worker-failed"),
+    pytest.param(_terminal("FAIL-CLOSED:outer_deadline"), id="outer-deadline"),
+    pytest.param(_terminal("FAIL-CLOSED:containment_assignment_failed"), id="containment"),
+    pytest.param(_terminal("FAIL-CLOSED:supervisor_exception"), id="exception"),
+    pytest.param(_terminal("FAIL-CLOSED:supervisor_interrupted"), id="supervision-aborted"),
+    pytest.param(_terminal("FAIL-CLOSED:staging_exists"), id="other-fail-closed"),
+    pytest.param(_terminal("INCONCLUSIVE"), id="inconclusive"),
+    pytest.param(_terminal("INCONCLUSIVE:http_status:503"), id="inconclusive-kind"),
+    pytest.param(_terminal("PASS:converted"), id="unknown-pass"),
+    pytest.param(_terminal("OBSERVED:other"), id="unknown-observed"),
+    pytest.param(_terminal("observed:pending_post_run_review"), id="case-variant"),
+    pytest.param(_terminal("OBSERVED:pending_post_run_review "), id="trailing-space"),
+    pytest.param(_terminal(omit=True), id="missing-outcome"),
+    pytest.param(_terminal(None), id="null-outcome"),
+    pytest.param(_terminal(1), id="int-outcome"),
+    pytest.param(_terminal(True), id="bool-outcome"),
+    pytest.param(_terminal(["OBSERVED:pending_post_run_review"]), id="list-outcome"),
+]
+
+
+@pytest.mark.parametrize("reservation", _REJECTED_OUTCOMES)
+def test_rejected_terminal_outcomes_refuse_before_inventory_verification(
+    paths: canary.CanaryPaths,
+    taxonomy: TaxonomyIndex,
+    monkeypatch: pytest.MonkeyPatch,
+    reservation: bytes,
+) -> None:
+    """Only the exact successful attempt-2 outcome is accepted as worker-
+    completion evidence; every other terminal outcome refuses before
+    expected-inventory verification, deleting nothing."""
+    raw_sha, raw_bytes, binding = _staged_for_inventory(paths, taxonomy)
+    paths.reservation.write_bytes(reservation)
+    expected = _expected(paths, raw_sha, raw_bytes, binding)
+    _forbid_inventory_verification(monkeypatch)
+    before = _snapshot(paths.runtime_dir)
+    with pytest.raises(canary.CanaryRefusal) as refusal:
+        _run_cleanup(paths, raw_sha, raw_bytes, binding, expected)
+    assert refusal.value.kind == "worker_outcome_not_accepted"
+    assert paths.staging_dir.is_dir()
+    assert _snapshot(paths.runtime_dir) == before
+
+
+def test_rejected_outcome_refusal_is_categorical_through_the_cli(
+    paths: canary.CanaryPaths,
+    taxonomy: TaxonomyIndex,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    raw_sha, raw_bytes, binding = _staged_for_inventory(paths, taxonomy)
+    paths.reservation.write_bytes(_terminal("FAIL-CLOSED:worker_termination_unconfirmed"))
+    expected = _expected(paths, raw_sha, raw_bytes, binding)
+    monkeypatch.setattr(canary, "git_output", _git())
+    before = _snapshot(paths.runtime_dir)
+    assert canary.main(_cleanup_argv(raw_sha, raw_bytes, binding, expected), paths=paths) == 2
+    out = capsys.readouterr().out
+    assert json.loads(out) == {"result": "refused", "kind": "worker_outcome_not_accepted"}
+    assert "termination_unconfirmed" not in out
+    assert _snapshot(paths.runtime_dir) == before
+
+
+def _identity_refusal(
+    paths: canary.CanaryPaths,
+    taxonomy: TaxonomyIndex,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    arrange: Callable[[], None],
+    git: Callable[[Any], str] | None = None,
+) -> str:
+    """Runs the cleanup CLI after `arrange`; asserts cleanup and the checker
+    were never invoked and every runtime byte is unchanged. Returns the kind."""
+    raw_sha, raw_bytes, binding = _staged_for_inventory(paths, taxonomy)
+    expected = _expected(paths, raw_sha, raw_bytes, binding)
+    monkeypatch.setattr(canary, "git_output", git if git is not None else _git())
+    invoked: list[str] = []
+
+    def no_cleanup(*_: Any, **__: Any) -> dict[str, Any]:
+        invoked.append("cleanup")
+        raise AssertionError("cleanup invoked")
+
+    def no_checker(*_: Any, **__: Any) -> Any:
+        invoked.append("checker")
+        raise AssertionError("checker invoked")
+
+    monkeypatch.setattr(canary, "cleanup_staging", no_cleanup)
+    monkeypatch.setattr(canary.subprocess, "run", no_checker)
+    before = _snapshot(paths.runtime_dir)
+    arrange()
+    code = canary.main(_cleanup_argv(raw_sha, raw_bytes, binding, expected), paths=paths)
+    out = capsys.readouterr().out
+    monkeypatch.undo()
+    assert invoked == []
+    assert code == 2
+    assert _snapshot(paths.runtime_dir) == before
+    assert paths.staging_dir.is_dir()
+    assert _SENTINEL not in out
+    result = json.loads(out)
+    assert set(result) == {"result", "kind"} and result["result"] == "refused"
+    return str(result["kind"])
+
+
+def test_checker_hash_failure_refuses_before_deletion(
+    paths: canary.CanaryPaths,
+    taxonomy: TaxonomyIndex,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def unreadable(_: Path) -> str:
+        raise OSError(13, _SENTINEL)
+
+    kind = _identity_refusal(
+        paths,
+        taxonomy,
+        monkeypatch,
+        capsys,
+        lambda: monkeypatch.setattr(canary, "file_sha256", unreadable),
+    )
+    assert kind == "checker_identity_unavailable"
+
+
+def test_malformed_checker_hash_refuses_before_deletion(
+    paths: canary.CanaryPaths,
+    taxonomy: TaxonomyIndex,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    kind = _identity_refusal(
+        paths,
+        taxonomy,
+        monkeypatch,
+        capsys,
+        lambda: monkeypatch.setattr(canary, "file_sha256", lambda _: "A" * 64),
+    )
+    assert kind == "checker_identity_invalid"
+
+
+def test_missing_checker_path_refuses_before_deletion(
+    paths: canary.CanaryPaths,
+    taxonomy: TaxonomyIndex,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    missing = tmp_path / "run_greenhouse_s2c_canary.py"
+    kind = _identity_refusal(
+        paths,
+        taxonomy,
+        monkeypatch,
+        capsys,
+        lambda: monkeypatch.setattr(canary, "_checker_path", lambda: missing),
+    )
+    assert kind == "checker_identity_unavailable"
+
+
+def test_linked_checker_path_refuses_before_deletion(
+    paths: canary.CanaryPaths,
+    taxonomy: TaxonomyIndex,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    link = tmp_path / "run_greenhouse_s2c_canary.py"
+    try:
+        os.symlink(Path(canary.__file__).resolve(), link)
+    except OSError:
+        pytest.skip("symlink creation is not permitted on this host")
+    kind = _identity_refusal(
+        paths,
+        taxonomy,
+        monkeypatch,
+        capsys,
+        lambda: monkeypatch.setattr(canary, "_checker_path", lambda: link),
+    )
+    assert kind == "checker_identity_invalid"
+
+
+@pytest.mark.parametrize(
+    "mode",
+    [
+        pytest.param((stat.S_IFREG | 0o644, 0x400), id="reparse-point"),
+        pytest.param((stat.S_IFIFO | 0o644, 0), id="fifo"),
+    ],
+)
+def test_reparse_or_non_regular_checker_refuses_before_deletion(
+    paths: canary.CanaryPaths,
+    taxonomy: TaxonomyIndex,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    mode: tuple[int, int],
+) -> None:
+    checker = canary._checker_path()
+    real_lstat = os.lstat
+
+    def faked(path: Any, *args: Any, **kwargs: Any) -> Any:
+        if Path(path) == checker:
+            return types.SimpleNamespace(st_mode=mode[0], st_file_attributes=mode[1])
+        return real_lstat(path, *args, **kwargs)
+
+    kind = _identity_refusal(
+        paths, taxonomy, monkeypatch, capsys, lambda: monkeypatch.setattr(canary.os, "lstat", faked)
+    )
+    assert kind == "checker_identity_invalid"
+
+
+@pytest.mark.parametrize("target", ["directory", "copy"])
+def test_checker_that_is_not_the_harness_file_refuses_before_deletion(
+    paths: canary.CanaryPaths,
+    taxonomy: TaxonomyIndex,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    target: str,
+) -> None:
+    other = tmp_path / "run_greenhouse_s2c_canary.py"
+    if target == "directory":
+        other.mkdir()
+    else:
+        other.write_bytes(Path(canary.__file__).read_bytes())
+    kind = _identity_refusal(
+        paths,
+        taxonomy,
+        monkeypatch,
+        capsys,
+        lambda: monkeypatch.setattr(canary, "_checker_path", lambda: other),
+    )
+    assert kind == "checker_identity_invalid"
+
+
+def _git_head(head: Callable[[], str]) -> Callable[[Any], str]:
+    base = _git()
+
+    def git(args: Any) -> str:
+        return head() if args[0] == "rev-parse" else base(args)
+
+    return git
+
+
+def test_executing_sha_lookup_failure_refuses_before_deletion(
+    paths: canary.CanaryPaths,
+    taxonomy: TaxonomyIndex,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def failing() -> str:
+        raise subprocess.CalledProcessError(128, ["git"], stderr=_SENTINEL)
+
+    kind = _identity_refusal(
+        paths, taxonomy, monkeypatch, capsys, lambda: None, git=_git_head(failing)
+    )
+    assert kind == "executing_sha_unavailable"
+
+
+@pytest.mark.parametrize("head", ["", "not-a-sha\n", "C" * 40, "c" * 39, "c" * 41])
+def test_malformed_executing_sha_refuses_before_deletion(
+    paths: canary.CanaryPaths,
+    taxonomy: TaxonomyIndex,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    head: str,
+) -> None:
+    kind = _identity_refusal(
+        paths, taxonomy, monkeypatch, capsys, lambda: None, git=_git_head(lambda: head)
+    )
+    assert kind == "executing_sha_invalid"
+
+
+def test_executing_sha_other_than_the_candidate_refuses_before_deletion(
+    paths: canary.CanaryPaths,
+    taxonomy: TaxonomyIndex,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    kind = _identity_refusal(
+        paths, taxonomy, monkeypatch, capsys, lambda: None, git=_git_head(lambda: "d" * 40 + "\n")
+    )
+    assert kind == "executing_sha_not_candidate"
+
+
+def test_identities_are_captured_once_before_deletion(
+    paths: canary.CanaryPaths,
+    taxonomy: TaxonomyIndex,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Checker identity and executing SHA are captured before cleanup is
+    invoked and are never reacquired after deletion."""
+    raw_sha, raw_bytes, binding = _staged_for_inventory(paths, taxonomy)
+    expected = _expected(paths, raw_sha, raw_bytes, binding)
+    events: list[str] = []
+    fake_git = _git()
+
+    def git(args: Any) -> str:
+        if args[0] == "rev-parse":
+            events.append("rev-parse")
+        return fake_git(args)
+
+    real_sha = canary.file_sha256
+    checker = canary._checker_path()
+
+    def sha(path: Path) -> str:
+        if Path(path) == checker:
+            events.append("checker-hash")
+        return real_sha(path)
+
+    real_cleanup = canary.cleanup_staging
+
+    def cleanup(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        events.append("cleanup")
+        kwargs["git"] = fake_git  # the cleanup binding's own HEAD checks are not identity reads
+        return real_cleanup(*args, **kwargs)
+
+    def checker_run(argv: Any, **_: Any) -> subprocess.CompletedProcess[str]:
+        events.append("checker")
+        return subprocess.CompletedProcess(argv, 0, stdout=_checker_stdout(), stderr="")
+
+    monkeypatch.setattr(canary, "git_output", git)
+    monkeypatch.setattr(canary, "file_sha256", sha)
+    monkeypatch.setattr(canary, "cleanup_staging", cleanup)
+    monkeypatch.setattr(canary.subprocess, "run", checker_run)
+    assert canary.main(_cleanup_argv(raw_sha, raw_bytes, binding, expected), paths=paths) == 0
+    assert events == ["checker-hash", "rev-parse", "cleanup", "checker"]
+    attestation = json.loads(capsys.readouterr().out)
+    assert attestation["passed"] is True
+    assert attestation["checker"] == _CHECKER_IDENTITY
+    assert attestation["executing_sha"] == CANDIDATE
+
+
+_VALID_IDENTITY = {"path": "run_greenhouse_s2c_canary.py", "sha256": "e" * 64}
+
+
+@pytest.mark.parametrize(
+    ("identity", "executing", "failure", "passed"),
+    [
+        pytest.param(_VALID_IDENTITY, CANDIDATE, None, True, id="complete"),
+        pytest.param(None, CANDIDATE, None, False, id="identity-missing"),
+        pytest.param(
+            {"path": "run_greenhouse_s2c_canary.py"}, CANDIDATE, None, False, id="no-hash"
+        ),
+        pytest.param({**_VALID_IDENTITY, "x": "y"}, CANDIDATE, None, False, id="extra-field"),
+        pytest.param(
+            {**_VALID_IDENTITY, "sha256": "E" * 64}, CANDIDATE, None, False, id="bad-hash"
+        ),
+        pytest.param({**_VALID_IDENTITY, "path": "other.py"}, CANDIDATE, None, False, id="other"),
+        pytest.param(_VALID_IDENTITY, None, None, False, id="executing-missing"),
+        pytest.param(_VALID_IDENTITY, "d" * 40, None, False, id="executing-not-candidate"),
+        pytest.param(_VALID_IDENTITY, "C" * 40, None, False, id="executing-malformed"),
+        pytest.param(_VALID_IDENTITY, CANDIDATE, "checker_launch_failed", False, id="launch"),
+        pytest.param(_VALID_IDENTITY, CANDIDATE, "checker_check_failed", False, id="check"),
+    ],
+)
+def test_success_requires_every_identity_and_check(
+    identity: Any, executing: Any, failure: str | None, passed: bool
+) -> None:
+    binding = canary.CleanupBinding(SHA, CANDIDATE, None, "0" * 64)
+    assert canary.cleanup_passed(identity, executing, binding, failure) is passed
+
+
+@pytest.mark.parametrize(
+    ("identity", "executing"),
+    [
+        pytest.param({"path": "run_greenhouse_s2c_canary.py"}, CANDIDATE, id="incomplete-identity"),
+        pytest.param(_VALID_IDENTITY, "d" * 40, id="executing-not-candidate"),
+    ],
+)
+def test_all_true_checker_cannot_pass_without_complete_identities(
+    paths: canary.CanaryPaths,
+    taxonomy: TaxonomyIndex,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    identity: dict[str, str],
+    executing: str,
+) -> None:
+    """Defense in depth: even with an exact all-true checker result, the
+    attestation passes only with complete pre-captured identities."""
+    raw_sha, raw_bytes, binding = _staged_for_inventory(paths, taxonomy)
+    expected = _expected(paths, raw_sha, raw_bytes, binding)
+    monkeypatch.setattr(canary, "git_output", _git())
+    monkeypatch.setattr(canary, "capture_cleanup_identities", lambda *_: (identity, executing))
+
+    def checker(argv: Any, **_: Any) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(argv, 0, stdout=_checker_stdout(), stderr="")
+
+    monkeypatch.setattr(canary.subprocess, "run", checker)
+    assert canary.main(_cleanup_argv(raw_sha, raw_bytes, binding, expected), paths=paths) == 1
+    attestation = json.loads(capsys.readouterr().out)
+    assert attestation["passed"] is False
+    assert attestation["checker_failure"] is None
+    assert attestation["checks"] == dict.fromkeys(_ALL_KEYS, True)
+    assert attestation["inventory_equal"] is True
+
+
 QUIESCENCE_BOUNDARY_TEXT = (
     "This boundary excludes cooperative JobGoblin writers under the single-operator "
     "authorization model. It does not claim protection against a malicious process or "
@@ -3753,7 +4171,7 @@ def test_quiescence_is_attested_with_its_boundary(
     assert attestation["quiescence"] == {
         "operator_assertion": "single-operator-quiescent",
         "worker_exit_recorded": True,
-        "worker_terminal_outcome": "OBSERVED:synthetic",
+        "worker_terminal_outcome": "OBSERVED:pending_post_run_review",
         "worker_pid_recorded": False,
         "staging_path_expected": True,
         "boundary": QUIESCENCE_BOUNDARY_TEXT,
@@ -3800,7 +4218,6 @@ def test_quiescence_not_asserted_refuses_before_verification(
             b'{"event": "terminal", "outcome": "x"}\n{"event": "reserved"}\n', id="reversed"
         ),
         pytest.param(_EXITED_RESERVATION + b'{"event": "reserved"}\n', id="extra-record"),
-        pytest.param(b'{"event": "reserved"}\n{"event": "terminal"}\n', id="no-outcome"),
         pytest.param(
             b'{"event": "reserved"}\n{"event": "reserved", "outcome": "reserved"}\n',
             id="second-not-terminal",
@@ -3810,13 +4227,17 @@ def test_quiescence_not_asserted_refuses_before_verification(
     ],
 )
 def test_unrecorded_worker_exit_refuses_and_preserves_staging(
-    paths: canary.CanaryPaths, taxonomy: TaxonomyIndex, reservation: bytes
+    paths: canary.CanaryPaths,
+    taxonomy: TaxonomyIndex,
+    monkeypatch: pytest.MonkeyPatch,
+    reservation: bytes,
 ) -> None:
-    """If the recorded worker could still be alive (no terminal record written
-    after evidence-based reaping), cleanup refuses before deletion."""
+    """Without exactly one `reserved` record and then one `terminal` record,
+    cleanup refuses before expected-inventory verification or deletion."""
     raw_sha, raw_bytes, binding = _staged_for_inventory(paths, taxonomy)
     paths.reservation.write_bytes(reservation)
     expected = _expected(paths, raw_sha, raw_bytes, binding)
+    _forbid_inventory_verification(monkeypatch)
     before = _snapshot(paths.runtime_dir)
     with pytest.raises(canary.CanaryRefusal) as refusal:
         _run_cleanup(paths, raw_sha, raw_bytes, binding, expected)

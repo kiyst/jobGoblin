@@ -179,11 +179,20 @@ residue, a restart after the request began, and a concurrent or duplicate launch
   verification, cleanup also requires bounded one-use operational quiescence: the
   operator's affirmative single-operator quiescence assertion (no live, projection,
   fidelity, post-run, or other cleanup command running; no other command authorized to
-  write staging; this cleanup the sole cooperative staging accessor), the reservation's
-  terminal record as the worker-exit evidence (the harness records no worker PID, so OS
-  confirmation of the worker's absence is not available), and staging resolving directly
-  beneath the expected runtime directory without links. Any uncertainty refuses before
-  deletion. This boundary excludes cooperative JobGoblin writers under the
+  write staging; this cleanup the sole cooperative staging accessor), a reservation of
+  exactly one `reserved` record then one `terminal` record whose outcome is exactly
+  `OBSERVED:pending_post_run_review`, and staging resolving directly beneath the expected
+  runtime directory without links. Not every terminal record proves reaping. That exact
+  outcome follows the reviewed supervisor path (the worker exited zero after supervision
+  and wrote its summary), and with the hash-bound attempt-2 reservation it is accepted as
+  worker-completion evidence for this one-use cleanup only. Every other outcome refuses
+  with the fixed category `worker_outcome_not_accepted` before inventory verification:
+  any `FAIL-CLOSED` (including `worker_termination_unconfirmed`), `INCONCLUSIVE`,
+  exception or supervision-aborted, missing, non-string, or unknown outcomes; additional,
+  reordered, or substituted records refuse as `worker_exit_not_recorded`. The harness
+  records no worker PID, so OS confirmation of the worker's absence is not available, and
+  unconfirmed termination is never acceptable. Any uncertainty refuses before deletion.
+  This boundary excludes cooperative JobGoblin writers under the
   single-operator authorization model. It does not claim protection against a malicious
   process or privileged OS-level mutation. Cleanup then:
   1. inventories staging by relative path, size, and hash only;
@@ -201,6 +210,18 @@ residue, a restart after the request began, and a concurrent or duplicate launch
      `checker_output_malformed`, `checker_key_set_mismatch`, or `checker_check_failed`),
      with no exception message, output fragment, or dynamic path, and the command exits
      nonzero without retry.
+
+  Before cleanup is invoked, the command captures and validates the checker identity
+  (the current harness file; a regular, non-link, non-reparse file; a valid SHA-256) and
+  the executing Git SHA (available, well formed, and exactly the bound candidate). A
+  failure refuses with one fixed category (`checker_identity_unavailable`,
+  `checker_identity_invalid`, `executing_sha_unavailable`, `executing_sha_invalid`, or
+  `executing_sha_not_candidate`) before any deletion, without invoking cleanup or
+  retrying. These pre-captured identities go unchanged into the post-deletion
+  attestation and are never reacquired. `passed: true` requires the complete checker
+  identity, the executing SHA equal to the candidate, and a checker result with no
+  failure category. A post-deletion checker failure keeps all deletion and inventory
+  evidence and both identities, with `passed: false` and a nonzero exit.
 
   Cleanup failure blocks final `C`. This proves logical deletion from controlled
   locations, not forensic erasure.

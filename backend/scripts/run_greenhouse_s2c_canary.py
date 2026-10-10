@@ -2164,6 +2164,7 @@ def raw_absence_checks(
 
 
 QUIESCENCE_ASSERTION: Final = "single-operator-quiescent"
+ACCEPTED_WORKER_OUTCOME: Final = "OBSERVED:pending_post_run_review"
 QUIESCENCE_BOUNDARY: Final = (
     "This boundary excludes cooperative JobGoblin writers under the single-operator "
     "authorization model. It does not claim protection against a malicious process or "
@@ -2179,10 +2180,18 @@ def check_quiescence(paths: CanaryPaths, operator_quiescence: str) -> dict[str, 
       projection, fidelity, post-run, or other cleanup command is running, and no
       other command is authorized to write staging; this cleanup is the sole
       cooperative staging accessor through deletion;
-    - the attempt's worker exit is recorded: the reservation holds exactly its
-      `reserved` record and the `terminal` record the supervisor writes only after
-      evidence-based reaping (the harness records no worker PID, so this record is
-      the worker-absence evidence);
+    - the reservation holds exactly one `reserved` record and then one
+      `terminal` record whose outcome is exactly `OBSERVED:pending_post_run_review`.
+      The supervisor writes that outcome only on the reviewed path where the
+      worker exited zero after supervision and wrote its summary; for this
+      one-use attempt-2 cleanup, with the reservation hash-bound by the
+      expected-inventory manifest, it is accepted as worker-completion evidence
+      for this cleanup only. Not every terminal record proves reaping: every
+      other outcome (any `FAIL-CLOSED`, including
+      `worker_termination_unconfirmed`, `INCONCLUSIVE`, exception or
+      supervision-aborted outcomes) and any missing, non-string, or unknown
+      outcome refuses. The harness records no worker PID, so OS confirmation of
+      the worker's absence is not available;
     - staging and its parent resolve to the expected local paths, with no link.
 
     Called before any inventory verification. Any uncertainty refuses. A second
@@ -2202,13 +2211,15 @@ def check_quiescence(paths: CanaryPaths, operator_quiescence: str) -> dict[str, 
         or not all(isinstance(r, dict) for r in records)
         or records[0].get("event") != "reserved"
         or records[1].get("event") != "terminal"
-        or not isinstance(records[1].get("outcome"), str)
     ):
         raise CanaryRefusal("worker_exit_not_recorded")
+    outcome = records[1].get("outcome")
+    if not isinstance(outcome, str) or outcome != ACCEPTED_WORKER_OUTCOME:
+        raise CanaryRefusal("worker_outcome_not_accepted")
     return {
         "operator_assertion": QUIESCENCE_ASSERTION,
         "worker_exit_recorded": True,
-        "worker_terminal_outcome": records[1]["outcome"],
+        "worker_terminal_outcome": ACCEPTED_WORKER_OUTCOME,
         "worker_pid_recorded": False,
         "staging_path_expected": True,
         "boundary": QUIESCENCE_BOUNDARY,
@@ -2234,6 +2245,64 @@ _CHECKER_BASE_KEYS: Final = frozenset(
 _CHECKER_RAW_KEYS: Final = frozenset(
     {"raw_blob_absent_from_commit_range", "raw_blob_absent_from_index"}
 )
+
+
+def _checker_path() -> Path:
+    """The fresh checker is this harness file itself (absolute, links not
+    resolved, so a link is detectable)."""
+    return Path(os.path.abspath(__file__))
+
+
+def capture_cleanup_identities(
+    checker: Path, binding: CleanupBinding, git: Callable[[Sequence[str]], str]
+) -> tuple[dict[str, str], str]:
+    """Before cleanup is invoked: the checker is the current harness file, a
+    regular non-link, non-reparse file with a valid SHA-256 identity, and the
+    executing Git SHA is available, well formed, and exactly the bound
+    candidate. Raises a fixed categorical `CanaryRefusal`; never retried. The
+    returned identities are immutable inputs to the post-deletion attestation."""
+    if not os.path.lexists(checker):
+        raise CanaryRefusal("checker_identity_unavailable")
+    if _is_link(checker) or not stat.S_ISREG(os.lstat(checker).st_mode):
+        raise CanaryRefusal("checker_identity_invalid")
+    if checker.resolve(strict=True) != Path(__file__).resolve(strict=True):
+        raise CanaryRefusal("checker_identity_invalid")
+    try:
+        checker_sha256 = file_sha256(checker)
+    except OSError:
+        raise CanaryRefusal("checker_identity_unavailable") from None
+    if not _hex256(checker_sha256):
+        raise CanaryRefusal("checker_identity_invalid")
+    try:
+        executing_sha = git(["rev-parse", "HEAD"]).strip()
+    except Exception:  # categorical: never the message
+        raise CanaryRefusal("executing_sha_unavailable") from None
+    if not isinstance(executing_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", executing_sha):
+        raise CanaryRefusal("executing_sha_invalid")
+    if executing_sha != binding.candidate_sha:
+        raise CanaryRefusal("executing_sha_not_candidate")
+    return {"path": checker.name, "sha256": checker_sha256}, executing_sha
+
+
+def cleanup_passed(
+    checker_identity: Mapping[str, Any] | None,
+    executing_sha: str | None,
+    binding: CleanupBinding,
+    failure: str | None,
+) -> bool:
+    """`passed: true` only with a complete, valid pre-captured checker
+    identity, a pre-captured executing SHA equal to the bound candidate, and no
+    checker failure category (launch, zero exit, one exact all-true object)."""
+    return (
+        isinstance(checker_identity, Mapping)
+        and set(checker_identity) == {"path", "sha256"}
+        and checker_identity["path"] == Path(__file__).name
+        and _hex256(checker_identity["sha256"])
+        and isinstance(executing_sha, str)
+        and re.fullmatch(r"[0-9a-f]{40}", executing_sha) is not None
+        and executing_sha == binding.candidate_sha
+        and failure is None
+    )
 
 
 def required_checker_keys(raw_blob: str | None) -> frozenset[str]:
@@ -2680,6 +2749,8 @@ def _dispatch(args: argparse.Namespace, paths: CanaryPaths) -> int:
         return 0
     if args.command == "cleanup":
         binding = _binding(args)
+        checker = _checker_path()
+        checker_identity, executing_sha = capture_cleanup_identities(checker, binding, git_output)
         attestation = cleanup_staging(
             paths,
             expected_raw_sha256=args.expected_raw_sha256,
@@ -2693,7 +2764,6 @@ def _dispatch(args: argparse.Namespace, paths: CanaryPaths) -> int:
             git=git_output,
             operator_quiescence=args.operator_quiescence,
         )
-        checker = Path(__file__).resolve()
         argv = [
             sys.executable,
             str(checker),
@@ -2720,23 +2790,12 @@ def _dispatch(args: argparse.Namespace, paths: CanaryPaths) -> int:
         failure, checks = evaluate_checker(
             returncode, stdout, required_checker_keys(attestation["raw_blob"])
         )
-        try:
-            checker_identity: dict[str, str] | None = {
-                "path": checker.name,
-                "sha256": file_sha256(checker),
-            }
-        except OSError:
-            checker_identity = None
-        try:
-            executing_sha: str | None = git_output(["rev-parse", "HEAD"]).strip()
-        except Exception:  # categorical: identity unavailable
-            executing_sha = None
         attestation.update(
             checker=checker_identity,
             executing_sha=executing_sha,
             checks=checks,
             checker_failure=failure,
-            passed=failure is None,
+            passed=cleanup_passed(checker_identity, executing_sha, binding, failure),
         )
         _print(attestation)
         return 0 if attestation["passed"] else 1

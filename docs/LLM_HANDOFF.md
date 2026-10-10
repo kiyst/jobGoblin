@@ -1042,8 +1042,8 @@ findings: none
 
     No staging or runtime file is tracked. Workflow metadata remains pending.
 - **Post-run correction 6: strict fresh-checker contract, operational quiescence, and
-  non-regular-object evidence** (this commit, the direct single-parent child of
-  `c274f21ef1c029d0eb59318e6f40c386b76d74f0`). Scope: exactly
+  non-regular-object evidence** (`02b9fac0652e8e19c238d4d8422e22e084abea9a`, the direct
+  single-parent child of `c274f21ef1c029d0eb59318e6f40c386b76d74f0`). Scope: exactly
   `backend/scripts/run_greenhouse_s2c_canary.py`,
   `backend/tests/test_greenhouse_s2c_canary.py`,
   `docs/DECISIONS/0017-greenhouse-live-canary.md`, and this file.
@@ -1093,9 +1093,10 @@ findings: none
     - neither the runtime directory nor staging is a link, and staging resolves directly
       beneath the expected runtime directory (`staging_path_unexpected`);
     - the reservation holds exactly two JSON objects, `reserved` then a `terminal` record
-      with a string outcome (`worker_exit_not_recorded`). The supervisor writes that
-      record only after evidence-based reaping under the Job Object, so it is the
-      worker-absence evidence.
+      with a string outcome (`worker_exit_not_recorded`). *(Superseded by Correction 7:
+      not every terminal record proves reaping; only the exact outcome
+      `OBSERVED:pending_post_run_review` is accepted, as completion evidence for this
+      one-use attempt-2 cleanup only.)*
     The attestation records `quiescence` with the operator assertion,
     `worker_exit_recorded`, `worker_terminal_outcome`, `worker_pid_recorded: false`,
     `staging_path_expected`, and the boundary text. **Limitation:** the harness never
@@ -1184,7 +1185,148 @@ findings: none
 
     **Cleanup was not run.** No request was made. No staging or runtime file is tracked
     or staged. Workflow metadata remains pending.
-- STOP -- Correction 6, for Sol Medium and Astra's narrow re-review. Cleanup, another
+- **Post-run correction 7: exact accepted worker outcome and pre-deletion cleanup
+  identities** (this commit, the direct single-parent child of
+  `02b9fac0652e8e19c238d4d8422e22e084abea9a`). Scope: exactly
+  `backend/scripts/run_greenhouse_s2c_canary.py`,
+  `backend/tests/test_greenhouse_s2c_canary.py`,
+  `docs/DECISIONS/0017-greenhouse-live-canary.md`, and this file.
+  - **Findings and dispositions:**
+    1. *Any string terminal outcome was accepted as worker-exit evidence* (including
+       `FAIL-CLOSED:worker_termination_unconfirmed`): fixed. Quiescence now accepts only
+       exactly one `reserved` record then one `terminal` record whose outcome is exactly
+       `OBSERVED:pending_post_run_review` (`ACCEPTED_WORKER_OUTCOME`).
+    2. *Checker identity and executing SHA were acquired after deletion as optional
+       values*: fixed. Both are captured and validated before cleanup is invoked and
+       passed unchanged into the attestation.
+    3. *`passed` depended only on the checker result*: fixed. `cleanup_passed` also
+       requires the complete identities.
+    4. *Correction 6 wording that every terminal record proves reaping* (function
+       docstring, ADR §4, this file's Correction 6 record): corrected to the narrow
+       statement below; the Correction 6 record carries an inline supersession note in
+       place of that claim.
+  - **Exact accepted outcome.** Not every terminal record proves reaping. The supervisor
+    writes `OBSERVED:pending_post_run_review` only on the reviewed path where the worker
+    exited zero after supervision and wrote its summary (no containment failure,
+    unconfirmed termination, deadline, or worker failure). For this one-use attempt-2
+    cleanup, with the reservation hash-bound by the expected-inventory manifest, that
+    exact outcome is accepted as worker-completion evidence for this cleanup only. Every
+    other outcome refuses with the fixed category `worker_outcome_not_accepted` (no
+    outcome value is ever output), before expected-inventory verification and before
+    deletion: any `FAIL-CLOSED` (including `worker_termination_unconfirmed`,
+    `worker_failed`, `outer_deadline`, `containment_assignment_failed`,
+    `supervisor_exception`, `supervisor_interrupted`, `staging_exists`), `INCONCLUSIVE`
+    with or without a kind, unknown outcomes (including case and whitespace variants),
+    and missing or non-string outcomes. Wrong record counts, reordered records, a second
+    `reserved` record in place of the terminal record, and malformed or non-object lines
+    refuse as `worker_exit_not_recorded`. **Limitation retained:** this does not
+    establish malicious-process exclusion, the harness records no worker PID, and
+    unconfirmed termination is never acceptable. The retained attempt-2 reservation's
+    terminal outcome is exactly the accepted value, so no reservation change is needed.
+  - **Identities captured before deletion** (`_checker_path`,
+    `capture_cleanup_identities`), in `_dispatch` before `cleanup_staging` is called.
+    The checker must exist, be a regular, non-link, non-reparse file, resolve to the
+    current harness file, and have a valid lowercase SHA-256. The executing Git SHA must
+    be obtainable, 40 lowercase hex characters, and exactly the binding's candidate. The
+    tracked tree and candidate binding are then still checked by the existing
+    pre-deletion publication checks. Refusals are fixed categories with exit 2:
+    `checker_identity_unavailable`, `checker_identity_invalid`,
+    `executing_sha_unavailable`, `executing_sha_invalid`, `executing_sha_not_candidate`.
+    Cleanup is not invoked, the checker is not launched, and nothing is retried.
+  - **Post-deletion success** (`cleanup_passed`). `passed: true` requires a complete
+    pre-captured checker identity (exactly `path` and a valid `sha256`, path equal to the
+    harness file name), a pre-captured executing SHA equal to the bound candidate, and no
+    checker failure category (launch, zero exit, one exact all-true object). After
+    deletion, a checker launch, output, or check failure keeps all deletion and inventory
+    evidence and both pre-captured identities, with `passed: false`, the existing
+    Correction 6 category, and exit 1, never retried.
+  - **ADR 0017 §4:** the exact accepted outcome, the rejected outcomes, the narrow
+    completion-evidence statement and retained limitation, identity capture before
+    deletion, the success conjunction, and preservation of failed-attestation evidence.
+    No live-run, fidelity, `PASS`, report, or option-A evidence was reopened.
+  - **Tests** (temporary synthetic staging only). Module 316 → 363 collected: 48 added,
+    and the `no-outcome` case moved from the structural test to the outcome test.
+    - `test_rejected_terminal_outcomes_refuse_before_inventory_verification` (18 cases):
+      seven `FAIL-CLOSED` outcomes, `INCONCLUSIVE` with and without a kind, an unknown
+      `PASS`, an unknown `OBSERVED`, case and trailing-space variants, a missing outcome,
+      and `null`, integer, Boolean, and list outcomes. Each proves
+      `check_expected_inventory` and `staging_inventory` are never reached, no deletion
+      occurs, and every runtime byte is unchanged. The structural test
+      (`test_unrecorded_worker_exit_refuses_and_preserves_staging`, 7 cases) gained the
+      same proof.
+    - `test_rejected_outcome_refusal_is_categorical_through_the_cli`: exit 2, a
+      categorical line, and no outcome text in the output.
+    - Pre-deletion identity refusals through the CLI, each proving cleanup and the
+      checker were never invoked, exit 2, no sentinel leak, and every runtime byte
+      unchanged:
+      - `test_checker_hash_failure_refuses_before_deletion`;
+      - `test_malformed_checker_hash_refuses_before_deletion`;
+      - `test_missing_checker_path_refuses_before_deletion`;
+      - `test_linked_checker_path_refuses_before_deletion` (real symlink; ran here);
+      - `test_reparse_or_non_regular_checker_refuses_before_deletion` (reparse attribute;
+        FIFO mode);
+      - `test_checker_that_is_not_the_harness_file_refuses_before_deletion` (directory;
+        byte-identical copy elsewhere);
+      - `test_executing_sha_lookup_failure_refuses_before_deletion`;
+      - `test_malformed_executing_sha_refuses_before_deletion` (5);
+      - `test_executing_sha_other_than_the_candidate_refuses_before_deletion`.
+    - `test_identities_are_captured_once_before_deletion`: the checker hash and
+      `rev-parse` occur once, before cleanup, and never after.
+    - `test_success_requires_every_identity_and_check` (11) and
+      `test_all_true_checker_cannot_pass_without_complete_identities` (2).
+    - The Correction 6 launch-failure, malformed/partial/failed-output matrix, and
+      all-true tests now also assert the pre-captured checker identity and executing SHA.
+    - Synthetic reservations use the exact accepted outcome.
+      `test_reservation_blocks_rerun_after_cleanup` now drives the real supervisor path to
+      `OBSERVED:pending_post_run_review` (an `INCONCLUSIVE` outcome is now correctly
+      refused).
+  - **Ad hoc load-bearing checks** (manual, not coordinator-executed; harness restored
+    byte-identical each time). Fourteen mutants were each killed by their new witness:
+    - exact-outcome and outcome-type checks;
+    - removal of the capture call;
+    - the missing-path, link/regular, is-harness, and hash-validity checks;
+    - the hash `OSError` handling, the executing-SHA lookup handling, and the format and
+      candidate checks;
+    - the `passed` conjunction, and its identity and executing terms.
+    The conjunction first survived at the CLI (capture already guarantees validity), so
+    `test_all_true_checker_cannot_pass_without_complete_identities` was added.
+  - **Verification** after the final semantic change (no full suite, no coordinator):
+    - harness module: 362 passed, 1 skipped (the real-FIFO case; no `os.mkfifo`);
+    - related selection (as in Correction 6): 1,266 passed, 1 skipped;
+    - `tests/contracts`: 130 passed;
+    - Ruff format/check and mypy clean;
+    - `check_handoff`, `check_repo`, and `git diff --check` pass.
+  - **W1–W12 manual mutations**, rerun after the final semantic change against harness
+    `190f9427a2d88a27565412af98441120ccc798d110db1f48d0d0562f6bf21be8`. No anchor needed to move. Manual advisory evidence only; no coordinator
+    executed them, and the 34 registered witnesses are unchanged.
+    - Controls: `tests/test_greenhouse_s2c_canary.py::test_default_invocation_refuses` and `tests/test_greenhouse_s2c_canary.py::test_selection_rule_follows_provider_order`.
+    - Every anchor occurred exactly once; the baseline and final runs passed.
+    - Log: `.claude/runtime/phase4-s2c-correction7-mutation-log.json`, SHA-256
+      `8bbed49909431d97910b367e624db689ee2d44a8486e3bce2eede1930b161a77`.
+
+  | ID | Mutation | Anchor → replacement | Failing witness (`tests/test_greenhouse_s2c_canary.py::`) | Baseline | Mutant | Restored; SHA-256 |
+  |---|---|---|---|---|---|---|
+  | W1 | request-shape guard removed | `check_request_shape(request) ⏎ request.headers["Accept-Encoding"]` → `request.headers["Accept-Encoding"]` | `test_request_shape_guard_refuses_before_send[other_board]` | pass | fail; controls pass | pass; `190f9427a2d88a27565412af98441120ccc798d110db1f48d0d0562f6bf21be8` |
+  | W2 | second-send refusal removed | `if self._capture.request_sent: ⏎ raise CanaryRefusal("second_request_refused")` → (deleted) | `test_second_send_is_refused_before_network` | pass | fail; controls pass | pass; `190f9427a2d88a27565412af98441120ccc798d110db1f48d0d0562f6bf21be8` |
+  | W3 | live gate enabled by default (env check removed) | `if env.get(LIVE_ENV_VAR) != LIVE_ENV_VALUE: ⏎ raise CanaryRefusal("gate_disabled")` → (deleted) | `test_live_preflight_refuses_without_live_env` | pass | fail; controls pass | pass; `190f9427a2d88a27565412af98441120ccc798d110db1f48d0d0562f6bf21be8` |
+  | W4 | board allowlist check removed | `if request.board != BOARD_TOKEN: ⏎ raise CanaryRefusal("board_not_allowlisted")` → (deleted) | `test_live_preflight_refuses_non_allowlisted_board` | pass | fail; controls pass | pass; `190f9427a2d88a27565412af98441120ccc798d110db1f48d0d0562f6bf21be8` |
+  | W5 | Accept-Encoding: identity override removed | `request.headers["Accept-Encoding"] = ACCEPT_ENCODING` → (deleted) | `test_accept_encoding_identity_and_default_user_agent` | pass | fail; controls pass | pass; `190f9427a2d88a27565412af98441120ccc798d110db1f48d0d0562f6bf21be8` |
+  | W6 | raw capture overwrite instead of exclusive create | `fd = os.open(path, os.O_WRONLY \| os.O_CREAT \| os.O_EXCL \| getattr(os, "O_BINARY", 0))` → `fd = os.open(path, os.O_WRONLY \| os.O_CREAT \| os.O_TRUNC \| getattr(os, "O_BINARY", 0))` | `test_exclusive_write_never_overwrites` | pass | fail; controls pass | pass; `190f9427a2d88a27565412af98441120ccc798d110db1f48d0d0562f6bf21be8` |
+  | W7 | supervisor no longer terminates/kills at the deadline | `stop()` → `pass` | `test_supervisor_terminates_and_reaps_worker_at_deadline` | pass | fail; controls pass | pass; `190f9427a2d88a27565412af98441120ccc798d110db1f48d0d0562f6bf21be8` |
+  | W8 | retries enabled (max_attempts=3) | `max_attempts=1, max_response_bytes=MAX_RESPONSE_BYTES` → `max_attempts=3, max_response_bytes=MAX_RESPONSE_BYTES` | `test_503_is_inconclusive_with_exactly_one_request` | pass | fail; controls pass | pass; `190f9427a2d88a27565412af98441120ccc798d110db1f48d0d0562f6bf21be8` |
+  | W9 | response cap raised to 5 MiB (5,242,880) | `MAX_RESPONSE_BYTES: Final = 5_000_000` → `MAX_RESPONSE_BYTES: Final = 5_242_880` | `test_body_over_cap_is_partial_without_complete_hash` | pass | fail; controls pass | pass; `190f9427a2d88a27565412af98441120ccc798d110db1f48d0d0562f6bf21be8` |
+  | W10 | record cap before conversion removed | `if capture.source_record_count > MAX_SOURCE_RECORDS: ⏎ raise CanaryRefusal("record_cap_exceeded")` → (deleted) | `test_record_cap_is_enforced_before_conversion` | pass | fail; controls pass | pass; `190f9427a2d88a27565412af98441120ccc798d110db1f48d0d0562f6bf21be8` |
+  | W11 | database-layer import added | `from app.ingestion.hashing import canonical_json_hash  # noqa: E402` → `import sqlalchemy  # noqa: E402, F401 ⏎ from app.ingestion.hashing import canonical_json_hash  # noqa: E402` | `test_harness_imports_only_allowed_modules` | pass | fail; controls pass | pass; `190f9427a2d88a27565412af98441120ccc798d110db1f48d0d0562f6bf21be8` |
+  | W12 | existing-reservation refusal removed from preflight | `if os.path.lexists(paths.reservation): ⏎ raise CanaryRefusal("attempt_already_reserved")` → (deleted) | `test_live_preflight_refuses_existing_reservation` | pass | fail; controls pass | pass; `190f9427a2d88a27565412af98441120ccc798d110db1f48d0d0562f6bf21be8` |
+  - **Retained state, unchanged throughout** (verified before and after):
+    - the seven staging artifacts and inventory `bbdc7659…04bb`;
+    - the attempt-2 reservation `0f89c0c1…d329` and attempt-1 archive `18763cf6…0f5e`;
+    - the expected-inventory manifest `7bab5eda…88f0`;
+    - report `093f59b5…873e` and fixture `d7e14857…5249`.
+
+    **Cleanup was not run.** No request was made. No staging or runtime file is tracked
+    or staged. Workflow metadata remains pending.
+- STOP -- Correction 7, for Sol Medium and Astra's narrow re-review. Cleanup, another
   request, a reservation change, a receipt, final `C`/`A`/`R`, `M`/`Q`, persistence, S3,
   and S4 remain prohibited. The live attempt-2 `PASS` is unchanged.
 
