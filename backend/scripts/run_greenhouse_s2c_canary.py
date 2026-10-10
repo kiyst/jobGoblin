@@ -172,6 +172,10 @@ class CanaryPaths:
     def claim(self) -> Path:
         return self.staging_dir / "worker-claim.json"
 
+    @property
+    def reservation_archive(self) -> Path:
+        return self.runtime_dir / "phase4-s2c-attempt1-reservation.jsonl"
+
 
 _RUNTIME_DIR = REPO_ROOT / ".claude" / "runtime"
 LIVE_PATHS: Final = CanaryPaths(
@@ -2041,9 +2045,12 @@ def staging_inventory(staging_dir: Path) -> list[dict[str, Any]]:
                 raise CanaryRefusal("staging_link_refused")
             if not child.resolve(strict=True).is_relative_to(root):
                 raise CanaryRefusal("staging_escape_refused")
-            if child.is_dir():
+            mode = os.lstat(child).st_mode
+            if stat.S_ISDIR(mode):
                 pending.append(child)
                 entries.append({"path": child.relative_to(staging_dir).as_posix(), "kind": "dir"})
+            elif not stat.S_ISREG(mode):
+                raise CanaryRefusal("staging_unexpected_object")
             else:
                 entries.append(
                     {
@@ -2156,17 +2163,191 @@ def raw_absence_checks(
     }
 
 
+_MANIFEST_KIND: Final = "s2c_attempt2_expected_staging_inventory"
+_MANIFEST_KEYS: Final = frozenset(
+    {
+        "schema_version",
+        "manifest_kind",
+        "source_advisory_candidate",
+        "raw_capture",
+        "attempt2_reservation_sha256",
+        "attempt1_archive_sha256",
+        "fixture_sha256",
+        "report_sha256",
+        "inventory",
+        "inventory_sha256",
+    }
+)
+
+
+@dataclass(frozen=True)
+class ExpectedInventory:
+    """The approved expected-inventory manifest that cleanup is bound to: its
+    path (outside staging), its externally supplied exact SHA-256, and the
+    expected canonical staging-inventory SHA-256."""
+
+    manifest_path: Path
+    manifest_sha256: str
+    inventory_sha256: str
+
+
+def _hex256(value: Any) -> bool:
+    return isinstance(value, str) and bool(_SHA256_RE.fullmatch(value))
+
+
+def _valid_relative_path(value: Any) -> bool:
+    """A normalized POSIX path relative to the staging root: no absolute or
+    drive form, no backslash, and no empty, `.`, or `..` segment."""
+    if not isinstance(value, str) or not value or value.startswith("/"):
+        return False
+    if "\\" in value or ":" in value:
+        return False
+    return all(part not in ("", ".", "..") for part in value.split("/"))
+
+
+def validate_expected_manifest(document: Any) -> list[dict[str, Any]]:
+    """Strict schema validation of the expected-inventory manifest. Returns its
+    inventory; raises `CanaryRefusal("manifest_invalid:<reason>")`."""
+
+    def require(condition: bool, reason: str) -> None:
+        if not condition:
+            raise CanaryRefusal(f"manifest_invalid:{reason}")
+
+    require(isinstance(document, dict) and set(document) == _MANIFEST_KEYS, "keys")
+    require(document["schema_version"] == 1 and document["manifest_kind"] == _MANIFEST_KIND, "kind")
+    source = document["source_advisory_candidate"]
+    require(isinstance(source, str) and bool(_SHA_RE.fullmatch(source)), "source_candidate")
+    raw = document["raw_capture"]
+    require(
+        raw is None
+        or (
+            isinstance(raw, dict)
+            and set(raw) == {"bytes", "sha256"}
+            and _strict_int(raw["bytes"])
+            and raw["bytes"] >= 0
+            and _hex256(raw["sha256"])
+        ),
+        "raw_capture",
+    )
+    for key in ("attempt2_reservation_sha256", "attempt1_archive_sha256", "report_sha256"):
+        require(_hex256(document[key]), key)
+    require(document["fixture_sha256"] is None or _hex256(document["fixture_sha256"]), "fixture")
+    require(_hex256(document["inventory_sha256"]), "inventory_sha256")
+    inventory = document["inventory"]
+    require(isinstance(inventory, list), "inventory")
+    seen: set[str] = set()
+    for entry in inventory:
+        require(isinstance(entry, dict), "entry")
+        kind = entry.get("kind")
+        if kind == "file":
+            require(set(entry) == {"path", "kind", "bytes", "sha256"}, "file_entry")
+            require(_strict_int(entry["bytes"]) and entry["bytes"] >= 0, "bytes")
+            require(_hex256(entry["sha256"]), "sha256")
+        elif kind == "dir":
+            require(set(entry) == {"path", "kind"}, "dir_entry")
+        else:
+            require(False, "entry_kind")
+        require(_valid_relative_path(entry["path"]), "path")
+        require(entry["path"] not in seen, "duplicate_entry")
+        seen.add(entry["path"])
+    require(inventory == sorted(inventory, key=lambda e: e["path"]), "order")
+    require(
+        canonical_json_hash({"inventory": inventory}) == document["inventory_sha256"],
+        "inventory_sha256_mismatch",
+    )
+    validated: list[dict[str, Any]] = inventory
+    return validated
+
+
+def check_expected_inventory(
+    paths: CanaryPaths,
+    expected: ExpectedInventory,
+    *,
+    expected_raw_sha256: str | None,
+    expected_raw_bytes: int | None,
+    binding: CleanupBinding,
+    git: Callable[[Sequence[str]], str],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Before any deletion: the manifest is outside staging and exactly
+    identified; its bindings (raw capture, both reservations, fixture, report,
+    and source advisory candidate) hold; neither reservation is inside staging;
+    every expected path resolves beneath the staging root; and the freshly
+    computed staging inventory equals the expected inventory exactly. Returns
+    the observed inventory and attestation fields; raises `CanaryRefusal`."""
+    root = paths.staging_dir.resolve(strict=True)
+    manifest = expected.manifest_path
+    if not os.path.lexists(manifest) or _is_link(manifest) or not manifest.is_file():
+        raise CanaryRefusal("manifest_missing")
+    if manifest.resolve().is_relative_to(root):
+        raise CanaryRefusal("manifest_inside_staging")
+    if not _hex256(expected.manifest_sha256) or file_sha256(manifest) != expected.manifest_sha256:
+        raise CanaryRefusal("manifest_identity")
+    try:
+        document = json.loads(manifest.read_text(encoding="utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        raise CanaryRefusal("manifest_invalid:json") from None
+    inventory = validate_expected_manifest(document)
+    if expected.inventory_sha256 != document["inventory_sha256"]:
+        raise CanaryRefusal("expected_inventory_identity")
+    protected = (
+        ("attempt2_reservation", paths.reservation, document["attempt2_reservation_sha256"]),
+        ("attempt1_archive", paths.reservation_archive, document["attempt1_archive_sha256"]),
+    )
+    for _, path, _sha in protected:
+        if os.path.lexists(path) and path.resolve().is_relative_to(root):
+            raise CanaryRefusal("protected_path_in_staging")
+    for name, path, sha in protected:
+        if (
+            not os.path.lexists(path)
+            or _is_link(path)
+            or not path.is_file()
+            or file_sha256(path) != sha
+        ):
+            raise CanaryRefusal(f"manifest_binding:{name}")
+    raw_expected = (
+        None
+        if expected_raw_sha256 is None
+        else {"bytes": expected_raw_bytes, "sha256": expected_raw_sha256}
+    )
+    if document["raw_capture"] != raw_expected:
+        raise CanaryRefusal("manifest_binding:raw_capture")
+    if (
+        document["fixture_sha256"] != binding.fixture_sha256
+        or document["report_sha256"] != binding.report_sha256
+    ):
+        raise CanaryRefusal("manifest_binding:publication")
+    history = git(["rev-list", f"{binding.base_sha}..{binding.candidate_sha}"]).split()
+    if document["source_advisory_candidate"] not in history:
+        raise CanaryRefusal("manifest_binding:source_candidate")
+    for entry in inventory:
+        if not (paths.staging_dir / entry["path"]).resolve().is_relative_to(root):
+            raise CanaryRefusal("manifest_path_escapes_staging")
+    observed = staging_inventory(paths.staging_dir)
+    observed_sha = canonical_json_hash({"inventory": observed})
+    if observed != inventory or observed_sha != expected.inventory_sha256:
+        raise CanaryRefusal("inventory_mismatch")
+    return observed, {
+        "expected_manifest": {"path": _repo_rel(manifest), "sha256": expected.manifest_sha256},
+        "expected_inventory_sha256": expected.inventory_sha256,
+        "observed_inventory_sha256": observed_sha,
+        "inventory_equal": True,
+    }
+
+
 def cleanup_staging(
     paths: CanaryPaths,
     *,
     expected_raw_sha256: str | None,
     expected_raw_bytes: int | None,
     binding: CleanupBinding,
+    expected: ExpectedInventory,
     git: Callable[[Sequence[str]], str],
 ) -> dict[str, Any]:
-    """Verify the publication binding and raw absence, then inventory and
-    delete the dedicated staging directory. The attempt reservation is never
-    touched. Any failed check raises `CanaryRefusal` and deletes nothing."""
+    """Verify the publication binding, raw absence, and the exact expected
+    inventory, then delete the dedicated staging directory. Neither
+    reservation, the manifest, nor anything outside staging is ever a target.
+    Every check completes before the first deletion; any failure raises
+    `CanaryRefusal` and deletes nothing. There is no retry."""
     if not os.path.lexists(paths.staging_dir):
         raise CanaryRefusal("staging_absent")
     raw: bytes | None = None
@@ -2182,7 +2363,14 @@ def cleanup_staging(
     failed = sorted(name for name, ok in pre_deletion.items() if not ok)
     if failed:
         raise CanaryRefusal(f"publication_binding_failed:{failed[0]}")
-    inventory = staging_inventory(paths.staging_dir)
+    inventory, inventory_binding = check_expected_inventory(
+        paths,
+        expected,
+        expected_raw_sha256=expected_raw_sha256,
+        expected_raw_bytes=expected_raw_bytes,
+        binding=binding,
+        git=git,
+    )
     for entry in sorted(inventory, key=lambda e: e["path"].count("/"), reverse=True):
         target = paths.staging_dir / entry["path"]
         if entry["kind"] == "file":
@@ -2195,6 +2383,7 @@ def cleanup_staging(
         "raw_bytes": expected_raw_bytes,
         "raw_blob": git_blob_id(raw) if raw is not None else None,
         "pre_deletion_checks": pre_deletion,
+        **inventory_binding,
         "inventory": inventory,
         "inventory_sha256": canonical_json_hash({"inventory": inventory}),
         "cleaned_at": _now_iso(),
@@ -2279,6 +2468,9 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     cleanup = sub.add_parser("cleanup", help="verified deletion of raw staging")
     cleanup.add_argument("--expected-raw-sha256")
     cleanup.add_argument("--expected-raw-bytes", type=int)
+    cleanup.add_argument("--expected-manifest", required=True, type=Path)
+    cleanup.add_argument("--expected-manifest-sha256", required=True)
+    cleanup.add_argument("--expected-inventory-sha256", required=True)
     _add_binding_args(cleanup)
     check = sub.add_parser("verify-cleanup", help=argparse.SUPPRESS)
     _add_binding_args(check)
@@ -2376,6 +2568,11 @@ def _dispatch(args: argparse.Namespace, paths: CanaryPaths) -> int:
             expected_raw_sha256=args.expected_raw_sha256,
             expected_raw_bytes=args.expected_raw_bytes,
             binding=binding,
+            expected=ExpectedInventory(
+                args.expected_manifest,
+                args.expected_manifest_sha256,
+                args.expected_inventory_sha256,
+            ),
             git=git_output,
         )
         checker = Path(__file__).resolve()
@@ -2397,7 +2594,12 @@ def _dispatch(args: argparse.Namespace, paths: CanaryPaths) -> int:
         completed = subprocess.run(  # fixed argv: a fresh checker process
             argv, capture_output=True, text=True, check=False
         )
-        checks = json.loads(completed.stdout)
+        try:
+            checks = json.loads(completed.stdout)
+        except ValueError:
+            checks = None
+        if not isinstance(checks, dict) or not all(isinstance(v, bool) for v in checks.values()):
+            checks = {"checker_output_valid": False}  # checker or invocation failure
         attestation.update(
             checker={"path": checker.name, "sha256": file_sha256(checker)},
             executing_sha=git_output(["rev-parse", "HEAD"]).strip(),

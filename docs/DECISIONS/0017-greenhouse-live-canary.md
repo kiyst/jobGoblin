@@ -328,9 +328,9 @@ Its salary statement is exactly:
     interpreter finalization.
   - CPython then aborted with `Fatal Python error: _enter_buffered_busy`.
   - No offline test had exercised a successful real `_worker` exit.
-- **Retained staging.** Raw capture, run summary, launch capability, and worker claim
-  remain unchanged and gitignored for post-run review. They are never committed or
-  logged.
+- **Retained staging.** At that checkpoint, the attempt-1 artifacts were retained
+  unchanged through review. They were later removed by verified cleanup at `408e09e`; the
+  reservation survives in the immutable archive.
 
 ### Post-run correction 3
 
@@ -369,7 +369,8 @@ Its salary statement is exactly:
   - fixture `backend/tests/fixtures/providers/greenhouse_s2c_projected.json`,
     `d7e14857e3279090709093d71f0c7c26d3e7baf806f35615c3b32520c75b5249`. It was produced by the reviewed create-only builder and holds one
     record: the five-field projection, the exact proper excerpt `[0, 1005)`, lineage,
-    aggregates, and golden expectations;
+    aggregates, and golden expectations. It was created for attempt 1 and preserved
+    unchanged as the sole durable replay fixture; it does not prove attempt-2 fidelity;
   - report `docs/evaluation/phase4-s2c-live-canary.md`, `0b3c136954e31ad5c713eb6e47cbeaac2fcf56b22fb11fc0b2aa0491ef80148c`. Its controlling
     verdict is permanently `FAIL-CLOSED:worker_failed`.
 - The user approved the minimized fixture, report, and replay test for publication to the S2c
@@ -377,17 +378,18 @@ Its salary statement is exactly:
   only: raw cleanup remains pending, and final `C`/`A`/`R`/`M`/`Q` and another request
   remain unauthorized.
 - Post-run correction 3 (`3d9404b0fe42663457ad80cf58f791e801bd7ff4`) received advisory
-  approval from both Sol Medium and Astra (as relayed by the user). It has not completed
-  a live attempt.
+  approval from both Sol Medium and Astra (as relayed by the user). At that checkpoint it
+  had not completed a live attempt; it later served as the corrected harness for attempt 2.
 
-### Evidence limitations
+### Attempt-1 evidence limitations at that checkpoint
 
-- The complete capture remains usable only for bounded evidence: captured-response,
+- The complete attempt-1 capture was usable only for bounded evidence: captured-response,
   replay, lineage, and provisional fidelity.
-- It cannot make S2c pass. A corrected candidate must complete a separately authorized
-  new live request, which needs new U1 network authorization and an explicitly
-  authorized reservation reset.
-- The W1–W12 mutation experiments are manual advisory evidence. No coordinator executed
+- Attempt-1 evidence could never make attempt 1 pass. A corrected candidate had to
+  complete a separately authorized new live request, which needed new U1 network
+  authorization and an explicitly authorized reservation reset. That request was attempt
+  2, recorded below.
+- The W1–W12 mutation experiments were manual advisory evidence. No coordinator executed
   them.
 
 ### Timeout-wording disclosure

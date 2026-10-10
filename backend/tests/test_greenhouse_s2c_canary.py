@@ -865,7 +865,12 @@ def test_reservation_blocks_rerun_after_cleanup(paths: canary.CanaryPaths) -> No
     paths.report.write_text("# S2c report\n", encoding="utf-8")
     binding = canary.CleanupBinding(SHA, CANDIDATE, None, canary.file_sha256(paths.report))
     canary.cleanup_staging(
-        paths, expected_raw_sha256=None, expected_raw_bytes=None, binding=binding, git=_git()
+        paths,
+        expected_raw_sha256=None,
+        expected_raw_bytes=None,
+        binding=binding,
+        expected=_expected(paths, None, None, binding),
+        git=_git(),
     )
     assert not paths.staging_dir.exists()
     with pytest.raises(canary.CanaryRefusal) as refusal:
@@ -1417,18 +1422,68 @@ def _approved(
     return summary, binding
 
 
+def _expected(
+    paths: canary.CanaryPaths,
+    raw_sha: str | None,
+    raw_bytes: int | None,
+    binding: canary.CleanupBinding,
+    *,
+    source: str = CANDIDATE,
+    mutate: Callable[[dict[str, Any]], Any] | None = None,
+    rehash: bool = False,
+    location: Path | None = None,
+) -> canary.ExpectedInventory:
+    """A synthetic expected-inventory manifest for the temporary staging, written
+    outside staging by default. Creates synthetic reservation/archive files if
+    absent. `rehash` recomputes the manifest inventory hash after `mutate`, so a
+    test isolates the check it targets."""
+    for path, content in (
+        (paths.reservation, b'{"event": "reserved"}\n'),
+        (paths.reservation_archive, b'{"event": "archived"}\n'),
+    ):
+        if not path.exists():
+            path.write_bytes(content)
+    inventory = canary.staging_inventory(paths.staging_dir)
+    document: dict[str, Any] = {
+        "schema_version": 1,
+        "manifest_kind": "s2c_attempt2_expected_staging_inventory",
+        "source_advisory_candidate": source,
+        "raw_capture": None if raw_sha is None else {"bytes": raw_bytes, "sha256": raw_sha},
+        "attempt2_reservation_sha256": canary.file_sha256(paths.reservation),
+        "attempt1_archive_sha256": canary.file_sha256(paths.reservation_archive),
+        "fixture_sha256": binding.fixture_sha256,
+        "report_sha256": binding.report_sha256,
+        "inventory": inventory,
+        "inventory_sha256": canonical_json_hash({"inventory": inventory}),
+    }
+    if mutate is not None:
+        mutate(document)
+    if rehash:
+        document["inventory_sha256"] = canonical_json_hash({"inventory": document["inventory"]})
+    target = location if location is not None else paths.runtime_dir / "expected-inventory.json"
+    target.write_text(json.dumps(document, indent=2, sort_keys=True), encoding="utf-8")
+    return canary.ExpectedInventory(
+        target, canary.file_sha256(target), document["inventory_sha256"]
+    )
+
+
 def _cleanup(
     paths: canary.CanaryPaths,
     summary: dict[str, Any],
     binding: canary.CleanupBinding,
     git: Callable[[Any], str],
+    expected: canary.ExpectedInventory | None = None,
 ) -> dict[str, Any]:
     capture = summary["capture"]
+    raw_sha, raw_bytes = capture["complete_response_sha256"], capture["complete_response_bytes"]
+    if expected is None:
+        expected = _expected(paths, raw_sha, raw_bytes, binding)
     return canary.cleanup_staging(
         paths,
-        expected_raw_sha256=capture["complete_response_sha256"],
-        expected_raw_bytes=capture["complete_response_bytes"],
+        expected_raw_sha256=raw_sha,
+        expected_raw_bytes=raw_bytes,
         binding=binding,
+        expected=expected,
         git=git,
     )
 
@@ -1473,10 +1528,19 @@ def test_git_blob_id_matches_git() -> None:
 def test_cleanup_refuses_a_raw_mismatch_and_deletes_nothing(
     paths: canary.CanaryPaths, taxonomy: TaxonomyIndex
 ) -> None:
-    _, binding = _approved(paths, taxonomy)
+    summary, binding = _approved(paths, taxonomy)
+    capture = summary["capture"]
+    expected = _expected(
+        paths, capture["complete_response_sha256"], capture["complete_response_bytes"], binding
+    )
     with pytest.raises(canary.CanaryRefusal, match="raw_capture_mismatch"):
         canary.cleanup_staging(
-            paths, expected_raw_sha256="0" * 64, expected_raw_bytes=1, binding=binding, git=_git()
+            paths,
+            expected_raw_sha256="0" * 64,
+            expected_raw_bytes=1,
+            binding=binding,
+            expected=expected,
+            git=_git(),
         )
     assert paths.raw.exists()
 
@@ -3101,3 +3165,417 @@ def test_committed_projected_fixture_validates_and_replays(taxonomy: TaxonomyInd
     )
     assert len(document["replay_envelope"]["jobs"]) == 1
     assert document["replay_envelope"]["meta"]["total"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Correction 5: exact expected-inventory binding inside cleanup (synthetic only).
+# ---------------------------------------------------------------------------
+
+
+def _snapshot(root: Path) -> dict[str, bytes]:
+    """Every regular file's bytes beneath `root`, without following links."""
+    out: dict[str, bytes] = {}
+    for dirpath, _dirs, files in os.walk(root):
+        for name in files:
+            path = Path(dirpath) / name
+            if not path.is_symlink():
+                out[path.relative_to(root).as_posix()] = path.read_bytes()
+    return out
+
+
+def _staged_for_inventory(
+    paths: canary.CanaryPaths, taxonomy: TaxonomyIndex
+) -> tuple[str, int, canary.CleanupBinding]:
+    summary, binding = _approved(paths, taxonomy)
+    capture = summary["capture"]
+    return capture["complete_response_sha256"], capture["complete_response_bytes"], binding
+
+
+def _run_cleanup(
+    paths: canary.CanaryPaths,
+    raw_sha: str,
+    raw_bytes: int,
+    binding: canary.CleanupBinding,
+    expected: canary.ExpectedInventory,
+) -> dict[str, Any]:
+    return canary.cleanup_staging(
+        paths,
+        expected_raw_sha256=raw_sha,
+        expected_raw_bytes=raw_bytes,
+        binding=binding,
+        expected=expected,
+        git=_git(),
+    )
+
+
+def test_exact_inventory_cleanup_succeeds_and_attests(
+    paths: canary.CanaryPaths, taxonomy: TaxonomyIndex
+) -> None:
+    raw_sha, raw_bytes, binding = _staged_for_inventory(paths, taxonomy)
+    expected = _expected(paths, raw_sha, raw_bytes, binding)
+    protected = {
+        path: path.read_bytes()
+        for path in (paths.reservation, paths.reservation_archive, expected.manifest_path)
+    }
+    attestation = _run_cleanup(paths, raw_sha, raw_bytes, binding, expected)
+    assert not paths.staging_dir.exists()
+    assert {path: path.read_bytes() for path in protected} == protected
+    assert attestation["expected_manifest"]["sha256"] == expected.manifest_sha256
+    assert attestation["expected_manifest"]["path"].endswith("expected-inventory.json")
+    assert attestation["expected_inventory_sha256"] == expected.inventory_sha256
+    assert attestation["observed_inventory_sha256"] == expected.inventory_sha256
+    assert attestation["inventory_equal"] is True
+    assert attestation["inventory_sha256"] == expected.inventory_sha256
+    assert attestation["pre_deletion_checks"] == dict.fromkeys(
+        attestation["pre_deletion_checks"], True
+    )
+
+
+def _drop_entry(path: str) -> Callable[[canary.CanaryPaths], None]:
+    return lambda p: (p.staging_dir / path).unlink()
+
+
+def _wrong_kind(p: canary.CanaryPaths) -> None:
+    target = p.staging_dir / "drafts" / "preview.json"
+    target.unlink()
+    target.mkdir()
+
+
+def _entry_to_dir(d: dict[str, Any]) -> None:
+    for i, entry in enumerate(d["inventory"]):
+        if entry["path"] == "drafts/preview.json":
+            d["inventory"][i] = {"path": entry["path"], "kind": "dir"}
+
+
+def _set_entry(field: str, value: Any) -> Callable[[dict[str, Any]], None]:
+    def mutate(d: dict[str, Any]) -> None:
+        for entry in d["inventory"]:
+            if entry["path"] == "drafts/preview.json":
+                entry[field] = value
+
+    return mutate
+
+
+@pytest.mark.parametrize(
+    ("staging_change", "manifest_kwargs", "override", "kind"),
+    [
+        pytest.param(
+            _drop_entry("drafts/preview.json"), {}, None, "inventory_mismatch", id="missing_entry"
+        ),
+        pytest.param(
+            lambda p: (p.staging_dir / "extra.txt").write_bytes(b"x"),
+            {},
+            None,
+            "inventory_mismatch",
+            id="additional_entry",
+        ),
+        pytest.param(
+            lambda p: (p.staging_dir / "drafts" / "preview.json").write_bytes(b"[]"),
+            {},
+            None,
+            "inventory_mismatch",
+            id="same_size_bytes",
+        ),
+        pytest.param(
+            lambda p: (p.staging_dir / "drafts" / "preview.json").write_bytes(b"{ }"),
+            {},
+            None,
+            "inventory_mismatch",
+            id="changed_size",
+        ),
+        pytest.param(_wrong_kind, {}, None, "inventory_mismatch", id="wrong_kind_in_staging"),
+        pytest.param(
+            None,
+            {"mutate": _entry_to_dir, "rehash": True},
+            None,
+            "inventory_mismatch",
+            id="wrong_kind_in_manifest",
+        ),
+        pytest.param(
+            None,
+            {"mutate": lambda d: d["inventory"].append(dict(d["inventory"][0])), "rehash": True},
+            None,
+            "manifest_invalid:duplicate_entry",
+            id="duplicate_entry",
+        ),
+        pytest.param(
+            None,
+            {"mutate": _set_entry("sha256", "A" * 64), "rehash": True},
+            None,
+            "manifest_invalid:sha256",
+            id="uppercase_hash",
+        ),
+        pytest.param(
+            None,
+            {"mutate": _set_entry("sha256", "0" * 63), "rehash": True},
+            None,
+            "manifest_invalid:sha256",
+            id="short_hash",
+        ),
+        pytest.param(
+            None,
+            {"mutate": _set_entry("bytes", -1), "rehash": True},
+            None,
+            "manifest_invalid:bytes",
+            id="negative_size",
+        ),
+        pytest.param(
+            None,
+            {"mutate": _set_entry("bytes", True), "rehash": True},
+            None,
+            "manifest_invalid:bytes",
+            id="bool_size",
+        ),
+        pytest.param(
+            None,
+            {"mutate": _set_entry("bytes", "2"), "rehash": True},
+            None,
+            "manifest_invalid:bytes",
+            id="string_size",
+        ),
+        pytest.param(
+            None,
+            {"mutate": _set_entry("path", "/etc/passwd"), "rehash": True},
+            None,
+            "manifest_invalid:path",
+            id="absolute_path",
+        ),
+        pytest.param(
+            None,
+            {"mutate": _set_entry("path", "C:/Windows/x"), "rehash": True},
+            None,
+            "manifest_invalid:path",
+            id="drive_path",
+        ),
+        pytest.param(
+            None,
+            {"mutate": _set_entry("path", "../attempt.jsonl"), "rehash": True},
+            None,
+            "manifest_invalid:path",
+            id="traversal",
+        ),
+        pytest.param(
+            None,
+            {"mutate": _set_entry("path", "drafts/../x"), "rehash": True},
+            None,
+            "manifest_invalid:path",
+            id="inner_traversal",
+        ),
+        pytest.param(
+            None,
+            {"mutate": _set_entry("path", "drafts\\preview.json"), "rehash": True},
+            None,
+            "manifest_invalid:path",
+            id="backslash",
+        ),
+        pytest.param(
+            None,
+            {"mutate": lambda d: d.__setitem__("extra", 1)},
+            None,
+            "manifest_invalid:keys",
+            id="extra_key",
+        ),
+        pytest.param(
+            None,
+            {},
+            "wrong_inventory",
+            "expected_inventory_identity",
+            id="wrong_canonical_inventory",
+        ),
+        pytest.param(
+            None,
+            {"mutate": lambda d: d.__setitem__("inventory_sha256", "0" * 64)},
+            None,
+            "manifest_invalid:inventory_sha256_mismatch",
+            id="manifest_inventory_hash",
+        ),
+        pytest.param(None, {}, "wrong_manifest_sha", "manifest_identity", id="wrong_manifest_sha"),
+        pytest.param(None, {}, "missing_manifest", "manifest_missing", id="missing_manifest"),
+        pytest.param(None, {}, "invalid_json", "manifest_invalid:json", id="invalid_json"),
+        pytest.param(
+            None, {}, "manifest_in_staging", "manifest_inside_staging", id="manifest_inside_staging"
+        ),
+        pytest.param(
+            lambda p: p.reservation_archive.write_bytes(b"tampered"),
+            {},
+            None,
+            "manifest_binding:attempt1_archive",
+            id="archive_changed",
+        ),
+        pytest.param(
+            lambda p: p.reservation.write_bytes(b"tampered"),
+            {},
+            None,
+            "manifest_binding:attempt2_reservation",
+            id="reservation_changed",
+        ),
+        pytest.param(
+            None,
+            {"source": "e" * 40},
+            None,
+            "manifest_binding:source_candidate",
+            id="source_not_in_history",
+        ),
+        pytest.param(
+            None,
+            {"mutate": lambda d: d.__setitem__("raw_capture", {"bytes": 1, "sha256": "0" * 64})},
+            None,
+            "manifest_binding:raw_capture",
+            id="raw_binding",
+        ),
+        pytest.param(
+            None,
+            {"mutate": lambda d: d.__setitem__("report_sha256", "0" * 64)},
+            None,
+            "manifest_binding:publication",
+            id="report_binding",
+        ),
+    ],
+)
+def test_inventory_refusals_delete_nothing(
+    staging_change: Callable[[canary.CanaryPaths], Any] | None,
+    manifest_kwargs: dict[str, Any],
+    override: str | None,
+    kind: str,
+    paths: canary.CanaryPaths,
+    taxonomy: TaxonomyIndex,
+) -> None:
+    raw_sha, raw_bytes, binding = _staged_for_inventory(paths, taxonomy)
+    location = paths.staging_dir / "manifest.json" if override == "manifest_in_staging" else None
+    expected = _expected(paths, raw_sha, raw_bytes, binding, location=location, **manifest_kwargs)
+    if override == "wrong_inventory":
+        expected = canary.ExpectedInventory(
+            expected.manifest_path, expected.manifest_sha256, "0" * 64
+        )
+    elif override == "wrong_manifest_sha":
+        expected = canary.ExpectedInventory(
+            expected.manifest_path, "f" * 64, expected.inventory_sha256
+        )
+    elif override == "missing_manifest":
+        expected.manifest_path.unlink()
+    elif override == "invalid_json":
+        expected.manifest_path.write_text("{not json", encoding="utf-8")
+        expected = canary.ExpectedInventory(
+            expected.manifest_path,
+            canary.file_sha256(expected.manifest_path),
+            expected.inventory_sha256,
+        )
+    if staging_change is not None:
+        staging_change(paths)
+    before = _snapshot(paths.runtime_dir)
+    with pytest.raises(canary.CanaryRefusal) as refusal:
+        _run_cleanup(paths, raw_sha, raw_bytes, binding, expected)
+    assert refusal.value.kind == kind
+    assert paths.staging_dir.is_dir()
+    assert _snapshot(paths.runtime_dir) == before  # every byte unchanged
+
+
+def test_reservation_inside_staging_is_refused_as_a_target(
+    paths: canary.CanaryPaths, taxonomy: TaxonomyIndex
+) -> None:
+    raw_sha, raw_bytes, binding = _staged_for_inventory(paths, taxonomy)
+    inside = dataclasses.replace(paths, reservation=paths.staging_dir / "attempt.jsonl")
+    inside.reservation.write_bytes(b'{"event": "reserved"}\n')
+    expected = _expected(inside, raw_sha, raw_bytes, binding)
+    before = _snapshot(paths.runtime_dir)
+    with pytest.raises(canary.CanaryRefusal, match="protected_path_in_staging"):
+        _run_cleanup(inside, raw_sha, raw_bytes, binding, expected)
+    assert _snapshot(paths.runtime_dir) == before
+
+
+def test_symlink_in_staging_is_refused_before_deletion(
+    paths: canary.CanaryPaths, taxonomy: TaxonomyIndex, tmp_path: Path
+) -> None:
+    raw_sha, raw_bytes, binding = _staged_for_inventory(paths, taxonomy)
+    expected = _expected(paths, raw_sha, raw_bytes, binding)
+    outside = tmp_path / "outside.txt"
+    outside.write_bytes(b"keep")
+    try:
+        os.symlink(outside, paths.staging_dir / "link.txt")
+    except OSError:
+        pytest.skip("symlink creation is not permitted on this host")
+    before = _snapshot(paths.runtime_dir)
+    with pytest.raises(canary.CanaryRefusal, match="staging_link_refused"):
+        _run_cleanup(paths, raw_sha, raw_bytes, binding, expected)
+    assert _snapshot(paths.runtime_dir) == before and outside.read_bytes() == b"keep"
+
+
+def test_junction_in_staging_is_refused_before_deletion(
+    paths: canary.CanaryPaths, taxonomy: TaxonomyIndex, tmp_path: Path
+) -> None:
+    winapi = pytest.importorskip("_winapi")
+    if not hasattr(winapi, "CreateJunction"):
+        pytest.skip("junctions are not supported on this host")
+    raw_sha, raw_bytes, binding = _staged_for_inventory(paths, taxonomy)
+    expected = _expected(paths, raw_sha, raw_bytes, binding)
+    target = tmp_path / "junction-target"
+    target.mkdir()
+    (target / "kept.txt").write_bytes(b"keep")
+    winapi.CreateJunction(str(target), str(paths.staging_dir / "junction"))
+    before = _snapshot(target)
+    with pytest.raises(canary.CanaryRefusal, match="staging_link_refused"):
+        _run_cleanup(paths, raw_sha, raw_bytes, binding, expected)
+    assert _snapshot(target) == before and paths.raw.exists()
+
+
+def test_cleanup_checker_failure_yields_a_failed_attestation(
+    paths: canary.CanaryPaths,
+    taxonomy: TaxonomyIndex,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    raw_sha, raw_bytes, binding = _staged_for_inventory(paths, taxonomy)
+    expected = _expected(paths, raw_sha, raw_bytes, binding)
+    monkeypatch.setattr(canary, "git_output", _git())
+
+    def broken_checker(*_: Any, **__: Any) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(["checker"], 1, stdout="not json", stderr="")
+
+    monkeypatch.setattr(canary.subprocess, "run", broken_checker)
+    argv = [
+        "cleanup",
+        "--base",
+        SHA,
+        "--candidate",
+        CANDIDATE,
+        "--fixture-sha256",
+        binding.fixture_sha256 or "absent",
+        "--report-sha256",
+        binding.report_sha256,
+        "--expected-raw-sha256",
+        raw_sha,
+        "--expected-raw-bytes",
+        str(raw_bytes),
+        "--expected-manifest",
+        str(expected.manifest_path),
+        "--expected-manifest-sha256",
+        expected.manifest_sha256,
+        "--expected-inventory-sha256",
+        expected.inventory_sha256,
+    ]
+    assert canary.main(argv, paths=paths) == 1
+    attestation = json.loads(capsys.readouterr().out)
+    assert attestation["passed"] is False
+    assert attestation["checks"] == {"checker_output_valid": False}
+    assert attestation["inventory_equal"] is True
+
+
+def test_cleanup_cli_requires_the_expected_inventory_arguments(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        canary.main(
+            [
+                "cleanup",
+                "--base",
+                SHA,
+                "--candidate",
+                CANDIDATE,
+                "--fixture-sha256",
+                "absent",
+                "--report-sha256",
+                "0" * 64,
+            ]
+        )
+    assert exit_info.value.code == 2
+    assert "--expected-manifest" in capsys.readouterr().err

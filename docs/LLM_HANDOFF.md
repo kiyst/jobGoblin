@@ -908,7 +908,7 @@ findings: none
   - Workflow metadata remains pending and unchanged.
   - No cleanup, Greenhouse contact, new request, reservation reset, receipt, `A`, formal `R`,
     merge, or other slice is authorized.
-- **Live attempt 2 and its post-run advisory candidate** (this commit, the direct
+- **Live attempt 2 and its post-run advisory candidate** (`97cf21453bf663ca7d30d7dfc8c071e16c3e039a`, the direct
   single-parent child of `408e09e58cf833f72886dfd6e4c8992d3e730089`). Scope: exactly
   `docs/DECISIONS/0017-greenhouse-live-canary.md`, `docs/evaluation/phase4-s2c-live-canary.md`,
   `docs/ROADMAP.md`, and this file.
@@ -946,9 +946,104 @@ findings: none
   - **Limitations:** no broad accuracy, provider generalization, D1/persistence readiness,
     salary, runtime activation, recurring collection, or production readiness. No third
     request is authorized.
-- STOP -- attempt-2 post-run advisory candidate, for Sol Medium and Astra's narrow review.
-  Cleanup, another request, a reservation change, a receipt, final `C`/`A`/`R`, `M`/`Q`,
-  persistence, S3, and S4 remain prohibited.
+- **Post-run correction 5: ADR temporal corrections and the exact-inventory cleanup
+  safeguard** (this commit, the direct single-parent child of
+  `97cf21453bf663ca7d30d7dfc8c071e16c3e039a`). Scope: exactly
+  `backend/scripts/run_greenhouse_s2c_canary.py`,
+  `backend/tests/test_greenhouse_s2c_canary.py`,
+  `docs/DECISIONS/0017-greenhouse-live-canary.md`, and this file. The user selected the
+  harness-correction option over a one-use wrapper.
+  - **ADR temporal corrections**, exactly the statements identified in review:
+    - fixture: created for attempt 1 and preserved unchanged as the sole durable replay
+      fixture; it does not prove attempt-2 fidelity;
+    - attempt-1 staging: retained at that checkpoint, later removed by verified cleanup at
+      `408e09e`, with the reservation in the immutable archive;
+    - Correction 3: had not completed a live attempt at that checkpoint, and later served
+      as attempt 2's corrected harness;
+    - "Evidence limitations" became "Attempt-1 evidence limitations at that checkpoint",
+      in past tense, stating that attempt-1 evidence could never make attempt 1 pass and
+      that attempt 2 is recorded below.
+  - **Expected-inventory manifest** (gitignored, outside staging, create-only, fsynced,
+    byte-verified): `.claude/runtime/phase4-s2c-attempt2-expected-inventory.json`, SHA-256
+    `7bab5eda4f5abd6cc4529a5793a011f2ea8d13a335c2a6271545a3c9e48b88f0`. It binds:
+    - source advisory candidate `97cf214`;
+    - raw capture 420,784 bytes, `43ca81bd…15c5`;
+    - attempt-2 reservation `0f89c0c1…d329` and attempt-1 archive `18763cf6…0f5e`;
+    - fixture `d7e14857…5249` and report `093f59b5…873e`;
+    - the exact seven staging entries (path, kind, bytes, SHA-256);
+    - canonical inventory `bbdc7659…04bb`.
+  - **Harness correction.** `cleanup` now requires `--expected-manifest`,
+    `--expected-manifest-sha256`, and `--expected-inventory-sha256`. Before the first
+    deletion, `cleanup_staging` → `check_expected_inventory` verifies:
+    - the manifest exists, is not a link, is outside staging, and matches the supplied
+      SHA-256;
+    - the strict schema (exact keys and kind; normalized relative paths with no absolute,
+      drive, backslash, `.`, or `..` forms; unique entries; `file`/`dir` kinds only;
+      nonnegative strict-int sizes; lowercase SHA-256; sorted order; matching canonical
+      inventory hash);
+    - the supplied inventory SHA;
+    - neither reservation is inside staging, and both match their bound hashes;
+    - the raw, fixture, report, and source-candidate (in `base..candidate`) bindings;
+    - every expected path resolves beneath the staging root;
+    - fresh inventory, refusing links, junctions, reparse points, and other non-regular
+      objects;
+    - exact structural and canonical equality.
+
+    Any failure is a categorical refusal before deletion. There is no manual fallback or
+    retry. The existing publication, raw-absence, and fresh-process checks are kept. The
+    attestation adds `expected_manifest` (path and SHA-256), `expected_inventory_sha256`,
+    `observed_inventory_sha256`, and `inventory_equal`. A checker or invocation failure now
+    yields a failed attestation (exit 1) with `checker_output_valid: false`. **Cleanup was
+    not run.**
+  - **Tests (temporary synthetic staging only; never the real retained staging):**
+    - existing cleanup tests updated to pass a synthetic manifest;
+    - added: the success path with its attestation fields;
+    - added: 29 refusal cases, each proving every runtime byte unchanged:
+      - inventory: missing entry, additional entry, same-size changed bytes, changed size,
+        wrong kind in staging or in the manifest;
+      - manifest: duplicate entry, malformed hash or size, absolute, drive, traversal, or
+        backslash path, extra key, wrong canonical inventory, manifest hash mismatch,
+        wrong manifest SHA, missing or invalid manifest, manifest inside staging;
+      - bindings: archive changed, reservation changed, source not in history, raw or
+        report binding mismatch;
+    - added: a reservation inside staging as a target; a symlink; a Windows junction; a
+      checker failure through the CLI; the required CLI arguments.
+  - **Verification** (no full suite; no broader risk found):
+    - harness module: 274 passed, 0 skipped, including the symlink and junction cases;
+    - related selection: 1,004 passed;
+    - Ruff format/check and mypy clean;
+    - `check_handoff`, `check_repo`, and `git diff --check` pass.
+  - **W1–W12 manual mutations**, rerun after the final semantic change against harness
+    `c9eaf40cae48655179bbdbf33a48a97eb219e41641fbd15173c06002cee62429`. No anchor needed to move. These are manual advisory evidence only; no
+    coordinator executed them, and the 34 registered witnesses are unchanged.
+    - Controls: `tests/test_greenhouse_s2c_canary.py::test_default_invocation_refuses` and `tests/test_greenhouse_s2c_canary.py::test_selection_rule_follows_provider_order`.
+    - Every anchor occurred exactly once; the baseline and final runs passed.
+    - Log: `.claude/runtime/phase4-s2c-correction5-mutation-log.json`, SHA-256
+      `1126f0bea8109ae4e2353efdbc3d048018dfed0f16d19539c2a5770373cf2663`.
+
+  | ID | Mutation | Anchor → replacement | Failing witness (`tests/test_greenhouse_s2c_canary.py::`) | Baseline | Mutant | Restored; SHA-256 |
+  |---|---|---|---|---|---|---|
+  | W1 | request-shape guard removed | `check_request_shape(request) ⏎ request.headers["Accept-Encoding"]` → `request.headers["Accept-Encoding"]` | `test_request_shape_guard_refuses_before_send[other_board]` | pass | fail; controls pass | pass; `c9eaf40cae48655179bbdbf33a48a97eb219e41641fbd15173c06002cee62429` |
+  | W2 | second-send refusal removed | `if self._capture.request_sent: ⏎ raise CanaryRefusal("second_request_refused")` → (deleted) | `test_second_send_is_refused_before_network` | pass | fail; controls pass | pass; `c9eaf40cae48655179bbdbf33a48a97eb219e41641fbd15173c06002cee62429` |
+  | W3 | live gate enabled by default (env check removed) | `if env.get(LIVE_ENV_VAR) != LIVE_ENV_VALUE: ⏎ raise CanaryRefusal("gate_disabled")` → (deleted) | `test_live_preflight_refuses_without_live_env` | pass | fail; controls pass | pass; `c9eaf40cae48655179bbdbf33a48a97eb219e41641fbd15173c06002cee62429` |
+  | W4 | board allowlist check removed | `if request.board != BOARD_TOKEN: ⏎ raise CanaryRefusal("board_not_allowlisted")` → (deleted) | `test_live_preflight_refuses_non_allowlisted_board` | pass | fail; controls pass | pass; `c9eaf40cae48655179bbdbf33a48a97eb219e41641fbd15173c06002cee62429` |
+  | W5 | Accept-Encoding: identity override removed | `request.headers["Accept-Encoding"] = ACCEPT_ENCODING` → (deleted) | `test_accept_encoding_identity_and_default_user_agent` | pass | fail; controls pass | pass; `c9eaf40cae48655179bbdbf33a48a97eb219e41641fbd15173c06002cee62429` |
+  | W6 | raw capture overwrite instead of exclusive create | `fd = os.open(path, os.O_WRONLY \| os.O_CREAT \| os.O_EXCL \| getattr(os, "O_BINARY", 0))` → `fd = os.open(path, os.O_WRONLY \| os.O_CREAT \| os.O_TRUNC \| getattr(os, "O_BINARY", 0))` | `test_exclusive_write_never_overwrites` | pass | fail; controls pass | pass; `c9eaf40cae48655179bbdbf33a48a97eb219e41641fbd15173c06002cee62429` |
+  | W7 | supervisor no longer terminates/kills at the deadline | `stop()` → `pass` | `test_supervisor_terminates_and_reaps_worker_at_deadline` | pass | fail; controls pass | pass; `c9eaf40cae48655179bbdbf33a48a97eb219e41641fbd15173c06002cee62429` |
+  | W8 | retries enabled (max_attempts=3) | `max_attempts=1, max_response_bytes=MAX_RESPONSE_BYTES` → `max_attempts=3, max_response_bytes=MAX_RESPONSE_BYTES` | `test_503_is_inconclusive_with_exactly_one_request` | pass | fail; controls pass | pass; `c9eaf40cae48655179bbdbf33a48a97eb219e41641fbd15173c06002cee62429` |
+  | W9 | response cap raised to 5 MiB (5,242,880) | `MAX_RESPONSE_BYTES: Final = 5_000_000` → `MAX_RESPONSE_BYTES: Final = 5_242_880` | `test_body_over_cap_is_partial_without_complete_hash` | pass | fail; controls pass | pass; `c9eaf40cae48655179bbdbf33a48a97eb219e41641fbd15173c06002cee62429` |
+  | W10 | record cap before conversion removed | `if capture.source_record_count > MAX_SOURCE_RECORDS: ⏎ raise CanaryRefusal("record_cap_exceeded")` → (deleted) | `test_record_cap_is_enforced_before_conversion` | pass | fail; controls pass | pass; `c9eaf40cae48655179bbdbf33a48a97eb219e41641fbd15173c06002cee62429` |
+  | W11 | database-layer import added | `from app.ingestion.hashing import canonical_json_hash  # noqa: E402` → `import sqlalchemy  # noqa: E402, F401 ⏎ from app.ingestion.hashing import canonical_json_hash  # noqa: E402` | `test_harness_imports_only_allowed_modules` | pass | fail; controls pass | pass; `c9eaf40cae48655179bbdbf33a48a97eb219e41641fbd15173c06002cee62429` |
+  | W12 | existing-reservation refusal removed from preflight | `if os.path.lexists(paths.reservation): ⏎ raise CanaryRefusal("attempt_already_reserved")` → (deleted) | `test_live_preflight_refuses_existing_reservation` | pass | fail; controls pass | pass; `c9eaf40cae48655179bbdbf33a48a97eb219e41641fbd15173c06002cee62429` |
+  - **Retained state, unchanged throughout:**
+    - the seven staging artifacts and inventory `bbdc7659…04bb`;
+    - the attempt-2 reservation and attempt-1 archive;
+    - report `093f59b5…873e` and fixture `d7e14857…5249`.
+
+    No staging or runtime file is tracked. Workflow metadata remains pending.
+- STOP -- corrected advisory candidate and cleanup mechanism, for Sol Medium and Astra's
+  narrow review. Cleanup, another request, a reservation change, a receipt, final
+  `C`/`A`/`R`, `M`/`Q`, persistence, S3, and S4 remain prohibited.
 
 ```workflow-metadata
 workflow_version: v3.2
