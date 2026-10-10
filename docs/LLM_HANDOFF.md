@@ -881,7 +881,7 @@ findings: none
   - Correction 3 has two advisory approvals, as relayed. The stale 55-second U1 wording
     disclosure above still applies. A separately authorized corrected live attempt is
     still required.
-- **Post-run documentation correction 4** (this commit, the direct single-parent child of
+- **Post-run documentation correction 4** (`408e09e58cf833f72886dfd6e4c8992d3e730089`, the direct single-parent child of
   `ec1a0f01fecced17277084cf12b72bf2d8d05abf`). Scope: exactly
   `docs/DECISIONS/0017-greenhouse-live-canary.md` and this file.
   - **Review input (as relayed by the user; complete text not relayed):**
@@ -908,9 +908,47 @@ findings: none
   - Workflow metadata remains pending and unchanged.
   - No cleanup, Greenhouse contact, new request, reservation reset, receipt, `A`, formal `R`,
     merge, or other slice is authorized.
-- STOP -- the post-run advisory candidate may be committed and pushed under the user's
-  publication approval. Cleanup, another request, a reservation reset, a receipt, `A`,
-  formal `R`, `M`/`Q`, persistence, S3, and S4 remain prohibited.
+- **Live attempt 2 and its post-run advisory candidate** (this commit, the direct
+  single-parent child of `408e09e58cf833f72886dfd6e4c8992d3e730089`). Scope: exactly
+  `docs/DECISIONS/0017-greenhouse-live-canary.md`, `docs/evaluation/phase4-s2c-live-canary.md`,
+  `docs/ROADMAP.md`, and this file.
+  - **Sequence**, each step separately authorized:
+    1. the restricted terms/robots refresh and the reviewed retry proposal
+       (`1dff80da…66e2`);
+    2. the fresh user terms decision (`1a1a2513…ff06`);
+    3. the reviewed archive/reset, with one `git ls-remote` returning `408e09e`; attempt 1's
+       reservation was archived byte-identically (`18763cf6…0f5e`);
+    4. the attempt-2 U1 (`3fb904ac…1653`) and exactly one request at 2026-10-10T19:03:13Z;
+    5. the offline preview and fidelity packet;
+    6. the user-adopted decisions, then the offline verdict computation.
+  - **Observations:**
+    - HTTP 200 JSON, User-Agent `python-httpx/0.28.1`;
+    - a complete 420,784-byte capture, `43ca81bd…15c5`;
+    - 49 records with `meta.total` 49, all valid, retained, and converted; 0 invalid,
+      skipped, or duplicate; no incomplete results;
+    - components: employment type 48, seniority 30, title 25, skills 29 and 55; the others
+      0. These are observations, not accuracy evidence.
+  - **Fidelity (option A):** ordinal 0 only (`first_converted`), excerpt `[0, 1005)`, no
+    negative sample. Both reviewers found all five points sound, and the user adopted them.
+    - preview `7f31b864…acac`, packet `67cb2c50…bce7`, decisions `cce96428…48c8`
+      (byte-identical to attempt 1's decisions file);
+    - seven-file staging inventory `bbdc7659…04bb`;
+    - projection `ebf2e024…` independently equals the attempt-1 fixture
+      projection.
+  - **Verdict:** **`PASS` with no findings.** Only PASS completes the live-evidence
+    requirement. Cleanup is pending and fail-closed. S2c workflow publication needs
+    cleanup plus `C`/`A`/`R`/`M`/`Q`.
+  - **Reproducibility (option A):** the attempt-1 fixture and replay test are unchanged and
+    do not prove attempt-2 fidelity. Attempt 2 has no durable fixture, and its preview and
+    raw response are not replayable after cleanup.
+  - **Unchanged:** fixture `d7e14857…5249`, replay test, harness `7bcc0edf…9c0`, and all
+    other tracked paths. Workflow metadata remains pending.
+  - **Limitations:** no broad accuracy, provider generalization, D1/persistence readiness,
+    salary, runtime activation, recurring collection, or production readiness. No third
+    request is authorized.
+- STOP -- attempt-2 post-run advisory candidate, for Sol Medium and Astra's narrow review.
+  Cleanup, another request, a reservation change, a receipt, final `C`/`A`/`R`, `M`/`Q`,
+  persistence, S3, and S4 remain prohibited.
 
 ```workflow-metadata
 workflow_version: v3.2

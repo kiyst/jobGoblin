@@ -2,15 +2,19 @@
 
 ## Status
 
-**Proposed — post-run advisory candidate; S2c has not passed.** Phase 4 S2c
+**Proposed — attempt-2 post-run advisory candidate; attempt 2 computed `PASS`; S2c workflow not complete.** Phase 4 S2c
 (`phase-4/greenhouse-live-canary-s2c`, risk class H, `slice_kind: tooling`, `gate: final`),
 base `eeac72abb2ba930fb469a4abb563a7601826266a` (`Q` of the ADR 0016 retention slice).
 
-**One live request has been made: attempt 1, permanently `FAIL-CLOSED:worker_failed`**
-(see [Results](#results)). S2c has not passed. A corrected candidate must complete a
-separately authorized new live request before S2c can pass. The minimized projected fixture
-and report are published to the S2c feature branch as the post-run advisory candidate
-(advisory only; not final-C evidence).
+**Two live requests have been made** (see [Results](#results)):
+- **Attempt 1** is permanently `FAIL-CLOSED:worker_failed`.
+- **Attempt 2**, the separately authorized corrected attempt, has computed verdict `PASS`
+  with no findings. That completes the live-evidence requirement.
+
+Attempt-2 raw cleanup is pending (a cleanup failure is `FAIL-CLOSED`). S2c is not complete
+until cleanup and `C`/`A`/`R`/`M`/`Q` succeed. The minimized attempt-1 fixture and the
+two-attempt report are published to the S2c feature branch as advisory evidence, not
+final-C evidence. No third request is authorized.
 
 The contract is the frozen, gitignored packet `.claude/runtime/phase4-s2c-frozen-contract.md`
 (SHA-256 `ac2cc00afc9e2bb7b7520eba71da7d6349e7b523f1b9b601bb2ad254c450800b`). It holds nine
@@ -397,10 +401,50 @@ separate harness timer (Sol A25, compatibility C9/C10). The only bounds are:
 U1 is preserved unchanged as historical evidence, and no timer was added to match it.
 Any future network authorization must state this corrected timeout model explicitly.
 
+### Live attempt 2: computed `PASS` (cleanup pending)
+
+- **The request.** Exactly one `GET https://boards-api.greenhouse.io/v1/boards/discord/jobs?content=true`
+  at 2026-10-10T19:03:13Z, made with the corrected candidate `408e09e` (harness
+  `7bcc0edf…9c0`). There was no retry, redirect, fallback, or other endpoint, board, or
+  provider.
+- **Authority, in order:** the user's fresh attempt-2 terms decision (`1a1a2513…ff06`); the
+  reviewed archive/reset, which archived attempt 1's reservation byte-identically as
+  `phase4-s2c-attempt1-reservation.jsonl` (`18763cf6…0f5e`); and the attempt-2 U1
+  (`3fb904ac…1653`), bound into the attempt-2 reservation (`0f89c0c1…d329`).
+- **Observations:**
+  - HTTP 200 JSON, observed User-Agent `python-httpx/0.28.1`;
+  - a complete 420,784-byte capture, `43ca81bd854df7764b691fae8424d2669c750411e43e65036de0890785f215c5`;
+  - 49 records, with `meta.total` 49;
+  - 49 valid, retained, and converted; 0 invalid, skipped, or duplicate; no incomplete
+    results;
+  - component values: employment type 48, seniority 30, title 25, skills 29 jobs and 55
+    matches; experience, remote type, and location 0.
+
+  These are observations, not accuracy evidence.
+- **Fidelity (option A).** One record was selected, ordinal 0 (`first_converted`), with
+  excerpt `[0, 1005)` and no negative sample. Both reviewers found all five fidelity points
+  sound, and the user adopted them. Bound identities: preview `7f31b864…acac`, packet
+  `67cb2c50…bce7`, decisions `cce96428…48c8`, and seven-file staging inventory
+  `bbdc7659…04bb`. Lineage hashes:
+  - projection `ebf2e02407c77303ccd91bf1ce0e60e1e6789d5e2cc27987e61521706c7753f8`;
+  - golden `a8871bfdd6e281b7aa59b49cb945d9c77c7ff0f1b734632ac87b72fc8996870a`;
+  - excerpt `3938fb4de3aaf631089e42d2b403361455425606ad29b8f0a1332b566fde5537`.
+
+  The projection independently equals the committed attempt-1 fixture's.
+- **Verdict:** the offline computation returned **`PASS` with no findings**, and only PASS
+  completes the live-evidence requirement. Cleanup is still pending, and a cleanup failure
+  remains `FAIL-CLOSED`. S2c is not complete until cleanup and `C`/`A`/`R`/`M`/`Q` succeed.
+- **Reproducibility:** the attempt-1 fixture and replay test are unchanged and do not prove
+  attempt-2 fidelity. Attempt 2 has no durable executable fixture, and after cleanup its
+  preview and raw response cannot be replayed. No attempt-2 replayability claim is made.
+- **Attempt-1 raw staging** was cleaned at `408e09e` through the reviewed mechanism
+  (attestation `a31f3638…e21f`, `passed: true`).
+
 ## Remaining gates for a corrected live attempt
 
-Gates 1–3 were satisfied for attempt 1 at candidate `1cb715a`. A new live attempt with a
-corrected candidate requires all of these again, and separately:
+Gates 1–3 were satisfied for attempt 1 at candidate `1cb715a` and again, separately, for
+attempt 2 at `408e09e`. No further attempt is authorized. Any future attempt would require
+all of these again, and separately:
 
 1. Sol Medium and Astra review of the corrected advisory candidate (U7).
 2. The user's terms and robots dispositions (U3). Attempt 1's are recorded in the personal-use
@@ -418,6 +462,7 @@ corrected candidate requires all of these again, and separately:
   after the authorized run).
 - The W1–W12 manual mutation experiments are advisory evidence, not registered
   witnesses. The 34 registered witnesses are unchanged.
-- One external request has occurred (attempt 1). Rollback: abandon the branch and apply
-  the contract's verified staging cleanup. The consumed reservation is retained through
-  `Q` or recorded abandonment.
+- Two external requests have occurred (attempts 1 and 2). Rollback: abandon the branch and
+  apply the contract's verified staging cleanup. The attempt-1 reservation archive and the
+  attempt-2 reservation are retained through `Q` or recorded abandonment, and they are
+  never cleanup targets.

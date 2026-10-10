@@ -653,21 +653,25 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   authorizes no S2c, provider contact, persistence, D1, S3, or S4; each still requires
   separate explicit user authorization.
 - **Phase 4 S2c (`phase-4/greenhouse-live-canary-s2c`): bounded read-only Greenhouse live
-  canary ([ADR 0017](DECISIONS/0017-greenhouse-live-canary.md)) -- in progress; not passed.**
+  canary ([ADR 0017](DECISIONS/0017-greenhouse-live-canary.md)) -- in progress; attempt 2 computed PASS; not complete.**
   One separately authorized `GET /v1/boards/discord/jobs?content=true` through the
   unchanged S1 adapter, S2b converter and bridge, and S2 composition, with no retry,
   redirect, fallback, second request, persistence, or runtime registration.
   - **Live attempt 1** (candidate `1cb715a`) is permanently `FAIL-CLOSED:worker_failed`.
     The response was HTTP 200 with a complete 413,101-byte capture, and all 48 records
     were retained and converted. A worker-shutdown defect then crashed the exit.
-  - **Post-run correction 3** (`3d9404b`) fixes that defect and has advisory approval. It
-    has not completed a live attempt.
+  - **Post-run correction 3** (`3d9404b`) fixes that defect and has advisory approval.
   - Bounded fidelity decisions are approved for one excerpt (ordinal 0). The minimized
     projected fixture, report, and replay test are published to the S2c feature branch
     as the post-run advisory candidate (advisory only; final `C`/`A`/`R`/`M`/`Q` and
     another request remain unauthorized).
-  - Raw cleanup is pending.
-  - A separately authorized new live request is required before S2c can pass.
+  - Attempt-1 raw staging was cleaned through the reviewed mechanism.
+  - **Live attempt 2** (corrected candidate `408e09e`) made exactly one request: HTTP 200, a
+    complete 420,784-byte capture, and 49 of 49 records retained and converted. With
+    reviewed fidelity decisions, it computed **`PASS` with no findings**.
+  - Attempt-2 raw cleanup is pending, and a cleanup failure is fail-closed.
+  - S2c is not complete until cleanup and `C`/`A`/`R`/`M`/`Q` succeed. No third request is
+    authorized.
 - **Phases 5-14: not started.** Begin each phase only after completing its preflight in
   [PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md) and receiving approval for the next
   smallest slice.
