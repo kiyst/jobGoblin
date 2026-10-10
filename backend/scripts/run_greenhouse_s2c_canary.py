@@ -2163,6 +2163,118 @@ def raw_absence_checks(
     }
 
 
+QUIESCENCE_ASSERTION: Final = "single-operator-quiescent"
+QUIESCENCE_BOUNDARY: Final = (
+    "This boundary excludes cooperative JobGoblin writers under the single-operator "
+    "authorization model. It does not claim protection against a malicious process or "
+    "privileged OS-level mutation."
+)
+
+
+def check_quiescence(paths: CanaryPaths, operator_quiescence: str) -> dict[str, Any]:
+    """Bounded one-use operational quiescence, checked before inventory
+    verification:
+
+    - the operator affirmatively asserts single-operator quiescence: no live,
+      projection, fidelity, post-run, or other cleanup command is running, and no
+      other command is authorized to write staging; this cleanup is the sole
+      cooperative staging accessor through deletion;
+    - the attempt's worker exit is recorded: the reservation holds exactly its
+      `reserved` record and the `terminal` record the supervisor writes only after
+      evidence-based reaping (the harness records no worker PID, so this record is
+      the worker-absence evidence);
+    - staging and its parent resolve to the expected local paths, with no link.
+
+    Called before any inventory verification. Any uncertainty refuses. A second
+    inventory scan is not claimed to establish quiescence."""
+    if operator_quiescence != QUIESCENCE_ASSERTION:
+        raise CanaryRefusal("quiescence_not_asserted")
+    if _is_link(paths.runtime_dir) or _is_link(paths.staging_dir):
+        raise CanaryRefusal("staging_path_unexpected")
+    if paths.staging_dir.resolve(strict=True).parent != paths.runtime_dir.resolve(strict=True):
+        raise CanaryRefusal("staging_path_unexpected")
+    try:
+        records = [json.loads(line) for line in paths.reservation.read_bytes().splitlines()]
+    except (OSError, ValueError):
+        raise CanaryRefusal("worker_exit_not_recorded") from None
+    if (
+        len(records) != 2
+        or not all(isinstance(r, dict) for r in records)
+        or records[0].get("event") != "reserved"
+        or records[1].get("event") != "terminal"
+        or not isinstance(records[1].get("outcome"), str)
+    ):
+        raise CanaryRefusal("worker_exit_not_recorded")
+    return {
+        "operator_assertion": QUIESCENCE_ASSERTION,
+        "worker_exit_recorded": True,
+        "worker_terminal_outcome": records[1]["outcome"],
+        "worker_pid_recorded": False,
+        "staging_path_expected": True,
+        "boundary": QUIESCENCE_BOUNDARY,
+    }
+
+
+_CHECKER_BASE_KEYS: Final = frozenset(
+    {
+        "staging_root_absent",
+        "known_capture_paths_absent",
+        "no_staging_residue",
+        "no_staging_path_in_index",
+        "binding_well_formed",
+        "head_is_candidate",
+        "tree_clean",
+        "candidate_descends_from_base",
+        "report_matches_approval",
+        "report_screening_clean",
+        "fixture_matches_approval",
+        "no_runtime_path_in_commit_range",
+    }
+)
+_CHECKER_RAW_KEYS: Final = frozenset(
+    {"raw_blob_absent_from_commit_range", "raw_blob_absent_from_index"}
+)
+
+
+def required_checker_keys(raw_blob: str | None) -> frozenset[str]:
+    """The exact key set the fresh checker must report for a valid binding."""
+    return _CHECKER_BASE_KEYS | _CHECKER_RAW_KEYS if raw_blob is not None else _CHECKER_BASE_KEYS
+
+
+def evaluate_checker(
+    returncode: int | None, stdout: str | None, required: frozenset[str]
+) -> tuple[str | None, dict[str, bool] | None]:
+    """Strict fresh-checker contract. Returns `(failure_category, checks)`;
+    `failure_category` is `None` only when the launch succeeded, the exit code
+    is zero, stdout is exactly one JSON object whose key set equals `required`,
+    and every value is literally `True`. `checks` is kept only when its shape is
+    exact (required keys, Boolean values)."""
+    if returncode is None:
+        return "checker_launch_failed", None
+    try:
+        parsed: Any = json.loads(stdout) if isinstance(stdout, str) else None
+        valid_json = isinstance(stdout, str)
+    except ValueError:
+        parsed, valid_json = None, False
+    exact_shape = (
+        isinstance(parsed, dict)
+        and set(parsed) == required
+        and all(type(v) is bool for v in parsed.values())
+    )
+    checks = {str(k): bool(v) for k, v in parsed.items()} if exact_shape else None
+    if returncode != 0:
+        return "checker_nonzero_exit", checks
+    if not valid_json or not isinstance(parsed, dict):
+        return "checker_output_malformed", None
+    if set(parsed) != required:
+        return "checker_key_set_mismatch", None
+    if not all(type(v) is bool for v in parsed.values()):
+        return "checker_output_malformed", None
+    if not all(v is True for v in parsed.values()):
+        return "checker_check_failed", checks
+    return None, checks
+
+
 _MANIFEST_KIND: Final = "s2c_attempt2_expected_staging_inventory"
 _MANIFEST_KEYS: Final = frozenset(
     {
@@ -2342,14 +2454,17 @@ def cleanup_staging(
     binding: CleanupBinding,
     expected: ExpectedInventory,
     git: Callable[[Sequence[str]], str],
+    operator_quiescence: str,
 ) -> dict[str, Any]:
     """Verify the publication binding, raw absence, and the exact expected
     inventory, then delete the dedicated staging directory. Neither
     reservation, the manifest, nor anything outside staging is ever a target.
-    Every check completes before the first deletion; any failure raises
-    `CanaryRefusal` and deletes nothing. There is no retry."""
+    Operational quiescence is established first, before any inventory or
+    binding verification. Every check completes before the first deletion; any
+    failure raises `CanaryRefusal` and deletes nothing. There is no retry."""
     if not os.path.lexists(paths.staging_dir):
         raise CanaryRefusal("staging_absent")
+    quiescence = check_quiescence(paths, operator_quiescence)
     raw: bytes | None = None
     if paths.raw.exists():
         raw = paths.raw.read_bytes()
@@ -2382,6 +2497,7 @@ def cleanup_staging(
         "raw_sha256": expected_raw_sha256,
         "raw_bytes": expected_raw_bytes,
         "raw_blob": git_blob_id(raw) if raw is not None else None,
+        "quiescence": quiescence,
         "pre_deletion_checks": pre_deletion,
         **inventory_binding,
         "inventory": inventory,
@@ -2471,6 +2587,7 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     cleanup.add_argument("--expected-manifest", required=True, type=Path)
     cleanup.add_argument("--expected-manifest-sha256", required=True)
     cleanup.add_argument("--expected-inventory-sha256", required=True)
+    cleanup.add_argument("--operator-quiescence", required=True)
     _add_binding_args(cleanup)
     check = sub.add_parser("verify-cleanup", help=argparse.SUPPRESS)
     _add_binding_args(check)
@@ -2574,6 +2691,7 @@ def _dispatch(args: argparse.Namespace, paths: CanaryPaths) -> int:
                 args.expected_inventory_sha256,
             ),
             git=git_output,
+            operator_quiescence=args.operator_quiescence,
         )
         checker = Path(__file__).resolve()
         argv = [
@@ -2591,20 +2709,34 @@ def _dispatch(args: argparse.Namespace, paths: CanaryPaths) -> int:
         ]
         if attestation["raw_blob"] is not None:
             argv += ["--raw-blob", attestation["raw_blob"]]
-        completed = subprocess.run(  # fixed argv: a fresh checker process
-            argv, capture_output=True, text=True, check=False
+        try:
+            completed = subprocess.run(  # fixed argv: a fresh checker process
+                argv, capture_output=True, text=True, check=False
+            )
+            returncode: int | None = completed.returncode
+            stdout: str | None = completed.stdout
+        except Exception:  # launch failure: categorical only, never the message
+            returncode, stdout = None, None
+        failure, checks = evaluate_checker(
+            returncode, stdout, required_checker_keys(attestation["raw_blob"])
         )
         try:
-            checks = json.loads(completed.stdout)
-        except ValueError:
-            checks = None
-        if not isinstance(checks, dict) or not all(isinstance(v, bool) for v in checks.values()):
-            checks = {"checker_output_valid": False}  # checker or invocation failure
+            checker_identity: dict[str, str] | None = {
+                "path": checker.name,
+                "sha256": file_sha256(checker),
+            }
+        except OSError:
+            checker_identity = None
+        try:
+            executing_sha: str | None = git_output(["rev-parse", "HEAD"]).strip()
+        except Exception:  # categorical: identity unavailable
+            executing_sha = None
         attestation.update(
-            checker={"path": checker.name, "sha256": file_sha256(checker)},
-            executing_sha=git_output(["rev-parse", "HEAD"]).strip(),
+            checker=checker_identity,
+            executing_sha=executing_sha,
             checks=checks,
-            passed=completed.returncode == 0 and all(checks.values()),
+            checker_failure=failure,
+            passed=failure is None,
         )
         _print(attestation)
         return 0 if attestation["passed"] else 1

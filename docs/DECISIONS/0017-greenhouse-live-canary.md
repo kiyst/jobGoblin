@@ -175,7 +175,17 @@ residue, a restart after the request began, and a concurrent or duplicate launch
      - its bytes (LF and CRLF forms) from every changed and publication file.
 
   Content screening is recorded but never establishes publication safety; independent
-  content review of derived artifacts stays mandatory. Cleanup then:
+  content review of derived artifacts stays mandatory. Before any inventory
+  verification, cleanup also requires bounded one-use operational quiescence: the
+  operator's affirmative single-operator quiescence assertion (no live, projection,
+  fidelity, post-run, or other cleanup command running; no other command authorized to
+  write staging; this cleanup the sole cooperative staging accessor), the reservation's
+  terminal record as the worker-exit evidence (the harness records no worker PID, so OS
+  confirmation of the worker's absence is not available), and staging resolving directly
+  beneath the expected runtime directory without links. Any uncertainty refuses before
+  deletion. This boundary excludes cooperative JobGoblin writers under the
+  single-operator authorization model. It does not claim protection against a malicious
+  process or privileged OS-level mutation. Cleanup then:
   1. inventories staging by relative path, size, and hash only;
   2. refuses links, junctions, and reparse points;
   3. deletes everything beneath the staging root, then the root;
@@ -183,15 +193,23 @@ residue, a restart after the request began, and a concurrent or duplicate launch
      root and every known capture path are absent, no staging residue is tracked, staged,
      untracked, or ignored, no runtime path appears in the commit range or the index,
      the raw blob is absent from the commit range and the index, and the artifact
-     bindings still hold.
+     bindings still hold. The checker passes only on a successful launch, exit code 0,
+     and stdout that is exactly one JSON object whose key set equals the required set
+     (14 keys with a raw blob) and whose every value is literally `true`. Otherwise the
+     cleanup attestation is still emitted with `passed: false` and one fixed failure
+     category (`checker_launch_failed`, `checker_nonzero_exit`,
+     `checker_output_malformed`, `checker_key_set_mismatch`, or `checker_check_failed`),
+     with no exception message, output fragment, or dynamic path, and the command exits
+     nonzero without retry.
 
   Cleanup failure blocks final `C`. This proves logical deletion from controlled
   locations, not forensic erasure.
 
 ### 5. Projected fixture and lineage
 
-`backend/tests/fixtures/providers/greenhouse_s2c_projected.json` (path reserved; not yet
-created) has `fixture_kind = projected_live_record_with_exact_content_excerpt`:
+`backend/tests/fixtures/providers/greenhouse_s2c_projected.json` (created for attempt 1
+and preserved unchanged as the sole durable replay fixture; it does not prove attempt-2
+fidelity) has `fixture_kind = projected_live_record_with_exact_content_excerpt`:
 
 - at most three selected records, chosen in provider order:
   1. the first publication-safe, adapter-valid `converted` record with a safe excerpt

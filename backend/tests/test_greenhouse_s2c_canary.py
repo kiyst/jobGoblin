@@ -22,11 +22,13 @@ import os
 import secrets
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 import textwrap
 import threading
 import time
+import types
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
@@ -871,6 +873,7 @@ def test_reservation_blocks_rerun_after_cleanup(paths: canary.CanaryPaths) -> No
         binding=binding,
         expected=_expected(paths, None, None, binding),
         git=_git(),
+        operator_quiescence=canary.QUIESCENCE_ASSERTION,
     )
     assert not paths.staging_dir.exists()
     with pytest.raises(canary.CanaryRefusal) as refusal:
@@ -1422,6 +1425,11 @@ def _approved(
     return summary, binding
 
 
+_EXITED_RESERVATION = (
+    b'{"event": "reserved"}\n{"event": "terminal", "outcome": "OBSERVED:synthetic"}\n'
+)
+
+
 def _expected(
     paths: canary.CanaryPaths,
     raw_sha: str | None,
@@ -1438,7 +1446,7 @@ def _expected(
     absent. `rehash` recomputes the manifest inventory hash after `mutate`, so a
     test isolates the check it targets."""
     for path, content in (
-        (paths.reservation, b'{"event": "reserved"}\n'),
+        (paths.reservation, _EXITED_RESERVATION),
         (paths.reservation_archive, b'{"event": "archived"}\n'),
     ):
         if not path.exists():
@@ -1485,6 +1493,7 @@ def _cleanup(
         binding=binding,
         expected=expected,
         git=git,
+        operator_quiescence=canary.QUIESCENCE_ASSERTION,
     )
 
 
@@ -1492,7 +1501,7 @@ def test_cleanup_inventories_deletes_staging_and_keeps_the_reservation(
     paths: canary.CanaryPaths, taxonomy: TaxonomyIndex
 ) -> None:
     summary, binding = _approved(paths, taxonomy)
-    paths.reservation.write_bytes(b'{"event": "reserved"}\n')
+    paths.reservation.write_bytes(_EXITED_RESERVATION)
     reservation = paths.reservation.read_bytes()
     raw = paths.raw.read_bytes()
     attestation = _cleanup(paths, summary, binding, _git())
@@ -1541,6 +1550,7 @@ def test_cleanup_refuses_a_raw_mismatch_and_deletes_nothing(
             binding=binding,
             expected=expected,
             git=_git(),
+            operator_quiescence=canary.QUIESCENCE_ASSERTION,
         )
     assert paths.raw.exists()
 
@@ -3205,6 +3215,7 @@ def _run_cleanup(
         binding=binding,
         expected=expected,
         git=_git(),
+        operator_quiescence=canary.QUIESCENCE_ASSERTION,
     )
 
 
@@ -3403,7 +3414,9 @@ def _set_entry(field: str, value: Any) -> Callable[[dict[str, Any]], None]:
             id="archive_changed",
         ),
         pytest.param(
-            lambda p: p.reservation.write_bytes(b"tampered"),
+            lambda p: p.reservation.write_bytes(
+                _EXITED_RESERVATION.replace(b"synthetic", b"tampered")
+            ),
             {},
             None,
             "manifest_binding:attempt2_reservation",
@@ -3475,7 +3488,7 @@ def test_reservation_inside_staging_is_refused_as_a_target(
 ) -> None:
     raw_sha, raw_bytes, binding = _staged_for_inventory(paths, taxonomy)
     inside = dataclasses.replace(paths, reservation=paths.staging_dir / "attempt.jsonl")
-    inside.reservation.write_bytes(b'{"event": "reserved"}\n')
+    inside.reservation.write_bytes(_EXITED_RESERVATION)
     expected = _expected(inside, raw_sha, raw_bytes, binding)
     before = _snapshot(paths.runtime_dir)
     with pytest.raises(canary.CanaryRefusal, match="protected_path_in_staging"):
@@ -3518,20 +3531,13 @@ def test_junction_in_staging_is_refused_before_deletion(
     assert _snapshot(target) == before and paths.raw.exists()
 
 
-def test_cleanup_checker_failure_yields_a_failed_attestation(
-    paths: canary.CanaryPaths,
-    taxonomy: TaxonomyIndex,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    raw_sha, raw_bytes, binding = _staged_for_inventory(paths, taxonomy)
-    expected = _expected(paths, raw_sha, raw_bytes, binding)
-    monkeypatch.setattr(canary, "git_output", _git())
-
-    def broken_checker(*_: Any, **__: Any) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess(["checker"], 1, stdout="not json", stderr="")
-
-    monkeypatch.setattr(canary.subprocess, "run", broken_checker)
+def _cleanup_argv(
+    raw_sha: str,
+    raw_bytes: int,
+    binding: canary.CleanupBinding,
+    expected: canary.ExpectedInventory,
+    quiescence: str | None = canary.QUIESCENCE_ASSERTION,
+) -> list[str]:
     argv = [
         "cleanup",
         "--base",
@@ -3553,11 +3559,360 @@ def test_cleanup_checker_failure_yields_a_failed_attestation(
         "--expected-inventory-sha256",
         expected.inventory_sha256,
     ]
-    assert canary.main(argv, paths=paths) == 1
-    attestation = json.loads(capsys.readouterr().out)
+    if quiescence is not None:
+        argv += ["--operator-quiescence", quiescence]
+    return argv
+
+
+_ALL_KEYS = sorted(canary.required_checker_keys("b" * 40))
+_SENTINEL = "SENTINEL-FRAGMENT-C6"
+
+
+def _checker_stdout(**overrides: Any) -> str:
+    checks: dict[str, Any] = dict.fromkeys(_ALL_KEYS, True)
+    for key, value in overrides.items():
+        if value is _DROP:
+            del checks[key]
+        else:
+            checks[key] = value
+    return json.dumps(checks)
+
+
+_DROP = object()
+
+_CHECKER_CASES = [
+    pytest.param(0, "{}", "checker_key_set_mismatch", id="empty-object"),
+    pytest.param(
+        0, _checker_stdout(tree_clean=_DROP), "checker_key_set_mismatch", id="partial-dict"
+    ),
+    pytest.param(
+        0,
+        _checker_stdout(**{_SENTINEL: True}),
+        "checker_key_set_mismatch",
+        id="extra-key",
+    ),
+    pytest.param(
+        0,
+        _checker_stdout(raw_blob_absent_from_index=_DROP, **{"not_a_check": True}),
+        "checker_key_set_mismatch",
+        id="substituted-key",
+    ),
+    pytest.param(0, _checker_stdout(tree_clean=False), "checker_check_failed", id="false"),
+    pytest.param(0, _checker_stdout(tree_clean=1), "checker_output_malformed", id="int-1"),
+    pytest.param(
+        0, _checker_stdout(tree_clean="true"), "checker_output_malformed", id="string-true"
+    ),
+    pytest.param(0, _checker_stdout(tree_clean=None), "checker_output_malformed", id="null"),
+    pytest.param(0, _SENTINEL, "checker_output_malformed", id="not-json"),
+    pytest.param(0, "", "checker_output_malformed", id="empty-stdout"),
+    pytest.param(0, "[true]", "checker_output_malformed", id="json-array"),
+    pytest.param(0, "true", "checker_output_malformed", id="json-scalar"),
+    pytest.param(
+        0, _checker_stdout() + _checker_stdout(), "checker_output_malformed", id="two-objects"
+    ),
+    pytest.param(1, _checker_stdout(), "checker_nonzero_exit", id="nonzero-valid-output"),
+    pytest.param(2, _SENTINEL, "checker_nonzero_exit", id="nonzero-malformed-output"),
+]
+
+
+@pytest.mark.parametrize(("returncode", "stdout", "category"), _CHECKER_CASES)
+def test_invalid_checker_results_fail_the_attestation(
+    paths: canary.CanaryPaths,
+    taxonomy: TaxonomyIndex,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    returncode: int,
+    stdout: str,
+    category: str,
+) -> None:
+    """Strict fresh-checker contract: only a zero exit with exactly one JSON
+    object whose key set equals the required set and whose every value is
+    literally `true` passes. The attestation is kept, categorical only."""
+    raw_sha, raw_bytes, binding = _staged_for_inventory(paths, taxonomy)
+    expected = _expected(paths, raw_sha, raw_bytes, binding)
+    monkeypatch.setattr(canary, "git_output", _git())
+    calls: list[Any] = []
+
+    def checker(argv: Any, **_: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, returncode, stdout=stdout, stderr=_SENTINEL)
+
+    monkeypatch.setattr(canary.subprocess, "run", checker)
+    assert canary.main(_cleanup_argv(raw_sha, raw_bytes, binding, expected), paths=paths) == 1
+    out = capsys.readouterr().out
+    attestation = json.loads(out)
     assert attestation["passed"] is False
-    assert attestation["checks"] == {"checker_output_valid": False}
+    assert attestation["checker_failure"] == category
+    assert len(calls) == 1  # never retried
+    assert _SENTINEL not in out
     assert attestation["inventory_equal"] is True
+    assert attestation["expected_manifest"]["sha256"] == expected.manifest_sha256
+    assert attestation["checker"]["path"] == "run_greenhouse_s2c_canary.py"
+    if attestation["checks"] is not None:
+        assert set(attestation["checks"]) == set(_ALL_KEYS)
+
+
+def test_exact_all_true_checker_result_passes(
+    paths: canary.CanaryPaths,
+    taxonomy: TaxonomyIndex,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    raw_sha, raw_bytes, binding = _staged_for_inventory(paths, taxonomy)
+    expected = _expected(paths, raw_sha, raw_bytes, binding)
+    monkeypatch.setattr(canary, "git_output", _git())
+
+    def checker(argv: Any, **_: Any) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(argv, 0, stdout=_checker_stdout(), stderr="")
+
+    monkeypatch.setattr(canary.subprocess, "run", checker)
+    assert canary.main(_cleanup_argv(raw_sha, raw_bytes, binding, expected), paths=paths) == 0
+    attestation = json.loads(capsys.readouterr().out)
+    assert attestation["passed"] is True
+    assert attestation["checker_failure"] is None
+    assert attestation["checks"] == dict.fromkeys(_ALL_KEYS, True)
+    assert len(_ALL_KEYS) == 14
+
+
+def test_checker_launch_failure_yields_a_failed_attestation(
+    paths: canary.CanaryPaths,
+    taxonomy: TaxonomyIndex,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A launch `OSError` cannot escape: the already-produced cleanup
+    attestation is emitted with a categorical failure and exit 1, no retry,
+    and no exception message or dynamic path."""
+    raw_sha, raw_bytes, binding = _staged_for_inventory(paths, taxonomy)
+    expected = _expected(paths, raw_sha, raw_bytes, binding)
+    monkeypatch.setattr(canary, "git_output", _git())
+    calls: list[Any] = []
+
+    def unlaunchable(argv: Any, **_: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        raise OSError(2, _SENTINEL, str(paths.runtime_dir / _SENTINEL))
+
+    monkeypatch.setattr(canary.subprocess, "run", unlaunchable)
+    assert canary.main(_cleanup_argv(raw_sha, raw_bytes, binding, expected), paths=paths) == 1
+    out = capsys.readouterr().out
+    attestation = json.loads(out)
+    assert attestation["passed"] is False
+    assert attestation["checker_failure"] == "checker_launch_failed"
+    assert attestation["checks"] is None
+    assert len(calls) == 1
+    assert _SENTINEL not in out
+    assert attestation["inventory_equal"] is True
+    assert attestation["observed_inventory_sha256"] == expected.inventory_sha256
+    assert attestation["quiescence"]["worker_exit_recorded"] is True
+    assert not paths.staging_dir.exists()  # deletion already performed and attested
+
+
+@pytest.mark.parametrize(
+    ("returncode", "stdout", "category"),
+    [
+        (None, None, "checker_launch_failed"),
+        (3, _checker_stdout(), "checker_nonzero_exit"),
+        (0, "{", "checker_output_malformed"),
+        (0, "{}", "checker_key_set_mismatch"),
+        (0, _checker_stdout(tree_clean=False), "checker_check_failed"),
+        (0, _checker_stdout(), None),
+    ],
+)
+def test_evaluate_checker_categories_are_distinct(
+    returncode: int | None, stdout: str | None, category: str | None
+) -> None:
+    failure, _checks = canary.evaluate_checker(
+        returncode, stdout, canary.required_checker_keys("b" * 40)
+    )
+    assert failure == category
+
+
+def test_required_checker_keys_follow_the_raw_binding() -> None:
+    with_raw = canary.required_checker_keys("b" * 40)
+    without_raw = canary.required_checker_keys(None)
+    assert len(with_raw) == 14 and len(without_raw) == 12
+    assert with_raw - without_raw == {
+        "raw_blob_absent_from_commit_range",
+        "raw_blob_absent_from_index",
+    }
+
+
+QUIESCENCE_BOUNDARY_TEXT = (
+    "This boundary excludes cooperative JobGoblin writers under the single-operator "
+    "authorization model. It does not claim protection against a malicious process or "
+    "privileged OS-level mutation."
+)
+
+
+def test_quiescence_is_attested_with_its_boundary(
+    paths: canary.CanaryPaths, taxonomy: TaxonomyIndex
+) -> None:
+    raw_sha, raw_bytes, binding = _staged_for_inventory(paths, taxonomy)
+    expected = _expected(paths, raw_sha, raw_bytes, binding)
+    attestation = _run_cleanup(paths, raw_sha, raw_bytes, binding, expected)
+    assert attestation["quiescence"] == {
+        "operator_assertion": "single-operator-quiescent",
+        "worker_exit_recorded": True,
+        "worker_terminal_outcome": "OBSERVED:synthetic",
+        "worker_pid_recorded": False,
+        "staging_path_expected": True,
+        "boundary": QUIESCENCE_BOUNDARY_TEXT,
+    }
+
+
+@pytest.mark.parametrize(
+    "assertion", ["", "yes", "single-operator-quiescent ", "SINGLE-OPERATOR-QUIESCENT"]
+)
+def test_quiescence_not_asserted_refuses_before_verification(
+    paths: canary.CanaryPaths,
+    taxonomy: TaxonomyIndex,
+    monkeypatch: pytest.MonkeyPatch,
+    assertion: str,
+) -> None:
+    raw_sha, raw_bytes, binding = _staged_for_inventory(paths, taxonomy)
+    expected = _expected(paths, raw_sha, raw_bytes, binding)
+
+    def no_inventory(_: Path) -> list[dict[str, Any]]:
+        raise AssertionError("inventory verified before quiescence")
+
+    monkeypatch.setattr(canary, "staging_inventory", no_inventory)
+    before = _snapshot(paths.runtime_dir)
+    with pytest.raises(canary.CanaryRefusal) as refusal:
+        canary.cleanup_staging(
+            paths,
+            expected_raw_sha256=raw_sha,
+            expected_raw_bytes=raw_bytes,
+            binding=binding,
+            expected=expected,
+            git=_git(),
+            operator_quiescence=assertion,
+        )
+    assert refusal.value.kind == "quiescence_not_asserted"
+    assert _snapshot(paths.runtime_dir) == before
+
+
+@pytest.mark.parametrize(
+    "reservation",
+    [
+        pytest.param(b'{"event": "reserved"}\n', id="worker-exit-unrecorded"),
+        pytest.param(b"", id="empty"),
+        pytest.param(
+            b'{"event": "terminal", "outcome": "x"}\n{"event": "reserved"}\n', id="reversed"
+        ),
+        pytest.param(_EXITED_RESERVATION + b'{"event": "reserved"}\n', id="extra-record"),
+        pytest.param(b'{"event": "reserved"}\n{"event": "terminal"}\n', id="no-outcome"),
+        pytest.param(
+            b'{"event": "reserved"}\n{"event": "reserved", "outcome": "reserved"}\n',
+            id="second-not-terminal",
+        ),
+        pytest.param(b'{"event": "reserved"}\nnot json\n', id="malformed"),
+        pytest.param(b'{"event": "reserved"}\n["terminal"]\n', id="non-object"),
+    ],
+)
+def test_unrecorded_worker_exit_refuses_and_preserves_staging(
+    paths: canary.CanaryPaths, taxonomy: TaxonomyIndex, reservation: bytes
+) -> None:
+    """If the recorded worker could still be alive (no terminal record written
+    after evidence-based reaping), cleanup refuses before deletion."""
+    raw_sha, raw_bytes, binding = _staged_for_inventory(paths, taxonomy)
+    paths.reservation.write_bytes(reservation)
+    expected = _expected(paths, raw_sha, raw_bytes, binding)
+    before = _snapshot(paths.runtime_dir)
+    with pytest.raises(canary.CanaryRefusal) as refusal:
+        _run_cleanup(paths, raw_sha, raw_bytes, binding, expected)
+    assert refusal.value.kind == "worker_exit_not_recorded"
+    assert _snapshot(paths.runtime_dir) == before
+
+
+def test_missing_reservation_refuses_quiescence(paths: canary.CanaryPaths) -> None:
+    paths.staging_dir.mkdir()
+    with pytest.raises(canary.CanaryRefusal) as refusal:
+        canary.check_quiescence(paths, canary.QUIESCENCE_ASSERTION)
+    assert refusal.value.kind == "worker_exit_not_recorded"
+
+
+def test_staging_outside_the_expected_parent_refuses_quiescence(
+    paths: canary.CanaryPaths,
+) -> None:
+    nested = paths.runtime_dir / "nested" / "phase4-s2c-staging"
+    nested.mkdir(parents=True)
+    paths.reservation.write_bytes(_EXITED_RESERVATION)
+    moved = dataclasses.replace(paths, staging_dir=nested)
+    before = _snapshot(paths.runtime_dir)
+    with pytest.raises(canary.CanaryRefusal) as refusal:
+        canary.check_quiescence(moved, canary.QUIESCENCE_ASSERTION)
+    assert refusal.value.kind == "staging_path_unexpected"
+    assert _snapshot(paths.runtime_dir) == before
+
+
+def test_linked_staging_refuses_quiescence(paths: canary.CanaryPaths, tmp_path: Path) -> None:
+    target = tmp_path / "elsewhere"
+    target.mkdir()
+    paths.reservation.write_bytes(_EXITED_RESERVATION)
+    try:
+        os.symlink(target, paths.staging_dir, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlink creation is not permitted on this host")
+    with pytest.raises(canary.CanaryRefusal) as refusal:
+        canary.check_quiescence(paths, canary.QUIESCENCE_ASSERTION)
+    assert refusal.value.kind == "staging_path_unexpected"
+
+
+def test_cleanup_cli_requires_the_operator_quiescence_assertion(
+    paths: canary.CanaryPaths,
+    taxonomy: TaxonomyIndex,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    raw_sha, raw_bytes, binding = _staged_for_inventory(paths, taxonomy)
+    expected = _expected(paths, raw_sha, raw_bytes, binding)
+    before = _snapshot(paths.runtime_dir)
+    with pytest.raises(SystemExit) as exit_info:
+        canary.main(
+            _cleanup_argv(raw_sha, raw_bytes, binding, expected, quiescence=None), paths=paths
+        )
+    assert exit_info.value.code == 2
+    assert "--operator-quiescence" in capsys.readouterr().err
+    assert _snapshot(paths.runtime_dir) == before
+
+
+def test_non_regular_staging_object_is_refused_before_deletion(
+    paths: canary.CanaryPaths, taxonomy: TaxonomyIndex, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression evidence for the pre-existing guard: a non-regular,
+    non-directory object (reported as a FIFO) refuses before any deletion."""
+    raw_sha, raw_bytes, binding = _staged_for_inventory(paths, taxonomy)
+    expected = _expected(paths, raw_sha, raw_bytes, binding)
+    real_lstat = os.lstat
+
+    def fifo_lstat(path: Any, *args: Any, **kwargs: Any) -> Any:
+        result = real_lstat(path, *args, **kwargs)
+        if Path(path).name == "run-summary.json":
+            return types.SimpleNamespace(
+                st_mode=stat.S_IFIFO | 0o600,
+                st_file_attributes=getattr(result, "st_file_attributes", 0),
+            )
+        return result
+
+    monkeypatch.setattr(canary.os, "lstat", fifo_lstat)
+    before = _snapshot(paths.runtime_dir)
+    with pytest.raises(canary.CanaryRefusal) as refusal:
+        _run_cleanup(paths, raw_sha, raw_bytes, binding, expected)
+    assert refusal.value.kind == "staging_unexpected_object"
+    assert _snapshot(paths.runtime_dir) == before
+
+
+def test_real_fifo_in_staging_is_refused_before_deletion(
+    paths: canary.CanaryPaths, taxonomy: TaxonomyIndex
+) -> None:
+    if not hasattr(os, "mkfifo"):
+        pytest.skip("FIFOs are not supported on this host")
+    raw_sha, raw_bytes, binding = _staged_for_inventory(paths, taxonomy)
+    expected = _expected(paths, raw_sha, raw_bytes, binding)
+    os.mkfifo(paths.staging_dir / "pipe")
+    with pytest.raises(canary.CanaryRefusal) as refusal:
+        _run_cleanup(paths, raw_sha, raw_bytes, binding, expected)
+    assert refusal.value.kind == "staging_unexpected_object"
+    assert paths.raw.exists()
 
 
 def test_cleanup_cli_requires_the_expected_inventory_arguments(

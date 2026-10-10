@@ -947,7 +947,7 @@ findings: none
     salary, runtime activation, recurring collection, or production readiness. No third
     request is authorized.
 - **Post-run correction 5: ADR temporal corrections and the exact-inventory cleanup
-  safeguard** (this commit, the direct single-parent child of
+  safeguard** (`c274f21ef1c029d0eb59318e6f40c386b76d74f0`, the direct single-parent child of
   `97cf21453bf663ca7d30d7dfc8c071e16c3e039a`). Scope: exactly
   `backend/scripts/run_greenhouse_s2c_canary.py`,
   `backend/tests/test_greenhouse_s2c_canary.py`,
@@ -1041,9 +1041,152 @@ findings: none
     - report `093f59b5…873e` and fixture `d7e14857…5249`.
 
     No staging or runtime file is tracked. Workflow metadata remains pending.
-- STOP -- corrected advisory candidate and cleanup mechanism, for Sol Medium and Astra's
-  narrow review. Cleanup, another request, a reservation change, a receipt, final
-  `C`/`A`/`R`, `M`/`Q`, persistence, S3, and S4 remain prohibited.
+- **Post-run correction 6: strict fresh-checker contract, operational quiescence, and
+  non-regular-object evidence** (this commit, the direct single-parent child of
+  `c274f21ef1c029d0eb59318e6f40c386b76d74f0`). Scope: exactly
+  `backend/scripts/run_greenhouse_s2c_canary.py`,
+  `backend/tests/test_greenhouse_s2c_canary.py`,
+  `docs/DECISIONS/0017-greenhouse-live-canary.md`, and this file.
+  - **Findings and dispositions:**
+    1. *Permissive checker acceptance* (`all(checks.values())` over any Boolean
+       dictionary, so `{}` or a partial dictionary passed): fixed by the strict
+       contract below.
+    2. *Checker launch failure escaped* (an `OSError` from `subprocess.run` lost the
+       already-produced attestation): fixed; categorical failure attestation.
+    3. *No operational quiescence boundary* before inventory verification: fixed by the
+       bounded one-use model below.
+    4. *Non-regular objects*: the guard already existed in `c274f21`
+       (`elif not stat.S_ISREG(mode): raise CanaryRefusal("staging_unexpected_object")`
+       in `staging_inventory`). No production change; this correction adds regression
+       evidence only.
+    5. *ADR §5 stale wording* `(path reserved; not yet created)`: corrected.
+  - **Strict fresh-checker contract** (`required_checker_keys`, `evaluate_checker`). The
+    checker passes only when the launch succeeded, the exit code is 0, stdout parses as
+    exactly one JSON object, its key set equals the required set exactly (no missing or
+    extra key), and every value is literally `True` (`value is True`; type `bool`). With
+    a raw blob the required set is exactly these 14 keys: `staging_root_absent`,
+    `known_capture_paths_absent`, `no_staging_residue`, `no_staging_path_in_index`,
+    `binding_well_formed`, `head_is_candidate`, `tree_clean`,
+    `candidate_descends_from_base`, `report_matches_approval`, `report_screening_clean`,
+    `fixture_matches_approval`, `no_runtime_path_in_commit_range`,
+    `raw_blob_absent_from_commit_range`, `raw_blob_absent_from_index` (12 without a raw
+    blob).
+  - **Failure attestation.** The checker invocation is wrapped so no launch failure
+    escapes. The already-produced attestation (expected and observed inventories,
+    manifest identity, deletion result, bindings, quiescence) is emitted with
+    `passed: false`, `checker_failure` set to one fixed category, `checks` (only when the
+    shape was exact, else `null`), and the checker identity (`null` if unavailable); the
+    command exits 1 and never retries. Categories: `checker_launch_failed`,
+    `checker_nonzero_exit`, `checker_output_malformed` (non-JSON, non-object, more than one
+    value, or a non-Boolean value), `checker_key_set_mismatch` (missing, extra, or
+    substituted keys), `checker_check_failed` (a required value `false`). No exception
+    message, stdout fragment, or dynamic path is included.
+  - **Operational quiescence boundary** (`check_quiescence`), bounded and one-use; no
+    concurrency framework, retry, or timer. It runs first in `cleanup_staging`, after the
+    staging-presence check and before every raw, binding, manifest, and inventory
+    verification. It refuses, deleting nothing, unless:
+    - `--operator-quiescence` (now a required CLI argument) equals exactly
+      `single-operator-quiescent`: the operator's affirmative assertion that no live,
+      projection, fidelity, post-run, or other cleanup command is running, no other
+      command is authorized to write staging, and this cleanup is the sole cooperative
+      staging accessor (`quiescence_not_asserted`);
+    - neither the runtime directory nor staging is a link, and staging resolves directly
+      beneath the expected runtime directory (`staging_path_unexpected`);
+    - the reservation holds exactly two JSON objects, `reserved` then a `terminal` record
+      with a string outcome (`worker_exit_not_recorded`). The supervisor writes that
+      record only after evidence-based reaping under the Job Object, so it is the
+      worker-absence evidence.
+    The attestation records `quiescence` with the operator assertion,
+    `worker_exit_recorded`, `worker_terminal_outcome`, `worker_pid_recorded: false`,
+    `staging_path_expected`, and the boundary text. **Limitation:** the harness never
+    recorded a worker PID, so OS confirmation of the worker's absence is not available;
+    process-table inspection of the other commands is not performed, and the operator
+    assertion covers them. A second inventory scan is not claimed to establish
+    quiescence. Verbatim disclosure: "This boundary excludes cooperative JobGoblin
+    writers under the single-operator authorization model. It does not claim protection
+    against a malicious process or privileged OS-level mutation." The retained attempt-2
+    reservation has exactly the `reserved` and terminal
+    `OBSERVED:pending_post_run_review` records, so the real cleanup will satisfy this
+    check without any reservation change.
+  - **ADR 0017:** §5 now reads `(created for attempt 1 and preserved unchanged as the sole
+    durable replay fixture; it does not prove attempt-2 fidelity)`; §4 adds only the
+    quiescence boundary (with the verbatim disclosure) and the strict checker contract
+    with its failure categories.
+  - **Tests** (temporary synthetic staging only; never the real retained staging). Module
+    274 → 316 collected: the Correction 5 checker-failure test was replaced, and 43 tests
+    were added:
+    - `test_invalid_checker_results_fail_the_attestation` (15 cases through `main`):
+      `{}`, partial dictionary, extra key, substituted key, `false`, `1`, `"true"`,
+      `null`, non-JSON, empty stdout, JSON array, JSON scalar, two concatenated objects,
+      nonzero exit with otherwise valid output, nonzero exit with malformed output. Each
+      asserts `passed: false`, its category, exit 1, exactly one checker call, the
+      attestation kept, and no sentinel output fragment;
+    - `test_exact_all_true_checker_result_passes` (exact 14-key all-true → exit 0);
+    - `test_checker_launch_failure_yields_a_failed_attestation` (launch `OSError`, kept
+      separate from malformed output and nonzero exit; no message or path leaks);
+    - `test_evaluate_checker_categories_are_distinct` (6) and
+      `test_required_checker_keys_follow_the_raw_binding`;
+    - quiescence: `test_quiescence_is_attested_with_its_boundary`,
+      `test_quiescence_not_asserted_refuses_before_verification` (4; inventory never
+      scanned), `test_unrecorded_worker_exit_refuses_and_preserves_staging` (8),
+      `test_missing_reservation_refuses_quiescence`,
+      `test_staging_outside_the_expected_parent_refuses_quiescence`,
+      `test_linked_staging_refuses_quiescence`,
+      `test_cleanup_cli_requires_the_operator_quiescence_assertion`; each refusal proves
+      every runtime byte unchanged;
+    - non-regular objects: `test_non_regular_staging_object_is_refused_before_deletion`
+      (controlled `S_IFIFO` mode; runs on every host) and
+      `test_real_fifo_in_staging_is_refused_before_deletion` (skipped here: no
+      `os.mkfifo` on Windows).
+    Synthetic cleanup reservations now carry a terminal record; existing cleanup calls
+    pass the assertion.
+  - **Ad hoc load-bearing checks** (manual, not coordinator-executed; harness restored
+    byte-identical): removing the non-regular guard, the Boolean-type check, the exact
+    key-set check, the launch wrapper (narrowed to `ValueError`), the quiescence call, or
+    the `terminal` requirement each failed its new witness. The `terminal` check first
+    survived, so the `second-not-terminal` case was added; all six then failed.
+  - **Verification** after the final semantic change (no full suite, no coordinator):
+    - harness module: 315 passed, 1 skipped (the real-FIFO case);
+    - related selection (harness module plus `test_greenhouse_content`,
+      `test_greenhouse_posting_inputs`, `test_greenhouse_provider`,
+      `test_greenhouse_html_convert`, `test_canary_greenhouse_mapping`,
+      `test_normalization_posting`, `test_normalization_posting_realistic`): 1,219 passed,
+      1 skipped; `tests/contracts`: 130 passed;
+    - Ruff format/check and mypy clean;
+    - `check_handoff`, `check_repo`, and `git diff --check` pass.
+  - **W1–W12 manual mutations**, rerun after the final semantic change against harness
+    `307c7df6dc7c5a60871e4ab0e8532be2de6ac3170dca519d8fd2e91ef2d0f06c`. No anchor needed to move. Manual advisory evidence only; no coordinator
+    executed them, and the 34 registered witnesses are unchanged.
+    - Controls: `tests/test_greenhouse_s2c_canary.py::test_default_invocation_refuses` and `tests/test_greenhouse_s2c_canary.py::test_selection_rule_follows_provider_order`.
+    - Every anchor occurred exactly once; the baseline and final runs passed.
+    - Log: `.claude/runtime/phase4-s2c-correction6-mutation-log.json`, SHA-256
+      `e4121415c9e5c77559214726087adcde1cb1ba031fe5df65e13414dbf0cc9e51`.
+
+  | ID | Mutation | Anchor → replacement | Failing witness (`tests/test_greenhouse_s2c_canary.py::`) | Baseline | Mutant | Restored; SHA-256 |
+  |---|---|---|---|---|---|---|
+  | W1 | request-shape guard removed | `check_request_shape(request) ⏎ request.headers["Accept-Encoding"]` → `request.headers["Accept-Encoding"]` | `test_request_shape_guard_refuses_before_send[other_board]` | pass | fail; controls pass | pass; `307c7df6dc7c5a60871e4ab0e8532be2de6ac3170dca519d8fd2e91ef2d0f06c` |
+  | W2 | second-send refusal removed | `if self._capture.request_sent: ⏎ raise CanaryRefusal("second_request_refused")` → (deleted) | `test_second_send_is_refused_before_network` | pass | fail; controls pass | pass; `307c7df6dc7c5a60871e4ab0e8532be2de6ac3170dca519d8fd2e91ef2d0f06c` |
+  | W3 | live gate enabled by default (env check removed) | `if env.get(LIVE_ENV_VAR) != LIVE_ENV_VALUE: ⏎ raise CanaryRefusal("gate_disabled")` → (deleted) | `test_live_preflight_refuses_without_live_env` | pass | fail; controls pass | pass; `307c7df6dc7c5a60871e4ab0e8532be2de6ac3170dca519d8fd2e91ef2d0f06c` |
+  | W4 | board allowlist check removed | `if request.board != BOARD_TOKEN: ⏎ raise CanaryRefusal("board_not_allowlisted")` → (deleted) | `test_live_preflight_refuses_non_allowlisted_board` | pass | fail; controls pass | pass; `307c7df6dc7c5a60871e4ab0e8532be2de6ac3170dca519d8fd2e91ef2d0f06c` |
+  | W5 | Accept-Encoding: identity override removed | `request.headers["Accept-Encoding"] = ACCEPT_ENCODING` → (deleted) | `test_accept_encoding_identity_and_default_user_agent` | pass | fail; controls pass | pass; `307c7df6dc7c5a60871e4ab0e8532be2de6ac3170dca519d8fd2e91ef2d0f06c` |
+  | W6 | raw capture overwrite instead of exclusive create | `fd = os.open(path, os.O_WRONLY \| os.O_CREAT \| os.O_EXCL \| getattr(os, "O_BINARY", 0))` → `fd = os.open(path, os.O_WRONLY \| os.O_CREAT \| os.O_TRUNC \| getattr(os, "O_BINARY", 0))` | `test_exclusive_write_never_overwrites` | pass | fail; controls pass | pass; `307c7df6dc7c5a60871e4ab0e8532be2de6ac3170dca519d8fd2e91ef2d0f06c` |
+  | W7 | supervisor no longer terminates/kills at the deadline | `stop()` → `pass` | `test_supervisor_terminates_and_reaps_worker_at_deadline` | pass | fail; controls pass | pass; `307c7df6dc7c5a60871e4ab0e8532be2de6ac3170dca519d8fd2e91ef2d0f06c` |
+  | W8 | retries enabled (max_attempts=3) | `max_attempts=1, max_response_bytes=MAX_RESPONSE_BYTES` → `max_attempts=3, max_response_bytes=MAX_RESPONSE_BYTES` | `test_503_is_inconclusive_with_exactly_one_request` | pass | fail; controls pass | pass; `307c7df6dc7c5a60871e4ab0e8532be2de6ac3170dca519d8fd2e91ef2d0f06c` |
+  | W9 | response cap raised to 5 MiB (5,242,880) | `MAX_RESPONSE_BYTES: Final = 5_000_000` → `MAX_RESPONSE_BYTES: Final = 5_242_880` | `test_body_over_cap_is_partial_without_complete_hash` | pass | fail; controls pass | pass; `307c7df6dc7c5a60871e4ab0e8532be2de6ac3170dca519d8fd2e91ef2d0f06c` |
+  | W10 | record cap before conversion removed | `if capture.source_record_count > MAX_SOURCE_RECORDS: ⏎ raise CanaryRefusal("record_cap_exceeded")` → (deleted) | `test_record_cap_is_enforced_before_conversion` | pass | fail; controls pass | pass; `307c7df6dc7c5a60871e4ab0e8532be2de6ac3170dca519d8fd2e91ef2d0f06c` |
+  | W11 | database-layer import added | `from app.ingestion.hashing import canonical_json_hash  # noqa: E402` → `import sqlalchemy  # noqa: E402, F401 ⏎ from app.ingestion.hashing import canonical_json_hash  # noqa: E402` | `test_harness_imports_only_allowed_modules` | pass | fail; controls pass | pass; `307c7df6dc7c5a60871e4ab0e8532be2de6ac3170dca519d8fd2e91ef2d0f06c` |
+  | W12 | existing-reservation refusal removed from preflight | `if os.path.lexists(paths.reservation): ⏎ raise CanaryRefusal("attempt_already_reserved")` → (deleted) | `test_live_preflight_refuses_existing_reservation` | pass | fail; controls pass | pass; `307c7df6dc7c5a60871e4ab0e8532be2de6ac3170dca519d8fd2e91ef2d0f06c` |
+  - **Retained state, unchanged throughout** (verified before and after):
+    - the seven staging artifacts and inventory `bbdc7659…04bb`;
+    - the attempt-2 reservation `0f89c0c1…d329` and attempt-1 archive `18763cf6…0f5e`;
+    - the expected-inventory manifest `7bab5eda…88f0`;
+    - report `093f59b5…873e` and fixture `d7e14857…5249`.
+
+    **Cleanup was not run.** No request was made. No staging or runtime file is tracked
+    or staged. Workflow metadata remains pending.
+- STOP -- Correction 6, for Sol Medium and Astra's narrow re-review. Cleanup, another
+  request, a reservation change, a receipt, final `C`/`A`/`R`, `M`/`Q`, persistence, S3,
+  and S4 remain prohibited. The live attempt-2 `PASS` is unchanged.
 
 ```workflow-metadata
 workflow_version: v3.2
