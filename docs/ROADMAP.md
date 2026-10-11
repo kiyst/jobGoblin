@@ -653,7 +653,7 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   authorizes no S2c, provider contact, persistence, D1, S3, or S4; each still requires
   separate explicit user authorization.
 - **Phase 4 S2c (`phase-4/greenhouse-live-canary-s2c`): bounded read-only Greenhouse live
-  canary ([ADR 0017](DECISIONS/0017-greenhouse-live-canary.md)) -- in progress; attempt 2 computed PASS; not complete.**
+  canary ([ADR 0017](DECISIONS/0017-greenhouse-live-canary.md)) -- in progress; attempt 2 computed PASS; attempt-2 cleanup verified; not complete.**
   One separately authorized `GET /v1/boards/discord/jobs?content=true` through the
   unchanged S1 adapter, S2b converter and bridge, and S2 composition, with no retry,
   redirect, fallback, second request, persistence, or runtime registration.
@@ -669,8 +669,11 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   - **Live attempt 2** (corrected candidate `408e09e`) made exactly one request: HTTP 200, a
     complete 420,784-byte capture, and 49 of 49 records retained and converted. With
     reviewed fidelity decisions, it computed **`PASS` with no findings**.
-  - Attempt-2 raw cleanup is pending, and a cleanup failure is fail-closed.
-  - S2c is not complete until cleanup and `C`/`A`/`R`/`M`/`Q` succeed. No third request is
+  - Attempt-2 raw staging was cleaned exactly once through the reviewed mechanism
+    (candidate `2232d96`), and the attestation passed. Attempt 2 remains PASS with no
+    findings. This is logical deletion, not forensic erasure, and attempt 2 has no durable
+    replay fixture.
+  - S2c is not complete until `C`/`A`/`R`/`M`/`Q` succeed. No third request is
     authorized.
 - **Phases 5-14: not started.** Begin each phase only after completing its preflight in
   [PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md) and receiving approval for the next

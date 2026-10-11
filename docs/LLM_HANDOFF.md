@@ -1186,8 +1186,8 @@ findings: none
     **Cleanup was not run.** No request was made. No staging or runtime file is tracked
     or staged. Workflow metadata remains pending.
 - **Post-run correction 7: exact accepted worker outcome and pre-deletion cleanup
-  identities** (this commit, the direct single-parent child of
-  `02b9fac0652e8e19c238d4d8422e22e084abea9a`). Scope: exactly
+  identities** (`2232d9693b54a225bf87d23ec5d65898a081602f`, the direct single-parent child
+  of `02b9fac0652e8e19c238d4d8422e22e084abea9a`). Scope: exactly
   `backend/scripts/run_greenhouse_s2c_canary.py`,
   `backend/tests/test_greenhouse_s2c_canary.py`,
   `docs/DECISIONS/0017-greenhouse-live-canary.md`, and this file.
@@ -1326,9 +1326,103 @@ findings: none
 
     **Cleanup was not run.** No request was made. No staging or runtime file is tracked
     or staged. Workflow metadata remains pending.
-- STOP -- Correction 7, for Sol Medium and Astra's narrow re-review. Cleanup, another
-  request, a reservation change, a receipt, final `C`/`A`/`R`, `M`/`Q`, persistence, S3,
-  and S4 remain prohibited. The live attempt-2 `PASS` is unchanged.
+- **Attempt-2 verified-cleanup checkpoint** (this commit, the direct single-parent child
+  of `2232d9693b54a225bf87d23ec5d65898a081602f`). This is an advisory checkpoint, **not
+  final `C`**. Documentation only: exactly
+  `docs/DECISIONS/0017-greenhouse-live-canary.md`,
+  `docs/evaluation/phase4-s2c-live-canary.md`, `docs/ROADMAP.md`, and this file.
+  - **Approvals** (as relayed by the user):
+    - Sol Medium and Astra both approved the exact Correction 7 cleanup mechanism.
+      Before the invocation, the user asserted single-operator quiescence: no live,
+      projection, fidelity, post-run, or other cleanup command running; no other command
+      or task authorized to read or write staging; this cleanup the sole cooperative
+      accessor from final verification through deletion; and an understanding that this
+      excludes cooperative JobGoblin writers, not a malicious process or privileged
+      OS-level mutation.
+    - Both reviewers then approved the cleanup result. The user's checkpoint
+      authorization records the verified facts and identities below. No separate
+      reviewer-authored text was supplied to the implementer, so this entry does not
+      itemize either reviewer's individual method beyond those facts.
+  - **Invocation and preflight.** Read-only preflight first confirmed:
+    - `HEAD`, branch, and tracking ref at `2232d96`, with a clean tree;
+    - the harness blob `190f9427…1be8`;
+    - every binding exact, and the seven-entry staging inventory equal to the manifest;
+    - the reservation records `reserved` then terminal
+      `OBSERVED:pending_post_run_review`;
+    - no local process referencing the harness or staging.
+
+    Cleanup then ran exactly once through the reviewed harness, using fixed argv with no
+    shell, retry, fallback, or manual deletion. The manifest path was passed in absolute
+    form (the same file). The attestation was written create-only and fsynced outside
+    staging.
+  - **Exact cleanup identities:**
+    - cleanup candidate and executing SHA `2232d9693b54a225bf87d23ec5d65898a081602f`;
+    - cleaned at 2026-10-10T23:38:07+00:00;
+    - attestation `.claude/runtime/phase4-s2c-attempt2-cleanup-attestation.json`, 3,717
+      bytes, `e9a41acedc407ca9db3ae7438920dc9e604726f223ad058250ea71841140d576`;
+    - harness and checker `190f9427a2d88a27565412af98441120ccc798d110db1f48d0d0562f6bf21be8`;
+    - manifest `7bab5eda4f5abd6cc4529a5793a011f2ea8d13a335c2a6271545a3c9e48b88f0`;
+    - expected, observed, and attested inventory
+      `bbdc7659e1a2bc86bd5e1b18e23c725e041c8dbde7654fe7b898782afa6404bb`;
+    - raw evidence 420,784 bytes,
+      `43ca81bd854df7764b691fae8424d2669c750411e43e65036de0890785f215c5`, Git blob
+      `fc1d8a9cc83cb65a071afc7a9c70ab2d673faf3f`;
+    - attempt-2 reservation `0f89c0c1946007a2027c3a108c5ccc2d1b3c7eb9436ea043637f3c84de0fd329`;
+    - attempt-1 archive `18763cf69c9452d36e96017ee91b9ad3638398726b7dbce24917ef75efd00f5e`;
+    - fixture `d7e14857e3279090709093d71f0c7c26d3e7baf806f35615c3b32520c75b5249`;
+    - report before this update
+      `093f59b52b277bd17ff29ed53be95985858af9d1cd5bdd8a0d8bcd9b6419873e`, and after it
+      `c5592176562140b1835cc47d22c0334e113ef9d00f60478c769f83673b95a506`.
+  - **Verified:**
+    - exit 0, `passed` literally `true`, `checker_failure` null;
+    - expected, observed, and attested inventories equal, and all seven approved staging
+      artifacts removed;
+    - the staging root and every known staging path absent;
+    - all ten pre-deletion checks and exactly fourteen fresh-checker keys literally `true`;
+    - the checker identity matched the reviewed harness, and the executing SHA matched the
+      cleanup candidate;
+    - no tracked, staged, untracked, or ignored S2c staging residue (an unrelated,
+      pre-existing ignored `backend/.evaluation-staging/` is not S2c staging and was not
+      touched);
+    - no runtime path or raw blob identity in the reviewed Git range or the index;
+    - both reservations, the fixture, and the report exact.
+
+    Attempt 1 remains permanently `FAIL-CLOSED:worker_failed`. Attempt 2 remains `PASS`
+    with no findings after cleanup.
+  - **Retained limitations:**
+    - logical deletion from controlled project locations, not forensic erasure;
+    - the deleted attempt-2 source content can no longer be reread;
+    - attempt 2 has no durable executable replay fixture, and the attempt-1 fixture does
+      not prove attempt-2 fidelity;
+    - the remaining evidence is the approved report, the identities, aggregates, lineage
+      and decisions, the cleanup attestation, and Git history;
+    - the post-cleanup filesystem does not independently prove the historical absence of
+      every possible unrecorded manual action or network event. The attestation, the
+      reservations, Git state, and the retained identities contain no conflicting
+      evidence;
+    - no proof of broad normalization accuracy, provider generalization, D1,
+      persistence, runtime activation, or production readiness;
+    - the quiescence boundary excludes only cooperative writers.
+  - **Documentation changes.**
+    - Present-state "cleanup pending" statements in ADR 0017, the report, and ROADMAP now
+      record the verified cleanup.
+    - Historical statements are temporalized, not deleted.
+    - ADR 0017 and the report each gain a verified-cleanup section.
+    - No live-run, fidelity, `PASS`, or option-A evidence is changed.
+  - **Validation** (documentation only, so no pytest, Ruff, mypy, or mutation run):
+    - an exact four-file scope check;
+    - required-identity and stale-wording checks;
+    - the harness's `screening_hits` (as used for `report_screening_clean`) clean on the
+      updated report and the changed docs;
+    - no `.claude/runtime` path tracked or staged;
+    - fixture, harness, and both reservations unchanged;
+    - `check_handoff`, `check_repo`, and `git diff --check` pass.
+  - **Next:** final `C` may be prepared only after this checkpoint commit receives narrow
+    review. Workflow metadata remains pending and byte-identical.
+- STOP -- attempt-2 verified-cleanup checkpoint, for Sol Medium and Astra's narrow
+  checkpoint review. Final `C`, a coordinator run, a receipt, `A`, formal `R`, `M`/`Q`,
+  merge, provider contact, a reservation change, another request, persistence, S3, and S4
+  remain prohibited.
 
 ```workflow-metadata
 workflow_version: v3.2

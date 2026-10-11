@@ -4,11 +4,12 @@
 > PASS-WITH-FINDINGS, or INCONCLUSIVE, however clean its processing summary is.
 >
 > **Attempt 2: computed verdict `PASS`, with no findings.** That completes the live-evidence
-> requirement. Cleanup is still pending (a cleanup failure is `FAIL-CLOSED`), and S2c
-> workflow publication is not complete until cleanup and the `C`/`A`/`R`/`M`/`Q` controls
-> succeed. Each attempt keeps its own verdict.
+> requirement. Attempt-2 raw cleanup ran exactly once through the reviewed mechanism and
+> passed, and attempt 2 remains `PASS` with no findings after cleanup. S2c workflow
+> publication is not complete until the `C`/`A`/`R`/`M`/`Q` controls succeed. Each attempt
+> keeps its own verdict.
 
-Post-run advisory report. The user approved this minimized report and projected fixture for publication to the S2c feature branch for post-run advisory review. They are not final-C evidence, and attempt 1 remains permanently `FAIL-CLOSED:worker_failed`. The attempt-2 sections were added as the attempt-2 post-run advisory candidate. Governing record:
+Post-run advisory report. The user approved this minimized report and projected fixture for publication to the S2c feature branch for post-run advisory review. They are not final-C evidence, and attempt 1 remains permanently `FAIL-CLOSED:worker_failed`. The attempt-2 sections were added as the attempt-2 post-run advisory candidate, and the verified attempt-2 cleanup was recorded at the attempt-2 verified-cleanup checkpoint. Governing record:
 [ADR 0017](../DECISIONS/0017-greenhouse-live-canary.md). Bounded by ADR 0017 §7:
 aggregates, categorical observations, and no titles, locations, warnings, exception text,
 raw keys, or descriptions.
@@ -99,7 +100,7 @@ was that separately authorized corrected attempt.
   excerpt only. They make no positive normalization-coverage claim, and they do not prove
   that excerpt normalization equals complete-posting normalization.
 
-## Attempt 2: computed verdict `PASS` (cleanup pending)
+## Attempt 2: computed verdict `PASS` (cleanup verified)
 
 ### What ran
 
@@ -176,9 +177,9 @@ These are **observations, not accuracy evidence**.
 - **Verdict:** the offline verdict computation (`build_projection`, with full validation and
   semantic replay, then `compute_verdict`) returned **`PASS` with no findings**.
 - **Completion:** under the reviewed rule, only PASS completes the live-evidence
-  requirement. Cleanup is still pending, and a cleanup failure remains `FAIL-CLOSED`. S2c
-  workflow publication is not complete until cleanup and the subsequent
-  `C`/`A`/`R`/`M`/`Q` controls succeed.
+  requirement. When this verdict was first published, cleanup was still pending, and a
+  cleanup failure would have been `FAIL-CLOSED`. Cleanup later passed (below). S2c workflow
+  publication is not complete until the subsequent `C`/`A`/`R`/`M`/`Q` controls succeed.
 
 ### Option-A reproducibility boundary
 
@@ -188,10 +189,66 @@ These are **observations, not accuracy evidence**.
   preview, packet, decisions, and inventory hashes above.
 - Both reviewers inspected the retained attempt-2 raw-to-preview derivation before
   cleanup.
-- After cleanup, the attempt-2 preview and full raw response cannot be independently
-  replayed. Durable attempt-2 evidence will be only this report, the identities,
-  aggregates, lineage hashes, decisions, the cleanup attestation, and Git history.
+- Cleanup deleted the attempt-2 preview and full raw response. They can no longer be
+  reread or independently replayed. The remaining attempt-2 evidence is only this report,
+  the identities, aggregates, lineage hashes, decisions, the cleanup attestation, and Git
+  history.
 - **No attempt-2 replayability claim is made.**
+
+### Verified cleanup
+
+- **Invocation.** Both Sol Medium and Astra approved the Correction 7 cleanup mechanism,
+  and the user asserted single-operator quiescence (as relayed by the user). The reviewed
+  harness `cleanup` subcommand then ran **exactly once**, with fixed arguments and no
+  retry, fallback, or manual deletion:
+  - cleanup candidate and executing SHA `2232d9693b54a225bf87d23ec5d65898a081602f`;
+  - harness and checker SHA-256
+    `190f9427a2d88a27565412af98441120ccc798d110db1f48d0d0562f6bf21be8`;
+  - cleaned at 2026-10-10T23:38:07+00:00.
+- **Result:** exit 0, `passed` literally `true`, `checker_failure` null.
+- **Attestation** (gitignored; never committed):
+  `.claude/runtime/phase4-s2c-attempt2-cleanup-attestation.json`, 3,717 bytes, SHA-256
+  `e9a41acedc407ca9db3ae7438920dc9e604726f223ad058250ea71841140d576`.
+- **Bound identities:**
+  - expected-inventory manifest
+    `7bab5eda4f5abd6cc4529a5793a011f2ea8d13a335c2a6271545a3c9e48b88f0`;
+  - expected, observed, and attested inventory, all equal:
+    `bbdc7659e1a2bc86bd5e1b18e23c725e041c8dbde7654fe7b898782afa6404bb`;
+  - raw evidence: 420,784 bytes, SHA-256
+    `43ca81bd854df7764b691fae8424d2669c750411e43e65036de0890785f215c5`, Git blob identity
+    `fc1d8a9cc83cb65a071afc7a9c70ab2d673faf3f`;
+  - attempt-2 reservation `0f89c0c1946007a2027c3a108c5ccc2d1b3c7eb9436ea043637f3c84de0fd329`;
+  - attempt-1 archive `18763cf69c9452d36e96017ee91b9ad3638398726b7dbce24917ef75efd00f5e`;
+  - fixture `d7e14857e3279090709093d71f0c7c26d3e7baf806f35615c3b32520c75b5249`;
+  - report as bound at cleanup, before the checkpoint documentation update,
+    `093f59b52b277bd17ff29ed53be95985858af9d1cd5bdd8a0d8bcd9b6419873e`.
+- **Verified:**
+  - all seven approved staging artifacts were removed;
+  - the staging root and every known staging path are absent;
+  - all ten pre-deletion checks were literally `true`;
+  - exactly fourteen fresh-checker keys were present, all literally `true`;
+  - the checker identity matched the reviewed harness, and the executing SHA matched the
+    cleanup candidate;
+  - no tracked, staged, untracked, or ignored S2c staging residue remained;
+  - no runtime path or raw blob identity entered the reviewed Git range or the index;
+  - both reservations, the fixture, and the report remained exact.
+- **Verdicts unchanged:** attempt 1 remains permanently `FAIL-CLOSED:worker_failed`.
+  Attempt 2 remains `PASS` with no findings after cleanup.
+- **Limits:**
+  - This is logical deletion from controlled project locations, not forensic erasure.
+  - The deleted attempt-2 source content can no longer be reread. Attempt 2 has no durable
+    executable replay fixture, and the attempt-1 fixture does not prove attempt-2
+    fidelity.
+  - The remaining attempt-2 evidence is the approved report, the identities, aggregates,
+    lineage and decisions, the cleanup attestation, and Git history.
+  - The retained post-cleanup filesystem does not independently prove the historical
+    absence of every possible unrecorded manual action or network event. The attestation,
+    the reservations, Git state, and the retained identities contain no conflicting
+    evidence.
+  - The evidence does not prove broad normalization accuracy, provider generalization, D1,
+    persistence, runtime activation, or production readiness.
+  - S2c workflow completion is still pending final `C`/`A`/`R`/`M`/`Q`. **No third
+    request is authorized.**
 
 ## Salary
 
@@ -208,12 +265,13 @@ No salary-specific parameters or endpoint were requested; no salary field was ex
   verdict computation returned PASS.
 
 **Not proven:**
-- S2c workflow completion (cleanup and `C`/`A`/`R`/`M`/`Q` are pending);
+- S2c workflow completion (`C`/`A`/`R`/`M`/`Q` are pending);
 - attempt-2 replayability after cleanup;
 - normalization accuracy or coverage;
 - generalization to other boards, times, or encodings;
 - provider stability or rate behavior;
-- production readiness, runtime registration, or operational use;
+- forensic erasure of deleted content;
+- production readiness, runtime registration or activation, or operational use;
 - persistence, or D1 compliance;
 - salary support.
 
@@ -225,8 +283,10 @@ No production-readiness or generalized-provider claim is made.
 - The corrected harness has completed one live attempt (attempt 2), for one board at one
   time.
 - Attempt-1 raw staging was cleaned through the reviewed mechanism (attestation
-  `a31f363817c9ac44062cbc1dc06d49053dba3288b0eaf0afb6ef9cc7214ee21f`). Attempt-2 raw cleanup
-  is still pending.
+  `a31f363817c9ac44062cbc1dc06d49053dba3288b0eaf0afb6ef9cc7214ee21f`). Attempt-2 raw staging
+  was likewise cleaned (attestation
+  `e9a41acedc407ca9db3ae7438920dc9e604726f223ad058250ea71841140d576`). Both are logical
+  deletion from controlled project locations, not forensic erasure.
 - Once a capture is deleted, omitted source content cannot be reconstructed or
   independently re-verified from hashes.
 - Fidelity was reviewed for one excerpt of one record per attempt only.
@@ -247,4 +307,4 @@ No production-readiness or generalized-provider claim is made.
   per-board timer: 55 seconds is only the conservative sum of the adapter's internal
   timeouts, under one supervised 60-second deadline. U1 is preserved unchanged, and future
   authorizations must state the corrected model.
-- Publication is advisory only: this report is part of the attempt-2 post-run advisory candidate on the S2c feature branch, not final-C evidence. Final `C`/`A`/`R`/`M`/`Q`, cleanup, and any further request remain unauthorized. **No third request is authorized.**
+- Publication is advisory only: this report is part of the attempt-2 verified-cleanup checkpoint on the S2c feature branch (first published in the attempt-2 post-run advisory candidate), not final-C evidence. Final `C`/`A`/`R`/`M`/`Q` and any further request remain unauthorized. **No third request is authorized.**

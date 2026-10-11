@@ -2,7 +2,7 @@
 
 ## Status
 
-**Proposed — attempt-2 post-run advisory candidate; attempt 2 computed `PASS`; S2c workflow not complete.** Phase 4 S2c
+**Proposed — attempt-2 verified-cleanup checkpoint; attempt 2 computed `PASS`; attempt-2 cleanup verified; S2c workflow not complete.** Phase 4 S2c
 (`phase-4/greenhouse-live-canary-s2c`, risk class H, `slice_kind: tooling`, `gate: final`),
 base `eeac72abb2ba930fb469a4abb563a7601826266a` (`Q` of the ADR 0016 retention slice).
 
@@ -11,10 +11,11 @@ base `eeac72abb2ba930fb469a4abb563a7601826266a` (`Q` of the ADR 0016 retention s
 - **Attempt 2**, the separately authorized corrected attempt, has computed verdict `PASS`
   with no findings. That completes the live-evidence requirement.
 
-Attempt-2 raw cleanup is pending (a cleanup failure is `FAIL-CLOSED`). S2c is not complete
-until cleanup and `C`/`A`/`R`/`M`/`Q` succeed. The minimized attempt-1 fixture and the
-two-attempt report are published to the S2c feature branch as advisory evidence, not
-final-C evidence. No third request is authorized.
+Attempt-2 raw cleanup ran exactly once through the reviewed mechanism at `2232d96` and
+passed (see [Verified attempt-2 cleanup](#verified-attempt-2-cleanup)). S2c is not complete
+until `C`/`A`/`R`/`M`/`Q` succeed. The minimized attempt-1 fixture and the two-attempt
+report are published to the S2c feature branch as advisory evidence, not final-C evidence.
+No third request is authorized.
 
 The contract is the frozen, gitignored packet `.claude/runtime/phase4-s2c-frozen-contract.md`
 (SHA-256 `ac2cc00afc9e2bb7b7520eba71da7d6349e7b523f1b9b601bb2ad254c450800b`). It holds nine
@@ -414,8 +415,8 @@ Its salary statement is exactly:
     verdict is permanently `FAIL-CLOSED:worker_failed`.
 - The user approved the minimized fixture, report, and replay test for publication to the S2c
   feature branch as the immutable post-run advisory candidate. This is advisory publication
-  only: raw cleanup remains pending, and final `C`/`A`/`R`/`M`/`Q` and another request
-  remain unauthorized.
+  only: at that checkpoint raw cleanup remained pending, and final `C`/`A`/`R`/`M`/`Q` and
+  another request remained unauthorized.
 - Post-run correction 3 (`3d9404b0fe42663457ad80cf58f791e801bd7ff4`) received advisory
   approval from both Sol Medium and Astra (as relayed by the user). At that checkpoint it
   had not completed a live attempt; it later served as the corrected harness for attempt 2.
@@ -442,7 +443,7 @@ separate harness timer (Sol A25, compatibility C9/C10). The only bounds are:
 U1 is preserved unchanged as historical evidence, and no timer was added to match it.
 Any future network authorization must state this corrected timeout model explicitly.
 
-### Live attempt 2: computed `PASS` (cleanup pending)
+### Live attempt 2: computed `PASS` (cleanup verified)
 
 - **The request.** Exactly one `GET https://boards-api.greenhouse.io/v1/boards/discord/jobs?content=true`
   at 2026-10-10T19:03:13Z, made with the corrected candidate `408e09e` (harness
@@ -473,13 +474,71 @@ Any future network authorization must state this corrected timeout model explici
 
   The projection independently equals the committed attempt-1 fixture's.
 - **Verdict:** the offline computation returned **`PASS` with no findings**, and only PASS
-  completes the live-evidence requirement. Cleanup is still pending, and a cleanup failure
-  remains `FAIL-CLOSED`. S2c is not complete until cleanup and `C`/`A`/`R`/`M`/`Q` succeed.
+  completes the live-evidence requirement. At the advisory-candidate checkpoint, cleanup was
+  still pending, and a cleanup failure would have been `FAIL-CLOSED`. Cleanup later passed
+  (below), and attempt 2 remains `PASS` with no findings. S2c is not complete until
+  `C`/`A`/`R`/`M`/`Q` succeed.
 - **Reproducibility:** the attempt-1 fixture and replay test are unchanged and do not prove
-  attempt-2 fidelity. Attempt 2 has no durable executable fixture, and after cleanup its
-  preview and raw response cannot be replayed. No attempt-2 replayability claim is made.
+  attempt-2 fidelity. Attempt 2 has no durable executable fixture. Cleanup deleted its
+  preview and raw response, which can no longer be reread or replayed. No attempt-2
+  replayability claim is made.
 - **Attempt-1 raw staging** was cleaned at `408e09e` through the reviewed mechanism
   (attestation `a31f3638…e21f`, `passed: true`).
+
+### Verified attempt-2 cleanup
+
+- **Invocation.** Both Sol Medium and Astra approved the Correction 7 cleanup mechanism,
+  and the user asserted single-operator quiescence (as relayed by the user). The reviewed
+  harness `cleanup` subcommand then ran **exactly once**, with fixed arguments and no
+  retry, fallback, or manual deletion:
+  - cleanup candidate and executing SHA `2232d9693b54a225bf87d23ec5d65898a081602f`;
+  - harness and checker SHA-256
+    `190f9427a2d88a27565412af98441120ccc798d110db1f48d0d0562f6bf21be8`;
+  - cleaned at 2026-10-10T23:38:07+00:00.
+- **Result:** exit 0, `passed` literally `true`, `checker_failure` null.
+- **Attestation** (gitignored; never committed):
+  `.claude/runtime/phase4-s2c-attempt2-cleanup-attestation.json`, 3,717 bytes, SHA-256
+  `e9a41acedc407ca9db3ae7438920dc9e604726f223ad058250ea71841140d576`.
+- **Bound identities:**
+  - expected-inventory manifest
+    `7bab5eda4f5abd6cc4529a5793a011f2ea8d13a335c2a6271545a3c9e48b88f0`;
+  - expected, observed, and attested inventory, all equal:
+    `bbdc7659e1a2bc86bd5e1b18e23c725e041c8dbde7654fe7b898782afa6404bb`;
+  - raw evidence: 420,784 bytes, SHA-256
+    `43ca81bd854df7764b691fae8424d2669c750411e43e65036de0890785f215c5`, Git blob identity
+    `fc1d8a9cc83cb65a071afc7a9c70ab2d673faf3f`;
+  - attempt-2 reservation `0f89c0c1946007a2027c3a108c5ccc2d1b3c7eb9436ea043637f3c84de0fd329`;
+  - attempt-1 archive `18763cf69c9452d36e96017ee91b9ad3638398726b7dbce24917ef75efd00f5e`;
+  - fixture `d7e14857e3279090709093d71f0c7c26d3e7baf806f35615c3b32520c75b5249`;
+  - report as bound at cleanup, before the checkpoint documentation update,
+    `093f59b52b277bd17ff29ed53be95985858af9d1cd5bdd8a0d8bcd9b6419873e`.
+- **Verified:**
+  - all seven approved staging artifacts were removed;
+  - the staging root and every known staging path are absent;
+  - all ten pre-deletion checks were literally `true`;
+  - exactly fourteen fresh-checker keys were present, all literally `true`;
+  - the checker identity matched the reviewed harness, and the executing SHA matched the
+    cleanup candidate;
+  - no tracked, staged, untracked, or ignored S2c staging residue remained;
+  - no runtime path or raw blob identity entered the reviewed Git range or the index;
+  - both reservations, the fixture, and the report remained exact.
+- **Verdicts unchanged:** attempt 1 remains permanently `FAIL-CLOSED:worker_failed`.
+  Attempt 2 remains `PASS` with no findings after cleanup.
+- **Limits:**
+  - This is logical deletion from controlled project locations, not forensic erasure.
+  - The deleted attempt-2 source content can no longer be reread. Attempt 2 has no durable
+    executable replay fixture, and the attempt-1 fixture does not prove attempt-2
+    fidelity.
+  - The remaining attempt-2 evidence is the approved report, the identities, aggregates,
+    lineage and decisions, the cleanup attestation, and Git history.
+  - The retained post-cleanup filesystem does not independently prove the historical
+    absence of every possible unrecorded manual action or network event. The attestation,
+    the reservations, Git state, and the retained identities contain no conflicting
+    evidence.
+  - The evidence does not prove broad normalization accuracy, provider generalization, D1,
+    persistence, runtime activation, or production readiness.
+  - S2c workflow completion is still pending final `C`/`A`/`R`/`M`/`Q`. **No third
+    request is authorized.**
 
 ## Remaining gates for a corrected live attempt
 
@@ -503,7 +562,8 @@ all of these again, and separately:
   after the authorized run).
 - The W1–W12 manual mutation experiments are advisory evidence, not registered
   witnesses. The 34 registered witnesses are unchanged.
-- Two external requests have occurred (attempts 1 and 2). Rollback: abandon the branch and
-  apply the contract's verified staging cleanup. The attempt-1 reservation archive and the
+- Two external requests have occurred (attempts 1 and 2). Rollback: abandon the branch.
+  Both attempts' raw staging has already been removed by verified cleanup (attempt 1 at
+  `408e09e`, attempt 2 at `2232d96`). The attempt-1 reservation archive and the
   attempt-2 reservation are retained through `Q` or recorded abandonment, and they are
   never cleanup targets.
