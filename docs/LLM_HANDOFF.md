@@ -1537,3 +1537,102 @@ gate: final
 verdict: approved
 findings: none
 ```
+
+### Merge record
+
+- Date: 2026-10-19 (UTC). Merged `phase-4/greenhouse-live-canary-s2c` into `main` with
+  `git merge --no-ff`, at the approved, reviewed commit
+  `04a32f5c17bedfdf8c104e9c94432c7c4aa1b453` (`R`). `R` is Sol Medium's "approved -- no
+  findings" formal verdict on `C=2a10f13df0e07b6484335bf57af9ca59043a2a9e` /
+  `A=8d37617e40df5bb2a7655607a5452ef53c5dbcf9`.
+  - Merge commit `M`: `2b7446fff360ce6a3298ba45aa6b5e85396bc2a3`.
+  - Rollback boundary (the pre-merge `main`/`origin/main` tip):
+    `eeac72abb2ba930fb469a4abb563a7601826266a`.
+  - Full lineage: base `eeac72a` -> ... -> checkpoint `df25db4` -> `C` `2a10f13` -> `A`
+    `8d37617` -> `R` `04a32f5` -> `M` `2b7446f` -> `Q` (this commit).
+- Pre-merge checks, after a fresh fetch of `origin`:
+  - the feature branch, its upstream, and the remote ref all sat at `R`; `R`'s sole parent
+    is `A`, `A`'s is `C`, and `C`'s is `df25db4`; the tree was clean;
+  - `main`/`origin/main`/remote `main` were synchronized at the rollback boundary;
+  - **receipt `01963a8f-dbaf-4985-ad9c-ddf8ac5beed5`** (file SHA-256
+    `697f2edc0f579b8a1a48d979dce6be023f59c47e790d5ad000cc2b1d895ab5aa`):
+    - schema-valid and bound to `C`, the base, the slice, gate `final`, and risk class H;
+    - its verifier, checker (`check_handoff.py`), and configuration hashes equal the files
+      committed at `C`;
+    - the affected surface, focused selector, migration decision (not triggered), and
+      complete 34-witness active inventory recomputed identically;
+    - independently recomputed as approval-eligible;
+  - `validate_c_a_r_chain(C, A, R)` and `check_merge_eligibility(C, A, R)` returned
+    `approved`, `findings: none`, `reviewer_model: Sol Medium`, `reviewer_role: primary`,
+    `gate: final`, `published_slice_kind: tooling`, and base `eeac72a`.
+- Release sequence:
+  - `M` was created locally and not pushed. It has two parents (the rollback boundary,
+    then `R`), `R..M` has zero content difference, and
+    `check_review.validate_merge(R, M, eeac72a)` passed.
+  - `verification_coordinator.run_post_merge_verification` ran once against `M` in a
+    disposable detached worktree (always full/final). It produced artifact
+    `ef644ba0-b1f8-4991-b3dd-4ce7585790c8`.
+  - `Q` is `M`'s direct mainline child. It contains that artifact plus this append-only
+    merge record, in one commit (this entry).
+- Post-merge evidence:
+  `docs/post-merge/2b7446fff360ce6a3298ba45aa6b5e85396bc2a3/ef644ba0-b1f8-4991-b3dd-4ce7585790c8.json`
+  (SHA-256 of the artifact file as written:
+  `cfd34017ab2d8f84438dbf1d5d452ab2ffdbb7502b689d0c4d81757833feec95`). It references
+  original receipt `01963a8f-dbaf-4985-ad9c-ddf8ac5beed5`.
+  `check_review.validate_published(C, A, R, M, Q)` and
+  `verification_coordinator.confirm_main_unchanged` run immediately before the push.
+  Their results are in the agent's final report rather than restated here in advance.
+- Evidence by source:
+  - **Post-merge coordinator (this artifact, at `M`):**
+    - all 11 steps PASS: Ruff format and check, mypy, `check_repo`, `git diff --check`,
+      disposable test-database URL validation and reachability preflight, the full
+      suite, contract mutation witnesses, handoff metadata validation, and
+      temporary-directory cleanup;
+    - full pytest suite: **4,609 passed**;
+    - all 34 registered mutation witnesses passed, 0 failed;
+    - no migration triggered;
+    - identical initial and final worktree snapshots; worktree removed with no residual
+      entry or directory; cleanup PASS;
+    - recorded step duration 392.594 seconds.
+  - **Pre-merge receipt (at `C`):** all 12 final-gate steps PASS, including focused pytest
+    (455), the full suite (4,609 passed), and 34/34 registered witnesses; migration not
+    triggered; cleanup PASS; recorded step duration 521.765 seconds.
+  - **Formal review (`R`):** Sol Medium approved with no executable findings. Per the
+    relay, Sol independently verified the lineage, scope, advisory paragraphs, pending and
+    published metadata, receipt schema and binding, hashes, affected surface, focused
+    selector, migration decision, 34-guard inventory, and approval eligibility, and the
+    handoff, repository, transition, diff, and working-tree checks; reran the focused
+    selection (455 passed, 1 expected Windows FIFO skip), Ruff, and mypy; and relied on the
+    receipt for the full suite and registered witnesses.
+  - **Historical advisory and manual evidence (not coordinator-executed, not registered
+    witnesses):**
+    - the W1–W12 manual mutations, last rerun for Correction 7 against harness
+      `190f9427…1be8` (log `.claude/runtime/phase4-s2c-correction7-mutation-log.json`,
+      SHA-256 `8bbed499…1a77`);
+    - the Sol Medium and Astra advisory reviews of the corrections and the
+      verified-cleanup checkpoint, recorded verbatim or as relayed in `Iteration 2`.
+  - **Live-network evidence boundary:** the authorized live attempts are recorded in ADR
+    0017 and the report and were not repeated. No provider was contacted during `C`, `A`,
+    `R`, `M`, or `Q`. No reservation changed, staging was not recreated, and no
+    production database or production data was accessed. Both suite runs used the
+    configured disposable test database.
+- Status: merged. S2c records a bounded, read-only, single-board Greenhouse live canary
+  under ADR 0017 and its report `docs/evaluation/phase4-s2c-live-canary.md`, plus its
+  verified attempt-2 cleanup. It adds no persistence, runtime registration, or runtime
+  activation.
+- Retained limitations:
+  - attempt 1 remains permanently `FAIL-CLOSED:worker_failed`; attempt 2 is `PASS` with no
+    findings;
+  - deletion of the attempt-2 staging was logical deletion from controlled project
+    locations, not forensic erasure; the deleted source content can no longer be reread;
+  - attempt 2 has no durable executable replay fixture, and the attempt-1 fixture does
+    not prove attempt-2 fidelity;
+  - no proof of broad normalization accuracy, provider generalization, D1, persistence,
+    runtime activation, or production readiness;
+  - no third provider request is authorized.
+
+  Approval and passing verification are review and verification status, not production
+  readiness.
+- STOP -- report the synchronized final `main` SHA and stop. S2c is complete once this `Q`
+  reaches `main`. No S3, persistence, runtime activation, another provider request, D1
+  work, or another slice without separate explicit user authorization.
