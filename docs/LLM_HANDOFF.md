@@ -1419,10 +1419,21 @@ findings: none
     - `check_handoff`, `check_repo`, and `git diff --check` pass.
   - **Next:** final `C` may be prepared only after this checkpoint commit receives narrow
     review. Workflow metadata remains pending and byte-identical.
-- STOP -- attempt-2 verified-cleanup checkpoint, for Sol Medium and Astra's narrow
-  checkpoint review. Final `C`, a coordinator run, a receipt, `A`, formal `R`, `M`/`Q`,
-  merge, provider contact, a reservation change, another request, persistence, S3, and S4
-  remain prohibited.
+- **Final `C`** (this commit, the direct single-parent child of checkpoint
+  `df25db4c21a7eec4c69c5a60dd40b47fac09d862`). Changes only this file. It records the two
+  advisory verified-cleanup checkpoint reviews, verbatim as relayed by the user:
+
+> **Sol Medium verified-cleanup checkpoint advisory review — approved, no executable findings.** Reviewed checkpoint `df25db4c21a7eec4c69c5a60dd40b47fac09d862`, direct child of cleanup candidate `2232d9693b54a225bf87d23ec5d65898a081602f`. Independently confirmed the exact four-document scope, synchronized feature refs, clean tree, committed report SHA-256 `c5592176562140b1835cc47d22c0334e113ef9d00f60478c769f83673b95a506`, cleanup-bound report SHA-256 `093f59b52b277bd17ff29ed53be95985858af9d1cd5bdd8a0d8bcd9b6419873e`, cleanup attestation SHA-256 `e9a41acedc407ca9db3ae7438920dc9e604726f223ad058250ea71841140d576`, and all retained harness, manifest, fixture and reservation identities. The documentation accurately records the single successful cleanup, seven removed staging artifacts, absent staging root, ten true pre-deletion checks, exactly fourteen true fresh-checker checks, permanent attempt-1 `FAIL-CLOSED:worker_failed`, and unchanged attempt-2 `PASS` with no findings. Historical pending statements are temporalized; logical deletion is not forensic erasure; attempt 2 has no durable replay fixture; the attempt-1 fixture proves no attempt-2 fidelity; and no accuracy, generalization, D1, persistence, runtime-activation or production-readiness claim is made. Reviewer approvals are represented only as user-relayed where verbatim reviewer text was unavailable, without attributing unrecorded methods. The updated report and newly added checkpoint hunks pass privacy screening; ADR 0017’s unchanged literal policy references `mailto:` and `tel:` trigger the generic whole-file heuristic but contain no captured content or personal information. This checkpoint may parent final C, limited to recording the advisory decisions in `docs/LLM_HANDOFF.md`; formal R retains unrestricted authority.
+
+> Astra independently reviewed verified-cleanup checkpoint `df25db4c21a7eec4c69c5a60dd40b47fac09d862` and approved it with no findings. Review confirmed the four-document scope, ancestry and synchronized clean Git state; current and historical report hashes; retained cleanup identities; unchanged pending metadata; accurate verdict, cleanup, attribution and limitation wording; and passing repository, handoff, diff and changed-content privacy checks. The checkpoint is suitable as the parent for separately authorized final-C preparation. This advisory approval is not formal R, candidate-bound verification, receipt approval, merge authorization or permission for further provider contact.
+
+- Final `C` is designated. Verification: the genuine candidate-bound
+  `verification_coordinator` `gate=final` run against this `C` is pending; it is recorded
+  in `A` only if every step passes, cleanup completes, and `approval_eligible` is `true`.
+  No live request is repeated, no provider is contacted, and neither reservation nor the
+  deleted staging is touched.
+- STOP after `A` for formal Sol Medium review. No `R`, `M`/`Q`, merge, provider contact,
+  reservation change, another request, persistence, runtime activation, S3, or S4.
 
 ```workflow-metadata
 workflow_version: v3.2
