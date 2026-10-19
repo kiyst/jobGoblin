@@ -1437,10 +1437,14 @@ findings: none
 
 ```workflow-metadata
 workflow_version: v3.2
-state: pending
+state: published
 slice_id: 2026-10-05-phase4-greenhouse-live-canary-s2c-eeac72a
 slice_kind: tooling
 risk_class: H
 base_sha: eeac72abb2ba930fb469a4abb563a7601826266a
 declared_gate: final
+executed_gate: final
+candidate_sha: 2a10f13df0e07b6484335bf57af9ca59043a2a9e
+receipt_id: 01963a8f-dbaf-4985-ad9c-ddf8ac5beed5
+receipt_path: docs/verification-receipts/2a10f13df0e07b6484335bf57af9ca59043a2a9e/01963a8f-dbaf-4985-ad9c-ddf8ac5beed5.json
 ```
