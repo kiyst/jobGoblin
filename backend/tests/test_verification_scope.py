@@ -57,6 +57,10 @@ def test_nested_test_file_classified_as_generic_changed_test() -> None:
             "backend/tests/fixtures/evaluation/phase3_realistic_corpus.json",
             "test-fixture:phase3-evaluation",
         ),
+        (
+            "backend/tests/fixtures/providers/greenhouse_s2c_projected.json",
+            "test-fixture:greenhouse-s2c-canary",
+        ),
         ("backend/tests/contracts/taxonomy.py", "shared-harness-core"),
         ("backend/tests/contracts/transforms.py", "shared-harness-core"),
         ("backend/tests/contracts/mutation_registry.py", "shared-harness-core"),
@@ -260,6 +264,75 @@ def test_evaluation_fixture_file_is_mapped_never_owner_mapping_required() -> Non
 def test_evaluation_fixture_category_never_requires_contract_family_coverage() -> None:
     classifications = [vs.classify_path(path) for path in vs._EVALUATION_FIXTURE_FILES]
     assert vs.required_contract_families(classifications) == frozenset()
+
+
+_S2C_FIXTURE = "backend/tests/fixtures/providers/greenhouse_s2c_projected.json"
+
+
+def test_greenhouse_s2c_fixture_has_exact_mapping_and_category() -> None:
+    assert vs._GREENHOUSE_S2C_FIXTURE_FILES == {
+        _S2C_FIXTURE: "test-fixture:greenhouse-s2c-canary",
+    }
+    assert vs.classify_path(_S2C_FIXTURE) == vs.Classification(
+        _S2C_FIXTURE, "test-fixture:greenhouse-s2c-canary", directly_execute=False
+    )
+
+
+def test_greenhouse_s2c_fixture_requires_no_contract_family() -> None:
+    assert vs.required_contract_families([vs.classify_path(_S2C_FIXTURE)]) == frozenset()
+
+
+def test_greenhouse_s2c_fixture_table_is_disjoint_from_every_other_fixture_table() -> None:
+    others = (
+        vs._TAXONOMY_FIXTURE_FILES,
+        vs._SKILL_FIXTURE_FILES,
+        vs._REMOTE_FIXTURE_FILES,
+        vs._TITLE_FIXTURE_FILES,
+        vs._EVALUATION_FIXTURE_FILES,
+    )
+    for other in others:
+        assert vs._GREENHOUSE_S2C_FIXTURE_FILES is not other
+        assert set(vs._GREENHOUSE_S2C_FIXTURE_FILES).isdisjoint(set(other))
+
+
+def test_unrelated_sibling_json_beside_greenhouse_s2c_fixture_still_fails_closed() -> None:
+    """The exact rule creates no directory-wide fallback: a different JSON
+    path in the same directory still requires an owner mapping."""
+    for sibling in (
+        "backend/tests/fixtures/providers/greenhouse_s2c_lineage.json",
+        "backend/tests/fixtures/providers/greenhouse_s2c_projected.json.bak",
+        "backend/tests/fixtures/providers/other.json",
+    ):
+        with pytest.raises(vs.OwnerMappingRequiredError, match="owner mapping required"):
+            vs.classify_path(sibling)
+
+
+def test_greenhouse_s2c_fixture_mapping_is_load_bearing() -> None:
+    """Fault injection: clearing only this map makes the fixture fail closed
+    with `OwnerMappingRequiredError`; restoring it makes classification pass."""
+    original = dict(vs._GREENHOUSE_S2C_FIXTURE_FILES)
+    try:
+        vs._GREENHOUSE_S2C_FIXTURE_FILES.clear()
+        with pytest.raises(vs.OwnerMappingRequiredError, match="owner mapping required"):
+            vs.classify_path(_S2C_FIXTURE)
+    finally:
+        vs._GREENHOUSE_S2C_FIXTURE_FILES.clear()
+        vs._GREENHOUSE_S2C_FIXTURE_FILES.update(original)
+    assert vs.classify_path(_S2C_FIXTURE).category == "test-fixture:greenhouse-s2c-canary"
+
+
+def test_greenhouse_s2c_fixture_is_included_in_configuration_validation() -> None:
+    """A colliding exact rule in this table is rejected by the same
+    configuration validator."""
+    original = dict(vs._GREENHOUSE_S2C_FIXTURE_FILES)
+    try:
+        vs._GREENHOUSE_S2C_FIXTURE_FILES["backend/scripts/verify.py"] = "test-fixture:bogus"
+        with pytest.raises(vs.ScopeConfigurationError, match="duplicate exact-path rule"):
+            vs._validate_configuration()
+    finally:
+        vs._GREENHOUSE_S2C_FIXTURE_FILES.clear()
+        vs._GREENHOUSE_S2C_FIXTURE_FILES.update(original)
+    vs._validate_configuration()
 
 
 def test_unmapped_python_path_is_never_a_literal_pytest_focus_target() -> None:

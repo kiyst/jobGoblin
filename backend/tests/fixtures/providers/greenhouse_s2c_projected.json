@@ -1,0 +1,163 @@
+{
+  "schema_version": 1,
+  "fixture_kind": "projected_live_record_with_exact_content_excerpt",
+  "source_evidence": {
+    "provider": "greenhouse",
+    "board_token": "discord",
+    "request_path": "/v1/boards/discord/jobs",
+    "request_query": "content=true",
+    "observed_user_agent": "python-httpx/0.28.1",
+    "accept_encoding": "identity",
+    "captured_at": "2026-10-08T23:18:16+00:00",
+    "complete_response_sha256": "3bbce131108b1fb0b0645a90bcb5174b58c69360fd4257f1ff288460cbf90c19",
+    "complete_response_bytes": 413101,
+    "source_record_count": 48,
+    "source_meta_total": 48
+  },
+  "aggregate_evidence": {
+    "valid_count": 48,
+    "invalid_count": 0,
+    "retained_count": 48,
+    "skipped_count": 0,
+    "duplicate_count": 0,
+    "completeness_disposition": "consistent",
+    "conversion_outcomes": {
+      "absent": 0,
+      "blank": 0,
+      "converted": 48,
+      "empty_after_conversion": 0,
+      "input_too_large": 0,
+      "invalid_type": 0,
+      "malformed_truncated_markup": 0,
+      "mixed_literal_and_escaped_markup": 0,
+      "not_requested": 0,
+      "output_too_large": 0,
+      "parser_error": 0,
+      "residual_nested_encoding": 0,
+      "unclosed_suppressed_element": 0,
+      "unsupported_angle_reference": 0
+    }
+  },
+  "selected": [
+    {
+      "source_ordinal": 0,
+      "selection_reason": "first_converted",
+      "replay_index": 0,
+      "lineage": {
+        "source_record_sha256": "c6630cc4b8911599d35701728f81fe6e8042c85cac7c0cb7d1756548b5c0b099",
+        "allowed_field_hashes": {
+          "title": {
+            "state": "string",
+            "sha256": "288583b2cb6d7dc525871f8a0721b2d775dfb2cd0703ff910c143e000a2e7794",
+            "utf8_bytes": 22
+          },
+          "location.name": {
+            "state": "string",
+            "sha256": "439e53e2815b0491d6560eadf0309d5a130f9e6425d92f7a5eae7256cd5485e4",
+            "utf8_bytes": 22
+          },
+          "content": {
+            "state": "string",
+            "sha256": "3d2d39d2d4d65d2fe11fc395d4c64415e05a61f41921bb804275e30b2f17c471",
+            "utf8_bytes": 5419
+          }
+        },
+        "original_content_sha256": "3d2d39d2d4d65d2fe11fc395d4c64415e05a61f41921bb804275e30b2f17c471",
+        "original_content_code_points": 5413,
+        "original_content_utf8_bytes": 5419,
+        "excerpt_start_code_point": 0,
+        "excerpt_end_code_point_exclusive": 1005,
+        "excerpt_sha256": "3938fb4de3aaf631089e42d2b403361455425606ad29b8f0a1332b566fde5537",
+        "excerpt_code_points": 1005,
+        "excerpt_utf8_bytes": 1007,
+        "projected_record_sha256": "ebf2e02407c77303ccd91bf1ce0e60e1e6789d5e2cc27987e61521706c7753f8",
+        "golden_output_sha256": "a8871bfdd6e281b7aa59b49cb945d9c77c7ff0f1b734632ac87b72fc8996870a"
+      },
+      "review": {
+        "publication_safe": true,
+        "full_capture_fidelity_disposition": "faithful",
+        "excerpt_replay_disposition": "faithful",
+        "reviewer": "user"
+      },
+      "golden_expectations": {
+        "content_outcome": "converted",
+        "description": "Discord has a highly engaged community of millions of daily active users who use the platform for many different reasons, but there\u2019s one thing that nearly everyone does: play video games. Discord plays a uniquely important role in the future of gaming, and we are focused on making it easier and more fun for people to hang out before, during, and after playing games.\nWe are seeking a strategic Commercial Policy Lead to shape Discord's approach to monetization and revenue products. As a key member of the Product Policy organization, you will develop and implement advertising and commerce policies that enable Discord's business while maintaining platform safety and user trust. This role requires a deep understanding of digital commerce, creator economies, and advertising ecosystems, with the ability to balance business objectives with responsible platform practices.",
+        "posting_inputs": {
+          "title": "Commercial Policy Lead",
+          "description": "Discord has a highly engaged community of millions of daily active users who use the platform for many different reasons, but there\u2019s one thing that nearly everyone does: play video games. Discord plays a uniquely important role in the future of gaming, and we are focused on making it easier and more fun for people to hang out before, during, and after playing games.\nWe are seeking a strategic Commercial Policy Lead to shape Discord's approach to monetization and revenue products. As a key member of the Product Policy organization, you will develop and implement advertising and commerce policies that enable Discord's business while maintaining platform safety and user trust. This role requires a deep understanding of digital commerce, creator economies, and advertising ecosystems, with the ability to balance business objectives with responsible platform practices.",
+          "location": "San Francisco Bay Area"
+        },
+        "normalized": {
+          "title": {
+            "canonical_title": {
+              "value": null,
+              "provenance": "unavailable"
+            },
+            "role_family": {
+              "value": null,
+              "provenance": "unavailable"
+            },
+            "outcome": "unsupported"
+          },
+          "remote_type": {
+            "value": null,
+            "provenance": "unavailable"
+          },
+          "employment_type": {
+            "value": null,
+            "provenance": "unavailable"
+          },
+          "seniority": {
+            "value": null,
+            "provenance": "unavailable"
+          },
+          "experience": {
+            "minimum": {
+              "value": null,
+              "provenance": "unavailable"
+            },
+            "maximum": {
+              "value": null,
+              "provenance": "unavailable"
+            }
+          },
+          "location": {
+            "city": {
+              "value": null,
+              "provenance": "unavailable"
+            },
+            "state": {
+              "value": null,
+              "provenance": "unavailable"
+            },
+            "country": {
+              "value": null,
+              "provenance": "unavailable"
+            },
+            "postal_code": {
+              "value": null,
+              "provenance": "unavailable"
+            }
+          },
+          "skills": []
+        }
+      }
+    }
+  ],
+  "replay_envelope": {
+    "jobs": [
+      {
+        "id": 8806482002,
+        "absolute_url": "https://job-boards.greenhouse.io/discord/jobs/8806482002",
+        "title": "Commercial Policy Lead",
+        "location": {
+          "name": "San Francisco Bay Area"
+        },
+        "content": "&lt;div class=&quot;content-intro&quot;&gt;&lt;p&gt;Discord has a highly engaged community of millions of daily active users who use the platform for many different reasons, but there\u2019s one thing that nearly everyone does: &lt;strong&gt;play video games.&lt;/strong&gt; Discord plays a uniquely important role in the future of gaming, and we are focused on making it easier and more fun for people to hang out before, during, and after playing games.&lt;/p&gt;&lt;/div&gt;&lt;p&gt;We are seeking a strategic Commercial Policy Lead to shape Discord&#39;s approach to monetization and revenue products. As a key member of the Product Policy organization, you will develop and implement advertising and commerce policies that enable Discord&#39;s business while maintaining platform safety and user trust. This role requires a deep understanding of digital commerce, creator economies, and advertising ecosystems, with the ability to balance business objectives with responsible platform practices.&lt;/p&gt;"
+      }
+    ],
+    "meta": {
+      "total": 1
+    }
+  }
+}

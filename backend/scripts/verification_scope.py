@@ -113,6 +113,17 @@ _EVALUATION_FIXTURE_FILES: dict[str, str] = {
     ),
 }
 
+# The Phase 4 S2c projected live-canary replay fixture (ADR 0017) -- its own
+# dedicated table, never folded into another fixture table, and not a
+# contract-record (same reasoning as `_EVALUATION_FIXTURE_FILES` above). The
+# path is reserved: the fixture is created only after the separately
+# authorized live request and its post-run review.
+_GREENHOUSE_S2C_FIXTURE_FILES: dict[str, str] = {
+    "backend/tests/fixtures/providers/greenhouse_s2c_projected.json": (
+        "test-fixture:greenhouse-s2c-canary"
+    ),
+}
+
 _SHARED_HARNESS_CORE_FILES: frozenset[str] = frozenset(
     {
         "backend/tests/contracts/taxonomy.py",
@@ -203,6 +214,7 @@ def _validate_configuration() -> None:
         _REMOTE_FIXTURE_FILES,
         _TITLE_FIXTURE_FILES,
         _EVALUATION_FIXTURE_FILES,
+        _GREENHOUSE_S2C_FIXTURE_FILES,
     ]
     exact_sets: list[frozenset[str]] = [
         _SHARED_HARNESS_CORE_FILES,
@@ -269,6 +281,7 @@ def classify_path(path: str) -> Classification:
         _REMOTE_FIXTURE_FILES,
         _TITLE_FIXTURE_FILES,
         _EVALUATION_FIXTURE_FILES,
+        _GREENHOUSE_S2C_FIXTURE_FILES,
     ):
         if path in exact_map:
             return Classification(path, exact_map[path])
