@@ -1448,3 +1448,92 @@ candidate_sha: 2a10f13df0e07b6484335bf57af9ca59043a2a9e
 receipt_id: 01963a8f-dbaf-4985-ad9c-ddf8ac5beed5
 receipt_path: docs/verification-receipts/2a10f13df0e07b6484335bf57af9ca59043a2a9e/01963a8f-dbaf-4985-ad9c-ddf8ac5beed5.json
 ```
+
+### Work review
+
+- Date/reviewer: 2026-10-19 (UTC), Sol (primary, Sol Medium). Formal review of Phase 4
+  S2c, the bounded read-only Greenhouse live canary, on
+  `phase-4/greenhouse-live-canary-s2c`:
+  - base `eeac72abb2ba930fb469a4abb563a7601826266a`;
+  - final candidate `C` = `2a10f13df0e07b6484335bf57af9ca59043a2a9e`;
+  - publication `A` = `8d37617e40df5bb2a7655607a5452ef53c5dbcf9`;
+  - receipt `01963a8f-dbaf-4985-ad9c-ddf8ac5beed5`, SHA-256
+    `697f2edc0f579b8a1a48d979dce6be023f59c47e790d5ad000cc2b1d895ab5aa`.
+
+  The Sol Medium and Astra verified-cleanup checkpoint reviews recorded in `C` were
+  advisory only; this is the formal review.
+- **1. Sol's formal verdict and limitations** (as relayed by the user; the relay is the
+  authority for this review):
+  - verdict **approved**, no executable findings;
+  - primary reviewer Sol (Sol Medium); gate `final`; slice kind `tooling`; risk class H;
+  - attempt 1 remains permanently `FAIL-CLOSED:worker_failed`; attempt 2 remains `PASS`
+    with no findings after verified cleanup;
+  - the evidence does not establish broad normalization accuracy, provider
+    generalization, persistence, D1 satisfaction, runtime activation, or production
+    readiness; logical deletion is not forensic erasure; attempt 2 has no durable replay
+    fixture;
+  - `C`/`A` are ready for an `R` record. The verdict does not authorize merge, `M`/`Q`,
+    another provider request, reservation changes, persistence, runtime activation, S3,
+    or S4.
+
+  The relay itemizes the evidence below and no further disposition, so none is
+  attributed to Sol here.
+- **2. Independently verified or rerun in formal review** (per the relay):
+  - **ancestry and scope:** `C` is the direct child of `df25db4`, and `A` is `C`'s direct
+    child; `C` changes only this file; both advisory paragraphs are recorded correctly;
+    `C`'s metadata remains pending without receipt or executed-gate fields; `C..A` adds
+    exactly one receipt and changes only the newest metadata block; `A`'s published
+    metadata names `C`, the final gate, the receipt ID, and the receipt path;
+  - **receipt:** schema-valid and bound to the exact `C`, base, slice, risk class H, and
+    final gate; the verifier, handoff-checker, and configuration hashes match their
+    committed `C` versions; the affected surface, focused selector, migration decision,
+    and complete 34-guard inventory recompute correctly; `approval_eligible` recomputes
+    to `true`;
+  - **checks:** `check_handoff`, `check_repo`, the transition checks, repository diff
+    checks, and working-tree checks pass;
+  - **state:** feature `HEAD` and the local tracking ref equal `A`; `main` and
+    `origin/main` remain at `eeac72a`; the tree is clean; S2c staging remains absent;
+    runtime evidence is untracked; the retained evidence hashes match;
+  - **rerun:** the focused selection, **455 passed, 1 expected Windows FIFO skip**; Ruff
+    format and check pass; mypy passes.
+- **3. Relied upon from the genuine C-bound coordinator receipt** (not rerun in formal
+  review):
+  - all 12 required steps passed;
+  - the full suite, **4,609 passed**;
+  - registered witnesses, **34 of 34 passed**;
+  - disposable test-database validation and reachability passed;
+  - isolated-worktree snapshots matched, cleanup passed, and no worktree residue
+    remained;
+  - migration was correctly not triggered.
+- **4. Retained limitations and explicit exclusions:**
+  - no proof of broad normalization accuracy, provider generalization, persistence, D1,
+    runtime activation, or production readiness;
+  - logical deletion from controlled project locations, not forensic erasure; the deleted
+    attempt-2 source content can no longer be reread; attempt 2 has no durable replay
+    fixture, and the attempt-1 fixture does not prove attempt-2 fidelity;
+  - a receipt proves verification only, never review approval or merge authorization;
+  - no third live request is authorized; no provider was contacted, no reservation was
+    changed, and no staging was recreated while recording this review.
+- Findings by severity with exact references: none.
+- Verdict: **approved** -- no findings.
+- Exact bounded correction: none required.
+- STOP -- record-only. This review authorizes no merge, `M`, `Q`, provider contact,
+  reservation change, another request, persistence, runtime activation, S3, or S4. Merge
+  requires separate user authorization.
+
+```workflow-review-metadata
+schema_version: 2
+slice_id: 2026-10-05-phase4-greenhouse-live-canary-s2c-eeac72a
+risk_class: H
+reviewer: Sol
+reviewer_role: primary
+reviewer_model: Sol Medium
+reviewed_at: 2026-10-19T02:35:33+00:00
+candidate_sha: 2a10f13df0e07b6484335bf57af9ca59043a2a9e
+publication_commit_sha: 8d37617e40df5bb2a7655607a5452ef53c5dbcf9
+receipt_path: docs/verification-receipts/2a10f13df0e07b6484335bf57af9ca59043a2a9e/01963a8f-dbaf-4985-ad9c-ddf8ac5beed5.json
+receipt_id: 01963a8f-dbaf-4985-ad9c-ddf8ac5beed5
+gate: final
+verdict: approved
+findings: none
+```
