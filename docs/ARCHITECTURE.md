@@ -446,8 +446,9 @@ Hard rules that don't fit neatly into the table:
   passes `pipeline.run(..., normalization=context)`; nothing in the application does.
   `providers/greenhouse_record.py` holds every output-affecting Greenhouse semantic,
   extracted unchanged from the adapter (board configuration and the board set behind the
-  snapshot, response decoding, record selection, and job construction), so the manifest
-  hashes them without hashing transport, retry, or diagnostics code.
+  snapshot, response decoding, record selection, and job construction). The manifest
+  hashes it and, conservatively, the whole adapter too, because the adapter still owns
+  the response-to-board association; any adapter edit rotates the parser version.
 - **Greenhouse content and parser-input mapping (Phase 4 S2b,
   [ADR 0015](DECISIONS/0015-greenhouse-content-conversion-and-posting-input-mapping.md)).**
   `providers/greenhouse.py` fills `DiscoveredJob.description` only for a board that

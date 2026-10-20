@@ -17,9 +17,12 @@ Manifest boundary (schema `jgnorm-v1`):
   its UTF-8 bytes with CRLF and lone CR normalized to LF, so Windows and Linux
   checkouts agree and no Git metadata is needed. A relative import, a dynamic
   import (`importlib`, `__import__`), an unparsable file, or an `app.*` module
-  that does not resolve to a file fails closed. The transport/retry adapter
-  `app/providers/greenhouse.py` is deliberately outside the closure: everything
-  in it that decides a job's values lives in `app/providers/greenhouse_record.py`.
+  that does not resolve to a file fails closed. The Greenhouse adapter
+  `app/providers/greenhouse.py` is a root and is bound whole (conservative):
+  it still owns the association between a response, its board, and the jobs it
+  returns, so any edit to it, transport and retry code included, rotates the
+  version. Its value semantics also live, unchanged, in the hashed
+  `app/providers/greenhouse_record.py`.
 - **Standard library.** Any top-level module in `sys.stdlib_module_names` (and
   `__future__`) is bound collectively through the complete interpreter
   implementation and version below, never hashed individually.
@@ -54,6 +57,7 @@ import sys
 import unicodedata
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
+from importlib.metadata import version as _distribution_version
 from pathlib import Path
 from typing import Any
 
@@ -76,9 +80,16 @@ BACKEND_DIR = APP_DIR.parent
 TAXONOMY_DIR = APP_DIR / "taxonomy"
 
 # The closure roots: the normalization context/projection/merge code (which
-# imports the bridge and the composition) and the Greenhouse record semantics
-# (which import the content converter).
-CLOSURE_ROOTS = ("app.ingestion.normalized_fields", "app.providers.greenhouse_record")
+# imports the bridge and the composition), the Greenhouse record semantics
+# (which import the content converter), and the whole Greenhouse adapter, which
+# owns the response -> board -> returned-jobs association. Binding the adapter
+# whole is deliberately conservative: until a separately reviewed boundary can
+# bind that association independently, any adapter edit rotates the version.
+CLOSURE_ROOTS = (
+    "app.ingestion.normalized_fields",
+    "app.providers.greenhouse",
+    "app.providers.greenhouse_record",
+)
 
 # Every non-Python file under `app/taxonomy/`, by name. A new data file fails
 # closed until it is declared here and bound into the manifest.
@@ -99,9 +110,14 @@ THIRD_PARTY_BINDINGS: Mapping[str, Callable[[], dict[str, Any]]] = {
     "yaml": _yaml_binding,
     "pydantic": lambda: {"version": pydantic.VERSION},
     "pydantic_core": lambda: {"version": pydantic_core.__version__},
+    # The installed distribution's exact version, read from package metadata so
+    # that `httpx` stays imported only by the Greenhouse adapter (S1's rule).
+    "httpx": lambda: {"version": _distribution_version("httpx")},
 }
 
 _DYNAMIC_IMPORT_MODULES = frozenset({"importlib"})
+# Read-only package metadata, used only to bind a declared dependency's version.
+_PERMITTED_IMPORTLIB_MODULES = frozenset({"importlib.metadata"})
 
 
 class ParserVersionError(Exception):
@@ -199,6 +215,8 @@ def compute_closure(roots: Iterable[str], read: Reader = read_bytes) -> Closure:
                 top = module.partition(".")[0]
                 if top == "app":
                     pending.append(module)
+                elif module in _PERMITTED_IMPORTLIB_MODULES:
+                    continue
                 elif top in _DYNAMIC_IMPORT_MODULES:
                     raise ParserVersionError("a closure module uses a dynamic import")
                 elif _is_stdlib(top):

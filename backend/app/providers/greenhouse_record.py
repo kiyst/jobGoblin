@@ -1,10 +1,11 @@
 """Output-affecting Greenhouse record semantics (Phase 4 S3, Class H;
 `docs/DECISIONS/0018-d1-parser-version-and-normalized-persistence.md`).
 
-Extracted unchanged from `app/providers/greenhouse.py` so that ADR 0018's D1
-normalization manifest can hash every application semantic that decides a
-`DiscoveredJob`'s values, without hashing the adapter's transport, retry,
-timeout, health, and diagnostics code:
+Extracted unchanged from `app/providers/greenhouse.py` so that every
+application semantic deciding a `DiscoveredJob`'s values lives in one pure module
+that ADR 0018's D1 normalization manifest hashes. The manifest also binds the
+adapter itself, whole, because the adapter still owns the response-to-board
+association (ADR 0018 correction 2). This module holds:
 
 - board configuration (`GreenhouseBoard`) and the validated board set, the
   single source of both the board -> content-mode snapshot D1 verification

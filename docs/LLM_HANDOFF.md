@@ -1304,9 +1304,11 @@ findings: none
   `phase-4/normalized-persistence-s3`, base
   `b0bb33ac6c471fed759f33555dc4b681876a8927` (`Q` of the S2c merge). The immutable
   pre-publication advisory candidate `7fd1b94298e0a73a1f08d0abc62872dcb2c113eb` is
-  preserved unamended. Ending commit: this commit, **correction 1** (its direct
-  single-parent child), for Sol Medium's narrow re-review. Neither is final `C`: no
-  coordinator run, receipt, `A`, formal review, or merge metadata exists.
+  preserved unamended, as is correction 1
+  `a6e807e13e9274c3e020bca7c27d913877750583` (its direct child). Ending commit: this
+  commit, **correction 2** (correction 1's direct single-parent child), for Sol Medium's
+  narrow re-review. None is final `C`: no coordinator run, receipt, `A`, formal review, or
+  merge metadata exists.
 - Slice: Phase 4 S3, D1 parser version and opt-in normalized persistence
   ([ADR 0018](DECISIONS/0018-d1-parser-version-and-normalized-persistence.md)). Risk
   class H, `slice_kind: tooling`, `declared_gate: final`. Streamlined workflow: Sol Medium
@@ -1419,7 +1421,7 @@ findings: none
     (the adapter import pin drops `json`/`types`), `test_normalization_version.py` (+9),
     `test_normalized_fields.py` (+4, rule 6 rewritten), `test_normalized_persistence.py`
     (+5, rerun rewritten).
-  - Verification at this commit (offline; not a receipt):
+  - Verification at `a6e807e` (offline; not a receipt):
     `scripts/verify.py --level routine` passed all 10 checks, including the full
     suite (**4,769 passed, 1 skipped**: the earlier 4,748 plus 21 new tests). Registered
     witnesses: **34 of 34** passed. Affected suites: Greenhouse
@@ -1441,7 +1443,59 @@ findings: none
     - receipt runs: 0;
     - elapsed: correction 1 started at about 21:00Z and this commit is about 21:36Z on
       2026-10-20.
-- STOP -- for Sol Medium's narrow re-review of correction 1. No final `C`, coordinator
+- **Correction 2** (Sol Medium's narrow re-review of `a6e807e`: P1b resolved; one
+  remaining P1, as relayed by the user). The unhashed adapter still owned the
+  response -> board -> returned-jobs association (`_discover_board`, the token passed to
+  `parse_body`, `_aggregate`, the snapshot property). Applied the conservative option
+  Sol named:
+  - `app.providers.greenhouse` is now a manifest root and is bound whole, which brings in
+    `app/schemas/provider.py`; the closure is 24 modules. `httpx` is a declared
+    third-party binding, read from installed package metadata
+    (`importlib.metadata.version`) so `httpx` stays imported only by the adapter, as S1
+    requires. The closure walker allows exactly `importlib.metadata`; any other
+    `importlib` use still fails closed.
+  - Trade-off, stated in ADR 0018: until a separately reviewed boundary binds the
+    response-to-board association independently, any adapter edit, transport-only
+    included, rotates the combined version. `greenhouse_record.py` and
+    `GreenhouseBoardSet` are retained unchanged in behavior; only their module docstring
+    was corrected to say the adapter is bound too.
+  - `test_normalization_version.py` (74 -> 88 tests):
+    - removed: the transport-only no-rotation claim and test;
+    - added: rotation for the board token passed to `parse_body`, aggregated jobs, the
+      snapshot property, retryable statuses, backoff, and maximum attempts;
+    - added: an unchanged adapter and runtime give the same identifier;
+    - added: a context built under each changed adapter fails verification;
+    - added: an adapter changed on disk after first observation fails closed;
+    - added: an undeclared `httpx` binding fails closed, and the `httpx` version rotates
+      the identifier.
+  - Docs: ADR 0018 (§2 closure, third-party, conservative adapter binding; §4; a new
+    limitation) and the `ARCHITECTURE.md` module note.
+  - No Greenhouse behavior, D2 corpus, schema, migration, persisted field, runtime
+    activation, or network behavior changed.
+  - Verification at this commit (offline; not a receipt):
+    - manifest, normalized-field, provider, bridge, content, and normalized-persistence
+      suites: 709 passed;
+    - S2c canary, canary-mapping, and live-proof adapter suites: 472 passed, 1 skipped;
+    - Ruff format and check, mypy (173 files), `check_repo`, `check_handoff`, and
+      `git diff --check` all pass;
+    - no row leaked into the disposable test database.
+
+    Per the review, no further full-suite run at this advisory stage: the change is the
+    manifest boundary, its tests and docs, plus one docstring.
+  - Manifest mutations (advisory, not registered): 8 of 8 caught (adapter root dropped,
+    record root dropped, `httpx` binding removed or unbound, any `importlib` allowed,
+    configuration omitted, micro version dropped, first-seen pin disabled), with the tree
+    byte-identical afterwards. Log
+    `.claude/runtime/phase4-s3-correction2-mutation-log.txt` (gitignored), SHA-256
+    `f8f0f89cd5d6bcfb995964a6f92c530ae7d99d9d13e395f325175831c503f265`.
+  - Workflow metrics:
+    - proposal reviews: 1;
+    - advisory reviews: 2 (both changes requested);
+    - user relays: 5, plus 1 uncounted duplicate;
+    - correction commits: 2;
+    - receipt runs: 0;
+    - elapsed: this correction finished at about 22:30Z on 2026-10-20.
+- STOP -- for Sol Medium's narrow re-review of correction 2. No final `C`, coordinator
   run, `A`, `R`, merge, provider contact, runtime activation, S4, or S5.
 
 ```workflow-metadata

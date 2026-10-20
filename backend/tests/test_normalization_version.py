@@ -17,6 +17,7 @@ import unicodedata
 from collections.abc import Callable
 from pathlib import Path
 
+import httpx
 import pydantic
 import pydantic_core
 import pytest
@@ -53,12 +54,14 @@ EXPECTED_CLOSURE = (
     "app/normalization/titles.py",
     "app/normalization/types.py",
     "app/providers/__init__.py",
+    "app/providers/greenhouse.py",
     "app/providers/greenhouse_content.py",
     "app/providers/greenhouse_posting_inputs.py",
     "app/providers/greenhouse_record.py",
     "app/schemas/__init__.py",
     "app/schemas/discovered_job.py",
     "app/schemas/identifiers.py",
+    "app/schemas/provider.py",
 )
 
 
@@ -115,6 +118,7 @@ def test_manifest_boundary_and_canonical_serialization_are_explicit() -> None:
     assert manifest["standard_library"] == "bound by runtime.implementation and runtime.python"
     assert manifest["third_party"] == {
         "pydantic": {"version": pydantic.VERSION},
+        "httpx": {"version": httpx.__version__},
         "pydantic_core": {"version": pydantic_core.__version__},
         "yaml": {
             "version": yaml.__version__,
@@ -164,7 +168,11 @@ def test_taxonomy_identity_is_the_canonical_parsed_content() -> None:
 def _independent_closure() -> list[str]:
     """A second, independently written closure walk over `app.*` imports."""
     found: set[str] = set()
-    pending = ["app.ingestion.normalized_fields", "app.providers.greenhouse_record"]
+    pending = [
+        "app.ingestion.normalized_fields",
+        "app.providers.greenhouse",
+        "app.providers.greenhouse_record",
+    ]
     while pending:
         name = pending.pop()
         parts = name.split(".")
@@ -198,7 +206,11 @@ def test_parser_version_is_independently_reproducible() -> None:
     expected = {
         "schema": "jgnorm-v1",
         "closure": {
-            "roots": ["app.ingestion.normalized_fields", "app.providers.greenhouse_record"],
+            "roots": [
+                "app.ingestion.normalized_fields",
+                "app.providers.greenhouse",
+                "app.providers.greenhouse_record",
+            ],
             "modules": {
                 path: hashlib.sha256(
                     _real(path).replace(b"\r\n", b"\n").replace(b"\r", b"\n")
@@ -209,6 +221,7 @@ def test_parser_version_is_independently_reproducible() -> None:
         "standard_library": "bound by runtime.implementation and runtime.python",
         "third_party": {
             "pydantic": {"version": pydantic.VERSION},
+            "httpx": {"version": httpx.__version__},
             "pydantic_core": {"version": pydantic_core.__version__},
             "yaml": {
                 "version": yaml.__version__,
@@ -272,6 +285,7 @@ def test_taxonomy_formatting_alone_does_not_change_the_version(tmp_path: Path) -
         (yaml, "__version__", "0.0.0-synthetic"),
         (pydantic, "VERSION", "0.0.0-synthetic"),
         (pydantic_core, "__version__", "0.0.0-synthetic"),
+        (nv, "_distribution_version", lambda name: "0.0.0-synthetic"),
     ],
 )
 def test_changing_any_runtime_or_dependency_binding_changes_the_version(
@@ -296,7 +310,6 @@ def test_changing_the_board_configuration_changes_the_version() -> None:
 @pytest.mark.parametrize(
     "relative",
     [
-        "app/providers/greenhouse.py",
         "app/ingestion/persistence.py",
         "app/ingestion/pipeline.py",
         "app/ingestion/provider_execution.py",
@@ -331,15 +344,19 @@ def test_a_new_module_imported_into_the_composition_joins_the_closure() -> None:
     assert _build(read=_reader({posting: injected})).version != _build(read=_reader({})).version
 
 
-def test_salary_and_the_transport_adapter_are_not_in_the_real_closure() -> None:
-    modules = set(nv.compute_closure(nv.CLOSURE_ROOTS).modules.values())
+def test_salary_is_excluded_and_the_whole_adapter_and_httpx_are_bound() -> None:
+    closure = nv.compute_closure(nv.CLOSURE_ROOTS)
+    modules = set(closure.modules.values())
     assert "app/normalization/salary.py" not in modules
-    assert "app/providers/greenhouse.py" not in modules
-    assert set(nv.compute_closure(nv.CLOSURE_ROOTS).third_party) == {
-        "pydantic",
-        "pydantic_core",
-        "yaml",
-    }
+    assert "app/providers/greenhouse.py" in modules
+    assert set(closure.third_party) == {"httpx", "pydantic", "pydantic_core", "yaml"}
+
+
+def test_an_undeclared_httpx_binding_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    bindings = {k: v for k, v in nv.THIRD_PARTY_BINDINGS.items() if k != "httpx"}
+    monkeypatch.setattr(nv, "THIRD_PARTY_BINDINGS", bindings)
+    with pytest.raises(nv.ParserVersionError):
+        _build()
 
 
 # --- missing, unresolvable, undeclared, stale: fail closed ---
@@ -487,25 +504,87 @@ def test_each_output_affecting_greenhouse_semantic_rotates_the_version(
     assert rotated != baseline, label
 
 
-@pytest.mark.parametrize(
-    ("original", "changed"),
-    [
-        (
-            b"_RETRYABLE_STATUSES = frozenset({429, 502, 503, 504})",
-            b"_RETRYABLE_STATUSES = frozenset({429, 500, 502, 503, 504})",
-        ),
-        (
-            b"min(self._settings.backoff_base * 2 ** (attempts - 1), self._settings.backoff_cap)",
-            b"min(self._settings.backoff_base * 3 ** (attempts - 1), self._settings.backoff_cap)",
-        ),
-        (b"max_attempts: int = 3", b"max_attempts: int = 4"),
-    ],
-)
-def test_transport_only_adapter_edits_do_not_rotate_the_version(
-    original: bytes, changed: bytes
-) -> None:
+# Correction 2 (conservative): the adapter owns the association between a
+# response, its board, and the jobs it returns, so it is bound whole. Until a
+# separately reviewed boundary binds that association independently, any
+# adapter edit -- transport and retry code included -- rotates the version.
+ADAPTER_EDITS = [
+    (
+        "board token passed to parse_body",
+        b"self._board_set.parse_body(board.board_token, body, now=self._now)",
+        b"self._board_set.parse_body(self._boards[0].board_token, body, now=self._now)",
+    ),
+    (
+        "returned and aggregated jobs",
+        b"jobs = [job for result in board_results for job in result.jobs]",
+        b"jobs = [job for result in board_results for job in result.jobs][:1]",
+    ),
+    (
+        "adapter snapshot property",
+        b"        return self._board_set.content_modes()\n",
+        b"        return dict(self._board_set.content_modes())  # type: ignore[return-value]\n",
+    ),
+    (
+        "retryable statuses",
+        b"_RETRYABLE_STATUSES = frozenset({429, 502, 503, 504})",
+        b"_RETRYABLE_STATUSES = frozenset({429, 500, 502, 503, 504})",
+    ),
+    (
+        "backoff",
+        b"min(self._settings.backoff_base * 2 ** (attempts - 1), self._settings.backoff_cap)",
+        b"min(self._settings.backoff_base * 3 ** (attempts - 1), self._settings.backoff_cap)",
+    ),
+    ("maximum attempts", b"max_attempts: int = 3", b"max_attempts: int = 4"),
+]
+
+
+@pytest.mark.parametrize(("label", "original", "changed"), ADAPTER_EDITS)
+def test_any_adapter_edit_rotates_the_version(label: str, original: bytes, changed: bytes) -> None:
     source = _real(ADAPTER_MODULE).replace(b"\r\n", b"\n")
-    assert source.count(original) == 1
+    assert source.count(original) == 1, label
     baseline = _build(read=_reader({})).version
     edited = _build(read=_reader({ADAPTER_MODULE: source.replace(original, changed)})).version
-    assert edited == baseline
+    assert edited != baseline, label
+
+
+def test_an_unchanged_adapter_and_runtime_give_the_same_identifier() -> None:
+    assert _build(read=_reader({})).version == _build(read=_reader({})).version == _build().version
+
+
+@pytest.mark.parametrize(("label", "original", "changed"), ADAPTER_EDITS)
+def test_a_context_built_under_a_changed_adapter_fails_verification(
+    label: str, original: bytes, changed: bytes
+) -> None:
+    """A context whose manifest was produced while the adapter differed from the
+    current file never verifies against the current repository."""
+    from app.ingestion.normalized_fields import (
+        NormalizationBindingError,
+        build_normalization_context,
+        verify_normalization_context,
+    )
+    from app.providers.greenhouse import GreenhouseBoard, GreenhouseJobBoardProvider
+
+    provider = GreenhouseJobBoardProvider(
+        [GreenhouseBoard("acme-synthetic", "Acme", content_mode="declared-double-escaped")]
+    )
+    context = build_normalization_context(provider.board_content_modes)
+    source = _real(ADAPTER_MODULE).replace(b"\r\n", b"\n")
+    stale = nv.build_manifest(
+        provider.board_content_modes,
+        read=_reader({ADAPTER_MODULE: source.replace(original, changed)}),
+    )
+    object.__setattr__(context, "_canonical", stale.canonical)
+    object.__setattr__(context, "_version", stale.version)
+    with pytest.raises(NormalizationBindingError):
+        verify_normalization_context(context, provider)
+
+
+def test_an_adapter_changed_on_disk_after_first_observation_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _build()
+    stale = dict(nv._FIRST_SEEN)
+    stale[ADAPTER_MODULE] = "0" * 64
+    monkeypatch.setattr(nv, "_FIRST_SEEN", stale)
+    with pytest.raises(nv.ParserVersionError):
+        _build()

@@ -52,12 +52,13 @@ Nothing in the application builds a context, registers a provider, or schedules 
 manifest's canonical JSON (sorted keys, compact separators, ASCII escapes, no NaN).
 
 - **Application closure.** Every `app.*` module reachable by import from the roots
-  `app.ingestion.normalized_fields` and `app.providers.greenhouse_record`, found from each
-  module's syntax tree (all import statements, including function bodies), plus parent
-  package `__init__.py` files. At the base it is 22 modules: the seven composed parsers,
-  `taxonomy`, `types`, and `posting`; the content converter, the bridge, and the record
-  semantics; `discovered_job` and `identifiers`; the two S3 modules; and five package
-  initializers. Each is identified by the SHA-256 of its UTF-8 bytes with CRLF and lone CR
+  `app.ingestion.normalized_fields`, `app.providers.greenhouse`, and
+  `app.providers.greenhouse_record`, found from each module's syntax tree (all import
+  statements, including function bodies), plus parent package `__init__.py` files. At
+  the base it is 24 modules: the seven composed parsers, `taxonomy`, `types`, and
+  `posting`; the whole Greenhouse adapter, the content converter, the bridge, and the
+  record semantics; `discovered_job`, `identifiers`, and `provider` schemas; the two S3
+  modules; and five package initializers. Each is identified by the SHA-256 of its UTF-8 bytes with CRLF and lone CR
   normalized to LF -- not a Git blob or commit hash, so unrelated repository changes and
   checkout line endings never alter it. A relative import, a dynamic import
   (`importlib`, `__import__`), an unparsable file, or an unresolvable `app.*` module fails
@@ -66,8 +67,8 @@ manifest's canonical JSON (sorted keys, compact separators, ASCII escapes, no Na
   complete version, not hashed per module.
 - **Third-party.** Every other top-level import in the closure must be declared, and its
   exact installed version is recorded: `yaml` (plus the exact loader class hierarchy the
-  taxonomy loader uses), `pydantic`, and `pydantic_core`. An undeclared dependency fails
-  closed.
+  taxonomy loader uses), `pydantic`, `pydantic_core`, and `httpx` (reached through the
+  adapter). An undeclared dependency fails closed.
 - **Taxonomy.** The canonical *parsed* content the parsers consume: every
   `(lookup key, canonical_id, display_name)` triple of the loaded index, sorted. Comment
   or formatting edits do not rotate the version; any change to what a parser can match
@@ -79,10 +80,18 @@ manifest's canonical JSON (sorted keys, compact separators, ASCII escapes, no Na
 - **Staleness.** The first real-disk identity of each closure file is pinned per process;
   a later build that sees different bytes fails closed.
 
-Excluded from the closure, so their edits never rotate the version:
-`app/providers/greenhouse.py` (transport, timeouts, retries and backoff, media-type and
-size checks, health, and completeness diagnostics only), the persistence and pipeline
-code, `salary.py`, `url.py`, models, and the API.
+Excluded from the closure, so their edits never rotate the version: the persistence and
+pipeline code, `salary.py`, `url.py`, models, and the API.
+
+**Conservative adapter binding (correction 2).** `app/providers/greenhouse.py` is bound
+whole, transport and retry code included. It still owns the association between a
+response, the board it was requested for, and the jobs the provider returns
+(`_discover_board`, the token passed to `parse_body`, `_aggregate`, and the snapshot
+property), and that association decides which boards, content modes, descriptions, and
+records reach persistence. Until a future, separately reviewed boundary can bind that
+association independently, any adapter edit -- including a transport-only one --
+rotates the combined normalization version. Over-binding is the deliberate trade-off:
+it costs unnecessary version changes, never an unbound output-affecting change.
 
 ### 3. Unforgeable, verified context (A1)
 
@@ -114,8 +123,8 @@ closed. Each job's `source_tenant_id` must be a board in the verified snapshot w
 approved mode, or the projection raises.
 
 Every application semantic that decides a job's values was extracted unchanged from
-`greenhouse.py` into `app/providers/greenhouse_record.py`, so the manifest hashes it
-without hashing transport code (correction 1 completed the extraction):
+`greenhouse.py` into `app/providers/greenhouse_record.py` (correction 1 completed the
+extraction); correction 2 additionally binds the adapter itself, as above:
 
 - board configuration (`GreenhouseBoard`) and `GreenhouseBoardSet`, the single source of
   both the snapshot verification binds and the board (token, company, content mode) each
@@ -208,6 +217,8 @@ persisted check itself.
 - Python-level guards stop misuse, not hostile in-process code.
 - The manifest identifies on-disk source; the per-process pin detects source changes
   after the first build in a process, not an edit between import and that first build.
+- The whole Greenhouse adapter is bound, so transport-only edits (retries, backoff,
+  timeouts, diagnostics) also rotate the parser version.
 - Third-party binding covers packages the closure imports directly, not their own
   transitive dependencies.
 - An abstention never retracts a value: after a parser change, an older value stays
