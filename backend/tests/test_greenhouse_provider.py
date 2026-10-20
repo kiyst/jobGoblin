@@ -1455,3 +1455,87 @@ async def test_t20_distinct_ids_are_stable_positive_controls() -> None:
     result = await discover(make_provider(single_board(json_response(envelope(records)))))
     assert [job.source_job_id for job in result.jobs] == ["10", "11", " 12"]
     assert result.errors == []
+
+
+# ---------------------------------------------------------------------------
+# S3 (ADR 0018): the adapter holds transport only; the board set in the
+# D1-hashed `greenhouse_record` module decides every job value.
+# ---------------------------------------------------------------------------
+
+
+def _adapter_tree() -> ast.Module:
+    return ast.parse(
+        (BACKEND_DIR / "app" / "providers" / "greenhouse.py").read_text(encoding="utf-8")
+    )
+
+
+def test_s3_adapter_contains_no_output_affecting_semantics() -> None:
+    tree = _adapter_tree()
+    attributes = {node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)}
+    names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+    # No decoding, JSON parsing, content-mode read, conversion, record
+    # selection, or job construction remains in the adapter.
+    assert not attributes & {"loads", "decode", "content_mode", "company"}
+    # (`DiscoveredJob` is still named in annotations, never constructed.)
+    assert not names & {
+        "json",
+        "to_discovered_job",
+        "convert_greenhouse_content",
+        "select_records",
+        "decode_envelope",
+        "_validate_record",
+        "_duplicate_identity",
+        "MappingProxyType",
+    }
+    constructed = {
+        node.func.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    assert "DiscoveredJob" not in constructed
+    (snapshot,) = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "board_content_modes"
+    ]
+    returned = snapshot.body[-1]
+    assert isinstance(returned, ast.Return)
+    assert ast.unparse(returned.value) == "self._board_set.content_modes()"  # type: ignore[arg-type]
+    parse_calls = [
+        ast.unparse(node)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "parse_body"
+    ]
+    assert parse_calls == ["self._board_set.parse_body(board.board_token, body, now=self._now)"]
+
+
+def test_s3_snapshot_is_derived_from_the_same_board_set_that_builds_jobs() -> None:
+    declared = GreenhouseBoard("beta-synthetic", "Beta", content_mode="declared-double-escaped")
+    provider = make_provider(boards=(ACME, declared))
+    assert dict(provider.board_content_modes) == {
+        "acme-synthetic": "disabled",
+        "beta-synthetic": "declared-double-escaped",
+    }
+    assert provider.board_content_modes is not provider.board_content_modes
+    with pytest.raises(TypeError):
+        provider.board_content_modes["acme-synthetic"] = "declared-double-escaped"  # type: ignore[index]
+
+
+async def test_s3_each_board_builds_its_jobs_with_its_own_content_mode() -> None:
+    declared = GreenhouseBoard("beta-synthetic", "Beta Co", content_mode="declared-double-escaped")
+    fake = FakeGreenhouse(
+        routes={
+            "acme-synthetic": [json_response(envelope([synthetic_record(1)]))],
+            "beta-synthetic": [
+                json_response(envelope([synthetic_record(2, board="beta-synthetic")]))
+            ],
+        }
+    )
+    result = await discover(make_provider(fake, boards=(ACME, declared)))
+    by_tenant = {job.source_tenant_id: job for job in result.jobs}
+    assert by_tenant["acme-synthetic"].description is None
+    assert by_tenant["acme-synthetic"].company == "Acme Synthetic Co"
+    assert by_tenant["beta-synthetic"].description == "Placeholder synthetic description."
+    assert by_tenant["beta-synthetic"].company == "Beta Co"

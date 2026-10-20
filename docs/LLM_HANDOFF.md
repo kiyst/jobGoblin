@@ -1302,10 +1302,11 @@ findings: none
 
 - Date/agent: 2026-10-20, Claude (implementer). Branch
   `phase-4/normalized-persistence-s3`, base
-  `b0bb33ac6c471fed759f33555dc4b681876a8927` (`Q` of the S2c merge). Ending commit: this
-  commit, the **immutable pre-publication advisory candidate** for Sol Medium's advisory
-  review. It is not final `C`: no coordinator run, receipt, `A`, formal review, or merge
-  metadata exists.
+  `b0bb33ac6c471fed759f33555dc4b681876a8927` (`Q` of the S2c merge). The immutable
+  pre-publication advisory candidate `7fd1b94298e0a73a1f08d0abc62872dcb2c113eb` is
+  preserved unamended. Ending commit: this commit, **correction 1** (its direct
+  single-parent child), for Sol Medium's narrow re-review. Neither is final `C`: no
+  coordinator run, receipt, `A`, formal review, or merge metadata exists.
 - Slice: Phase 4 S3, D1 parser version and opt-in normalized persistence
   ([ADR 0018](DECISIONS/0018-d1-parser-version-and-normalized-persistence.md)). Risk
   class H, `slice_kind: tooling`, `declared_gate: final`. Streamlined workflow: Sol Medium
@@ -1349,7 +1350,7 @@ findings: none
     moves);
   - docs: ADR 0018, plus `DATA_MODEL.md`, `ARCHITECTURE.md`, and `ROADMAP.md` (S2c marked
     complete; S3 entry).
-- Verification at this commit (offline; the authoring checkout, not a receipt):
+- Verification at `7fd1b94` (offline; the authoring checkout, not a receipt):
   `scripts/verify.py --level routine` (compat mode) passed all 10 checks: Ruff format
     and check, mypy, `check_repo`, `git diff --check`, test-database URL validation and
     reachability, the full suite (**4,748 passed, 1 skipped**), handoff metadata, and
@@ -1379,7 +1380,68 @@ findings: none
   - receipt runs: 0;
   - elapsed: re-anchor about 04:45Z, implementation start 19:28Z, and this candidate
     about 20:14Z, on 2026-10-20.
-- STOP -- for Sol Medium's advisory review of this candidate. No final `C`, coordinator
+- **Correction 1** (Sol Medium's advisory review of `7fd1b94`: changes requested, two
+  bounded P1 data-integrity findings; all other portions accepted, as relayed by the
+  user):
+  - **P1a, unbound Greenhouse semantics.** The adapter still decided values the manifest
+    did not hash. `greenhouse_record.py` now also holds `GreenhouseBoard`, a new
+    `GreenhouseBoardSet` (the single source of both the snapshot verification binds and
+    the board each job is built with), response decoding and JSON parsing, `jobs`
+    extraction, and record and duplicate selection, all moved unchanged.
+    - `greenhouse.py` keeps transport, timeouts, retries and backoff, media-type and size
+      checks, health, and completeness diagnostics only. It passes just a board token and
+      the body to `parse_body`, and its snapshot property only returns the board set's.
+    - Existing importers, including the frozen S2c harness, are served by explicit
+      re-exports.
+    - No new module; the closure is still 22 modules. An AST test pins that the adapter
+      decodes nothing, reads no content mode, and constructs no job.
+    - Named rotation tests cover decoding, JSON configuration, `jobs` extraction,
+      kept-record and duplicate selection, the per-job content-mode argument, and
+      snapshot derivation. Transport-only edits (retryable statuses, backoff, maximum
+      attempts) do not rotate the version.
+  - **P1b, hash used as an order.** At equal trust and an equal instant, an identical
+    value is a no-op and a differing value now raises `ProvenanceIntegrityError`,
+    whatever the parser versions; a parser version is evidence, never an ordering signal.
+    A newer version replaces only through a strictly later observation.
+    - New pure tests: V1→V2 and V2→V1 conflicts and same-version conflicts are refused;
+      identical values are a no-op under any version; the later-observation rule; and
+      instant equality across offsets.
+    - New PostgreSQL tests: the same three conflict orders, each with full rollback (value,
+      provenance, `last_seen_at`, occurrence and raw linkage, run `failed`); and a
+      concurrent equal-time agreeing/conflicting pair in both lock orders, where the
+      conflict is refused, its Tier 2 attach is rolled back, and the stored state is
+      identical.
+    - The corpus rerun now shows a newer version is a no-op at the same instant and
+      replaces only at a later one.
+  - Docs: ADR 0018 (§2 exclusion, §4 extraction, §6 rule 6, §7, limitations), the
+    `DATA_MODEL.md` merge paragraph, and the `ARCHITECTURE.md` module note.
+  - Tests changed: `test_greenhouse_provider.py` (+3), `test_greenhouse_posting_inputs.py`
+    (the adapter import pin drops `json`/`types`), `test_normalization_version.py` (+9),
+    `test_normalized_fields.py` (+4, rule 6 rewritten), `test_normalized_persistence.py`
+    (+5, rerun rewritten).
+  - Verification at this commit (offline; not a receipt):
+    `scripts/verify.py --level routine` passed all 10 checks, including the full
+    suite (**4,769 passed, 1 skipped**: the earlier 4,748 plus 21 new tests). Registered
+    witnesses: **34 of 34** passed. Affected suites: Greenhouse
+    provider/content/bridge/canary/live-proof 1,146 passed; S3 74 + 59 + 24 passed. No row
+    leaked into the disposable test database. Migration not triggered.
+  - Temporary mutations (advisory, not registered): 21 of 21 caught, including hash
+    ordering, silent equal-time keeping, concurrent conflict acceptance, the adapter
+    re-deriving the snapshot or decoding, and the board set ignoring a board's own mode.
+    The tree was byte-identical after the run. One earlier attempt hit a transient
+    Windows file lock while restoring one file; the line was restored by hand and
+    checked, and the harness reran from scratch with retries. Log
+    `.claude/runtime/phase4-s3-correction1-mutation-log.txt` (gitignored), SHA-256
+    `0efab345d5ba7b7fd31f7f0f226ec52ccb2f6baaf7c024cb5c2643195520598f`.
+  - Workflow metrics:
+    - proposal reviews: 1;
+    - advisory reviews: 1 (changes requested);
+    - user relays: 4, plus 1 uncounted duplicate;
+    - correction commits: 1 (this one);
+    - receipt runs: 0;
+    - elapsed: correction 1 started at about 21:00Z and this commit is about 21:36Z on
+      2026-10-20.
+- STOP -- for Sol Medium's narrow re-review of correction 1. No final `C`, coordinator
   run, `A`, `R`, merge, provider contact, runtime activation, S4, or S5.
 
 ```workflow-metadata

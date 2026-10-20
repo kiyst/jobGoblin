@@ -433,3 +433,79 @@ def test_missing_malformed_or_unapproved_configuration_fails_closed(modes: objec
 def test_stdlib_detection_uses_the_interpreter_list() -> None:
     assert "re" in sys.stdlib_module_names
     assert "yaml" not in sys.stdlib_module_names
+
+
+# --- correction 1: every output-affecting Greenhouse semantic is bound ---
+
+RECORD_MODULE = "app/providers/greenhouse_record.py"
+ADAPTER_MODULE = "app/providers/greenhouse.py"
+
+
+@pytest.mark.parametrize(
+    ("label", "original", "changed"),
+    [
+        (
+            "response decoding",
+            b'body.decode("utf-8")',
+            b'body.decode("utf-8", errors="replace")',
+        ),
+        (
+            "JSON parsing configuration",
+            b"parse_float=_parse_finite_float,",
+            b"parse_float=float,",
+        ),
+        (
+            "records-array extraction",
+            b'records: list[Any] = payload["jobs"]',
+            b'records: list[Any] = payload["jobs"][:1]',
+        ),
+        (
+            "kept-record and duplicate selection",
+            b"identities[_duplicate_identity(item.job_id)] == 1]",
+            b"identities[_duplicate_identity(item.job_id)] >= 1]",
+        ),
+        (
+            "the content-mode argument used for each job",
+            b"content_mode=board.content_mode,\n",
+            b'content_mode="declared-double-escaped",\n',
+        ),
+        (
+            "board -> content-mode snapshot derivation",
+            b"{board.board_token: board.content_mode for board in self._boards}",
+            b'{board.board_token: "declared-double-escaped" for board in self._boards}',
+        ),
+    ],
+)
+def test_each_output_affecting_greenhouse_semantic_rotates_the_version(
+    label: str, original: bytes, changed: bytes
+) -> None:
+    source = _real(RECORD_MODULE).replace(b"\r\n", b"\n")
+    assert source.count(original) == 1, label  # the semantic lives in the hashed module
+    assert _real(ADAPTER_MODULE).replace(b"\r\n", b"\n").count(original) == 0, label
+    baseline = _build(read=_reader({})).version
+    rotated = _build(read=_reader({RECORD_MODULE: source.replace(original, changed)})).version
+    assert rotated != baseline, label
+
+
+@pytest.mark.parametrize(
+    ("original", "changed"),
+    [
+        (
+            b"_RETRYABLE_STATUSES = frozenset({429, 502, 503, 504})",
+            b"_RETRYABLE_STATUSES = frozenset({429, 500, 502, 503, 504})",
+        ),
+        (
+            b"min(self._settings.backoff_base * 2 ** (attempts - 1), self._settings.backoff_cap)",
+            b"min(self._settings.backoff_base * 3 ** (attempts - 1), self._settings.backoff_cap)",
+        ),
+        (b"max_attempts: int = 3", b"max_attempts: int = 4"),
+    ],
+)
+def test_transport_only_adapter_edits_do_not_rotate_the_version(
+    original: bytes, changed: bytes
+) -> None:
+    source = _real(ADAPTER_MODULE).replace(b"\r\n", b"\n")
+    assert source.count(original) == 1
+    baseline = _build(read=_reader({})).version
+    edited = _build(read=_reader({ADAPTER_MODULE: source.replace(original, changed)})).version
+    assert edited == baseline

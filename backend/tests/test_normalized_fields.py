@@ -405,34 +405,75 @@ def test_equal_trust_newer_observation_replaces_and_older_is_kept() -> None:
     assert older is None
 
 
-def test_equal_trust_and_time_replace_only_under_a_different_parser_version() -> None:
-    same = merge_field(
+def test_equal_time_identical_values_are_a_no_op_under_any_version() -> None:
+    for existing_version, incoming_version in ((V1, V1), (V1, V2), (V2, V1)):
+        assert (
+            merge_field(
+                _result("senior", INFERRED),
+                existing_value="senior",
+                existing_entry=_entry(version=existing_version),
+                origin=_origin(version=incoming_version),
+            )
+            is None
+        )
+
+
+@pytest.mark.parametrize(
+    ("existing_version", "incoming_version"),
+    [("V1", "V2"), ("V2", "V1"), ("V1", "V1")],
+)
+def test_equal_time_conflicting_values_are_refused_whatever_the_versions(
+    existing_version: str, incoming_version: str
+) -> None:
+    """A parser version is evidence, never an ordering signal: neither V1 then
+    V2 nor V2 then V1 decides a winner, and the same version producing two
+    values at one instant is refused rather than masked."""
+    versions = {"V1": V1, "V2": V2}
+    with pytest.raises(ProvenanceIntegrityError):
+        merge_field(
+            _result("staff", INFERRED),
+            existing_value="senior",
+            existing_entry=_entry(version=versions[existing_version]),
+            origin=_origin(version=versions[incoming_version]),
+        )
+
+
+def test_a_new_parser_version_replaces_only_through_a_later_observation() -> None:
+    later = merge_field(
         _result("staff", INFERRED),
         existing_value="senior",
-        existing_entry=_entry(version=V1),
-        origin=_origin(version=V1),
+        existing_entry=_entry(version=V1, observed_at=T1),
+        origin=_origin(version=V2, observed_at=T2),
     )
-    assert same is None  # idempotent rerun under the same version
-    reprocessed = merge_field(
-        _result("senior", INFERRED),
+    assert later is not None
+    assert (later.value, later.entry["parser_version"]) == ("staff", V2)
+    earlier = merge_field(
+        _result("staff", INFERRED),
         existing_value="senior",
-        existing_entry=_entry(version=V1),
-        origin=_origin(version=V2),
+        existing_entry=_entry(version=V1, observed_at=T2),
+        origin=_origin(version=V2, observed_at=T1),
     )
-    assert reprocessed is not None and reprocessed.entry["parser_version"] == V2
+    assert earlier is None
 
 
 def test_an_equal_time_across_offsets_is_the_same_instant() -> None:
     offset = T1.astimezone(timezone(timedelta(hours=-4)))
     assert (
         merge_field(
-            _result("staff", INFERRED),
+            _result("senior", INFERRED),
             existing_value="senior",
             existing_entry=_entry(observed_at=offset),
             origin=_origin(observed_at=T1),
         )
         is None
     )
+    with pytest.raises(ProvenanceIntegrityError):
+        merge_field(
+            _result("staff", INFERRED),
+            existing_value="senior",
+            existing_entry=_entry(observed_at=offset),
+            origin=_origin(observed_at=T1),
+        )
 
 
 @pytest.mark.parametrize(

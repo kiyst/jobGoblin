@@ -39,7 +39,6 @@ the returned `DiscoveryResult`, per `DiscoveryProvider`'s contract.
 from __future__ import annotations
 
 import asyncio
-import json
 import math
 import re
 import time
@@ -48,24 +47,24 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
-from types import MappingProxyType
 from typing import Any
 
 import httpx
 
-from app.providers.greenhouse_content import (
-    CONTENT_MODES,
-    ERROR_INVALID_CONTENT_MODE,
-    ContentOutcome,
-    GreenhouseContentMode,
-)
+from app.providers.greenhouse_content import ContentOutcome, GreenhouseContentMode
+
+# Board configuration and record semantics live in the D1-hashed
+# `greenhouse_record` module (ADR 0018). `GreenhouseBoard`,
+# `GreenhouseConfigurationError`, `_duplicate_identity`, and `_validate_record`
+# are re-exported unchanged for existing importers, including the frozen S2c
+# canary harness.
+from app.providers.greenhouse_record import PROVIDER_NAME, SOURCE_NAME, GreenhouseBoardSet
+from app.providers.greenhouse_record import GreenhouseBoard as GreenhouseBoard
 from app.providers.greenhouse_record import (
-    PROVIDER_NAME,
-    SOURCE_NAME,
-    _duplicate_identity,
-    _validate_record,
-    to_discovered_job,
+    GreenhouseConfigurationError as GreenhouseConfigurationError,
 )
+from app.providers.greenhouse_record import _duplicate_identity as _duplicate_identity
+from app.providers.greenhouse_record import _validate_record as _validate_record
 from app.schemas.discovered_job import (
     DiscoveredJob,
     DiscoveryResult,
@@ -87,7 +86,6 @@ GREENHOUSE_API_ORIGIN = "https://boards-api.greenhouse.io"
 # `app/db/models/` and `app/ingestion/natural_key.py`.
 _COVERED_WHITESPACE = " \t\n\r"
 
-_BOARD_TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,99}")
 _RETRY_AFTER_RE = re.compile(r"[0-9]+")
 
 # The only HTTP statuses retried in-adapter. HTTP 500 is deliberately absent.
@@ -108,11 +106,6 @@ _HEALTH_NOT_OBSERVED = "no discovery observed"
 _HEALTH_SUCCEEDED = "discovery succeeded"
 _HEALTH_PARTIAL = "partial discovery observed"
 _HEALTH_FAILED = "discovery failed"
-
-
-class GreenhouseConfigurationError(ValueError):
-    """Invalid boards or settings — a wiring error, raised at construction.
-    Messages are fixed strings."""
 
 
 class UnsupportedSourceQueryError(ValueError):
@@ -184,27 +177,6 @@ class GreenhouseClientSettings:
         )
 
 
-@dataclass(frozen=True)
-class GreenhouseBoard:
-    """One configured board. `board_token` is a lowercase slug, so no
-    tenant-case ambiguity can reach the natural key; `company` is the only
-    source of `DiscoveredJob.company` (never the payload's `company_name`).
-    `content_mode` is declared here and never inferred; `"disabled"` (the
-    default) leaves `content` untouched."""
-
-    board_token: str
-    company: str
-    content_mode: GreenhouseContentMode = "disabled"
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.board_token, str) or not _BOARD_TOKEN_RE.fullmatch(self.board_token):
-            raise GreenhouseConfigurationError("board_token must match ^[a-z0-9][a-z0-9_-]{0,99}$")
-        if not isinstance(self.company, str) or not self.company.strip(_COVERED_WHITESPACE):
-            raise GreenhouseConfigurationError("company must be a non-blank string")
-        if type(self.content_mode) is not str or self.content_mode not in CONTENT_MODES:
-            raise GreenhouseConfigurationError(ERROR_INVALID_CONTENT_MODE)
-
-
 # ---------------------------------------------------------------------------
 # Envelope and media type (Sol A8).
 # ---------------------------------------------------------------------------
@@ -226,17 +198,6 @@ def _is_json_media_type(content_type: str | None) -> bool:
         and subtype.endswith("+json")
         and len(subtype) > len("+json")
     )
-
-
-def _reject_constant(_: str) -> Any:
-    raise ValueError("non-finite JSON constant")
-
-
-def _parse_finite_float(literal: str) -> float:
-    value = float(literal)
-    if not math.isfinite(value):
-        raise ValueError("non-finite JSON number")
-    return value
 
 
 def _completeness_problem(payload: dict[str, Any], record_count: int) -> str | None:
@@ -360,18 +321,12 @@ class GreenhouseJobBoardProvider:
         monotonic: Callable[[], float] = time.monotonic,
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
-        board_list = list(boards)
-        if not board_list:
-            raise GreenhouseConfigurationError("at least one board is required")
-        if not all(isinstance(board, GreenhouseBoard) for board in board_list):
-            raise GreenhouseConfigurationError("boards must be GreenhouseBoard instances")
-        tokens = [board.board_token for board in board_list]
-        if len(tokens) != len(set(tokens)):
-            raise GreenhouseConfigurationError("board tokens must be unique")
+        board_set = GreenhouseBoardSet(boards)
         resolved_settings = settings if settings is not None else GreenhouseClientSettings()
         if not isinstance(resolved_settings, GreenhouseClientSettings):
             raise GreenhouseConfigurationError("settings must be GreenhouseClientSettings")
-        self._boards = tuple(board_list)
+        self._board_set = board_set
+        self._boards = board_set.boards
         self._settings = resolved_settings
         self._transport_factory = transport_factory
         self._sleep = sleep
@@ -389,9 +344,10 @@ class GreenhouseJobBoardProvider:
         content mode (Phase 4 S3, ADR 0018 A3). The normalization context binds
         this snapshot, and normalization verifies each job's `source_tenant_id`
         against it, so a parser version can never claim a content mode the
-        board did not actually use. A fresh immutable mapping per call; the
-        boards themselves are frozen and fixed at construction."""
-        return MappingProxyType({board.board_token: board.content_mode for board in self._boards})
+        board did not actually use. Derived by `GreenhouseBoardSet` in the
+        D1-hashed `greenhouse_record` module, from the same board set that
+        decides each job's content mode."""
+        return self._board_set.content_modes()
 
     def capabilities(self) -> ProviderCapabilities:
         return ProviderCapabilities(
@@ -611,44 +567,25 @@ class GreenhouseJobBoardProvider:
             )
             return _BoardResult(_Outcome.FAILURE, [], [error], [], False, retries, rate_limited)
 
-        try:
-            payload = json.loads(
-                body.decode("utf-8"),
-                parse_constant=_reject_constant,
-                parse_float=_parse_finite_float,
-            )
-        except (ValueError, RecursionError):
-            # `RecursionError`: pathologically nested JSON is malformed
-            # input, never a programmer error to raise past this boundary.
-            return failed("invalid_json")
-        if not isinstance(payload, dict) or not isinstance(payload.get("jobs"), list):
-            return failed("envelope")
-        records: list[Any] = payload["jobs"]
-
-        valid = [checked for checked in map(_validate_record, records) if checked is not None]
-        identities = Counter(_duplicate_identity(item.job_id) for item in valid)
-        kept = [item for item in valid if identities[_duplicate_identity(item.job_id)] == 1]
-        if records and not kept:
-            return failed("no_usable_records")
-
-        discovered_at = self._now()
+        # Decoding, envelope and record selection, and job construction are
+        # D1-hashed semantics in `greenhouse_record` (ADR 0018). This adapter
+        # supplies only the board token and the body; the board set decides
+        # the content mode and company each job is built with.
+        parsed = self._board_set.parse_body(board.board_token, body, now=self._now)
+        if parsed.failure is not None:
+            return failed(parsed.failure)
+        assert parsed.payload is not None and parsed.discovered_at is not None
+        discovered_at = parsed.discovered_at
         jobs: list[DiscoveredJob] = []
         unconverted: Counter[ContentOutcome] = Counter()
-        for item in kept:
-            job, content_outcome = to_discovered_job(
-                board_token=board.board_token,
-                company=board.company,
-                content_mode=board.content_mode,
-                item=item,
-                discovered_at=discovered_at,
-            )
+        for job, content_outcome in parsed.jobs:
             jobs.append(job)
             # On an enabled board only `CONVERTED` is neutral; the job is kept
             # either way, with `description=None` when conversion abstained.
             if content_outcome is not None and content_outcome is not ContentOutcome.CONVERTED:
                 unconverted[content_outcome] += 1
-        skipped = len(records) - len(kept)
-        problem = _completeness_problem(payload, len(records))
+        skipped = parsed.record_count - len(jobs)
+        problem = _completeness_problem(parsed.payload, parsed.record_count)
         errors: list[ProviderError] = []
         warnings: list[str] = []
         if skipped:
@@ -663,7 +600,7 @@ class GreenhouseJobBoardProvider:
             )
         if problem is not None:
             warnings.append(f"greenhouse board={board.board_token} completeness_evidence={problem}")
-        partial = bool(kept) and (bool(skipped) or problem is not None or bool(unconverted))
+        partial = bool(jobs) and (bool(skipped) or problem is not None or bool(unconverted))
         return _BoardResult(
             outcome=_Outcome.PARTIAL if partial else _Outcome.SUCCESS,
             jobs=jobs,

@@ -1065,9 +1065,9 @@ def test_greenhouse_adapter_imports_no_normalization_or_mapper() -> None:
 def test_greenhouse_adapter_imports_are_the_s1_set_plus_the_content_module() -> None:
     """No new network primitive, logging, persistence, or normalization import:
     the adapter's module imports are exactly S1's plus `greenhouse_content`, as
-    revised by S3's extraction (ADR 0018): `copy` and `urllib.parse` moved with
-    the record semantics into `greenhouse_record`, and `types` backs the
-    read-only board/content-mode snapshot."""
+    revised by S3's extraction (ADR 0018): `copy`, `json`, and `urllib.parse`
+    moved with the board, decoding, and record semantics into
+    `greenhouse_record`."""
     tree = ast.parse(GREENHOUSE_MODULE.read_text(encoding="utf-8"))
     modules: set[str] = set()
     for node in ast.walk(tree):
@@ -1078,11 +1078,9 @@ def test_greenhouse_adapter_imports_are_the_s1_set_plus_the_content_module() -> 
     assert modules == {
         "__future__",
         "asyncio",
-        "json",
         "math",
         "re",
         "time",
-        "types",
         "collections",
         "collections.abc",
         "dataclasses",

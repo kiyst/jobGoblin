@@ -532,13 +532,25 @@ async def test_corpus_rerun_is_idempotent_and_a_newer_version_follows_precedence
     await _assert_persisted_d2(db_engine, corpus, v1.parser_version)
 
     # A legitimately newer parser version: a real configuration change (one more
-    # approved board) through the real builder, at the same observation time.
+    # approved board) through the real builder. At the same observation instant
+    # it is a no-op: identical values, and a version is never an ordering signal.
     extra = tracker.token("extra")
     boards_v2 = [*corpus.boards, _board(extra)]
     provider_v2, _ = _provider(boards_v2, {**corpus.routes, extra: []}, now=t)
     v2 = _context(provider_v2)
     assert v2.parser_version != v1.parser_version
     await _run(db_engine, provider_v2, tracker, observed_at=t, context=v2)
+    assert await snapshot() == first
+    for token, job_id in corpus.record_ids:
+        newest = (await _persisted(db_engine, token, job_id)).raws[-1]
+        assert newest.parser_version == v2.parser_version
+
+    # Through a strictly later observation, the newer version's entries replace.
+    later = t + timedelta(hours=1)
+    provider_later, _ = _provider(boards_v2, {**corpus.routes, extra: []}, now=later)
+    await _run(
+        db_engine, provider_later, tracker, observed_at=later, context=_context(provider_later)
+    )
     after_v2 = await snapshot()
     for (token, job_id), record_id in corpus.record_ids.items():
         values, entries = after_v2[record_id]
@@ -549,6 +561,7 @@ async def test_corpus_rerun_is_idempotent_and_a_newer_version_follows_precedence
         for entry in cast(dict[str, dict[str, str]], entries or {}).values():
             assert entry["parser_version"] == v2.parser_version
             assert entry["raw_job_ingestion_id"] == str(newest.id)
+            assert entry["observed_at"] == later.isoformat()
     await _assert_persisted_d2(db_engine, corpus, v2.parser_version)
 
     # An older observation under the older version never replaces the newer entry.
@@ -1231,3 +1244,152 @@ async def test_competing_updates_through_different_occurrence_keys_serialize(
                 "normalized",
                 verified.parser_version,
             )
+
+
+# ---------------------------------------------------------------------------
+# Correction 1: equal-time conflicts are refused, never ordered by version
+# ---------------------------------------------------------------------------
+
+FULL_TIME = "This is a full-time position."
+PART_TIME = "We are hiring for a part-time role."
+
+
+@pytest.mark.parametrize("order", ["v1_then_v2", "v2_then_v1", "same_version"])
+async def test_equal_time_conflicting_values_are_refused_with_full_rollback(
+    db_engine: AsyncEngine, tracker: Tracker, order: str
+) -> None:
+    token = tracker.token("equaltime")
+    extra = tracker.token("equaltime-extra")
+    t = _unique_time()
+
+    def provider_for(version: str, description: str) -> GreenhouseJobBoardProvider:
+        record = _record(token, 1, "Software Engineer", description)
+        boards = [_board(token)]
+        routes: dict[str, list[dict[str, Any]]] = {token: [record]}
+        if version == "v2":
+            boards.append(_board(extra))
+            routes[extra] = []
+        return _provider(boards, routes, now=t)[0]
+
+    first_version, second_version = {
+        "v1_then_v2": ("v1", "v2"),
+        "v2_then_v1": ("v2", "v1"),
+        "same_version": ("v1", "v1"),
+    }[order]
+    first = provider_for(first_version, FULL_TIME)
+    await _run(db_engine, first, tracker, observed_at=t, context=_context(first))
+    before = await _persisted(db_engine, token, "1")
+    assert before.job.employment_type == "full_time"
+
+    second = provider_for(second_version, PART_TIME)
+    if order != "same_version":
+        assert _context(second).parser_version != _context(first).parser_version
+    with pytest.raises(ProvenanceIntegrityError):
+        await _run(db_engine, second, tracker, observed_at=t, context=_context(second))
+
+    after = await _persisted(db_engine, token, "1")
+    assert _values(after.job) == _values(before.job)
+    assert after.job.field_provenance == before.job.field_provenance
+    assert after.job.last_seen_at == before.job.last_seen_at
+    assert after.occurrence.last_seen_at == before.occurrence.last_seen_at
+    assert [raw.id for raw in after.raws] == [raw.id for raw in before.raws]
+    unlinked = [r for r in await _raws_for(db_engine, token) if r.job_occurrence_id is None]
+    (refused,) = unlinked
+    assert (refused.processing_status, refused.parser_version) == ("fetched", None)
+    async with AsyncSession(bind=db_engine) as session:
+        runs = (
+            (await session.execute(select(CollectionRun).where(CollectionRun.started_at == t)))
+            .scalars()
+            .all()
+        )
+        assert sorted(run.status for run in runs) == ["completed", "failed"]
+
+
+@pytest.mark.parametrize("first", ["agreeing", "conflicting"])
+async def test_concurrent_equal_time_conflicting_write_is_refused_in_either_order(
+    db_engine: AsyncEngine, tracker: Tracker, monkeypatch: pytest.MonkeyPatch, first: str
+) -> None:
+    """Two postings resolving to one Job at the same instant: one agrees with
+    the stored value (a no-op), one conflicts. The conflicting one is refused,
+    and the stored state is identical whichever acquires the Job lock first."""
+    board_a, board_b = tracker.token("eqlock-a"), tracker.token("eqlock-b")
+    t = _unique_time()
+    shared = f"https://job-boards.greenhouse.io/{board_a}/jobs/1"
+    boards = [_board(board_a), _board(board_b)]
+    seed_record = _record(board_a, 1, "Senior Software Engineer")
+    seed_provider, _ = _provider(boards, {board_a: [seed_record], board_b: []}, now=t)
+    await _run(db_engine, seed_provider, tracker, observed_at=t, context=_context(seed_provider))
+    seeded = await _persisted(db_engine, board_a, "1")
+    assert seeded.job.seniority == "senior"
+
+    agreeing_record = _record(board_a, 1, "Senior Software Engineer")
+    conflicting_record = _record(board_b, 2, "Staff Software Engineer", url=shared)
+    provider, _ = _provider(
+        boards, {board_a: [agreeing_record], board_b: [conflicting_record]}, now=t
+    )
+    jobs = {job.source_tenant_id: job for job in (await provider.discover(QUERY)).jobs}
+    verified = verify_normalization_context(_context(provider), provider)
+    raw_ids: dict[str, uuid.UUID] = {}
+    for token in (board_a, board_b):
+        raw_ids[token] = await provider_execution._write_fetched_row(
+            db_engine, jobs[token], jobs[token].discovered_at
+        )
+    tracker.raw_ids |= set(raw_ids.values())
+
+    holding, release = asyncio.Event(), asyncio.Event()
+    flushes: list[str] = []
+
+    async def hold_first() -> None:
+        flushes.append("flush")
+        if len(flushes) == 1:
+            holding.set()
+            await release.wait()
+
+    monkeypatch.setattr(persistence, "_after_normalized_flush", hold_first)
+
+    def persist(token: str) -> Any:
+        job = jobs[token]
+        return persistence.persist_posting(
+            db_engine, resolve_identity(job), job, t, raw_ids[token], normalization=verified
+        )
+
+    if first == "agreeing":
+        agreeing_task = asyncio.create_task(persist(board_a))
+        await asyncio.wait_for(holding.wait(), timeout=30)
+        conflicting_task = asyncio.create_task(persist(board_b))
+        await asyncio.sleep(0.5)
+        assert not conflicting_task.done()  # blocked on the Job row lock
+        release.set()
+        agreeing_outcome, conflicting_outcome = await asyncio.wait_for(
+            asyncio.gather(agreeing_task, conflicting_task, return_exceptions=True), timeout=30
+        )
+    else:
+        release.set()  # the conflicting write is refused before its flush seam
+        (conflicting_outcome,) = await asyncio.wait_for(
+            asyncio.gather(persist(board_b), return_exceptions=True), timeout=30
+        )
+        agreeing_outcome = await asyncio.wait_for(persist(board_a), timeout=30)
+
+    assert isinstance(conflicting_outcome, ProvenanceIntegrityError)
+    assert not isinstance(agreeing_outcome, BaseException)
+    after = await _persisted(db_engine, board_a, "1")
+    assert after.job.id == seeded.job.id
+    assert _values(after.job) == _values(seeded.job)
+    assert after.job.field_provenance == seeded.job.field_provenance
+    async with AsyncSession(bind=db_engine) as session:
+        refused = await session.get(RawJobIngestion, raw_ids[board_b])
+        assert refused is not None
+        assert (refused.processing_status, refused.parser_version) == ("fetched", None)
+        assert refused.job_occurrence_id is None
+        attached = (
+            await session.execute(
+                select(JobOccurrence).where(JobOccurrence.source_tenant_id == board_b)
+            )
+        ).scalar_one_or_none()
+        assert attached is None  # the refused Tier 2 attach was rolled back
+        agreed = await session.get(RawJobIngestion, raw_ids[board_a])
+        assert agreed is not None
+        assert (agreed.processing_status, agreed.parser_version) == (
+            "normalized",
+            verified.parser_version,
+        )

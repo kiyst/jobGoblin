@@ -1556,9 +1556,10 @@ schema, not a one-off rule for job fields.
 implements this rule for its three normalized fields, under the destination `Job`'s row
 lock inside the persistence transaction: an `unavailable` result never writes (an
 abstention never erases); an incoming `explicit_source`/`structured_metadata` tag is
-rejected; higher trust replaces and lower trust is kept; at equal trust a strictly newer
-`observed_at` replaces, and at an equal instant only a different parser version replaces
-(so a rerun is idempotent). A value without a valid entry, an entry without a value, or a
+rejected; higher trust replaces and lower trust is kept; at equal trust a strictly later
+`observed_at` replaces, and at an equal instant an identical value is a no-op (so a rerun
+is idempotent) while a differing value is refused, whatever the parser versions. A parser
+version is traceability evidence, never an ordering signal. A value without a valid entry, an entry without a value, or a
 malformed or other-provider entry is rejected rather than overwritten. The configurable
 per-provider priority list is **not** implemented: S3 has one normalized provider
 (Greenhouse), and enabling a second requires a separately reviewed provider-priority

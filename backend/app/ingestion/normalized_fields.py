@@ -344,10 +344,12 @@ def merge_field(
     4. A value without an entry, an entry without a value, or a malformed or
        foreign-provider entry: raise, never overwrite.
     5. Higher trust replaces; lower trust is kept.
-    6. Equal trust: a strictly newer `observed_at` replaces and an older one is
-       kept. At an equal `observed_at`, a different parser version replaces (a
-       reprocessing under new code) and the same version is kept, so a rerun is
-       idempotent.
+    6. Equal trust: a strictly later `observed_at` replaces and an earlier one
+       is kept. At an equal instant, an identical value is a no-op (so a rerun
+       is idempotent) and a differing value is refused, whatever the parser
+       versions: a parser version is evidence, not an ordering signal, so it
+       never decides which of two equal-time results wins. A corrected parser
+       result replaces an equal-trust value only through a later observation.
 
     S3 has exactly one normalized provider. Cross-provider priority is not
     implemented: entries from any other provider are rejected (rule 4), and
@@ -368,9 +370,11 @@ def merge_field(
         return _write(incoming, origin) if rank > existing.rank else None
     if origin.observed_at != existing.observed_at:
         return _write(incoming, origin) if origin.observed_at > existing.observed_at else None
-    if origin.parser_version != existing.parser_version:
-        return _write(incoming, origin)
-    return None
+    if incoming.value == existing_value:
+        return None
+    raise ProvenanceIntegrityError(
+        "conflicting equal-trust values were observed at the same instant"
+    )
 
 
 def _write(incoming: NormalizationResult[str], origin: EntryOrigin) -> FieldWrite:

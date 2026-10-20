@@ -80,8 +80,9 @@ manifest's canonical JSON (sorted keys, compact separators, ASCII escapes, no Na
   a later build that sees different bytes fails closed.
 
 Excluded from the closure, so their edits never rotate the version:
-`app/providers/greenhouse.py` (transport, retries, timeouts, envelope parsing), the
-persistence and pipeline code, `salary.py`, `url.py`, models, and the API.
+`app/providers/greenhouse.py` (transport, timeouts, retries and backoff, media-type and
+size checks, health, and completeness diagnostics only), the persistence and pipeline
+code, `salary.py`, `url.py`, models, and the API.
 
 ### 3. Unforgeable, verified context (A1)
 
@@ -112,11 +113,24 @@ expose a snapshot equal to the context's; a provider named `greenhouse` without 
 closed. Each job's `source_tenant_id` must be a board in the verified snapshot with an
 approved mode, or the projection raises.
 
-The record semantics that decide a job's values -- record validation, duplicate identity,
-and the content-mode gate in front of the converter -- were extracted unchanged from
-`greenhouse.py` into `app/providers/greenhouse_record.py`, so the manifest can hash them
-without hashing transport code. The adapter still owns the network, and is still the only
-importer of `httpx`.
+Every application semantic that decides a job's values was extracted unchanged from
+`greenhouse.py` into `app/providers/greenhouse_record.py`, so the manifest hashes it
+without hashing transport code (correction 1 completed the extraction):
+
+- board configuration (`GreenhouseBoard`) and `GreenhouseBoardSet`, the single source of
+  both the snapshot verification binds and the board (token, company, content mode) each
+  job is built with;
+- response decoding and JSON parsing, and extraction of the `jobs` array;
+- record validation and duplicate selection;
+- the content-mode gate in front of the converter, and `DiscoveredJob` construction.
+
+The adapter passes only a board token and the response body to
+`GreenhouseBoardSet.parse_body`, and its snapshot property only returns the board set's.
+It reads no content mode, decodes nothing, and constructs no job; a test pins this. It
+still owns the network and is still the only importer of `httpx`. Existing importers of
+`GreenhouseBoard`, `GreenhouseConfigurationError`, `_validate_record`, and
+`_duplicate_identity` from the adapter, including the frozen S2c harness, are served by
+explicit re-exports.
 
 ### 5. Write path and transaction (A4)
 
@@ -159,9 +173,13 @@ The precedence rule, per field, under the `Job` row lock:
    overwrite.
 5. Trust order `explicit_source > structured_metadata > parsed_description > derived >
    inferred`: higher trust replaces; lower trust is kept.
-6. Equal trust: a strictly newer `observed_at` replaces and an older one is kept. At an
-   equal instant, a different parser version replaces (reprocessing under new code) and
-   the same version is kept, so a rerun is idempotent.
+6. Equal trust: a strictly later `observed_at` replaces and an earlier one is kept. At
+   an equal instant, an identical value is a no-op (a rerun is idempotent) and a
+   differing value is refused and aborts the run, whatever the parser versions. A parser
+   version is evidence, never an ordering signal: its hash carries no chronology, so it
+   never decides which of two equal-time results wins, and the same version producing
+   two values at one instant is surfaced rather than masked. A corrected parser result
+   replaces an equal-trust value only through a later observation (correction 1).
 
 S3 has exactly one normalized provider. Cross-provider priority is **not** implemented;
 entries from any other provider are rejected. Enabling a second normalized provider
@@ -177,8 +195,9 @@ committed `CORRECT` literal exactly (10, 18, and 5 records), that every other re
 `NULL`, that every unpersisted normalized column stays `NULL`, that provenance equals the
 emitted tag (including the three L5 `location.country` exceptions), and that raw payloads
 and hashes are exact. A rerun is idempotent, and a legitimately newer version (a real
-configuration change through the real builder) follows the rule in §6. A covered-output
-regression fails this persisted check itself.
+configuration change through the real builder) is a no-op at the same instant and
+replaces only through a later observation, per §6. A covered-output regression fails this
+persisted check itself.
 
 ## Bounded claim
 
@@ -194,7 +213,8 @@ regression fails this persisted check itself.
 - An abstention never retracts a value: after a parser change, an older value stays
   (still traceable to its own version and raw input) until a replacing write. No backfill
   or re-normalization tool exists.
-- At an equal instant and version, a differing value keeps the first writer.
+- An equal-time conflict between equal-trust results is refused and aborts the run; it
+  is not resolved automatically. A corrected value needs a later observation.
 - The explicit `FOR UPDATE` re-select is defense in depth: resolution already holds the
   same lock, so the concurrency test proves the serialized outcome but cannot isolate the
   re-select.
