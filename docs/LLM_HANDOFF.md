@@ -1497,6 +1497,28 @@ findings: none
     - elapsed: this correction finished at about 22:30Z on 2026-10-20.
 - STOP -- for Sol Medium's narrow re-review of correction 2. No final `C`, coordinator
   run, `A`, `R`, merge, provider contact, runtime activation, S4, or S5.
+- **Final `C`** (this commit, the direct single-parent child of correction 2
+  `a9ee747c5c82d9ed0474bdd8203489471fc7867b`). Changes only this file. It records Sol
+  Medium's advisory review of correction 2, verbatim from the structured review result
+  (verdict `approved`, findings: none):
+
+> Sol Medium independently reviewed a9ee747c5c82d9ed0474bdd8203489471fc7867b against parent a6e807e13e9274c3e020bca7c27d913877750583 and cumulatively against published S2c base b0bb33ac6c471fed759f33555dc4b681876a8927: advisory approved, no findings. The manifest conservatively binds the entire Greenhouse adapter and extracted record module plus the exact installed httpx version; tests cover association, aggregation, snapshot, retry/backoff edits, determinism, and stale-context rejection. Equal-trust/equal-time identical values remain no-ops; differing values fail closed regardless of parser hash, with later observations required for replacement. Persistence locking, atomicity, rollback, scope, and documentation were inspected directly. Git diff checks and static parsing passed; pytest and database tests were not rerun in this read-only session. This approval authorizes no final C, coordinator execution, receipt, A, formal R, merge, provider contact, activation, cleanup, or further slice.
+
+  - The review's non-authorization sentence was accurate when written. The user later
+    explicitly authorized final `C`, one genuine `gate=final` coordinator run, and `A`,
+    then a stop. That authorization excludes formal `R`, merge, provider contact,
+    cleanup, migration, persistence or runtime activation, and S4.
+  - Final `C` differs from the advisory-reviewed `a9ee747` only by this ledger entry. No
+    code, test, fixture, configuration, dependency, schema, or semantic document
+    changes. Migration is not triggered (no `app/db/` or migration path in
+    `b0bb33a..C`).
+  - Workflow metrics: advisory reviews 3 (the last approved, no findings); correction
+    commits 2; receipt runs: 1 pending, against this `C`.
+- Verification: the genuine candidate-bound `verification_coordinator` `gate=final` run
+  against this `C` is pending. It is recorded in `A` only if every step passes, cleanup
+  completes, and `approval_eligible` is `true`. No provider is contacted.
+- STOP after `A` for formal Sol Medium review. No `R`, `M`/`Q`, merge, provider contact,
+  cleanup, migration, persistence or runtime activation, S4, or S5.
 
 ```workflow-metadata
 workflow_version: v3.2
