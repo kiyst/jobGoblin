@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from app.db.models.collection_run import CollectionRun
 from app.db.models.collection_run_provider_attempt import CollectionRunProviderAttempt
 from app.ingestion.clock import Clock
+from app.ingestion.normalized_fields import NormalizationContext, verify_normalization_context
 
 # `_write_fetched_row` is re-exported (not just used internally) because a
 # large existing test suite already calls `pipeline._write_fetched_row(...)`
@@ -39,6 +40,7 @@ async def run(
     *,
     observed_at: datetime,
     clock: Clock,
+    normalization: NormalizationContext | None = None,
 ) -> uuid.UUID:
     """Runs one `CollectionRun` to completion and returns its id.
 
@@ -76,7 +78,17 @@ async def run(
     finalization, so the same execution primitive is shared with
     `app/ingestion/orchestrator.py::run_saved_search()` without either
     caller reaching into the other's internals.
+
+    `normalization` (Phase 4 S3, ADR 0018) is opt-in; `None` keeps Phase 2's
+    raw-only behavior exactly. When a context is given it is independently
+    re-verified -- current manifest, runtime, taxonomy, and this provider's own
+    board/content-mode snapshot -- before anything else: before any
+    `CollectionRun` row, provider call, or database work. A forged, incomplete,
+    stale, or mismatched context raises here and nothing happens.
     """
+    verified = (
+        verify_normalization_context(normalization, provider) if normalization is not None else None
+    )
     run_started_at = clock.now()
 
     async with AsyncSession(bind=engine) as session, session.begin():
@@ -116,7 +128,9 @@ async def run(
         state.per_source_updated.setdefault(source, 0)
 
     try:
-        await execute_provider_query(engine, provider, query, state, observed_at=observed_at)
+        await execute_provider_query(
+            engine, provider, query, state, observed_at=observed_at, normalization=verified
+        )
 
         jobs_discovered = sum(state.per_source_discovered.values())
         inserted = sum(state.per_source_inserted.values())

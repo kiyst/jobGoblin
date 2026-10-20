@@ -19,6 +19,14 @@ from app.ingestion.natural_key import (
     canonicalize_nullable_text,
     tenant_requisition_advisory_lock_key,
 )
+from app.ingestion.normalized_fields import (
+    PERSISTED_COLUMNS,
+    EntryOrigin,
+    NormalizationBindingError,
+    NormalizedProjection,
+    VerifiedNormalization,
+    merge_field,
+)
 from app.normalization.url import normalize_url
 from app.schemas.discovered_job import DiscoveredJob
 
@@ -759,12 +767,51 @@ async def _after_ambiguous_flush() -> None:
     return None
 
 
+async def _after_normalized_flush() -> None:
+    """Test seam only — a no-op in production. Tests monkeypatch this to
+    simulate a failure after the normalized `Job` columns, their
+    `field_provenance` entries, `raw.parser_version`, the raw row's terminal
+    update, and every occurrence/Job effect of resolution have been flushed,
+    but before `persist_posting`'s transaction commits — proving rollback
+    discards all of them together. Never a public parameter."""
+    return None
+
+
+def _apply_normalized_fields(
+    job_row: Job, projection: NormalizedProjection, origin: EntryOrigin
+) -> None:
+    """Merges each projected field into the locked `job_row` under
+    `merge_field`'s rule. Each changed entry is written by replacing the whole
+    `field_provenance` dict — never by mutating a nested entry in place, which
+    `MutableDict` would not detect."""
+    stored = job_row.field_provenance
+    current: dict[str, object] = dict(stored) if stored is not None else {}
+    updated = dict(current)
+    changed = False
+    for column in PERSISTED_COLUMNS:
+        write = merge_field(
+            projection.fields[column],
+            existing_value=getattr(job_row, column),
+            existing_entry=current.get(column),
+            origin=origin,
+        )
+        if write is None:
+            continue
+        setattr(job_row, column, write.value)
+        updated[column] = write.entry
+        changed = True
+    if changed:
+        job_row.field_provenance = updated
+
+
 async def persist_posting(
     engine: AsyncEngine,
     natural_key: NaturalKey,
     job: DiscoveredJob,
     observed_at: datetime,
     raw_id: uuid.UUID,
+    *,
+    normalization: VerifiedNormalization | None = None,
 ) -> UpsertOutcome:
     """Owns the one transaction that validates `raw_id`'s association with
     `job`, resolves/mutates the `Job`/`JobOccurrence` pair, and (for a
@@ -785,7 +832,23 @@ async def persist_posting(
     a structural guarantee rather than an application-level convention:
     a raw row already turned `identity_conflict`/`normalized` can never
     reach the quarantine or ambiguous-match branch again.
+
+    `normalization` (Phase 4 S3, ADR 0018) is opt-in and accepts only a
+    `VerifiedNormalization`. The projection is computed from `job` itself
+    before the transaction opens, holding no lock; a parser or binding
+    exception propagates and this transaction never begins. On a clean
+    `INSERTED`/`UPDATED`/`ATTACHED` outcome the projected fields are merged
+    into the destination `Job` under its row lock and `raw.parser_version` is
+    set, in this same transaction, so the status, link, version, values, and
+    provenance commit together or not at all. Both conflict outcomes write no
+    normalized value and leave `parser_version` unset, exactly as in Phase 2.
     """
+    projection: NormalizedProjection | None = None
+    if normalization is not None:
+        if not isinstance(normalization, VerifiedNormalization) or not normalization.is_authentic():
+            raise NormalizationBindingError("persistence requires a VerifiedNormalization")
+        projection = normalization.project(job)
+
     async with AsyncSession(bind=engine) as session, session.begin():
         raw = await _select_raw_for_association(session, raw_id)
         _validate_raw_association(raw, natural_key, job)
@@ -838,9 +901,36 @@ async def persist_posting(
                 ambiguous_candidate_job_ids=resolution.ambiguous_candidate_job_ids,
             )
 
+        if projection is not None:
+            # A4: the destination Job's row lock is the serialization point for
+            # the merge. Tier 1 and Tier 2/3 already hold it (parent before
+            # child); a Tier 5 Job is new in this transaction. Re-selecting it
+            # `FOR UPDATE` with `populate_existing` makes both the lock and a
+            # fresh read explicit rather than assumed from the identity map.
+            job_row = (
+                await session.execute(
+                    select(Job)
+                    .where(Job.id == resolution.job_id)
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
+            ).scalar_one()
+            _apply_normalized_fields(
+                job_row,
+                projection,
+                EntryOrigin(
+                    occurrence_id=resolution.occurrence_id,
+                    raw_job_ingestion_id=raw_id,
+                    parser_version=projection.parser_version,
+                    observed_at=observed_at,
+                ),
+            )
+            raw.parser_version = projection.parser_version
         raw.processing_status = "normalized"
         raw.job_occurrence_id = resolution.occurrence_id
         await session.flush()
+        if projection is not None:
+            await _after_normalized_flush()
         if resolution.kind is UpsertKind.ATTACHED:
             await _after_attach_flush()
         return resolution

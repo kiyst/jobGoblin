@@ -646,7 +646,7 @@ below are resolved *display* values only.
 | first_seen_at | timestamptz, not null | **no server default** (Rev 14) — describes observation time, not row-creation time; nothing may silently substitute `now()` for an omitted value. Writers (and the test factory) must supply it explicitly |
 | last_seen_at | timestamptz, not null | same as `first_seen_at`; `CHECK (first_seen_at <= last_seen_at)` |
 | application_deadline | timestamptz | nullable |
-| field_provenance | jsonb | nullable, `MutableDict.as_mutable`-wrapped; `CHECK` restricts to a top-level JSON object when non-null, matching `saved_searches.enabled_sources`/`scoring_weights` — same documented nested-mutation limitation (replace the complete per-field object, e.g. `job.field_provenance["salary_min"] = updated_entry`, rather than mutating a nested dict in place) |
+| field_provenance | jsonb | nullable, `MutableDict.as_mutable`-wrapped; `CHECK` restricts to a top-level JSON object when non-null, matching `saved_searches.enabled_sources`/`scoring_weights` — same documented nested-mutation limitation (replace the complete per-field object, e.g. `job.field_provenance["salary_min"] = updated_entry`, rather than mutating a nested dict in place). Phase 4 S3 ([ADR 0018](DECISIONS/0018-d1-parser-version-and-normalized-persistence.md)) is the first writer, for `employment_type`, `seniority`, and `country` only; each entry is `{"source", "provider", "provider_source", "occurrence_id", "raw_job_ingestion_id", "parser_version", "observed_at"}`, replaced whole — see "Field merging across occurrences" below |
 | created_at / updated_at | timestamptz, not null | `server_default now()`, per the established global convention |
 
 **Deferred (Rev 14): `duplicate_group_id` is omitted from this migration entirely.**
@@ -841,8 +841,8 @@ it. This Phase 1 slice only migrates the schema.
 | job_occurrence_id | UUID | FK → job_occurrences, `ON DELETE SET NULL`, nullable, set once this payload is associated with any occurrence — see nullable-behavior note below |
 | fetched_at | timestamptz, not null | **Rev 17: no server default** — represents the actual fetch event, which may differ from row-insertion time during buffering, replay, or backfill; callers/factories must supply it explicitly |
 | raw_payload | jsonb, not null | the `DiscoveredJob.raw` dict; **not** full raw HTML (§17 — avoid unbounded storage). `CHECK` requires a top-level JSON object (Rev 17). Stays not null through Phase 1 — see the retention note below. Deliberately not `MutableDict`-wrapped: an immutable, write-once snapshot set at insert, unlike `jobs.field_provenance`'s incrementally-updated fields — this is an application-level convention (Phase 2's ingestion code must honor it), not a schema-enforced immutability guarantee |
-| raw_content_hash | text, not null | sha256 of raw_payload, used to skip re-normalizing unchanged content. `CHECK` requires trim/non-empty only (Rev 17) — deliberately no length/hex-format constraint, since this is application-computed, not user input |
-| parser_version | text | nullable, case-preserving, NULL-safe trim/non-empty `CHECK` — which normalization code version produced the linked occurrence, if any. No code writes it yet: Phase 3 defines no normalization-version value or threading, and [ADR 0011](DECISIONS/0011-phase-3-exit-audit.md)'s D1 precondition must be met before any classifier result is first persisted |
+| raw_content_hash | text, not null | sha256 of raw_payload. Intended to let a later slice skip re-normalizing unchanged content; no code does so yet (S3 re-normalizes every ingestion deterministically). `CHECK` requires trim/non-empty only (Rev 17) — deliberately no length/hex-format constraint, since this is application-computed, not user input |
+| parser_version | text | nullable, case-preserving, NULL-safe trim/non-empty `CHECK` — the verified D1 parser version (`jgnorm-v1:sha256:<hex>`) under which this payload was normalized. Phase 4 S3 ([ADR 0018](DECISIONS/0018-d1-parser-version-and-normalized-persistence.md)) sets it, in the same transaction as the terminal status, only on a clean `normalized` outcome of an opt-in, verified normalization run for a Greenhouse job; it stays `NULL` for raw-only runs, unmapped providers, `parse_error`, and `identity_conflict` |
 | processing_status | text, not null | **renamed from `retrieval_status` in Rev 3** — `CHECK`-restricted enum: `fetched` / `parse_error` / `normalized` / `identity_conflict`. Describes only what happens to *this payload* after it exists; request-level failure modes (`http_error`, `rate_limited`, `timeout`) were removed from this enum — see below |
 | error_message | text | nullable, case-preserving, NULL-safe trim/non-empty `CHECK` |
 | created_at / updated_at | timestamptz, not null | `server_default now()`, per the established global convention (Rev 17) — the standard row-lifecycle pair, distinct from the business timestamp `fetched_at` above |
@@ -1550,3 +1550,16 @@ column shape above is what Phase 1 commits to so it doesn't need a later migrati
 same "never silently merge on a weak signal" principle applies to `companies` (see
 above) and to job identity itself (ADR 0004) — this is a consistent theme across the
 schema, not a one-off rule for job fields.
+
+**Phase 4 S3 implementation (single provider only,
+[ADR 0018](DECISIONS/0018-d1-parser-version-and-normalized-persistence.md)).** S3
+implements this rule for its three normalized fields, under the destination `Job`'s row
+lock inside the persistence transaction: an `unavailable` result never writes (an
+abstention never erases); an incoming `explicit_source`/`structured_metadata` tag is
+rejected; higher trust replaces and lower trust is kept; at equal trust a strictly newer
+`observed_at` replaces, and at an equal instant only a different parser version replaces
+(so a rerun is idempotent). A value without a valid entry, an entry without a value, or a
+malformed or other-provider entry is rejected rather than overwritten. The configurable
+per-provider priority list is **not** implemented: S3 has one normalized provider
+(Greenhouse), and enabling a second requires a separately reviewed provider-priority
+policy first.

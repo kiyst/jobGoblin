@@ -13,6 +13,7 @@ from app.ingestion.identity import (
     UnresolvableIdentityError,
     resolve_identity,
 )
+from app.ingestion.normalized_fields import VerifiedNormalization
 from app.ingestion.persistence import UpsertKind, persist_posting
 from app.providers.base import DiscoveryProvider
 from app.schemas.discovered_job import DiscoveredJob, ProviderError, SourceRunStats
@@ -148,6 +149,7 @@ async def execute_provider_query(
     state: ProviderExecutionState,
     *,
     observed_at: datetime,
+    normalization: VerifiedNormalization | None = None,
 ) -> None:
     """Executes one provider/query pair against attempt rows the caller has
     already created, mutating `state` in place. Creates and finalizes no
@@ -166,6 +168,10 @@ async def execute_provider_query(
     `ProviderError` entries are a *valid*, non-exceptional degraded outcome
     — those are handled here exactly as `pipeline.run()` always has, never
     raised.
+
+    `normalization` (Phase 4 S3, ADR 0018) is passed unchanged to every
+    `persist_posting` call; `None` keeps Phase 2's raw-only behavior. Callers
+    must pass only a `VerifiedNormalization` produced for this same provider.
     """
     result = await provider.discover(query)
 
@@ -262,7 +268,14 @@ async def execute_provider_query(
             state.had_parse_error = True
             continue
 
-        outcome = await persist_posting(engine, natural_key, job, observed_at, raw_id)
+        # Without normalization the call is exactly Phase 2's; the keyword is
+        # passed only when a verified context exists.
+        if normalization is None:
+            outcome = await persist_posting(engine, natural_key, job, observed_at, raw_id)
+        else:
+            outcome = await persist_posting(
+                engine, natural_key, job, observed_at, raw_id, normalization=normalization
+            )
         if outcome.kind is UpsertKind.INSERTED:
             state.per_source_inserted[job.source] = state.per_source_inserted.get(job.source, 0) + 1
         elif outcome.kind is UpsertKind.UPDATED:

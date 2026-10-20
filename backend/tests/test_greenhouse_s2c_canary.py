@@ -38,7 +38,7 @@ import pytest
 
 from app.ingestion.hashing import canonical_json_hash
 from app.normalization.taxonomy import DEFAULT_SKILLS_TAXONOMY_PATH, TaxonomyIndex, load_taxonomy
-from app.providers import greenhouse as adapter
+from app.providers import greenhouse_record
 from app.providers.greenhouse import GreenhouseClientSettings
 from app.providers.greenhouse_content import ContentOutcome, convert_greenhouse_content
 from scripts import run_greenhouse_s2c_canary as canary
@@ -491,13 +491,15 @@ def test_record_cap_is_enforced_before_conversion(
     """W10 witness: 501 records fail closed before the adapter converts a
     single record."""
     calls: list[object] = []
-    original = adapter.convert_greenhouse_content
+    # S3 (ADR 0018) moved the adapter's per-record conversion call, unchanged,
+    # into `greenhouse_record`; that is where the converter is looked up.
+    original = greenhouse_record.convert_greenhouse_content
 
     def counting(*args: Any, **kwargs: Any) -> Any:
         calls.append(args)
         return original(*args, **kwargs)
 
-    monkeypatch.setattr(adapter, "convert_greenhouse_content", counting)
+    monkeypatch.setattr(greenhouse_record, "convert_greenhouse_content", counting)
     summary = run_pipeline(paths, Recorder(body_of([record(i) for i in range(501)])), taxonomy)
     assert (summary["run_verdict"], summary["run_kind"]) == ("FAIL-CLOSED", "record_cap_exceeded")
     assert calls == []

@@ -98,347 +98,6 @@ that detail.
 
 ### Work done
 
-- Date/agent: 2026-10-04, Claude (implementer). Branch
-  `workflow/throughput-protocol-retention`, base
-  `6752dcdc0ce1b57c0af164aa217d3181566086bd` (`Q` of the Phase 4 S2b merge
-  `M=692c420`). Ending commit: this commit (candidate `C`).
-- Slice: the ADR 0012 pilot evaluation and adoption, a bounded documentation-policy
-  slice. Risk class D, `slice_kind: docs`, `declared_gate: final`. `docs/LLM_WORKFLOW.md`
-  is a `workflow-governing-doc` under `scripts/verification_scope.py`, which forces
-  `gate=final`. No executable, test, fixture, schema, or configuration change.
-- Re-anchor, before any edit and after a fresh fetch:
-  - local `main`, `origin/main`, and remote `main` all equalled the base, and the tree was
-    clean;
-  - S1, S2, and S2b each reached `Q`, which exhausts ADR 0012's three-slice
-    authorization;
-  - no S2c, provider-contact, persistence, D1, S3, or S4 work had begun.
-- Contract: the user's adoption decision and authorization, frozen with every binding
-  input in the create-only, gitignored runtime packet
-  `.claude/runtime/workflow-throughput-protocol-retention-contract.md` (SHA-256
-  `369a6c20c9135d087a50168576c5a1dff886b120ea9e8088743884e6eec4608a`). The packet is not
-  committed. Inputs, in precedence order:
-  1. the user's decision and authorization;
-  2. Sol Medium's compatibility review, with binding amendments E9–E13;
-  3. Astra's amendments E1–E8, as relayed. Astra's full response was not received, and
-     ADR 0016 discloses this with E13's exact wording;
-  4. the implementer's revised evaluation and O1–O5;
-  5. ADR 0012 and Workflow v3.2.
-
-  Both reviews were policy consultations, not formal `R` metadata.
-- Files (exact closed four-path list):
-  - `docs/DECISIONS/0016-workflow-throughput-pilot-evaluation-and-retention.md` (new).
-    It records the required decision sentence verbatim, the evaluation with cited
-    evidence paths, O1–O5, retained and deferred controls, the Phase 4 exit assessment,
-    and rollback;
-  - `docs/LLM_WORKFLOW.md`, in the Workflow v3.2 section:
-    - the ADR 0012 subsection is renamed "Workflow Throughput Protocol (ADR 0012,
-      retained by ADR 0016)", with an updated status and status pointer;
-    - "pilot" becomes "protocol" in the precedence, product-priority, and metrics
-      wording;
-    - the exit paragraph now covers the exit evaluation, next assessment, and rollback;
-    - O1–O5 are added;
-    - two deferred items are added: a new metrics framework, and another model-approval
-      layer.
-
-    No existing requirement was deleted;
-  - `docs/ROADMAP.md`: S2b's stale "in progress" status is replaced with its `M`/`Q`,
-    and an entry is added for this evaluation;
-  - this file: the two-iteration rotation. The S2 iteration was removed. The S2b
-    iteration is retained unchanged as Iteration 1, apart from its renumbered heading.
-- Not changed: ADR 0012 (byte-identical to the base), `CLAUDE.md`, validators and
-  verification tooling, tests, fixtures, schemas, configuration, reviewer roles, receipt
-  binding, handoff retention, and registered witnesses.
-- Metrics, recomputed from committed evidence before commit (receipt and post-merge
-  `duration_seconds` summed with exact decimal arithmetic; commit chains from `git log`):
-  - committed receipts:
-    - pilot: 3 across 3 slices (1.00 per slice);
-    - Phase 3 risk class H: 16 across 6 (2.67);
-    - all Phase 3 v3.2 product slices: 18 across 7 (2.57);
-  - Phase 3 risk class H receipt-bearing corrections after the first `A`: 10, each
-    changing code, tests, or fixtures;
-  - recorded step time:
-    - Phase 3 risk class H receipts: 6,158.988 seconds, averaging 384.937 seconds;
-    - pilot candidate receipts: 1,190.484 seconds;
-    - pilot post-merge runs: 1,238.609 seconds;
-  - known pilot full-suite runs: 9;
-  - pilot relays: 24 (19 necessary, 2 non-actionable, 3 indeterminate).
-
-  Every cited receipt and artifact path exists.
-- Implementer notes, recorded in the packet at freeze and disclosed for formal review:
-  - N1. ADR 0016 names the evaluation checkpoint (`6752dcd`, 2026-10-04T22:18:42Z) so
-    that E12's "less than 24 hours old" sentence stays true. At that instant, S1's `Q`
-    was about 22.4 hours old;
-  - N2. E9 is kept verbatim. One added factual sentence discloses `17f6f24`, the
-    skill-classifier slice's handoff-only commit after its first `A`. It carries no
-    receipt and is not a correction candidate.
-- Pre-commit checks: `check_repo`, `check_handoff`, and `git diff --check` pass. A
-  consistency review covered all four documents.
-- Verification: the genuine `verification_coordinator` `gate=final` run against `C`,
-  recorded in `A`.
-- STOP after `A` for formal Sol Medium review. No `R`, merge, `M`/`Q`, validator or
-  tooling change, Greenhouse or provider contact, S2c, persistence, D1, S3, or S4.
-
-```workflow-metadata
-workflow_version: v3.2
-state: published
-slice_id: 2026-10-04-workflow-throughput-protocol-retention-6752dcd
-slice_kind: docs
-risk_class: D
-base_sha: 6752dcdc0ce1b57c0af164aa217d3181566086bd
-declared_gate: final
-executed_gate: final
-candidate_sha: eac6f0a37e9ceb8a744b2c0c54b1c2315e08ebd2
-receipt_id: 734bd347-bac1-4a8d-a3e7-97b957a995bb
-receipt_path: docs/verification-receipts/eac6f0a37e9ceb8a744b2c0c54b1c2315e08ebd2/734bd347-bac1-4a8d-a3e7-97b957a995bb.json
-```
-
-### Work review
-
-- Date/reviewer: 2026-10-05 (UTC), Sol (primary, Sol Medium). Formal review of the
-  Workflow Throughput Protocol evaluation-and-retention slice (ADR 0016), on
-  `workflow/throughput-protocol-retention`:
-  - base `6752dcdc0ce1b57c0af164aa217d3181566086bd`;
-  - candidate `C` = `eac6f0a37e9ceb8a744b2c0c54b1c2315e08ebd2`;
-  - publication `A` = `cc76502a0d3c4f23e8225b1573184fe0a2f99e9c`;
-  - receipt `734bd347-bac1-4a8d-a3e7-97b957a995bb`, SHA-256
-    `e6e349cda892b013f11cdc9bbc168d7eca962a5335200c5bb2bcc5e67692563d`.
-
-  Reviewed against frozen contract SHA-256
-  `369a6c20c9135d087a50168576c5a1dff886b120ea9e8088743884e6eec4608a`. The earlier Astra
-  and Sol policy consultations (E1–E8 as relayed, and E9–E13) are contract evidence, not
-  formal review metadata for this slice; this is the formal review.
-- **1. Sol's formal verdict and disposition** (as relayed by the user; the relay is the
-  authority for this review):
-  - verdict **approved, no executable findings**; findings none;
-  - primary reviewer Sol (Sol Medium); gate `final`; risk class D, `slice_kind: docs`;
-  - lineage: `C` is the base's direct single-parent child and `A` is `C`'s; the feature
-    branch and origin equal `A`; `main` and `origin/main` remain at the base; the tree is
-    clean;
-  - scope: base→`C` changes exactly the four authorized documentation paths, and ADR 0012's
-    blob is byte-identical to the base. No executable, fixture, configuration, dependency,
-    migration, schema, validator, verification tool, registered witness, reviewer role,
-    receipt rule, handoff-retention rule, or product behavior changed;
-  - `C`→`A` adds exactly one receipt and changes only the newest workflow metadata from
-    pending to published. `C` has no `executed_gate` or formal-review metadata; `A`
-    records D/docs/final, the exact candidate, receipt ID, and path;
-  - contract conformance: ADR 0016, `LLM_WORKFLOW.md`, `ROADMAP.md`, and this file
-    correctly incorporate the retain-with-bounded-revisions decision, O1–O5, E1–E8 as
-    relayed, and E9–E13. E13's limitation on Astra attribution appears exactly and
-    prominently. Existing validator-enforced rules retain precedence;
-  - O1–O5 conform:
-    - O1 is a pre-advisory default, not a verification cap or closed exception list;
-    - O2 distinguishes immutable candidate reviews from proposal or policy reviews
-      without a candidate commit, and requires state-sensitive handling of repeated
-      messages;
-    - O3 requires a dependency-removal or reachable-capability statement without
-      compelling premature or unsafe wiring;
-    - O4 permits evidence reuse while leaving review depth, complete semantic rereview,
-      and rejection entirely within formal R's authority;
-    - O5 requires normal defect handling and a bounded process assessment, without
-      automatic rollback or new authorization;
-  - the evaluation makes none of the prohibited claims: measured delivery time, a
-    controlled counterfactual, unchanged assurance, relay improvement, production
-    readiness, or generalization to live-provider or persistence work.
-- **Rulings:**
-  - **N1 (evaluation checkpoint): approved.** Anchoring the exposure-age statement to
-    commit `6752dcdc0ce1b57c0af164aa217d3181566086bd` at `2026-10-04T22:18:42Z` preserves
-    a historically testable checkpoint as wall-clock time advances. At that checkpoint
-    S1's `Q` was about 22 hours 24 minutes old, S2's about 19 hours 7 minutes, and S2b's
-    `Q` was the checkpoint commit itself, so "less than 24 hours" is accurate and
-    sufficiently bounded.
-  - **N2 (non-receipt handoff commit): approved.**
-    `17f6f241d2c76f0ce3876ec1e2ae5a9bfb0880f3` is a direct post-`A` handoff-only commit
-    that changes only `docs/LLM_HANDOFF.md`. It has no receipt and is not a
-    receipt-bearing correction candidate. Its disclosure does not conflict with E9 or
-    alter the 16-receipt or 10-correction totals.
-  - **Continued metric recording: approved.** Continuing ADR 0012's existing metrics
-    through the Phase 4 exit assessment adds no metric, field, schema, or tool; creates no
-    new pilot authorization window; adds no reviewer or approval layer; authorizes no
-    product work; and is compatible with the retained protocol.
-- **2. Independently rerun or recomputed in formal review** (per the relay):
-  - Git ancestry, branch synchronization, the clean tree, the four-path scope, and ADR
-    0012's identity;
-  - receipt schema and its `C`/base/slice/risk/gate binding; the committed verifier,
-    checker, and configuration hashes;
-  - the affected surface (`docs-only`, `handoff-transition`, `workflow-governing-doc`),
-    no required focused selector, migration not triggered, and the complete active
-    registered-witness inventory;
-  - `approval_eligible=true`;
-  - `require_single_parent` for `C` and `A`; `validate_c_to_a_transition`; published
-    metadata validation; handoff, repository, and diff checks;
-  - every material receipt count, correction candidate, and duration total:
-    - committed receipts: pilot 3 / 3 slices = 1.00; Phase 3 risk class H 16 / 6 = 2.67;
-      all Phase 3 Workflow v3.2 product slices 18 / 7 = 2.57;
-    - risk class H receipt-bearing corrections after the first `A`: 10, all changing
-      executable code, tests, or fixtures, none handoff-only;
-    - Phase 3 risk class H receipt-step duration 6,158.988 seconds, averaging 384.937;
-      pilot candidate receipts 1,190.484 seconds; pilot post-merge runs 1,238.609
-      seconds;
-    - known pilot full-suite executions: 9;
-    - pilot relays: 24 (19 necessary, 2 non-actionable, 3 indeterminate);
-  - existence and readability of all 22 cited evidence files; all 19 cited verification
-    receipts are schema-valid.
-- **3. Committed content inspected directly** (per the relay): ADR 0016; the full
-  `LLM_WORKFLOW.md`, `ROADMAP.md`, and `LLM_HANDOFF.md` changes; the frozen contract; the
-  `C`→`A` publication diff; the receipt; the cited historical receipt and artifact
-  inventory; commit `17f6f24`; and the retained handoff rotation.
-- **4. Relied upon from the genuine C-bound receipt** (coordinator run at `C`; not rerun
-  in formal review):
-  - all 11 applicable final-gate steps PASS, including the full suite (**4,240
-    passed**) and registered contract mutation witnesses (**34 of 34 passed**);
-  - disposable test-database URL validation and reachability passed;
-  - migration not triggered; isolated-worktree integrity and cleanup passed;
-  - recorded coordinator step duration: 481.625 seconds.
-- Re-verified from Git plumbing and the receipt when this review was recorded:
-  - the local and remote feature branch equalled `A`, whose sole parent is `C`;
-    `main`, `origin/main`, and the remote `main` remained at the base; the tree was
-    clean;
-  - the receipt file SHA-256 and the frozen-contract SHA-256 matched exactly; the
-    receipt is schema-valid, bound to `C`, and recomputes `approval_eligible=true`.
-- Evidence boundary: no Greenhouse or other live-network contact, production database, or
-  production-data access occurred. The full suite used the configured disposable test
-  database.
-- **Approved operating rules** (effective only after this slice reaches `Q` on `main`):
-  O1 pre-advisory verification default; O2 actionable review evidence; O3 product
-  capability statement; O4 formal-review evidence reuse with unchanged authority; O5
-  incident assessment trigger. The next workflow assessment is at Phase 4 exit, with
-  earlier O5 assessments if triggered.
-- **Limitations retained:**
-  - Astra's full response was not received; only the relayed E1–E8 text was available to
-    the evaluator;
-  - complete end-to-end timing is unavailable; only recorded verification-step durations
-    exist, and authoring, reviewer, waiting, relay, and unrecorded verification time
-    remain unknown;
-  - Phase 3 is a historical comparison group, not a controlled baseline, and the tasks
-    are not matched;
-  - equivalent assurance and reduced relay frequency have not been demonstrated;
-  - the evidence does not generalize to live-provider, runtime-reachable, or persistence
-    work.
-
-  "No findings" is a review status. It does not prove unchanged assurance or improved
-  throughput.
-- Findings by severity with exact references: none.
-- Verdict: **approved** -- no findings.
-- Exact bounded correction: none required.
-- STOP -- record-only. This review authorizes no merge, `M`, `Q`, tooling or policy
-  change, Greenhouse contact, S2c, persistence, D1, S3, S4, or other slice. Merge
-  requires separate user authorization.
-
-```workflow-review-metadata
-schema_version: 2
-slice_id: 2026-10-04-workflow-throughput-protocol-retention-6752dcd
-risk_class: D
-reviewer: Sol
-reviewer_role: primary
-reviewer_model: Sol Medium
-reviewed_at: 2026-10-05T17:34:25+00:00
-candidate_sha: eac6f0a37e9ceb8a744b2c0c54b1c2315e08ebd2
-publication_commit_sha: cc76502a0d3c4f23e8225b1573184fe0a2f99e9c
-receipt_path: docs/verification-receipts/eac6f0a37e9ceb8a744b2c0c54b1c2315e08ebd2/734bd347-bac1-4a8d-a3e7-97b957a995bb.json
-receipt_id: 734bd347-bac1-4a8d-a3e7-97b957a995bb
-gate: final
-verdict: approved
-findings: none
-```
-
-### Merge record
-
-- Date: 2026-10-05 (UTC). Merged `workflow/throughput-protocol-retention` into `main` with
-  `git merge --no-ff`, at the approved, reviewed commit
-  `7a2e007ab1fac085cfb018a4c1b3a1882646640c` (`R`). `R` is Sol Medium's "approved -- no
-  findings" formal verdict on `C=eac6f0a37e9ceb8a744b2c0c54b1c2315e08ebd2` /
-  `A=cc76502a0d3c4f23e8225b1573184fe0a2f99e9c`.
-  - Merge commit `M`: `e1f510bf7482bb4f48ef1c21c0d35f32ac0ee0ba`.
-  - Rollback boundary (the pre-merge `main`/`origin/main` tip):
-    `6752dcdc0ce1b57c0af164aa217d3181566086bd`.
-  - Full lineage: base `6752dcd` -> `C` `eac6f0a` -> `A` `cc76502` -> `R` `7a2e007` ->
-    `M` `e1f510b` -> `Q` (this commit).
-- Pre-merge checks, after a fresh fetch of `origin`:
-  - the feature branch, its origin, and the remote ref all sat at `R`; `R`'s sole parent
-    is `A` and `A`'s is `C`; the tree was clean;
-  - `main`/`origin/main`/remote `main` were synchronized at the rollback boundary;
-  - **receipt `734bd347-bac1-4a8d-a3e7-97b957a995bb`** (file SHA-256
-    `e6e349cda892b013f11cdc9bbc168d7eca962a5335200c5bb2bcc5e67692563d`):
-    - schema-valid and bound to `C`, the base, the slice, gate `final`, and risk class D;
-    - its verifier, checker (`check_handoff.py`), and configuration hashes equal the files
-      committed at `C`;
-    - the affected surface (`docs-only`, `handoff-transition`, `workflow-governing-doc`)
-      and migration decision (not triggered) recomputed identically;
-    - independently recomputed as approval-eligible;
-  - `validate_c_a_r_chain(C, A, R)` and `check_merge_eligibility(C, A, R)` returned
-    `approved`, `findings: none`, `reviewer_model: Sol Medium`, `reviewer_role: primary`,
-    `gate: final`, `published_slice_kind: docs`.
-- Release sequence:
-  - `M` was created locally and not pushed. It has two parents (the rollback boundary,
-    then `R`), `R..M` has zero content difference, and
-    `check_review.validate_merge(R, M, 6752dcd)` passed.
-  - `verification_coordinator.run_post_merge_verification` ran against `M` in a
-    disposable detached worktree (always full/final). It produced artifact
-    `41e35df6-9d84-4e01-9726-9d0d71d4aa44`:
-    - all 11 steps PASS: Ruff format and check, mypy, `check_repo`, `git diff --check`,
-      disposable test-database URL validation and reachability preflight, the full
-      suite, contract mutation witnesses, handoff metadata validation, and
-      temporary-directory cleanup;
-    - full pytest suite: **4240 passed**;
-    - all 34 registered mutation witnesses passed, 0 failed;
-    - no migration triggered;
-    - worktree removed with no residual entry or directory; cleanup PASS;
-    - recorded step duration 457.172 seconds.
-  - `Q` is `M`'s direct mainline child. It contains that artifact plus this append-only
-    merge record, in one commit (this entry).
-- Post-merge evidence:
-  `docs/post-merge/e1f510bf7482bb4f48ef1c21c0d35f32ac0ee0ba/41e35df6-9d84-4e01-9726-9d0d71d4aa44.json`
-  (SHA-256 of the artifact file as written:
-  `1248b5f1f91f2aee758bd1361a26e8cd8602c98b540a7636c18c860052d10ee6`). It references
-  original receipt `734bd347-bac1-4a8d-a3e7-97b957a995bb`.
-  `check_review.validate_published(C, A, R, M, Q)` and
-  `verification_coordinator.confirm_main_unchanged` run immediately before the push.
-  Their results are in the agent's final report rather than restated here in advance.
-- Evidence by source:
-  - **Post-merge coordinator (this artifact, at `M`):** the 11 steps above, including the
-    4,240-test full suite and 34/34 registered witnesses.
-  - **Pre-merge receipt (at `C`):** all 11 final-gate steps PASS, including the full suite
-    (4,240 passed) and 34/34 registered witnesses; migration not triggered; cleanup PASS;
-    recorded step duration 481.625 seconds.
-  - **Formal review (`R`):** Sol independently reran or recomputed the lineage, scope,
-    ADR 0012 identity, receipt binding and hashes, affected surface, witness inventory,
-    approval eligibility, the `C`→`A` transition, handoff/repository/diff checks, and
-    every material evaluation metric. Sol inspected the four documents, the frozen
-    contract, and the cited evidence inventory, and relied on the receipt for the full
-    suite and registered witnesses. Sol approved N1, N2, and continued recording of ADR
-    0012's existing metrics.
-  - No Greenhouse or other live-network contact, production database, or production-data
-    access occurred. Both suite runs used the configured disposable test database.
-- Status: merged. This slice adds
-  [ADR 0016](DECISIONS/0016-workflow-throughput-pilot-evaluation-and-retention.md), which
-  records the ADR 0012 three-slice pilot evaluation and retains the Workflow Throughput
-  Protocol with bounded operational revisions O1–O5. **O1–O5 become effective only when
-  this `Q` reaches `main`.** The next workflow assessment is at Phase 4 exit, with earlier
-  O5 incident assessments if triggered. No validator, verification tool, metadata schema,
-  reviewer role, receipt-binding rule, handoff-retention rule, registered witness,
-  executable behavior, or product behavior changed. ADR 0012 is unchanged.
-- Retained limitations:
-  - Astra's full response was not received; only the relayed E1–E8 text was available to
-    the evaluator;
-  - complete end-to-end timing is unavailable; only recorded verification-step durations
-    exist, and authoring, reviewer, waiting, relay, and unrecorded verification time
-    remain unknown;
-  - Phase 3 is a historical comparison group, not a controlled baseline, and the tasks
-    are not matched;
-  - equivalent assurance and reduced relay frequency have not been demonstrated;
-  - the evidence does not generalize to live-provider, runtime-reachable, or persistence
-    work.
-
-  Approval and passing verification are review and verification status. They do not
-  establish unchanged assurance or a demonstrated throughput improvement.
-- STOP -- report the synchronized final `main` SHA and stop. No Greenhouse contact, S2c,
-  runtime wiring, persistence, D1 work, migration, workflow-tooling change, S3, S4, or
-  another slice without separate explicit user authorization.
-
-## Iteration 2
-
-### Work done
-
 - Date/agent: 2026-10-05, Claude (implementer). Branch
   `phase-4/greenhouse-live-canary-s2c`, base
   `eeac72abb2ba930fb469a4abb563a7601826266a` (`Q` of the ADR 0016 retention slice).
@@ -1636,3 +1295,99 @@ findings: none
 - STOP -- report the synchronized final `main` SHA and stop. S2c is complete once this `Q`
   reaches `main`. No S3, persistence, runtime activation, another provider request, D1
   work, or another slice without separate explicit user authorization.
+
+## Iteration 2
+
+### Work done
+
+- Date/agent: 2026-10-20, Claude (implementer). Branch
+  `phase-4/normalized-persistence-s3`, base
+  `b0bb33ac6c471fed759f33555dc4b681876a8927` (`Q` of the S2c merge). Ending commit: this
+  commit, the **immutable pre-publication advisory candidate** for Sol Medium's advisory
+  review. It is not final `C`: no coordinator run, receipt, `A`, formal review, or merge
+  metadata exists.
+- Slice: Phase 4 S3, D1 parser version and opt-in normalized persistence
+  ([ADR 0018](DECISIONS/0018-d1-parser-version-and-normalized-persistence.md)). Risk
+  class H, `slice_kind: tooling`, `declared_gate: final`. Streamlined workflow: Sol Medium
+  is the sole reviewer; Astra is not required (no new network, privacy, authorization,
+  destructive-cleanup, or threat-model boundary).
+- Contract: the consolidated S3 proposal, Sol Medium's binding amendments A1–A6, and the
+  user's implementation clarifications 1–8 (all as relayed by the user).
+- First check (clarification 5): the 30 reconstructed corpus envelopes, run through the
+  real adapter over `httpx.MockTransport`, reproduced the D2 `PostingInputs` exactly (30
+  jobs, no warnings or errors), and the non-null `employment_type`, `seniority`, and
+  `location.country` outputs equal ADR 0014's `CORRECT` literals exactly (10, 18, 5).
+- Implementation:
+  - `app/ingestion/normalization_version.py`: the D1 manifest (`jgnorm-v1`). It binds a
+    22-module application closure computed from import syntax trees (canonical-LF
+    SHA-256 per file), the standard library through the full interpreter version, the
+    declared third-party versions (`yaml` with its exact loader hierarchy, `pydantic`,
+    `pydantic_core`), the parsed taxonomy content, the Unicode database version, and the
+    board/content-mode configuration. Undeclared, unreadable, unresolvable, dynamic,
+    relative, or stale evidence fails closed.
+  - `app/ingestion/normalized_fields.py`: the builder-only context, the verifier, the
+    three-field projection with board binding, and the single-provider merge rule.
+  - `app/ingestion/persistence.py`: the projection is computed before Transaction B. On a
+    clean outcome it is merged under an explicit `FOR UPDATE` re-select of the
+    destination `Job` and `raw.parser_version` is set, in the same transaction. A new
+    `_after_normalized_flush` test seam was added.
+  - `pipeline.py` verifies the context before any run, provider call, or write.
+    `provider_execution.py` passes it through, keeping Phase 2's exact call when it is
+    absent.
+  - `app/providers/greenhouse_record.py`: the record validation and conversion-gate
+    semantics, extracted unchanged from the adapter (the diff shows only the
+    method-to-function signature change). `greenhouse.py` gains the read-only
+    `board_content_modes` snapshot.
+- Tests:
+  - new: `tests/test_normalization_version.py` (65), `tests/test_normalized_fields.py`
+    (55), and `tests/test_normalized_persistence.py` (19, real PostgreSQL). The primary
+    D2 proof runs the 30 envelopes through the real adapter into PostgreSQL and compares
+    a fresh reload with the D2 literals;
+  - updated for the extraction only: `tests/test_greenhouse_posting_inputs.py` (an import
+    moves, two direct calls use the extracted function, the import-set and reachability
+    pins change) and `tests/test_greenhouse_s2c_canary.py` (one monkeypatch target
+    moves);
+  - docs: ADR 0018, plus `DATA_MODEL.md`, `ARCHITECTURE.md`, and `ROADMAP.md` (S2c marked
+    complete; S3 entry).
+- Verification at this commit (offline; the authoring checkout, not a receipt):
+  `scripts/verify.py --level routine` (compat mode) passed all 10 checks: Ruff format
+    and check, mypy, `check_repo`, `git diff --check`, test-database URL validation and
+    reachability, the full suite (**4,748 passed, 1 skipped**), handoff metadata, and
+    temporary-directory cleanup. `scripts.contract_mutation_witnesses`: **34 of 34**
+    registered witnesses passed. New files alone: 65 + 55 + 19 passed. No row leaked into
+    the disposable test database. Migration not triggered (no `app/db/` or migration
+    change).
+- Advisory evidence (not registered witnesses): 15 temporary mutations of the new
+  invariants were applied, and every one was caught; the source was restored
+  byte-for-byte. Log `.claude/runtime/phase4-s3-mutation-log.txt` (gitignored), SHA-256
+  `91d923b4d230676dc073fe089632bf63cede4da818557d25b22a0dbbfa9c64bd`.
+- Production verification vs test evidence: nothing runs in production. All evidence is
+  offline tests against the disposable test database. No provider was contacted and no
+  new data was captured.
+- Retained limitations: listed in ADR 0018. In brief:
+  - the guards stop misuse, not hostile in-process code;
+  - an abstention never retracts an older value, and no backfill tool exists;
+  - cross-provider priority is not implemented;
+  - the S2c replay record abstains on all three fields;
+  - value evidence is the exposed, reconstructed 30-record corpus only;
+  - no accuracy, generalization, live, runtime, or production-readiness claim.
+- Workflow metrics so far:
+  - proposal reviews: 1 (approved with A1–A6, no second round);
+  - advisory and formal reviews: 0;
+  - user relays: 3 (one further duplicate relay was not counted);
+  - correction commits: 0;
+  - receipt runs: 0;
+  - elapsed: re-anchor about 04:45Z, implementation start 19:28Z, and this candidate
+    about 20:14Z, on 2026-10-20.
+- STOP -- for Sol Medium's advisory review of this candidate. No final `C`, coordinator
+  run, `A`, `R`, merge, provider contact, runtime activation, S4, or S5.
+
+```workflow-metadata
+workflow_version: v3.2
+state: pending
+slice_id: 2026-10-20-phase4-normalized-persistence-s3-b0bb33a
+slice_kind: tooling
+risk_class: H
+base_sha: b0bb33ac6c471fed759f33555dc4b681876a8927
+declared_gate: final
+```

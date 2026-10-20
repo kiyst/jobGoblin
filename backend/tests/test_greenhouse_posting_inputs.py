@@ -49,10 +49,10 @@ from app.providers.greenhouse import (
     GreenhouseBoard,
     GreenhouseConfigurationError,
     GreenhouseJobBoardProvider,
-    _ValidRecord,
 )
 from app.providers.greenhouse_content import ContentOutcome, GreenhouseContentMode
 from app.providers.greenhouse_posting_inputs import greenhouse_posting_inputs
+from app.providers.greenhouse_record import _ValidRecord, to_discovered_job
 from app.schemas.discovered_job import DiscoveredJob, DiscoveryResult
 from app.schemas.provider import SourceQuery
 from scripts.evaluate_phase3_corpus import CorpusRecord, load_corpus
@@ -212,6 +212,20 @@ def valid_record(record: dict[str, Any]) -> _ValidRecord:
     )
 
 
+def record_to_job(
+    board: GreenhouseBoard, item: _ValidRecord
+) -> tuple[DiscoveredJob, ContentOutcome | None]:
+    """The adapter's per-record mapping, extracted unchanged into
+    `greenhouse_record` by S3 (ADR 0018), called exactly as the adapter calls it."""
+    return to_discovered_job(
+        board_token=board.board_token,
+        company=board.company,
+        content_mode=board.content_mode,
+        item=item,
+        discovered_at=FIXED_NOW,
+    )
+
+
 def make_job(**overrides: Any) -> DiscoveredJob:
     values: dict[str, Any] = {
         "provider": "greenhouse",
@@ -302,8 +316,7 @@ def test_disabled_board_never_touches_content() -> None:
     record = ContentRaisingRecord(synthetic_record())
     with pytest.raises(AssertionError):
         record.get("content")
-    provider = make_provider({}, (ACME,))
-    job, outcome = provider._to_discovered_job(ACME, valid_record(record), FIXED_NOW)
+    job, outcome = record_to_job(ACME, valid_record(record))
     assert outcome is None
     assert job.description is None
     assert job.raw == dict(record)
@@ -549,8 +562,7 @@ async def test_raw_equals_source_record_after_conversion() -> None:
 def test_conversion_never_mutates_or_aliases_the_source_record() -> None:
     record = synthetic_record()
     before = copy.deepcopy(record)
-    provider = make_provider({}, (ACME_DECLARED,))
-    job, outcome = provider._to_discovered_job(ACME_DECLARED, valid_record(record), FIXED_NOW)
+    job, outcome = record_to_job(ACME_DECLARED, valid_record(record))
     assert outcome is ContentOutcome.CONVERTED
     assert job.description == ESCAPED_CONTENT_TEXT
     assert record == before
@@ -1018,8 +1030,17 @@ def _importers(module: str) -> list[str]:
 
 
 def test_new_modules_are_reachable_only_as_allowed() -> None:
-    assert _importers("app.providers.greenhouse_content") == ["app/providers/greenhouse.py"]
-    assert _importers("app.providers.greenhouse_posting_inputs") == []
+    """S3 (ADR 0018): the record semantics moved into `greenhouse_record`, which
+    now performs the conversion, and the bridge gained its first application
+    importer, the opt-in normalization context. Nothing imports the adapter."""
+    assert _importers("app.providers.greenhouse_content") == [
+        "app/providers/greenhouse.py",
+        "app/providers/greenhouse_record.py",
+    ]
+    assert _importers("app.providers.greenhouse_record") == ["app/providers/greenhouse.py"]
+    assert _importers("app.providers.greenhouse_posting_inputs") == [
+        "app/ingestion/normalized_fields.py"
+    ]
     assert _importers("app.providers.greenhouse") == []
 
 
@@ -1035,6 +1056,7 @@ def test_greenhouse_adapter_imports_no_normalization_or_mapper() -> None:
     }
     assert {name for name in from_modules if name.startswith("app.")} == {
         "app.providers.greenhouse_content",
+        "app.providers.greenhouse_record",
         "app.schemas.discovered_job",
         "app.schemas.provider",
     }
@@ -1042,7 +1064,10 @@ def test_greenhouse_adapter_imports_no_normalization_or_mapper() -> None:
 
 def test_greenhouse_adapter_imports_are_the_s1_set_plus_the_content_module() -> None:
     """No new network primitive, logging, persistence, or normalization import:
-    the adapter's module imports are exactly S1's plus `greenhouse_content`."""
+    the adapter's module imports are exactly S1's plus `greenhouse_content`, as
+    revised by S3's extraction (ADR 0018): `copy` and `urllib.parse` moved with
+    the record semantics into `greenhouse_record`, and `types` backs the
+    read-only board/content-mode snapshot."""
     tree = ast.parse(GREENHOUSE_MODULE.read_text(encoding="utf-8"))
     modules: set[str] = set()
     for node in ast.walk(tree):
@@ -1053,20 +1078,20 @@ def test_greenhouse_adapter_imports_are_the_s1_set_plus_the_content_module() -> 
     assert modules == {
         "__future__",
         "asyncio",
-        "copy",
         "json",
         "math",
         "re",
         "time",
+        "types",
         "collections",
         "collections.abc",
         "dataclasses",
         "datetime",
         "enum",
         "typing",
-        "urllib.parse",
         "httpx",
         "app.providers.greenhouse_content",
+        "app.providers.greenhouse_record",
         "app.schemas.discovered_job",
         "app.schemas.provider",
     }
