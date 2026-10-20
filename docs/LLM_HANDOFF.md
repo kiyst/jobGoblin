@@ -1522,10 +1522,14 @@ findings: none
 
 ```workflow-metadata
 workflow_version: v3.2
-state: pending
+state: published
 slice_id: 2026-10-20-phase4-normalized-persistence-s3-b0bb33a
 slice_kind: tooling
 risk_class: H
 base_sha: b0bb33ac6c471fed759f33555dc4b681876a8927
 declared_gate: final
+executed_gate: final
+candidate_sha: 06c89b29ef7d8ddedc187e8bb504963bcc04523a
+receipt_id: 87b753eb-fd7c-474d-8010-37d6a7b02180
+receipt_path: docs/verification-receipts/06c89b29ef7d8ddedc187e8bb504963bcc04523a/87b753eb-fd7c-474d-8010-37d6a7b02180.json
 ```
