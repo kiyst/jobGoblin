@@ -638,10 +638,14 @@ findings: none
 
 ```workflow-metadata
 workflow_version: v3.2
-state: pending
+state: published
 slice_id: 2026-10-21-phase4-read-api-s4-2a9c2a9
 slice_kind: tooling
 risk_class: R
 base_sha: 2a9c2a9570d3cb105a376a9b907658f736950be8
 declared_gate: final
+executed_gate: final
+candidate_sha: ce5ad248157018d7ae9cce5519ccd32b19f3ccea
+receipt_id: 4d8320ca-98da-4c4b-be42-de7a9173c087
+receipt_path: docs/verification-receipts/ce5ad248157018d7ae9cce5519ccd32b19f3ccea/4d8320ca-98da-4c4b-be42-de7a9173c087.json
 ```
