@@ -649,3 +649,51 @@ candidate_sha: ce5ad248157018d7ae9cce5519ccd32b19f3ccea
 receipt_id: 4d8320ca-98da-4c4b-be42-de7a9173c087
 receipt_path: docs/verification-receipts/ce5ad248157018d7ae9cce5519ccd32b19f3ccea/4d8320ca-98da-4c4b-be42-de7a9173c087.json
 ```
+
+### Work review
+
+- Date/reviewer: 2026-10-21 (UTC), Sol (primary, Sol Medium). Formal review of Phase 4 S4,
+  the local read-only jobs API, on `phase-4/read-api-s4`:
+  - base `2a9c2a9570d3cb105a376a9b907658f736950be8`;
+  - final candidate `C` = `ce5ad248157018d7ae9cce5519ccd32b19f3ccea`;
+  - publication `A` = `dd8258380bec0d5d2fe017349080075dc4216a45`;
+  - receipt `4d8320ca-98da-4c4b-be42-de7a9173c087`, SHA-256
+    `5d6bfb4009d7cddffbfc56a099ee7ad1a27249ef5a39e89de357e2dcca5d121f`.
+- Invocation: the coordinating agent ran Sol Medium automatically through the Codex CLI
+  (`codex exec -m gpt-6.1-sol`, medium reasoning effort, read-only sandbox, structured
+  output), with no user relay.
+  - Codex session `01a15c48-7940-72a3-989d-d2717fef539c`.
+  - The prompt, result and log are preserved, gitignored, under
+    `.claude/runtime/claude-autopilot/s4/sol-formal-3/`. Result SHA-256
+    `d09dd2002cef0359a513aedd8f7c92fb86ddba0c9628f8c651441bdb6204cc3d`.
+  - `reviewed_at` below is the result file's modification time.
+- Earlier formal-review history in this slice, both recorded in Work done above:
+  - attempt 1 was environment-blocked and inspected nothing;
+  - attempt 2, on the superseded `C=0a2e4ad`/`A=f476248`, requested changes with one P2
+    finding, fixed by correction 2.
+- Sol's durable handoff paragraph, verbatim:
+
+> Sol Medium formal primary review: approved, no findings, for C=ce5ad248157018d7ae9cce5519ccd32b19f3ccea and A=dd8258380bec0d5d2fe017349080075dc4216a45. Independently verified the complete single-parent chain, 15-path cumulative scope, unchanged 24-module S3 D1 closure and taxonomy, receipt SHA-256/schema/bindings/committed hashes, recomputed affected surface and focused selector, no migration trigger, complete 34-witness inventory, approval eligibility, and permitted C→A metadata transition. Inspected implementation, tests, contract, documentation, and prior review artifacts. Reran repository, handoff, diff, and selected static checks; offline ASGI probes confirmed control rejection before trimming across all five filters, ordinary-space trimming, fixed errors, validation precedence, leak-free failure responses, UTC cursor handling, and rollback on failure. Relied on receipt 4d8320ca-98da-4c4b-be42-de7a9173c087 for the 4,870-test full suite, 87 focused tests, database-backed behavior, and witness execution. No files changed, database accessed, or network service contacted.
+
+- Findings by severity with exact references: none.
+- Verdict: **approved** -- no findings.
+- Exact bounded correction: none required.
+- Approval is review status, not production readiness. It does not authorize provider
+  contact, live ingestion, S5, public or LAN exposure, or another slice.
+
+```workflow-review-metadata
+schema_version: 2
+slice_id: 2026-10-21-phase4-read-api-s4-2a9c2a9
+risk_class: R
+reviewer: Sol
+reviewer_role: primary
+reviewer_model: Sol Medium
+reviewed_at: 2026-10-21T02:30:03+00:00
+candidate_sha: ce5ad248157018d7ae9cce5519ccd32b19f3ccea
+publication_commit_sha: dd8258380bec0d5d2fe017349080075dc4216a45
+receipt_path: docs/verification-receipts/ce5ad248157018d7ae9cce5519ccd32b19f3ccea/4d8320ca-98da-4c4b-be42-de7a9173c087.json
+receipt_id: 4d8320ca-98da-4c4b-be42-de7a9173c087
+gate: final
+verdict: approved
+findings: none
+```
