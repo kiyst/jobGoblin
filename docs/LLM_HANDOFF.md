@@ -566,6 +566,29 @@ findings: none
   - Workflow metrics: advisory reviews 1; correction commits 1; receipt runs 0.
 - STOP -- for a narrow re-review of correction 1. No final `C`, coordinator run, `A`,
   `R`, merge, provider contact, live ingestion, or S5.
+- **Final `C`** (this commit, the direct single-parent child of correction 1
+  `85e3ccb80e133773349b6aa3d135fceb761891d6`). Changes only this file, recording the
+  narrow advisory re-review of correction 1:
+  - Reviewer: a fresh Claude general-purpose agent (read-only; Claude Opus 5.5; not Sol,
+    Codex, or Astra). Verdict **approved, no findings**. Preserved under
+    `.claude/runtime/claude-autopilot/s4/advisory-rereview-1.md`.
+  - It confirmed the exact 5-file correction scope and that every hunk maps to an
+    advisory finding.
+  - Its probe of 32 edge cases passed: 18 unrepresentable or malformed cursor times all
+    return 400 `invalid_cursor` with no echo and no 500, 10 valid edge times return 200,
+    and 4 non-UTC same-instant cursors paginate identically to UTC.
+  - It reran the API and seeder suites (66 passed), plus Ruff, mypy and
+    `check_handoff`.
+  - Final `C` differs from `85e3ccb` only by this ledger entry. No code, test,
+    configuration, dependency, schema, or semantic document changes. Migration is not
+    triggered: nothing in `2a9c2a9..C` touches `app/db/` or a migration path.
+  - Workflow metrics: proposal reviews 1; advisory reviews 2 (changes requested, then
+    approved); correction commits 1; receipt runs 1 pending, against this `C`.
+- Verification: the genuine candidate-bound `verification_coordinator` `gate=final` run
+  against this `C` is pending. It is recorded in `A` only if every step passes, cleanup
+  completes, and `approval_eligible` is `true`. No provider is contacted.
+- STOP after `A` for the formal primary review (Sol Medium, as the validator requires
+  for tooling slices). No `R`, `M`/`Q`, merge, provider contact, live ingestion, or S5.
 
 ```workflow-metadata
 workflow_version: v3.2
