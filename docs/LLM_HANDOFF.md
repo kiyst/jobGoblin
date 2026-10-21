@@ -487,9 +487,10 @@ findings: none
 
 - Date/agent: 2026-10-21, Claude (implementer; Claude Opus 5.5, coordinating session).
   Branch `phase-4/read-api-s4`, base `2a9c2a9570d3cb105a376a9b907658f736950be8` (`Q` of
-  the S3 merge). Ending commit: this commit, the **pre-publication advisory candidate**
-  for one fresh Claude advisory review. It is not final `C`: no coordinator run,
-  receipt, `A`, formal review, or merge metadata exists.
+  the S3 merge). The pre-publication advisory candidate
+  `ab5620f0769eac57dae7eec41ea36def5410a8a6` is preserved unamended. Ending commit: this
+  commit, **correction 1** (its direct single-parent child). Neither is final `C`: no
+  coordinator run, receipt, `A`, formal review, or merge metadata exists.
 - Slice: Phase 4 S4, the local read-only jobs API
   ([ADR 0019](DECISIONS/0019-local-read-only-jobs-api.md)). Risk class R (user
   decision), `slice_kind: tooling`, `declared_gate: final`.
@@ -524,7 +525,7 @@ findings: none
   `Q=2a9c2a9…`, plus the S4 entry); the `README.md` demo. `DATA_MODEL.md` is unchanged.
 - No migration or `app/db/` change. No file in the S3 D1 closure is edited, so the parser
   version is unchanged; the manifest tests pass.
-- Verification at this commit (offline; the authoring checkout, not a receipt):
+- Verification at `ab5620f` (offline; the authoring checkout, not a receipt):
   `scripts/verify.py --level routine` passed all 10 checks: Ruff format and
     check, mypy, `check_repo`, `git diff --check`, test-DB URL validation and
     reachability, the full suite (**4,845 passed, 1 skipped**: S3's 4,783 plus 62 new),
@@ -545,8 +546,26 @@ findings: none
   - correction commits: 0;
   - receipt runs: 0;
   - user relays: 1 (the S4 decision).
-- STOP -- for one fresh Claude advisory review of this candidate. No final `C`,
-  coordinator run, `A`, `R`, merge, provider contact, live ingestion, or S5.
+- **Correction 1**, from advisory review 1 of `ab5620f` by a fresh Claude
+  general-purpose agent (read-only; changes requested; one medium and two low findings;
+  preserved under `.claude/runtime/claude-autopilot/s4/advisory-review-1.md`):
+  - Medium: a cursor that decoded cleanly but held an out-of-range time (year 1 at
+    `+01:00`, or 9999-12-31 at `-01:00`) reached PostgreSQL and returned the generic
+    500 instead of 400 `invalid_cursor`. Nothing leaked. Fix: `decode_cursor` now
+    normalizes the time to UTC inside its guarded block and treats `OverflowError` as
+    `invalid_cursor`.
+  - Low: tests added for both overflow directions, a non-UTC-offset cursor that denotes
+    the same instant, and NULL `title`/`location_raw` rows under filters. The seeder
+    refusal test now asserts the specific `RuntimeError`.
+  - Low (informational): ADR 0019 §7 now notes FastAPI's fixed default 404/405 bodies
+    for unmatched paths, and the UTC cursor normalization.
+  - Verification at this commit: Ruff and mypy (180 files) clean; the API, seeder,
+    health, and D1 manifest suites pass (158); no row leaked. A temporary mutation that
+    removes the UTC normalization makes both overflow cases fail; the file was restored
+    byte-identically. The full suite runs in the final-gate coordinator.
+  - Workflow metrics: advisory reviews 1; correction commits 1; receipt runs 0.
+- STOP -- for a narrow re-review of correction 1. No final `C`, coordinator run, `A`,
+  `R`, merge, provider contact, live ingestion, or S5.
 
 ```workflow-metadata
 workflow_version: v3.2

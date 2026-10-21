@@ -88,7 +88,10 @@ nor skipped under an unchanged snapshot.
   input-echoing 422 cannot occur.
 - **Precedence:** `invalid_query` checks run before the cursor check.
 - **"Missing" job:** a well-formed UUID with no row. `/jobs/` itself redirects to
-  `/jobs`.
+  `/jobs`. Paths and methods that match neither route (`/jobs/a/b`, `POST /jobs`) get
+  FastAPI's fixed default 404/405 bodies, which reflect nothing.
+- **Cursor times** are normalized to UTC while decoding. A cursor whose time cannot be
+  represented, or whose offset is missing, is `invalid_cursor`.
 - **Logging:** route failures log only the exception type, never its message.
 - **Failures outside the route body** (dependency setup or teardown, response
   serialization) get Starlette's plain-text generic `Internal Server Error`. No SQL,

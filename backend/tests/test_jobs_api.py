@@ -15,7 +15,7 @@ import secrets
 import uuid
 from collections.abc import AsyncIterator, Iterable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -339,6 +339,20 @@ async def test_each_filter_is_case_insensitive_and_combinable(
     assert _ids(await _list(api, seed, location="remote", seniority="staff")) == []
 
 
+async def test_filters_exclude_null_values_without_error(api: AsyncClient, seed: Seeder) -> None:
+    """A NULL column never matches a filter on that column, and never errors
+    (advisory review 1, finding 2)."""
+    nameless = await seed.job(None, marked=False, location_raw=f"{seed.marker} City")
+    placeless = await seed.job("Placeless")  # location_raw and country are NULL
+    by_location = await api.get("/jobs", params={"location": seed.marker})
+    assert _ids(by_location.json()) == [str(nameless)]
+    both = await api.get("/jobs", params={"location": seed.marker, "title": "a"})
+    assert (both.status_code, _ids(both.json())) == (200, [])
+    assert _ids(await _list(api, seed, location="city")) == []
+    assert _ids(await _list(api, seed, country="canada")) == []
+    assert _ids(await _list(api, seed)) == [str(placeless)]
+
+
 async def test_filters_are_trimmed_and_wildcards_are_literal(
     api: AsyncClient, seed: Seeder
 ) -> None:
@@ -471,6 +485,10 @@ def _b64(text: str) -> str:
         _b64('{"i": "' + str(uuid.uuid4()) + '", "t": "2030-01-01T12:00:00"}'),
         _b64('{"i": "' + ECHO + '", "t": "2030-01-01T12:00:00+00:00"}'),
         _b64('{"i": 5, "t": "2030-01-01T12:00:00+00:00"}'),
+        # Decodes cleanly but lies outside the representable range once
+        # normalized to UTC (advisory review 1, finding 1).
+        _b64('{"i": "' + str(uuid.uuid4()) + '", "t": "0001-01-01T00:00:00+01:00"}'),
+        _b64('{"i": "' + str(uuid.uuid4()) + '", "t": "9999-12-31T23:59:59-01:00"}'),
         _b64('{"i": "' + str(uuid.uuid4()).upper() + '", "t": "2030-01-01T12:00:00+00:00"}'),
         "%%%",
         "",
@@ -486,6 +504,16 @@ async def test_invalid_cursor(api: AsyncClient, cursor: str) -> None:
 async def test_invalid_query_takes_precedence_over_invalid_cursor(api: AsyncClient) -> None:
     response = await api.get("/jobs", params={"limit": "0", "cursor": "!!!"})
     assert (response.status_code, response.json()) == (400, INVALID_QUERY)
+
+
+async def test_a_non_utc_cursor_is_the_same_instant(api: AsyncClient, seed: Seeder) -> None:
+    """A cursor carrying a non-UTC offset denotes the same boundary instant
+    (advisory review 1, findings 1-2)."""
+    first = await seed.job("First", last_seen_at=T0 + timedelta(minutes=1))
+    second = await seed.job("Second", last_seen_at=T0)
+    shifted = (T0 + timedelta(minutes=1)).astimezone(timezone(timedelta(hours=5, minutes=30)))
+    cursor = _b64('{"i": "' + str(first) + '", "t": "' + shifted.isoformat() + '"}')
+    assert _ids(await _list(api, seed, cursor=cursor)) == [str(second)]
 
 
 async def test_a_valid_cursor_round_trips(api: AsyncClient, seed: Seeder) -> None:

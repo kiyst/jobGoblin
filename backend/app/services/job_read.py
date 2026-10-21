@@ -30,7 +30,7 @@ import uuid
 from collections.abc import AsyncIterator, Callable, Iterable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import ColumnElement, Select, and_, exists, func, or_, select, text
@@ -156,11 +156,15 @@ def decode_cursor(raw: str) -> CursorPosition:
         job_id = uuid.UUID(job_text)
         if str(job_id) != job_text:
             raise InvalidCursorError
-        last_seen_at = datetime.fromisoformat(time_text)
-    except (UnicodeDecodeError, binascii.Error, ValueError, TypeError) as exc:
+        parsed = datetime.fromisoformat(time_text)
+        if parsed.tzinfo is None or parsed.utcoffset() is None:
+            raise InvalidCursorError
+        # Normalizing to UTC also rejects instants outside Python's datetime
+        # range (e.g. year 1 at +01:00), which would otherwise fail later when
+        # bound as a timestamptz parameter.
+        last_seen_at = parsed.astimezone(UTC)
+    except (UnicodeDecodeError, binascii.Error, ValueError, TypeError, OverflowError) as exc:
         raise InvalidCursorError from exc
-    if last_seen_at.tzinfo is None or last_seen_at.utcoffset() is None:
-        raise InvalidCursorError
     return CursorPosition(last_seen_at=last_seen_at, job_id=job_id)
 
 

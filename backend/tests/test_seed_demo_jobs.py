@@ -112,5 +112,5 @@ def test_the_seed_script_refuses_the_development_database(
     monkeypatch.setattr(
         demo, "get_settings", lambda: Settings(database_url=url, test_database_url=url)
     )
-    with pytest.raises(Exception):  # noqa: B017 - any refusal before an engine exists
+    with pytest.raises(RuntimeError):  # assert_is_disposable_test_database refuses
         demo._test_engine()
