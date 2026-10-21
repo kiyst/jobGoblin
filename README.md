@@ -55,12 +55,19 @@ uvicorn app.main:app --reload
 
 - `GET /health` — liveness only; always returns 200, never touches the database.
 - `GET /ready` — readiness; returns 200 if PostgreSQL is reachable, 503 otherwise.
+- `GET /jobs`, `GET /jobs/{job_id}` — the local, read-only jobs API
+  ([ADR 0019](docs/DECISIONS/0019-local-read-only-jobs-api.md)); see
+  "Local jobs API demo" below.
 
 Or via Docker Compose (builds and runs the backend against the compose Postgres):
 
 ```bash
 docker compose up -d
 ```
+
+Compose publishes both the backend (`127.0.0.1:8000`) and PostgreSQL (`127.0.0.1:5432`)
+on **localhost only**. The jobs API is unauthenticated, has no user isolation, and is not
+meant to be reachable from the LAN or the Internet; do not change these bindings.
 
 ## Dedicated test database
 
@@ -114,6 +121,45 @@ this test database, the same way:
 ```bash
 DATABASE_URL=postgresql+asyncpg://jobgoblin:jobgoblin@localhost:5432/jobgoblin_test alembic downgrade 0001
 DATABASE_URL=postgresql+asyncpg://jobgoblin:jobgoblin@localhost:5432/jobgoblin_test alembic upgrade head
+```
+
+## Local jobs API demo (fixture data)
+
+The jobs API (`GET /jobs`, `GET /jobs/{job_id}`) is read-only and localhost-only
+([ADR 0019](docs/DECISIONS/0019-local-read-only-jobs-api.md)). Before live ingestion
+(Phase 4 S5) nothing populates `jobs`, so the demo uses **hand-written fixture rows** in
+the disposable test database. Its output is **not live Greenhouse ingestion**; after S5
+the same API shows actually persisted live-ingestion results.
+
+From `backend/` on the host (the script is not part of the container image), with the
+test database migrated as described above:
+
+```bash
+python -m scripts.seed_demo_jobs        # seed labelled demo rows (idempotent)
+DATABASE_URL=postgresql+asyncpg://jobgoblin:jobgoblin@localhost:5432/jobgoblin_test \
+  uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+Then:
+
+```bash
+curl "http://127.0.0.1:8000/jobs?title=engineer&location=remote&limit=10"
+curl "http://127.0.0.1:8000/jobs/{uuid}"   # an id from the list output
+```
+
+- Filters: `title` and `location` (case-insensitive literal substring), `country`,
+  `employment_type`, `seniority` (case-insensitive exact); `include_inactive=true`
+  includes jobs with no active occurrence; `limit` is 1–100 (default 25); follow
+  `next_cursor` with `cursor=...`.
+- `null` means the value is absent: render it as **"not listed"**. It does not say
+  whether a parser abstained or the field was never normalized.
+- Errors are fixed JSON bodies (`invalid_query`, `invalid_cursor`, `job_not_found`) that
+  never echo the input.
+
+Remove the demo rows before running the test suite, which shares this database:
+
+```bash
+python -m scripts.seed_demo_jobs --remove
 ```
 
 ## Run tests
