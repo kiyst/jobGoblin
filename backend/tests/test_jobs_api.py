@@ -461,6 +461,23 @@ async def test_invalid_query_parameters(api: AsyncClient, params: dict[str, str]
     assert ECHO not in response.text
 
 
+@pytest.mark.parametrize("name", ["title", "location", "country", "employment_type", "seniority"])
+@pytest.mark.parametrize("value", ["\tEngineer", "Engineer\n", "\rEngineer\r", "\x0bEngineer"])
+async def test_leading_or_trailing_control_characters_are_invalid(
+    api: AsyncClient, name: str, value: str
+) -> None:
+    """Control characters are invalid even where trimming would remove them
+    (Sol Medium formal review finding); ordinary spaces are still trimmed."""
+    response = await api.get("/jobs", params={name: value})
+    assert (response.status_code, response.json()) == (400, INVALID_QUERY)
+
+
+async def test_ordinary_spaces_are_still_trimmed(api: AsyncClient, seed: Seeder) -> None:
+    job_id = await seed.job("Spacey")
+    response = await api.get("/jobs", params={"title": f"   {seed.marker} spacey   "})
+    assert (response.status_code, _ids(response.json())) == (200, [str(job_id)])
+
+
 async def test_repeated_parameters_are_invalid(api: AsyncClient) -> None:
     response = await api.get(f"/jobs?title=a&title={ECHO}")
     assert (response.status_code, response.json()) == (400, INVALID_QUERY)

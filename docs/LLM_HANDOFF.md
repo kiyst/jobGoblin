@@ -589,17 +589,46 @@ findings: none
   completes, and `approval_eligible` is `true`. No provider is contacted.
 - STOP after `A` for the formal primary review (Sol Medium, as the validator requires
   for tooling slices). No `R`, `M`/`Q`, merge, provider contact, live ingestion, or S5.
+- **Formal review of `C=0a2e4ad`/`A=f476248`, and correction 2:**
+  - Sol Medium was invoked through the Codex CLI (`codex exec -m gpt-6.1-sol`, medium
+    reasoning effort, read-only sandbox, structured output). Artifacts are preserved
+    under `.claude/runtime/claude-autopilot/s4/`.
+  - Attempt 1 was **blocked**: its command-execution host was missing from the CLI
+    install used, so it inspected nothing and approved nothing. Attempt 2 ran the same
+    model and prompt with a complete CLI install.
+  - Attempt 2 verdict: **changes requested, one P2 finding** (session
+    `01a15c3a-3722-7b13-848a-a99f82e109b1`; result SHA-256
+    `ea682101619f46f6815e4c2c7efe28de04ce3981109a9c05c3e5c9fdf370bf02`). `_clean_filter`
+    trimmed before checking for control characters, so `"\tEngineer\n"` was accepted
+    by all five filters, contrary to ADR 0019 §5.
+  - Sol independently verified ancestry, the 14-file scope, the unchanged 24-module D1
+    closure, receipt integrity and eligibility, and the C→A transition. It relied on
+    the receipt for database-backed results.
+  - **Correction 2** (this commit, the direct single-parent child of `A=f476248`):
+    - control characters are now rejected anywhere in the raw value, before trimming;
+      ordinary spaces are still trimmed;
+    - 20 regression cases cover leading and trailing control characters on every filter,
+      plus a space-trimming test;
+    - a temporary mutation that checks after trimming fails all 20 cases (file restored
+      byte-identically);
+    - the API and seeder suites pass (87), with Ruff and mypy clean.
+  - The receipt `1bf379ae…` and `A=f476248` remain valid evidence for `C=0a2e4ad` only;
+    a new final `C`, coordinator run, `A`, and formal review are required.
+  - Workflow metrics: correction commits 2 (the maximum); formal review attempts 2
+    (1 environment-blocked, 1 changes requested); receipt runs 1.
+  - The metadata block below returns from `published` to `pending` for the new
+    candidate. The superseded publication was `executed_gate: final`,
+    `candidate_sha: 0a2e4ad23d6f077b1576998cf45b5b38d7ee2733`, receipt
+    `1bf379ae-2337-41ed-b61c-036b1d75b876`; its receipt file stays committed as
+    evidence for that `C` only.
+- STOP -- for a new final `C` and its single coordinator run.
 
 ```workflow-metadata
 workflow_version: v3.2
-state: published
+state: pending
 slice_id: 2026-10-21-phase4-read-api-s4-2a9c2a9
 slice_kind: tooling
 risk_class: R
 base_sha: 2a9c2a9570d3cb105a376a9b907658f736950be8
 declared_gate: final
-executed_gate: final
-candidate_sha: 0a2e4ad23d6f077b1576998cf45b5b38d7ee2733
-receipt_id: 1bf379ae-2337-41ed-b61c-036b1d75b876
-receipt_path: docs/verification-receipts/0a2e4ad23d6f077b1576998cf45b5b38d7ee2733/1bf379ae-2337-41ed-b61c-036b1d75b876.json
 ```

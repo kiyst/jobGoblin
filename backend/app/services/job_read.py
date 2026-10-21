@@ -91,10 +91,13 @@ class JobListQuery:
 
 
 def _clean_filter(raw: str, max_length: int) -> str:
+    # Control characters are rejected anywhere in the raw value, before
+    # trimming, so a leading or trailing tab or newline is invalid rather than
+    # silently trimmed away (ADR 0019 §5; Sol Medium formal review finding).
+    if any(unicodedata.category(char) == "Cc" for char in raw):
+        raise InvalidQueryError
     value = raw.strip()
     if not value or len(value) > max_length:
-        raise InvalidQueryError
-    if any(unicodedata.category(char) == "Cc" for char in value):
         raise InvalidQueryError
     return value
 
