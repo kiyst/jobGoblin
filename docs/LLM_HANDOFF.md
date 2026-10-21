@@ -697,3 +697,99 @@ gate: final
 verdict: approved
 findings: none
 ```
+
+### Merge record
+
+- Date: 2026-10-21 (UTC). Merged `phase-4/read-api-s4` into `main` with
+  `git merge --no-ff` at the approved, reviewed commit
+  `60ba63cc83fc6f7cc23754b462c86e3a8eb4b1bf` (`R`). `R` records Sol Medium's "approved,
+  no findings" formal verdict on `C=ce5ad248157018d7ae9cce5519ccd32b19f3ccea` /
+  `A=dd8258380bec0d5d2fe017349080075dc4216a45`.
+  - Merge commit `M`: `ee463cbc353aa4db774f2e9a7c8c506e03065da2`.
+  - Rollback boundary (the pre-merge `main`/`origin/main` tip):
+    `2a9c2a9570d3cb105a376a9b907658f736950be8`.
+  - Lineage: base `2a9c2a9` -> advisory candidate `ab5620f` -> correction 1 `85e3ccb` ->
+    superseded `C` `0a2e4ad` -> superseded `A` `f476248` -> correction 2 `69bb92b` ->
+    `C` `ce5ad24` -> `A` `dd82583` -> `R` `60ba63c` -> `M` `ee463cb` -> `Q` (this commit).
+- Pre-merge checks, after a fresh fetch of `origin`:
+  - the feature branch, its upstream, and the remote ref sat at `R`; `R`'s sole parent is
+    `A`, and `A`'s is `C`; the tree was clean;
+  - `main`/`origin/main`/remote `main` were synchronized at the rollback boundary;
+  - **receipt `4d8320ca-98da-4c4b-be42-de7a9173c087`** (file SHA-256
+    `5d6bfb4009d7cddffbfc56a099ee7ad1a27249ef5a39e89de357e2dcca5d121f`):
+    - schema-valid and bound to `C`, the base, the slice, gate `final`, and risk class R;
+    - its verifier, checker, and configuration hashes equal the files committed at `C`;
+    - the affected surface, focused selector, migration decision (not triggered), and
+      complete 34-witness inventory recomputed identically;
+    - independently recomputed as approval-eligible;
+  - `validate_c_a_r_chain(C, A, R)` and `check_merge_eligibility(C, A, R)` returned
+    `approved`, `findings: none`, `reviewer_model: Sol Medium`, `reviewer_role: primary`,
+    `gate: final`, `published_slice_kind: tooling`, and base `2a9c2a9`.
+- Release sequence:
+  - `M` was created locally and not pushed. It has two parents (the rollback boundary,
+    then `R`), `R..M` has zero content difference, and
+    `check_review.validate_merge(R, M, 2a9c2a9)` passed.
+  - `verification_coordinator.run_post_merge_verification` ran once against `M` in a
+    disposable detached worktree, as one tracked background task (its duration
+    approaches the foreground cap); nothing else ran until it exited. It produced
+    artifact `1d1040a6-fab3-413d-8c70-49d6538994ef`.
+  - `Q` is `M`'s direct mainline child. It contains that artifact plus this append-only
+    merge record, in one commit.
+- Post-merge evidence:
+  `docs/post-merge/ee463cbc353aa4db774f2e9a7c8c506e03065da2/1d1040a6-fab3-413d-8c70-49d6538994ef.json`
+  (SHA-256 of the artifact file as written:
+  `84cb48a1d92c778788b770436c757d6a30f6037a4cc971ea049d61d42f1959f3`). It references
+  original receipt `4d8320ca-98da-4c4b-be42-de7a9173c087`.
+  `check_review.validate_published(C, A, R, M, Q)` and
+  `verification_coordinator.confirm_main_unchanged` run immediately before the push;
+  their results are in the agent's final report.
+- Evidence by source:
+  - **Post-merge coordinator (this artifact, at `M`):** all 11 steps PASS (Ruff format and
+    check, mypy, `check_repo`, `git diff --check`, test-database URL validation and
+    reachability, full suite, contract mutation witnesses, handoff metadata,
+    temporary-directory cleanup). Full suite **4,870 passed**; **34 of 34** registered
+    witnesses; migration not triggered; worktree removed with no residue; recorded step
+    duration 534.297 seconds.
+  - **Pre-merge receipt (at `C`):** all 12 final-gate steps PASS, including focused
+    pytest (87), the full suite (4,870), and 34/34 witnesses; migration not triggered;
+    cleanup PASS.
+  - **Formal review (`R`):** Sol Medium approved with no findings (Codex CLI session
+    `01a15c48-7940-72a3-989d-d2717fef539c`). Sol reran the repository, handoff, diff, and
+    static checks plus offline ASGI probes, and relied on the receipt for the full suite,
+    focused tests, database-backed behavior, and witnesses.
+  - **Advisory and formal history** (gitignored artifacts under
+    `.claude/runtime/claude-autopilot/s4/`; Claude reviewers attributed as Claude, never
+    as Sol):
+    - the planning determination and its review;
+    - the proposal review and amendments;
+    - advisory review 1 (changes requested, fixed by correction 1) and its re-review
+      (approved);
+    - Sol formal attempt 1 (environment-blocked), attempt 2 (one P2 finding, fixed by
+      correction 2), and attempt 3 (approved).
+  - **Superseded publication:** receipt `1bf379ae-2337-41ed-b61c-036b1d75b876` and
+    `A=f476248` stay in history as evidence for `C=0a2e4ad` only.
+- Network and data boundary:
+  - no provider was contacted at any point in S4, no data was captured, and no
+    production database was accessed;
+  - every suite run used the disposable test database;
+  - the demo seeder writes only labelled fixture rows to that database.
+- Status: merged. S4 adds the local, unauthenticated, read-only jobs API
+  (`GET /jobs`, `GET /jobs/{job_id}`;
+  [ADR 0019](DECISIONS/0019-local-read-only-jobs-api.md)), bound to localhost by Docker
+  Compose, and a fixture-data demo. It performs no ingestion, provider contact, or
+  migration. `ROADMAP.md`'s S4 entry still reads "in progress, not merged"; this merge
+  record supersedes it until the next slice's documentation update.
+- Retained limitations (ADR 0019):
+  - no authentication or user isolation, which is safe only because of the localhost
+    binding;
+  - `null` cannot distinguish parser abstention from never-normalized;
+  - fixture data only until S5;
+  - `api/health.py`'s direct `db` import is a recorded exception;
+  - the terms acceptance covers personal, localhost use only and is not legal
+    clearance.
+
+  Approval and passing verification are review and verification status, not production
+  readiness.
+- STOP -- S4 is complete once this `Q` reaches `main`. S5 (complete live ingestion)
+  requires separate authorization; no provider contact, live ingestion, or public
+  exposure follows from this merge.
