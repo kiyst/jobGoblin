@@ -622,6 +622,19 @@ findings: none
     `1bf379ae-2337-41ed-b61c-036b1d75b876`; its receipt file stays committed as
     evidence for that `C` only.
 - STOP -- for a new final `C` and its single coordinator run.
+- **Final `C` (2)** (this commit, the direct single-parent child of correction 2
+  `69bb92b9382e854bfedc6d1dc43ac8e182893233`). Changes only this file.
+  - It differs from correction 2 only by this ledger entry: no code, test,
+    configuration, dependency, schema, or semantic document changes. Migration is not
+    triggered: nothing in `2a9c2a9..C` touches `app/db/` or a migration path.
+  - Correction 2 answers the single P2 finding of Sol Medium's formal review. Its
+    narrow change is reviewed cumulatively in the new formal review; no separate Claude
+    advisory pass was run on it.
+  - Verification: the genuine candidate-bound `verification_coordinator` `gate=final`
+    run against this `C` is pending. It is recorded in `A` only if every step passes,
+    cleanup completes, and `approval_eligible` is `true`. No provider is contacted.
+  - STOP after `A` for the Sol Medium formal primary review (via the Codex CLI). No
+    `R`, `M`/`Q`, merge, provider contact, live ingestion, or S5.
 
 ```workflow-metadata
 workflow_version: v3.2
