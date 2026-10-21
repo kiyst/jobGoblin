@@ -653,7 +653,11 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   authorizes no S2c, provider contact, persistence, D1, S3, or S4; each still requires
   separate explicit user authorization.
 - **Phase 4 S2c (`phase-4/greenhouse-live-canary-s2c`): bounded read-only Greenhouse live
-  canary ([ADR 0017](DECISIONS/0017-greenhouse-live-canary.md)) -- in progress; attempt 2 computed PASS; attempt-2 cleanup verified; not complete.**
+  canary ([ADR 0017](DECISIONS/0017-greenhouse-live-canary.md)) -- complete. Merged into
+  `main` at `M=2b7446fff360ce6a3298ba45aa6b5e85396bc2a3` /
+  `Q=b0bb33ac6c471fed759f33555dc4b681876a8927`** (merge record in
+  [LLM_HANDOFF.md](LLM_HANDOFF.md)). Attempt 1 is permanently `FAIL-CLOSED:worker_failed`;
+  attempt 2 is `PASS` with no findings. The history below is kept as written at the time.
   One separately authorized `GET /v1/boards/discord/jobs?content=true` through the
   unchanged S1 adapter, S2b converter and bridge, and S2 composition, with no retry,
   redirect, fallback, second request, persistence, or runtime registration.
@@ -673,8 +677,16 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
     (candidate `2232d96`), and the attestation passed. Attempt 2 remains PASS with no
     findings. This is logical deletion, not forensic erasure, and attempt 2 has no durable
     replay fixture.
-  - S2c is not complete until `C`/`A`/`R`/`M`/`Q` succeed. No third request is
-    authorized.
+  - S2c was not complete until `C`/`A`/`R`/`M`/`Q` succeeded, which they now have. No
+    third request is authorized.
+- **Phase 4 S3 (`phase-4/normalized-persistence-s3`): D1 parser version and opt-in
+  normalized persistence
+  ([ADR 0018](DECISIONS/0018-d1-parser-version-and-normalized-persistence.md)) -- in
+  progress, not merged.** Persists `employment_type`, `seniority`, and `country` with
+  provenance and a verified D1 parser version, for Greenhouse jobs on an offline, opt-in
+  path proven against PostgreSQL. No provider contact, runtime activation, API, or
+  additional field. The remaining Phase 4 sequence is S4 (readable API output) and S5
+  (complete live ingestion), each separately authorized.
 - **Phases 5-14: not started.** Begin each phase only after completing its preflight in
   [PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md) and receiving approval for the next
   smallest slice.

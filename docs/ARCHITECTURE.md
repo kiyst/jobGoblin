@@ -301,7 +301,8 @@ jobGoblin/
 │   │   │   ├── seniority.py
 │   │   │   ├── remote.py               # remote/hybrid/onsite classifier (Phase 3, first parser slice)
 │   │   │   ├── posting.py              # pure normalize_posting composition (Phase 4 S2, ADR 0014);
-│   │   │   │                            # no salary, not called by ingestion or any runtime path
+│   │   │   │                            # no salary; called only by the opt-in S3 normalization
+│   │   │   │                            # context (ADR 0018), never by a default runtime path
 │   │   │   ├── types.py                # NormalizationResult[T]/Provenance shared by every parser above
 │   │   │   ├── company.py
 │   │   │   └── url.py                  # canonical URL normalization (ADR 0004)
@@ -433,6 +434,21 @@ Hard rules that don't fit neatly into the table:
   boundary, for the exact covered outputs demonstrated by the current exposed 30-record
   corpus under the pinned corpus and taxonomy identities (ADR 0014's bounded claim); D1
   remains unsatisfied.
+- **Opt-in normalized persistence (Phase 4 S3,
+  [ADR 0018](DECISIONS/0018-d1-parser-version-and-normalized-persistence.md)).**
+  `ingestion/normalization_version.py` builds the D1 manifest and parser version;
+  `ingestion/normalized_fields.py` holds the builder-only `NormalizationContext`, the
+  verifier `pipeline.run` calls before any run, provider call, or write, the three-field
+  projection, and the single-provider merge rule; `ingestion/persistence.py` applies it to
+  the locked `Job` row inside the existing persistence transaction and sets
+  `raw_job_ingestions.parser_version`. Only `employment_type`, `seniority`, and `country`
+  are written, only for Greenhouse jobs from a verified provider, and only when a caller
+  passes `pipeline.run(..., normalization=context)`; nothing in the application does.
+  `providers/greenhouse_record.py` holds every output-affecting Greenhouse semantic,
+  extracted unchanged from the adapter (board configuration and the board set behind the
+  snapshot, response decoding, record selection, and job construction). The manifest
+  hashes it and, conservatively, the whole adapter too, because the adapter still owns
+  the response-to-board association; any adapter edit rotates the parser version.
 - **Greenhouse content and parser-input mapping (Phase 4 S2b,
   [ADR 0015](DECISIONS/0015-greenhouse-content-conversion-and-posting-input-mapping.md)).**
   `providers/greenhouse.py` fills `DiscoveredJob.description` only for a board that
@@ -1627,14 +1643,13 @@ validation):**
 2. `ingestion/pipeline.py` calls `FixtureProvider.discover()`, writes one
    `RawJobIngestion` row per successfully-fetched payload (raw payload = the fixture
    JSON), then runs `ingestion/identity.py`'s resolution (§8) and
-   `ingestion/persistence.py`'s upsert logic. **Current state:** the pipeline runs no
-   Phase 3 classifier and never sets `raw_job_ingestions.parser_version`, which stays
-   `NULL`. Its only normalization is identity-key canonicalization through
-   `normalization/url.py`. Composing the Phase 3 parsers into ingestion, defining and
-   threading a parser version, and persisting normalized values with `field_provenance`
-   are deferred integration work. They are bound by the D1/D2 preconditions in
-   [ADR 0011](DECISIONS/0011-phase-3-exit-audit.md) and are not authorized by Phase 3
-   closure.
+   `ingestion/persistence.py`'s upsert logic. **Current state:** this fixture path runs
+   no Phase 3 classifier and leaves `raw_job_ingestions.parser_version` `NULL`; its only
+   normalization is identity-key canonicalization through `normalization/url.py`.
+   `FixtureProvider` has no approved parser-input mapping, so it stays raw-only even when
+   a normalization context is passed. Phase 4 S3
+   ([ADR 0018](DECISIONS/0018-d1-parser-version-and-normalized-persistence.md)) adds an
+   opt-in, D1-versioned normalized write for Greenhouse jobs only.
 3. `persistence.py` resolves each `DiscoveredJob` to a `Job` (creating one if no
    deterministic match) and a `JobOccurrence`, linking back to its `RawJobIngestion` via
    `raw_job_ingestions.job_occurrence_id` (§9 — no reverse pointer). For the two conflict
