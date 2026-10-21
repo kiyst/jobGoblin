@@ -445,6 +445,9 @@ Hard rules that don't fit neatly into the table:
   `raw_job_ingestions.parser_version`. Only `employment_type`, `seniority`, and `country`
   are written, only for Greenhouse jobs from a verified provider, and only when a caller
   passes `pipeline.run(..., normalization=context)`; nothing in the application does.
+  The only caller that builds one is the opt-in, one-shot Phase 4 S5 script
+  `scripts/run_greenhouse_s5_live_ingestion.py`
+  ([ADR 0020](DECISIONS/0020-greenhouse-live-ingestion.md)), outside `app/`.
   `providers/greenhouse_record.py` holds every output-affecting Greenhouse semantic,
   extracted unchanged from the adapter (board configuration and the board set behind the
   snapshot, response decoding, record selection, and job construction). The manifest

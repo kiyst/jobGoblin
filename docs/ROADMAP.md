@@ -690,13 +690,24 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
   additional field. The remaining Phase 4 sequence is S4 (readable API output) and S5
   (complete live ingestion), each separately authorized.
 - **Phase 4 S4 (`phase-4/read-api-s4`): local read-only jobs API
-  ([ADR 0019](DECISIONS/0019-local-read-only-jobs-api.md)) -- in progress, not merged.**
+  ([ADR 0019](DECISIONS/0019-local-read-only-jobs-api.md)) -- complete. Merged into
+  `main` at `M=ee463cbc353aa4db774f2e9a7c8c506e03065da2` /
+  `Q=fa761e4efc6c7305bfbb4fdcd95e4415ee22c479`** (merge record in
+  [LLM_HANDOFF.md](LLM_HANDOFF.md)).
   `GET /jobs` (filters, active-only by default, cursor pagination) and `GET /jobs/{job_id}`
   (with occurrences) return persisted jobs as JSON, with fixed non-reflective errors.
   Unauthenticated and localhost-only (Compose binds `127.0.0.1`); no field provenance,
   `description_raw`, salary, score, or user state; proven against PostgreSQL test
   fixtures, with a fixture-data local demo. No ingestion, provider contact, migration, or
   S5. The Phase 8 feed, scoring, and user workspace remain Phase 8.
+- **Phase 4 S5 (`phase-4/live-ingestion-s5`): one bounded live Greenhouse ingestion into
+  PostgreSQL ([ADR 0020](DECISIONS/0020-greenhouse-live-ingestion.md)) -- in progress,
+  offline advisory candidate; no live request made.** A script-level composition root
+  runs the unchanged S1 adapter (`discord`, one guarded `GET`), the S3 normalization
+  context, and `pipeline.run` into a freshly created, guarded, disposable local database,
+  then reads the persisted jobs back through the S4 routes and drops the database. It
+  needs the user's exact network, terms, and retention authorization; no `app/` change,
+  migration, runtime activation, or recurring collection.
 - **Phases 5-14: not started.** Begin each phase only after completing its preflight in
   [PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md) and receiving approval for the next
   smallest slice.

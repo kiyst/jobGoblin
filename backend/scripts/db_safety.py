@@ -107,9 +107,10 @@ _LOCAL_DESTRUCTIVE_LIFECYCLE_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"}
 def assert_safe_for_local_destructive_lifecycle(
     candidate_url: str, development_url: str, *, app_env: str
 ) -> None:
-    """A second, narrower guard for the *one* use case in this project that
-    actually issues `CREATE DATABASE`/`DROP DATABASE` at runtime
-    (`scripts/live_proof_greenhouse_ingestion.py`) — never called by the
+    """A second, narrower guard for the opt-in live-proof scripts that
+    actually issue `CREATE DATABASE`/`DROP DATABASE` at runtime
+    (`scripts/live_proof_greenhouse_ingestion.py` and Phase 4 S5's
+    `scripts/run_greenhouse_s5_live_ingestion.py`, ADR 0020) — never called by the
     ordinary test suite or `scripts/verify.py`, both of which only ever
     connect to an already-existing disposable database and never create or
     drop one. This function composes with, and never replaces,
