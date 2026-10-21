@@ -7,6 +7,13 @@
 `declared_gate: final`). Base: `fa761e4efc6c7305bfbb4fdcd95e4415ee22c479`, the `Q` of the
 S4 merge.
 
+**Pre-live reviews and correction 1.** All three pre-live reviews of the first
+advisory candidate (`6ce89cc`) were batched into correction 1:
+
+- **Sol Medium** (primary; `gpt-6.1-sol`, medium effort, Codex CLI): changes requested.
+- **Astra** (escalation; `gpt-6-astra`, high effort, Codex CLI): changes requested.
+- **A fresh Claude advisory reviewer:** approved, with should-fix findings.
+
 **Authority**, in order:
 
 1. The user's S5 objective and constraints (2026-10-21).
@@ -88,11 +95,20 @@ A guard transport refuses, before any I/O:
 
 It also refuses a non-identity `Content-Encoding`.
 
-The one-send latch is process-wide and shared by every transport the provider creates,
-because the adapter creates a new transport on each `discover()` (A3). A refusal is a
-non-`httpx` exception, so the adapter cannot downgrade it into a graceful per-source
-failure. It propagates, and `pipeline.run` marks the run `failed` before any raw row
-exists (A4).
+The guard enforces two send limits (A3):
+
+- **A per-composition latch**, shared by every transport the provider creates. The adapter
+  creates a new transport on each `discover()`, so the latch must sit outside it.
+- **A process-lifetime network send budget**, for real `httpx.AsyncHTTPTransport` inner
+  transports. No later composition or latch can reset it. Mock transports never use it.
+
+The guard bounds its own send and body read by the adapter's 30 s attempt deadline,
+because the adapter's deadline checks cannot run while the guard is still buffering. On
+timeout it refuses with `guard_deadline_exceeded`, which counts as INCONCLUSIVE.
+
+Every refusal is a non-`httpx` exception, so the adapter cannot downgrade it into a
+graceful per-source failure. It propagates, and `pipeline.run` marks the run `failed`
+before any raw row exists (A4).
 
 The body is held in memory only and is never written to a file.
 
@@ -150,7 +166,16 @@ The target is a freshly created local database named `jobgoblin_test_s5_<16 hex>
 these properties:
 - the name is generated, never supplied by a caller, and checked against its grammar
   before quoting;
-- it has the same host, port and credentials as `DATABASE_URL`;
+- it has the same host, port and credentials as `DATABASE_URL`. The URL is built from
+  validated components only (`URL.create`), never by editing the configured URL. A
+  configured URL is refused if it has any of the following, because asyncpg would apply
+  query overrides after the guards inspect the URL:
+  - a query option (for example `?host=`, `?database=`, `?port=` or a DSN);
+  - another driver;
+  - a non-local or multi-host host;
+  - a non-integer port.
+
+  Administration, migration and the worker all use this one construction;
 - it must pass both `assert_is_disposable_test_database` and
   `assert_safe_for_local_destructive_lifecycle`: localhost only, not production, the name
   contains "test", and it differs from the development database;
@@ -209,9 +234,12 @@ Dropping the database is logical deletion, not forensic erasure.
 7. **Cleanup and leak check:** passed, or PASS retention applies.
 
 **INCONCLUSIVE** (S2c's classification):
-- timeout, deadline or connection failure;
+- timeout, deadline (including the guard deadline) or connection failure;
 - HTTP 429 or 5xx;
-- a partial attempt (content abstention or completeness evidence).
+- an otherwise clean partial attempt (content abstention or completeness evidence).
+
+Identity conflicts and parse errors are decisive local failures. They are checked before
+a partial attempt and are FAIL-CLOSED (`posting_errors`).
 
 **FAIL-CLOSED:** everything else. That includes:
 - a guard refusal;
@@ -221,7 +249,11 @@ Dropping the database is logical deletion, not forensic erasure.
 - any count or API mismatch;
 - the worker deadline;
 - worker or containment failure;
-- cleanup failure.
+- cleanup failure or interruption. The terminal outcome is appended even then.
+
+A missing or non-integer `meta.total` is never PASS.
+
+Unexpected supervisor errors print only a categorical `ERROR` with the exception class.
 
 **Atomicity (A2).** "No partial normalized write" means **per-posting** atomicity. No
 normalized value is ever written without its provenance and `parser_version`, in the

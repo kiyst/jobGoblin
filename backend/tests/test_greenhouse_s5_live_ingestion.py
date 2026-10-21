@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import io
 import json
 import secrets
 from collections.abc import AsyncIterator, Callable
@@ -24,7 +25,8 @@ from typing import Any
 import httpx
 import pytest
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from sqlalchemy.engine import make_url
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
 from app.db.models import CollectionRun
 from app.ingestion import persistence
@@ -90,9 +92,16 @@ def _records(token: str, count: int) -> list[dict[str, Any]]:
     ]
 
 
-def _envelope(records: list[dict[str, Any]], *, total: int | None = None) -> bytes:
+def _envelope(
+    records: list[dict[str, Any]], *, total: int | None = None, meta: Any = "default"
+) -> bytes:
     meta_total = len(records) if total is None else total
-    return json.dumps({"jobs": records, "meta": {"total": meta_total}}).encode("utf-8")
+    envelope: dict[str, Any] = {"jobs": records}
+    if meta == "default":
+        envelope["meta"] = {"total": meta_total}
+    elif meta is not None:
+        envelope["meta"] = meta
+    return json.dumps(envelope).encode("utf-8")
 
 
 class BodyStream(httpx.AsyncByteStream):
@@ -496,14 +505,34 @@ async def test_duplicate_records_are_never_pass(db_engine: AsyncEngine, tracker:
     (record,) = _records(token, 1)
     factory, _ = _serving(_envelope([record, dict(record)]))
     summary = await s5.run_worker_pipeline(db_engine, _plan(tracker, token, factory))
-    assert summary["verdict"] != "PASS"
+    # The adapter drops both copies of a duplicated identity.
+    assert (summary["verdict"], summary["reason"]) == ("FAIL-CLOSED", "adapter:no_usable_records")
+    assert summary["persisted"]["raw_rows"] == 0
 
 
 async def test_meta_total_mismatch_is_never_pass(db_engine: AsyncEngine, tracker: Tracker) -> None:
     token = tracker.token("s5-meta")
     factory, _ = _serving(_envelope(_records(token, 2), total=3))
     summary = await s5.run_worker_pipeline(db_engine, _plan(tracker, token, factory))
-    assert summary["verdict"] != "PASS"
+    assert (summary["verdict"], summary["reason"]) == ("INCONCLUSIVE", "attempt_partial")
+
+
+@pytest.mark.parametrize(
+    ("meta", "verdict", "reason"),
+    [
+        (None, "FAIL-CLOSED", "meta_total_missing"),
+        ({}, "FAIL-CLOSED", "meta_total_missing"),
+        # The adapter itself flags a malformed total as completeness evidence.
+        ({"total": "2"}, "INCONCLUSIVE", "attempt_partial"),
+    ],
+)
+async def test_missing_meta_total_is_never_pass(
+    db_engine: AsyncEngine, tracker: Tracker, meta: Any, verdict: str, reason: str
+) -> None:
+    token = tracker.token("s5-nometa")
+    factory, _ = _serving(_envelope(_records(token, 2), meta=meta))
+    summary = await s5.run_worker_pipeline(db_engine, _plan(tracker, token, factory))
+    assert (summary["verdict"], summary["reason"]) == (verdict, reason)
 
 
 async def test_identity_conflict_is_fail_closed(db_engine: AsyncEngine, tracker: Tracker) -> None:
@@ -525,8 +554,35 @@ async def test_identity_conflict_is_fail_closed(db_engine: AsyncEngine, tracker:
     )
     factory, _ = _serving(_envelope([moved]))
     summary = await s5.run_worker_pipeline(db_engine, _plan(tracker, token, factory))
-    assert (summary["verdict"], summary["reason"]) == ("FAIL-CLOSED", "run_completed_with_errors")
+    assert (summary["verdict"], summary["reason"]) == ("FAIL-CLOSED", "posting_errors")
     assert summary["persisted"]["identity_conflicts"] == 1
+
+
+async def test_posting_errors_take_precedence_over_a_partial_attempt(
+    db_engine: AsyncEngine, tracker: Tracker
+) -> None:
+    token = tracker.token("s5-mixed")
+    await _ingest(
+        db_engine,
+        tracker,
+        token,
+        _record(token, 1, "Software Engineer"),
+        datetime(2031, 7, 1, tzinfo=UTC),
+    )
+    moved = _record(
+        token,
+        1,
+        "Senior Software Engineer",
+        "This is a full-time position.",
+        "Toronto, Canada",
+        url=f"https://job-boards.greenhouse.io/{token}/jobs/1-moved",
+    )
+    abstaining = _records(token, 1)[0]
+    abstaining["content"] = None  # makes the attempt partial
+    factory, _ = _serving(_envelope([moved, abstaining]))
+    summary = await s5.run_worker_pipeline(db_engine, _plan(tracker, token, factory))
+    assert summary["run"]["attempt_status"] == "partial"
+    assert (summary["verdict"], summary["reason"]) == ("FAIL-CLOSED", "posting_errors")
 
 
 @pytest.mark.parametrize(
@@ -714,7 +770,7 @@ def test_preflight_accepts_only_the_complete_gate(
         ({"app_env": "production"}, "database_target_refused"),
         (
             {"dev": "postgresql+asyncpg://u:p@db.example.invalid:5432/jobgoblin"},
-            "database_target_refused",
+            "database_url_refused",
         ),
     ],
 )
@@ -998,6 +1054,7 @@ def test_script_writes_only_through_the_pipeline() -> None:
         "sqlalchemy.select",
         "sqlalchemy.text",
         "sqlalchemy.engine",
+        "sqlalchemy.engine.URL",
         "sqlalchemy.engine.make_url",
         "sqlalchemy.ext.asyncio",
         "sqlalchemy.ext.asyncio.AsyncEngine",
@@ -1005,10 +1062,37 @@ def test_script_writes_only_through_the_pipeline() -> None:
         "sqlalchemy.ext.asyncio.async_sessionmaker",
         "sqlalchemy.ext.asyncio.create_async_engine",
     }
-    statements = {
-        line.strip() for line in source.splitlines() if "DATABASE" in line and 'f"' in line
-    }
-    assert all("CREATE DATABASE" in s or "DROP DATABASE IF EXISTS" in s for s in statements)
+    statements: list[str] = []
+    for node in ast.walk(ast.parse(source)):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "text"
+        ):
+            (arg,) = node.args
+            if isinstance(arg, ast.Constant):
+                statements.append(str(arg.value))
+            elif isinstance(arg, ast.JoinedStr):
+                statements.append(
+                    "".join(
+                        str(v.value) if isinstance(v, ast.Constant) else "{}" for v in arg.values
+                    )
+                )
+            else:
+                statements.append(ast.unparse(arg))
+    for statement in statements:
+        assert statement.startswith(("SELECT", "CREATE DATABASE", "DROP DATABASE IF EXISTS")) or (
+            statement == "statement"
+        ), statement
+    # `_admin`'s `statement` argument is only ever one of these literals.
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "_admin":
+            literal = node.args[1]
+            assert isinstance(literal, ast.Constant | ast.JoinedStr)
+            head = literal if isinstance(literal, ast.Constant) else literal.values[0]
+            assert isinstance(head, ast.Constant)
+            first = head.value
+            assert str(first).startswith(("SELECT", "CREATE DATABASE", "DROP DATABASE IF EXISTS"))
 
 
 # ---------------------------------------------------------------------------
@@ -1106,3 +1190,269 @@ def test_worker_refuses_a_mode_and_gate_mismatch(
     )
     assert code == 3
     assert not paths.summary.exists()
+
+
+# ---------------------------------------------------------------------------
+# Correction 1: effective database target, guard deadline, process budget,
+# and the real worker path
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "dev",
+    [
+        "postgresql+asyncpg://u:p@localhost:5432/jobgoblin?database=jobgoblin",
+        "postgresql+asyncpg://u:p@localhost:5432/jobgoblin?database=jobgoblin_test",
+        "postgresql+asyncpg://u:p@localhost:5432/jobgoblin?host=192.0.2.10",
+        "postgresql+asyncpg://u:p@localhost:5432/jobgoblin?port=6543",
+        "postgresql+asyncpg://u:p@localhost:5432/jobgoblin?dsn=postgresql://x@192.0.2.10/y",
+        "postgresql+psycopg://u:p@localhost:5432/jobgoblin",
+        "postgresql+asyncpg://u:p@192.0.2.10:5432/jobgoblin",
+        "postgresql+asyncpg://u:p@localhost,192.0.2.10:5432/jobgoblin",
+    ],
+)
+def test_database_url_refuses_every_target_override(dev: str) -> None:
+    with pytest.raises(s5.S5Refusal) as refused:
+        s5.assert_database_target(s5.generate_database_name(), dev, app_env="development")
+    assert refused.value.kind == "database_url_refused"
+
+
+async def test_effective_connection_target_is_the_guarded_name() -> None:
+    name = s5.generate_database_name()
+    url = s5.assert_database_target(name, DEV_URL, app_env="development")
+    assert make_url(url).query == {}
+    engine = create_async_engine(url)
+    try:
+        _, kwargs = engine.dialect.create_connect_args(make_url(url))
+    finally:
+        await engine.dispose()
+    assert (kwargs["host"], kwargs["port"], kwargs["database"]) == ("localhost", 5432, name)
+
+
+class SlowStream(httpx.AsyncByteStream):
+    def __init__(self) -> None:
+        self.chunks = 0
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        while True:
+            self.chunks += 1
+            yield b" "
+            await asyncio.sleep(0.05)
+
+
+async def test_guard_deadline_bounds_body_buffering(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(s5, "GUARD_DEADLINE_SECONDS", 0.3)
+    stream = SlowStream()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, stream=stream, headers={"content-type": "application/json"})
+
+    guard = s5.GuardTransport(httpx.MockTransport(handler), s5.SendLatch(), s5.Capture())
+    with pytest.raises(s5.S5Refusal) as refused:
+        await guard.handle_async_request(httpx.Request("GET", PERMITTED))
+    assert refused.value.kind == s5.GUARD_DEADLINE_KIND
+    assert stream.chunks < 20
+
+
+async def test_guard_deadline_is_inconclusive_and_writes_no_rows(
+    db_engine: AsyncEngine, tracker: Tracker, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(s5, "GUARD_DEADLINE_SECONDS", 0.3)
+    token = tracker.token("s5-slow")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, stream=SlowStream(), headers={"content-type": "application/json"}
+        )
+
+    summary = await s5.run_worker_pipeline(
+        db_engine, _plan(tracker, token, lambda: httpx.MockTransport(handler))
+    )
+    assert (summary["verdict"], summary["reason"]) == (
+        "INCONCLUSIVE",
+        f"refusal:{s5.GUARD_DEADLINE_KIND}",
+    )
+    assert summary["persisted"]["raw_rows"] == 0
+    (run,) = await _runs(db_engine, tracker)
+    assert run.status == "failed"
+
+
+class FakeNetwork(httpx.AsyncHTTPTransport):
+    """A real-network transport type whose send is replaced in-process."""
+
+    def __init__(self, served: Served) -> None:
+        super().__init__()
+        self._served = served
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        self._served.calls += 1
+        return httpx.Response(
+            200, stream=BodyStream(b'{"jobs": []}'), headers={"content-type": "application/json"}
+        )
+
+
+async def test_process_send_budget_spans_independent_compositions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(s5, "_NETWORK_SEND_BUDGET", s5.SendLatch())
+    served = Served()
+    first = s5.GuardTransport(FakeNetwork(served), s5.SendLatch(), s5.Capture())
+    await first.handle_async_request(httpx.Request("GET", PERMITTED))
+    second = s5.GuardTransport(FakeNetwork(served), s5.SendLatch(), s5.Capture())
+    with pytest.raises(s5.S5Refusal) as refused:
+        await second.handle_async_request(httpx.Request("GET", PERMITTED))
+    assert refused.value.kind == "process_send_budget_exhausted"
+    assert served.calls == 1
+
+
+async def test_mock_transports_never_consume_the_process_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    budget = s5.SendLatch()
+    monkeypatch.setattr(s5, "_NETWORK_SEND_BUDGET", budget)
+    guard, _, _ = _guard()
+    await guard.handle_async_request(httpx.Request("GET", PERMITTED))
+    assert budget.sent is False
+
+
+def _open_attempt(paths: s5.AttemptPaths, mode: str) -> str:
+    record = {
+        "event": "reserved",
+        "mode": mode,
+        "board_token": "discord",
+        "request_fingerprint": s2c.request_fingerprint(),
+        "parser_version": LIVE_VERSION,
+        "database_name": s5.generate_database_name(),
+    }
+    s5.reserve(paths, record).close()
+    token = secrets.token_hex(32)
+    line = paths.reservation.read_bytes().splitlines(keepends=True)[0]
+    s2c.exclusive_write(
+        paths.launch, json.dumps(s5.launch_capability(line, token), sort_keys=True).encode()
+    )
+    return token
+
+
+@pytest.mark.parametrize(
+    ("mode", "gate", "transport"),
+    [
+        ("rehearsal", s5.REHEARSAL_ENV_VALUE, "rehearsal"),
+        ("live", s5.LIVE_ENV_VALUE, "network"),
+    ],
+)
+def test_worker_main_runs_the_real_worker_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str, gate: str, transport: str
+) -> None:
+    paths = s5.AttemptPaths(tmp_path / "attempt")
+    if mode == "live":
+        monkeypatch.setattr(s5, "LIVE_PATHS", paths)
+    seen: dict[str, Any] = {}
+
+    async def fake_pipeline(engine: AsyncEngine, plan: s5.IngestionPlan) -> dict[str, Any]:
+        seen["plan"] = plan
+        seen["database"] = engine.url.database
+        return {"verdict": "PASS", "reason": "all_checks_passed"}
+
+    monkeypatch.setattr(s5, "run_worker_pipeline", fake_pipeline)
+    token = _open_attempt(paths, mode)
+    code = s5.worker_main(
+        paths, env={s5.LIVE_ENV_VAR: gate}, token=token, in_containment=lambda: True
+    )
+    assert code == 0
+    expected = s5.rehearsal_transport if transport == "rehearsal" else httpx.AsyncHTTPTransport
+    assert seen["plan"].inner_transport_factory is expected
+    assert seen["plan"].board == s5.live_board()
+    assert seen["plan"].expected_parser_version == LIVE_VERSION
+    assert seen["database"].startswith("jobgoblin_test_s5_")
+    assert paths.claim.is_file()
+    assert json.loads(paths.summary.read_text(encoding="utf-8"))["verdict"] == "PASS"
+    # The single worker slot is consumed.
+    assert (
+        s5.worker_main(paths, env={s5.LIVE_ENV_VAR: gate}, token=token, in_containment=lambda: True)
+        == 3
+    )
+
+
+def test_worker_exception_is_recorded_categorically(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = s5.AttemptPaths(tmp_path / "attempt")
+
+    async def boom(engine: AsyncEngine, plan: s5.IngestionPlan) -> dict[str, Any]:
+        raise ValueError("secret title text")
+
+    monkeypatch.setattr(s5, "run_worker_pipeline", boom)
+    token = _open_attempt(paths, "rehearsal")
+    assert (
+        s5.worker_main(
+            paths,
+            env={s5.LIVE_ENV_VAR: s5.REHEARSAL_ENV_VALUE},
+            token=token,
+            in_containment=lambda: True,
+        )
+        == 0
+    )
+    text = paths.summary.read_text(encoding="utf-8")
+    assert json.loads(text)["reason"] == "worker_exception:ValueError"
+    assert "secret" not in text
+
+
+class FakeStdin:
+    def __init__(self, data: bytes, *, tty: bool = False) -> None:
+        self.buffer = io.BytesIO(data)
+        self._tty = tty
+
+    def isatty(self) -> bool:
+        return self._tty
+
+
+def test_worker_entry_reads_one_token_line(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, Any] = {}
+
+    def fake_main(paths: s5.AttemptPaths, *, env: Any, token: str) -> int:
+        seen["token"] = token
+        return 7
+
+    monkeypatch.setattr(s5, "worker_main", fake_main)
+    paths = s5.AttemptPaths(tmp_path)
+    assert s5.worker_entry(paths, FakeStdin(b"abc\nignored\n")) == 7
+    assert seen["token"] == "abc"
+    assert s5.worker_entry(paths, FakeStdin(b"abc\n", tty=True)) == 3
+
+
+def test_worker_argv_round_trips_through_the_cli(tmp_path: Path) -> None:
+    paths = s5.AttemptPaths(tmp_path / "attempt")
+    argv = s5._worker_argv(paths)
+    assert argv[0] and argv[2] == "_worker"
+    args = s5._parse_args(argv[2:])
+    assert args.command == "_worker"
+    assert args.attempt_dir.resolve() == paths.directory.resolve()
+
+
+def test_interrupted_cleanup_still_records_the_terminal_outcome(
+    tmp_path: Path,
+    auth_file: tuple[Path, str],
+    lifecycle: FakeLifecycle,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def interrupted(url: str, name: str) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(s5, "drop_database", interrupted)
+    paths = s5.AttemptPaths(tmp_path / "attempt")
+    _fake_supervisor(monkeypatch, paths)
+    with pytest.raises(KeyboardInterrupt):
+        _run_live(tmp_path, auth_file, paths)
+    assert _terminal(paths)["outcome"] == "FAIL-CLOSED:cleanup_interrupted"
+
+
+def test_main_reports_unexpected_errors_categorically(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def boom(**kwargs: Any) -> Any:
+        raise FileNotFoundError("C:/secret/path")
+
+    monkeypatch.setattr(s5, "run_rehearsal", boom)
+    code = s5.main(["rehearse", "--confirm-create-and-drop-local-test-database"])
+    out = json.loads(capsys.readouterr().out)
+    assert code == 2 and out == {"outcome": "ERROR", "kind": "FileNotFoundError"}

@@ -76,7 +76,7 @@ from urllib.parse import urlsplit
 
 import httpx
 from sqlalchemy import func, select, text
-from sqlalchemy.engine import make_url
+from sqlalchemy.engine import URL, make_url
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -147,9 +147,17 @@ SUMMARY_VERSION: Final = 1
 API_PAGE_LIMIT: Final = 100
 API_MAX_PAGES: Final = 20
 
+ALLOWED_DRIVER: Final = "postgresql+asyncpg"
+ALLOWED_HOSTS: Final = frozenset({"localhost", "127.0.0.1", "::1"})
 S5_SETTINGS: Final = GreenhouseClientSettings(max_attempts=1, max_response_bytes=MAX_RESPONSE_BYTES)
 
 Verdict = s2c.Verdict
+
+# The guard bounds its own send and body read by the adapter's attempt
+# deadline: the adapter's deadline checks cannot run while the guard is still
+# buffering the body.
+GUARD_DEADLINE_SECONDS: Final = S5_SETTINGS.attempt_deadline
+GUARD_DEADLINE_KIND: Final = "guard_deadline_exceeded"
 
 # The exact response keys ADR 0019 allows; anything else is a contract breach.
 LIST_KEYS: Final = frozenset(JobListItem.model_fields)
@@ -217,10 +225,15 @@ class Capture:
 
 @dataclass
 class SendLatch:
-    """Process-wide: one latch is shared by every transport the live provider
-    creates, so a second `discover()` (or a retry) can never send again."""
+    """One latch is shared by every transport a composition creates, so a
+    second `discover()` (or a retry) can never send again."""
 
     sent: bool = False
+
+
+# Process-lifetime budget for real network transports: one send per process,
+# whatever composition or latch is constructed. Mock transports never use it.
+_NETWORK_SEND_BUDGET = SendLatch()
 
 
 def check_request_shape(request: httpx.Request, *, path: str = REQUEST_PATH) -> None:
@@ -262,9 +275,21 @@ class GuardTransport(httpx.AsyncBaseTransport):
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         if self._latch.sent:
             raise S5Refusal("second_request_refused")
+        network = isinstance(self._inner, httpx.AsyncHTTPTransport)
+        if network and _NETWORK_SEND_BUDGET.sent:
+            raise S5Refusal("process_send_budget_exhausted")
         check_request_shape(request, path=self._path)
         request.headers["Accept-Encoding"] = ACCEPT_ENCODING
         self._latch.sent = True
+        if network:
+            _NETWORK_SEND_BUDGET.sent = True
+        try:
+            async with asyncio.timeout(GUARD_DEADLINE_SECONDS):
+                return await self._send(request)
+        except TimeoutError:
+            raise S5Refusal(GUARD_DEADLINE_KIND) from None
+
+    async def _send(self, request: httpx.Request) -> httpx.Response:
         self._capture.request_sent = True
         self._capture.observed_user_agent = request.headers.get("user-agent")
         response = await self._inner.handle_async_request(request)
@@ -669,7 +694,9 @@ def _completed_checks(
     n = capture.source_record_count
     if n is None or n < 1:
         return "no_source_records"
-    if capture.source_meta_total is not None and capture.source_meta_total != n:
+    if capture.source_meta_total is None:
+        return "meta_total_missing"
+    if capture.source_meta_total != n:
         return "meta_total_mismatch"
     if len(set(capture.source_record_ids)) != n:
         return "source_record_ids_not_unique"
@@ -792,6 +819,7 @@ async def run_worker_pipeline(engine: AsyncEngine, plan: IngestionPlan) -> dict[
     started = plan.clock.now()
     run_id: uuid.UUID | None = None
     failure: str | None = None
+    failure_verdict = Verdict.FAIL_CLOSED
     try:
         run_id = await pipeline.run(
             engine,
@@ -803,6 +831,8 @@ async def run_worker_pipeline(engine: AsyncEngine, plan: IngestionPlan) -> dict[
         )
     except s2c.CanaryRefusal as refusal:
         failure = f"refusal:{refusal.kind}"
+        if refusal.kind == GUARD_DEADLINE_KIND:
+            failure_verdict = Verdict.INCONCLUSIVE  # a bounded upstream transient
     except Exception as exc:  # categorical: the class name only
         failure = f"pipeline_exception:{type(exc).__name__}"
     summary["request"] = _request_summary(capture)
@@ -812,7 +842,7 @@ async def run_worker_pipeline(engine: AsyncEngine, plan: IngestionPlan) -> dict[
     summary["persisted"] = _public(persisted)
     if failure is not None:
         summary["database_after_failure"] = await database_row_counts(engine)
-        return _stop(summary, Verdict.FAIL_CLOSED, failure)
+        return _stop(summary, failure_verdict, failure)
     assert run_id is not None
     run = await run_state(engine, run_id)
     summary["run"] = run
@@ -821,6 +851,14 @@ async def run_worker_pipeline(engine: AsyncEngine, plan: IngestionPlan) -> dict[
         if run["attempt_status"] == "failed" and kind is not None:
             verdict = s2c.classify_adapter_failure(kind, run["attempt_failure_status"])
             return _stop(summary, verdict, f"adapter:{kind}")
+        # Decisive local failures take precedence over a partial attempt.
+        statuses = persisted["raw_status_counts"]
+        if (
+            persisted["identity_conflicts"]
+            or statuses.get("identity_conflict")
+            or statuses.get("parse_error")
+        ):
+            return _stop(summary, Verdict.FAIL_CLOSED, "posting_errors")
         if run["attempt_status"] == "partial":
             return _stop(summary, Verdict.INCONCLUSIVE, "attempt_partial")
         return _stop(summary, Verdict.FAIL_CLOSED, f"run_{run['status']}")
@@ -909,14 +947,42 @@ def quote_database_name(name: str) -> str:
 
 def database_url(development_url: str, name: str) -> str:
     """Same host, port, and credentials as `DATABASE_URL`; only the name
-    differs. Never printed (see `redact_database_url`)."""
-    return make_url(development_url).set(database=name).render_as_string(hide_password=False)
+    differs. Built from validated components alone, never by editing the
+    configured URL: a configured URL with any query option (asyncpg merges
+    `?host=`, `?database=`, `?port=`, or a DSN into the effective target after
+    the guards inspect the URL), another driver, a non-local or multi-host
+    host, or a non-integer port is refused. Never printed (see
+    `redact_database_url`)."""
+    try:
+        base = make_url(development_url)
+    except Exception:
+        raise S5Refusal("database_url_refused") from None
+    host = (base.host or "").lower()
+    if (
+        base.drivername != ALLOWED_DRIVER
+        or base.query
+        or host not in ALLOWED_HOSTS
+        or (base.port is not None and not isinstance(base.port, int))
+    ):
+        raise S5Refusal("database_url_refused")
+    url = URL.create(
+        ALLOWED_DRIVER,
+        username=base.username,
+        password=base.password,
+        host=host,
+        port=base.port,
+        database=name,
+    )
+    return url.render_as_string(hide_password=False)
 
 
 def assert_database_target(name: str, development_url: str, *, app_env: str) -> str:
     """Both database-safety guards on the generated name. Returns its URL."""
     quote_database_name(name)
     url = database_url(development_url, name)
+    parsed = make_url(url)
+    if parsed.query or parsed.database != name:
+        raise S5Refusal("database_url_refused")
     try:
         assert_is_disposable_test_database(url, development_url)
         assert_safe_for_local_destructive_lifecycle(url, development_url, app_env=app_env)
@@ -1344,8 +1410,10 @@ def _attempt(
                 migrate=migrate,
             )
         finally:
-            _cleanup(result, name, development_url, keep=keep)
-            s2c.append_terminal_outcome(handle, result.outcome)
+            try:
+                _cleanup(result, name, development_url, keep=keep)
+            finally:
+                s2c.append_terminal_outcome(handle, result.outcome)
         return result
     finally:
         containment.close()
@@ -1409,6 +1477,10 @@ def _cleanup(result: LiveOutcome, name: str, development_url: str, *, keep: bool
         result.database_dropped = not asyncio.run(database_exists(development_url, name))
     except Exception:
         result.database_dropped = False
+    except BaseException:
+        result.database_dropped = False
+        result.outcome = f"{Verdict.FAIL_CLOSED.value}:cleanup_interrupted"
+        raise
     if not result.database_dropped:
         result.outcome = f"{Verdict.FAIL_CLOSED.value}:cleanup_failed"
 
@@ -1475,6 +1547,9 @@ def main(argv: Sequence[str] | None = None, *, paths: AttemptPaths = LIVE_PATHS)
         except s2c.CanaryRefusal as refusal:
             _print({"outcome": "REFUSED", "kind": refusal.kind})
             return 2
+        except Exception as exc:  # categorical: the class name only
+            _print({"outcome": "ERROR", "kind": type(exc).__name__})
+            return 2
         _print(_payload(result, rehearsal, settings.database_url))
         return 0 if result.outcome.startswith(f"{Verdict.PASS.value}:") else 1
     request = LiveRequest(
@@ -1498,6 +1573,9 @@ def main(argv: Sequence[str] | None = None, *, paths: AttemptPaths = LIVE_PATHS)
         )
     except s2c.CanaryRefusal as refusal:
         _print({"outcome": "REFUSED", "kind": refusal.kind})
+        return 2
+    except Exception as exc:  # categorical: the class name only
+        _print({"outcome": "ERROR", "kind": type(exc).__name__})
         return 2
     _print(_payload(result, paths, settings.database_url))
     return 0 if result.outcome.startswith(f"{Verdict.PASS.value}:") else 1

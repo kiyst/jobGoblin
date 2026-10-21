@@ -414,8 +414,9 @@ findings: none
 - Date/agent: 2026-10-21, Claude (implementer; Claude Opus 5.5, coordinating session).
   - Branch: `phase-4/live-ingestion-s5`.
   - Base: `fa761e4efc6c7305bfbb4fdcd95e4415ee22c479`, the `Q` of the S4 merge.
-  - Ending commit: this commit, the **offline pre-live advisory candidate**. It is not
-    final `C`. No live request, rehearsal, coordinator run, receipt, `A`, formal review,
+  - The offline pre-live advisory candidate is
+    `6ce89cce9d586d92e366744bd76faa2331fac9b5`, preserved unamended.
+  - Ending commit: this commit, **correction 1**. It is not final `C`. No live request, rehearsal, coordinator run, receipt, `A`, formal review,
     or merge metadata exists.
 - Slice: Phase 4 S5, one bounded live Greenhouse ingestion into PostgreSQL, read back
   through the S4 API ([ADR 0020](DECISIONS/0020-greenhouse-live-ingestion.md)).
@@ -449,7 +450,7 @@ findings: none
     serving a synthetic envelope.
   - **No change** to `app/`, migrations, the D1 closure, or the parser version.
     `db_safety.py` changes its docstring only.
-- Tests: `tests/test_greenhouse_s5_live_ingestion.py` (72), on real PostgreSQL through
+- Tests: `tests/test_greenhouse_s5_live_ingestion.py` (72 at `6ce89cc`), on real PostgreSQL through
   the S3 network guard. They cover:
   - the frozen constants and the offline parser version;
   - every guard refusal;
@@ -486,11 +487,47 @@ findings: none
   `DROP DATABASE` has occurred.
 - Next: Claude advisory review, Sol Medium primary and Astra pre-live reviews, at most one
   batched correction, then the single pre-live authorization packet and a stop.
+- **Correction 1** (this pass) batches every finding from three read-only pre-live
+  reviews of `6ce89cc`. The artifacts are gitignored under
+  `.claude/runtime/claude-autopilot/s5/`.
+
+  Reviews:
+  - **Sol Medium** (primary, pre-live): `gpt-6.1-sol`, medium effort, Codex CLI session
+    `01a15cbd-fdf9-7573-89f7-01be33dbd87d`. Changes requested: one P1, two P2.
+  - **Astra** (escalation): `gpt-6-astra`, high effort, session
+    `01a15cbd-fdf9-7c62-af8f-7db981dad427`. Changes requested: one P1, two P2.
+  - **A fresh Claude advisory reviewer:** approved, with two P2 and six P3 findings.
+
+  Fixes:
+  - **P1, raised by Sol and Astra.** A query option in `DATABASE_URL` could override the
+    guarded target (`?database=`, `?host=`). Database URLs are now built from validated
+    components. Query options, other drivers, and non-local or multi-host hosts are
+    refused, and a test checks the effective asyncpg target.
+  - **P2: `meta.total` is mandatory for PASS** (raised by Sol and Claude).
+  - **P2: precedence** (Sol). Conflicts and parse errors are FAIL-CLOSED before a partial
+    attempt is classified.
+  - **P2: guard deadline** (Astra). The guard's send and body buffering are bounded by
+    the 30 s attempt deadline, giving INCONCLUSIVE `guard_deadline_exceeded`.
+  - **P2: process budget** (Astra). A process-lifetime send budget for real network
+    transports.
+  - **P2: worker-path tests** (Claude). The real `worker_main` (transport choice by mode,
+    claim, summary), `worker_entry`, and the round trip of the worker argv through the
+    CLI.
+  - **P3s:**
+    - exact reasons are now asserted;
+    - cleanup interrupts still append the terminal outcome;
+    - unexpected errors print a categorical `ERROR`;
+    - an AST check covers every SQL text.
+
+  Tests: 96, up from 72. The Claude reviewer's notes 7 and 8 (fixed rehearsal IDs, and
+  the Windows venv launcher racing Job Object assignment, which fails closed) need no
+  change; note 8 goes into the authorization packet.
 - Workflow metrics so far:
   - planning agents: 1;
   - proposal reviews: 1;
-  - advisory and formal reviews: 0;
-  - correction commits: 0;
+  - advisory reviews: 1 (Claude);
+  - pre-live reviews: 2 (Sol, Astra);
+  - correction commits: 1;
   - receipt runs: 0;
   - user relays: 0.
 
