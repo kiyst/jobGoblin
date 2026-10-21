@@ -1533,3 +1533,57 @@ candidate_sha: 06c89b29ef7d8ddedc187e8bb504963bcc04523a
 receipt_id: 87b753eb-fd7c-474d-8010-37d6a7b02180
 receipt_path: docs/verification-receipts/06c89b29ef7d8ddedc187e8bb504963bcc04523a/87b753eb-fd7c-474d-8010-37d6a7b02180.json
 ```
+
+### Work review
+
+- Date/reviewer: 2026-10-21 (UTC), Sol (primary, Sol Medium). Formal review of Phase 4 S3,
+  D1 parser version and opt-in normalized persistence, on
+  `phase-4/normalized-persistence-s3`:
+  - base `b0bb33ac6c471fed759f33555dc4b681876a8927`;
+  - final candidate `C` = `06c89b29ef7d8ddedc187e8bb504963bcc04523a`;
+  - publication `A` = `c08c5c713dd3969209aa48d018d810737f7a91ae`;
+  - receipt `87b753eb-fd7c-474d-8010-37d6a7b02180`, SHA-256
+    `3f0093dc31d661305431fb606530dd9a87cfd9941b160ffb7b9de2e074e5ad4f`.
+
+  Source: the complete review supplied by the user at
+  `.claude/runtime/claude-autopilot/s3-formal-review.md` (gitignored), SHA-256
+  `c1fce228b95f9540ebb080d866882288f48ba1259fd0647dc8e7b541e62e4553`, 5,105 bytes.
+  `reviewed_at` below is that file's modification time; the review states no time of its
+  own. Its durable handoff paragraph, verbatim:
+
+> **Phase 4 S3 formal primary review — approved, no findings (Sol Medium).** Formally reviewed C `06c89b29ef7d8ddedc187e8bb504963bcc04523a`, A `c08c5c713dd3969209aa48d018d810737f7a91ae`, and C-bound receipt `87b753eb-fd7c-474d-8010-37d6a7b02180` (SHA-256 `3f0093dc31d661305431fb606530dd9a87cfd9941b160ffb7b9de2e074e5ad4f`) against published base `b0bb33ac6c471fed759f33555dc4b681876a8927`; approved with no findings. Independent review confirmed exact ancestry and C→A scope; receipt schema, bindings, committed-input hashes, affected surface, focused selector, migration decision, complete 34-guard inventory, and recomputed approval eligibility; whole-adapter, record-module, dependency, runtime, taxonomy and board-configuration D1 binding; verified-context-before-work ordering; opt-in three-field persistence with complete provenance; parser-version-neutral equal-time conflict refusal; explicit row locking, atomicity, rollback and concurrency behavior; the real-adapter 30-record D2 PostgreSQL proof; and accurate documentation and retained limitations. Independently reran the focused selector (806 passed, 1 expected Windows FIFO skip), Ruff formatting/checks, mypy, and repository/handoff/transition/diff checks. Relied on the genuine C-bound receipt for all 12 coordinator steps, the 4,783-test full suite, 34/34 registered witnesses, no migration, and clean disposable-worktree cleanup. This approval is review status, not evidence of runtime activation, provider generalization, broad normalization accuracy, production readiness, or authorization for another provider request or later slice.
+
+- **Independently verified or rerun in formal review** (per the review): exact ancestry
+  and C→A scope; receipt schema, bindings, committed-input hashes, affected surface,
+  focused selector, migration decision, the complete 34-guard inventory, and recomputed
+  approval eligibility; the D1 binding and the persistence, conflict, locking, rollback,
+  concurrency, and D2 evidence listed above. Rerun: the focused selector (**806 passed, 1
+  expected Windows FIFO skip**), Ruff format and check, mypy (172 source files), and the
+  repository, handoff, transition, receipt cross-check, metadata, and diff checks.
+- **Relied upon from the genuine C-bound receipt** (not rerun): all 12 final-gate steps
+  passed; the full suite (**4,783 passed**); registered witnesses **34 of 34**; migration
+  not triggered; disposable-worktree snapshots identical and cleanup without residue.
+- Retained limitations: as stated in the paragraph above and in ADR 0018. Approval is
+  review status, not runtime activation, provider generalization, broad normalization
+  accuracy, production readiness, or authorization for another provider request or
+  later slice.
+- Findings by severity with exact references: none.
+- Verdict: **approved** -- no findings.
+- Exact bounded correction: none required.
+
+```workflow-review-metadata
+schema_version: 2
+slice_id: 2026-10-20-phase4-normalized-persistence-s3-b0bb33a
+risk_class: H
+reviewer: Sol
+reviewer_role: primary
+reviewer_model: Sol Medium
+reviewed_at: 2026-10-21T00:09:53+00:00
+candidate_sha: 06c89b29ef7d8ddedc187e8bb504963bcc04523a
+publication_commit_sha: c08c5c713dd3969209aa48d018d810737f7a91ae
+receipt_path: docs/verification-receipts/06c89b29ef7d8ddedc187e8bb504963bcc04523a/87b753eb-fd7c-474d-8010-37d6a7b02180.json
+receipt_id: 87b753eb-fd7c-474d-8010-37d6a7b02180
+gate: final
+verdict: approved
+findings: none
+```
