@@ -1587,3 +1587,98 @@ gate: final
 verdict: approved
 findings: none
 ```
+
+### Merge record
+
+- Date: 2026-10-21 (UTC). Merged `phase-4/normalized-persistence-s3` into `main` with
+  `git merge --no-ff` at the approved, reviewed commit
+  `9319207eca320197f0e3a96088ea52c55fc8fae5` (`R`). `R` records Sol Medium's "approved --
+  no findings" formal verdict on `C=06c89b29ef7d8ddedc187e8bb504963bcc04523a` /
+  `A=c08c5c713dd3969209aa48d018d810737f7a91ae`.
+  - Merge commit `M`: `af849daf908d1ba9eb2655dd67428d1250d1fc92`.
+  - Rollback boundary (the pre-merge `main`/`origin/main` tip):
+    `b0bb33ac6c471fed759f33555dc4b681876a8927`.
+  - Lineage: base `b0bb33a` -> advisory candidate `7fd1b94` -> correction 1 `a6e807e` ->
+    correction 2 `a9ee747` -> `C` `06c89b2` -> `A` `c08c5c7` -> `R` `9319207` -> `M`
+    `af849da` -> `Q` (this commit).
+- Pre-merge checks, after a fresh fetch of `origin`:
+  - the feature branch, its upstream, and the remote ref sat at `R`; `R`'s sole parent is
+    `A`, and `A`'s is `C`; the tree was clean;
+  - `main`/`origin/main`/remote `main` were synchronized at the rollback boundary;
+  - **receipt `87b753eb-fd7c-474d-8010-37d6a7b02180`** (file SHA-256
+    `3f0093dc31d661305431fb606530dd9a87cfd9941b160ffb7b9de2e074e5ad4f`):
+    - schema-valid and bound to `C`, the base, the slice, gate `final`, and risk class H;
+    - its verifier, checker, and configuration hashes equal the files committed at `C`;
+    - the affected surface, focused selector, migration decision (not triggered), and
+      complete 34-witness inventory recomputed identically;
+    - independently recomputed as approval-eligible;
+  - `validate_c_a_r_chain(C, A, R)` and `check_merge_eligibility(C, A, R)` returned
+    `approved`, `findings: none`, `reviewer_model: Sol Medium`, `reviewer_role: primary`,
+    `gate: final`, `published_slice_kind: tooling`, and base `b0bb33a`.
+- Release sequence:
+  - `M` was created locally and not pushed. It has two parents (the rollback boundary,
+    then `R`), `R..M` has zero content difference, and
+    `check_review.validate_merge(R, M, b0bb33a)` passed.
+  - `verification_coordinator.run_post_merge_verification` ran once against `M` in a
+    disposable detached worktree (always full/final), as one tracked background task the
+    user approved because its expected duration approached the 10-minute foreground cap;
+    nothing else ran until it exited. It produced artifact
+    `8d40847d-2592-46e4-9f83-99f0155b0e46`.
+  - `Q` is `M`'s direct mainline child. It contains that artifact plus this append-only
+    merge record, in one commit.
+- Post-merge evidence:
+  `docs/post-merge/af849daf908d1ba9eb2655dd67428d1250d1fc92/8d40847d-2592-46e4-9f83-99f0155b0e46.json`
+  (SHA-256 of the artifact file as written:
+  `8310ff1a818f9901bf396e47fa7121e5e7c96ebd5a28e275949b07b1839c6932`). It references
+  original receipt `87b753eb-fd7c-474d-8010-37d6a7b02180`.
+  `check_review.validate_published(C, A, R, M, Q)` and
+  `verification_coordinator.confirm_main_unchanged` run immediately before the push.
+  Their results are in the agent's final report rather than restated here in advance.
+- Evidence by source:
+  - **Post-merge coordinator (this artifact, at `M`):**
+    - all 11 steps PASS: Ruff format and check, mypy, `check_repo`, `git diff --check`,
+      disposable test-database URL validation and reachability preflight, the full
+      suite, contract mutation witnesses, handoff metadata validation, and
+      temporary-directory cleanup;
+    - full pytest suite: **4,783 passed**;
+    - all 34 registered mutation witnesses passed, 0 failed;
+    - no migration triggered;
+    - identical initial and final worktree snapshots; worktree removed with no residual
+      entry or directory; cleanup PASS;
+    - recorded step duration 502.796 seconds.
+  - **Pre-merge receipt (at `C`):** all 12 final-gate steps PASS, including focused pytest
+    (806) and the full suite (4,783 passed), and 34/34 registered witnesses; migration
+    not triggered; cleanup PASS.
+  - **Formal review (`R`):** Sol Medium approved with no findings (review file SHA-256
+    `c1fce228b95f9540ebb080d866882288f48ba1259fd0647dc8e7b541e62e4553`). Per the review,
+    Sol reran the focused selector (806 passed, 1 expected Windows FIFO skip), Ruff, mypy,
+    and the repository, handoff, transition, and diff checks, and relied on the receipt
+    for the full suite and registered witnesses.
+  - **Advisory history (not coordinator-executed, not registered witnesses):** two
+    advisory change requests resolved by corrections 1 and 2, the advisory approval
+    recorded in `C`, and the temporary mutation logs in `.claude/runtime/`
+    (gitignored).
+- Network and data boundary: no provider was contacted at any point in S3, no data was
+  captured, and no production database or production data was accessed. Every suite run
+  used the configured disposable test database.
+- Recovery note: an earlier automated attempt created `C` and started a coordinator that
+  died without output or receipt. The genuine run's own stage 0 removed that provably
+  abandoned scratch directory; its git worktree registration remains listed as
+  prunable and was not pruned (no cleanup was authorized).
+- Status: merged. S3 adds D1-versioned, opt-in, offline normalized persistence of
+  `employment_type`, `seniority`, and `location.country` with provenance for Greenhouse
+  jobs ([ADR 0018](DECISIONS/0018-d1-parser-version-and-normalized-persistence.md)). It
+  activates no runtime ingestion, provider registration, scheduler, API, or additional
+  field. `ROADMAP.md`'s S3 entry still reads "in progress, not merged"; this merge record
+  supersedes it until the next slice's documentation update.
+- Retained limitations (ADR 0018): the guards stop misuse, not hostile in-process code;
+  any Greenhouse adapter edit rotates the parser version; an abstention never retracts an
+  older value and no backfill exists; equal-time conflicts abort rather than resolve;
+  cross-provider priority is not implemented; value evidence is the exposed,
+  reconstructed 30-record corpus only; no accuracy, generalization, live, runtime, or
+  production-readiness claim.
+
+  Approval and passing verification are review and verification status, not production
+  readiness.
+- STOP -- S3 is complete once this `Q` reaches `main`. No S4, S5, runtime activation, or
+  provider request without separate authorization.
