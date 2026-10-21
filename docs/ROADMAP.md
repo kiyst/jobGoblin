@@ -681,12 +681,22 @@ abstraction for production; PostgreSQL stores metadata/references only, not blob
     third request is authorized.
 - **Phase 4 S3 (`phase-4/normalized-persistence-s3`): D1 parser version and opt-in
   normalized persistence
-  ([ADR 0018](DECISIONS/0018-d1-parser-version-and-normalized-persistence.md)) -- in
-  progress, not merged.** Persists `employment_type`, `seniority`, and `country` with
+  ([ADR 0018](DECISIONS/0018-d1-parser-version-and-normalized-persistence.md)) --
+  complete. Merged into `main` at `M=af849daf908d1ba9eb2655dd67428d1250d1fc92` /
+  `Q=2a9c2a9570d3cb105a376a9b907658f736950be8`** (merge record in
+  [LLM_HANDOFF.md](LLM_HANDOFF.md)). Persists `employment_type`, `seniority`, and `country` with
   provenance and a verified D1 parser version, for Greenhouse jobs on an offline, opt-in
   path proven against PostgreSQL. No provider contact, runtime activation, API, or
   additional field. The remaining Phase 4 sequence is S4 (readable API output) and S5
   (complete live ingestion), each separately authorized.
+- **Phase 4 S4 (`phase-4/read-api-s4`): local read-only jobs API
+  ([ADR 0019](DECISIONS/0019-local-read-only-jobs-api.md)) -- in progress, not merged.**
+  `GET /jobs` (filters, active-only by default, cursor pagination) and `GET /jobs/{job_id}`
+  (with occurrences) return persisted jobs as JSON, with fixed non-reflective errors.
+  Unauthenticated and localhost-only (Compose binds `127.0.0.1`); no field provenance,
+  `description_raw`, salary, score, or user state; proven against PostgreSQL test
+  fixtures, with a fixture-data local demo. No ingestion, provider contact, migration, or
+  S5. The Phase 8 feed, scoring, and user workspace remain Phase 8.
 - **Phases 5-14: not started.** Begin each phase only after completing its preflight in
   [PHASE_RISK_CHECKLIST.md](PHASE_RISK_CHECKLIST.md) and receiving approval for the next
   smallest slice.

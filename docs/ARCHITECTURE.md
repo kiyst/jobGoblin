@@ -227,10 +227,11 @@ jobGoblin/
 │   │   ├── config.py                  # Pydantic Settings (env-driven)
 │   │   │
 │   │   ├── api/                       # HTTP layer only — thin, delegates to services/
-│   │   │   ├── deps.py                 # shared FastAPI dependencies (db session, current user)
+│   │   │   ├── deps.py                 # shared FastAPI dependencies; the jobs session comes
+│   │   │   │                            # from services/job_read.py (ADR 0019), never db/
 │   │   │   ├── profiles.py
 │   │   │   ├── searches.py
-│   │   │   ├── jobs.py
+│   │   │   ├── jobs.py                 # Phase 4 S4: local read-only GET /jobs, /jobs/{id}
 │   │   │   ├── collection.py
 │   │   │   ├── providers.py
 │   │   │   └── analytics.py
@@ -399,7 +400,7 @@ holds is a **DAG**, enforced per-module:
 | `ingestion/` (pipeline, raw_storage, identity, persistence) | `schemas/`, `providers/` (via `ProviderRegistry`, calls `discover()`), `discovery/`, `normalization/`, `db/` | `matching/`, `dedupe/`, `analytics/`, `api/` — and only `ingestion/persistence.py` (not `pipeline.py` directly) issues SQLAlchemy writes |
 | `matching/`, `dedupe/`, `analytics/` | `schemas/`, `db/models` (read), `normalization/` (reuse comparison helpers) | `providers/`, `ingestion/`, `api/`, any network client — read-only over already-persisted rows |
 | `services/` | `db/`, `ingestion/`, `matching/`, `dedupe/`, `analytics/`, `schemas/` | `api/` — this is the only layer allowed to compose across ingestion + matching/dedupe/analytics for one use case, and the only layer allowed to write `user_jobs`/`job_notes` |
-| `api/` | `services/`, `schemas/` | `db/`, `providers/`, `ingestion/` directly — routes never bypass `services/` |
+| `api/` | `services/`, `schemas/` | `db/`, `providers/`, `ingestion/` directly — routes never bypass `services/`. A route that needs a database session gets it through a `services/`-owned dependency wired in `api/deps.py` (e.g. `services/job_read.py::job_reader`, [ADR 0019](DECISIONS/0019-local-read-only-jobs-api.md)); `api/health.py`'s direct `db.session` import predates that and is a recorded exception, not precedent |
 | `workers/` | `services/`, `db/` (session bootstrap only) | same rule as `api/` — a scheduled run calls a `services/` function, never `ingestion/` directly, so there's exactly one orchestration path whether triggered by a cron tick or a "Run Now" button |
 | `frontend/` | the HTTP API only | everything else — no direct DB or provider access, ever |
 

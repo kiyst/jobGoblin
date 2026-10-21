@@ -7,8 +7,9 @@ services:
       POSTGRES_USER: jobgoblin
       POSTGRES_PASSWORD: jobgoblin
       POSTGRES_DB: jobgoblin
+    # Localhost only (ADR 0019): never reachable from the LAN or the Internet.
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       # Only runs on first init of an empty volume — see the file itself and
@@ -26,8 +27,11 @@ services:
     environment:
       APP_ENV: development
       DATABASE_URL: postgresql+asyncpg://jobgoblin:jobgoblin@postgres:5432/jobgoblin
+    # Localhost only (ADR 0019): the unauthenticated read-only jobs API must not
+    # be reachable from the LAN or the Internet. Uvicorn still listens on
+    # 0.0.0.0 inside the container.
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     depends_on:
       postgres:
         condition: service_healthy
